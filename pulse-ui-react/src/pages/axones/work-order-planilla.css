@@ -1,0 +1,446 @@
+.ax-ot {
+  /* Planilla: morado de marca (contrasta con el fondo lavanda) — no amarillo */
+  --ax-ot-header: #6d28d9; /* violet-700 */
+  --ax-ot-header-mid: #7c3aed; /* violet-600 */
+  --ax-ot-header-fore: #fafafa;
+  --ax-ot-sublam-bg: #ede9fe; /* violet-100 */
+  --ax-ot-sublam-fore: #1e1b4b; /* indigo-950 */
+  --ax-ot-table-head: #7c3aed;
+  --ax-ot-blue: #9dc3e6;
+  --ax-ot-green: #a8d08d;
+  --ax-ot-border: #c9c9c9;
+  --ax-ot-text: #111;
+}
+
+.ax-ot .ax-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--ax-ot-border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+}
+
+.ax-ot .ax-section {
+  border: 1px solid var(--ax-ot-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.ax-ot .ax-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ax-ot-border);
+  color: var(--ax-ot-text);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.ax-ot .ax-section__headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ax-ot .ax-section__body {
+  padding: 12px;
+}
+
+/* Alias legado: antes “amarillo” → ahora encabezado de marca (morado) */
+.ax-ot .ax-hdr-brand,
+.ax-ot .ax-hdr-yellow {
+  background: linear-gradient(
+    180deg,
+    var(--ax-ot-header-mid) 0%,
+    var(--ax-ot-header) 100%
+  );
+  color: var(--ax-ot-header-fore);
+  border-color: color-mix(in srgb, var(--ax-ot-header) 55%, #000 45%);
+}
+.ax-ot .ax-hdr-blue {
+  background: linear-gradient(180deg, rgba(157, 195, 230, 1), rgba(157, 195, 230, 0.88));
+}
+.ax-ot .ax-hdr-green {
+  background: linear-gradient(180deg, rgba(168, 208, 141, 1), rgba(168, 208, 141, 0.88));
+}
+.ax-ot .ax-hdr-purple {
+  background: linear-gradient(180deg, rgba(212, 197, 249, 1), rgba(212, 197, 249, 0.88));
+}
+
+.ax-ot .ax-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.ax-ot .ax-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ax-ot .ax-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(17, 17, 17, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+.ax-ot .ax-required::after {
+  content: " *";
+  color: #b42318;
+}
+
+.ax-ot .ax-input,
+.ax-ot .ax-select,
+.ax-ot .ax-textarea {
+  width: 100%;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 13px;
+  line-height: 1.1;
+  color: #111;
+}
+
+.ax-ot .ax-input[readonly] {
+  background: rgba(233, 236, 239, 0.92);
+  font-weight: 700;
+}
+
+.ax-ot .ax-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.ax-ot .ax-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--ax-ot-border);
+}
+
+.ax-ot .ax-table th {
+  background: var(--ax-ot-table-head);
+  color: var(--ax-ot-header-fore);
+  font-weight: 900;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  padding: 8px;
+  border-bottom: 1px solid var(--ax-ot-border);
+}
+
+.ax-ot .ax-table td {
+  padding: 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.ax-ot .ax-table tr:last-child td {
+  border-bottom: none;
+}
+
+.ax-ot .ax-table input {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  padding: 7px 8px;
+  width: 100%;
+  font-size: 13px;
+}
+
+/* Compat: estilos para el markup original (ot-*) sin parecer “Excel/HTML” */
+.ax-ot .ot-section {
+  margin-bottom: 12px;
+}
+
+/* Sub-bloque dentro de otra sección (ej. tintas dentro de impresión, sustratos en laminación) */
+.ax-ot .ot-section .ot-section {
+  margin-top: 1.5rem;
+  margin-bottom: 0;
+}
+
+/* Separación entre la última fila de métricas y un sub-encabezado morado */
+.ax-ot .ot-metrics-before-nested {
+  margin-bottom: 0.75rem;
+}
+
+.ax-ot .section-header {
+  background: linear-gradient(
+    180deg,
+    var(--ax-ot-header-mid) 0%,
+    var(--ax-ot-header) 100%
+  );
+  color: var(--ax-ot-header-fore);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--ax-ot-header) 70%, #000 30%);
+  border-bottom: none;
+  font-weight: 900;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.ax-ot .section-header svg {
+  color: var(--ax-ot-header-fore);
+  opacity: 0.95;
+}
+
+.ax-ot .section-header.header-blue {
+  background: linear-gradient(180deg, rgba(157, 195, 230, 1), rgba(157, 195, 230, 0.88));
+}
+.ax-ot .section-header.header-green {
+  background: linear-gradient(180deg, rgba(168, 208, 141, 1), rgba(168, 208, 141, 0.88));
+}
+
+.ax-ot .section-body {
+  border: 1px solid var(--ax-ot-border);
+  border-top: none;
+  padding: 12px 12px 1.1rem;
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.ax-ot .ot-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.ax-ot .ot-grid {
+  display: grid;
+  gap: 10px;
+  border-top: none;
+  min-width: 0;
+}
+
+/* Grillas responsivas (sustituyen gridTemplateColumns en línea) */
+.ax-ot .ot-grid.ot-cols-1 {
+  grid-template-columns: 1fr;
+}
+
+/* 2 columnas iguales: 1 en móvil, 2 desde ~480px */
+.ax-ot .ot-grid.ot-cols-2 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 480px) {
+  .ax-ot .ot-grid.ot-cols-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* 2fr / 1fr: apilar en móvil */
+.ax-ot .ot-grid.ot-cols-2-asym {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .ax-ot .ot-grid.ot-cols-2-asym {
+    grid-template-columns: 2fr 1fr;
+  }
+}
+
+/* 3 columnas: 1 → 2 → 3 */
+.ax-ot .ot-grid.ot-cols-3 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 480px) {
+  .ax-ot .ot-grid.ot-cols-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (min-width: 1024px) {
+  .ax-ot .ot-grid.ot-cols-3 {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* 4 columnas densas: 1 → 2 → 4 (montaje, métricas, corte) */
+.ax-ot .ot-grid.ot-cols-4 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 600px) {
+  .ax-ot .ot-grid.ot-cols-4 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (min-width: 1280px) {
+  .ax-ot .ot-grid.ot-cols-4 {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+  }
+}
+
+/* Línea sustrato laminación: mismo 2/1; margen bajo en listas */
+.ax-ot .ot-grid.ot-sustrato-lam {
+  margin-bottom: 0.3rem;
+}
+
+.ax-ot .ot-field {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.ax-ot .ot-label {
+  font-size: 11px;
+  font-weight: 900;
+  margin: 0;
+  color: rgba(17, 17, 17, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  white-space: normal;
+  line-height: 1.25;
+  hyphens: auto;
+  overflow-wrap: anywhere;
+}
+
+/* Altura alineada con Input de shadcn (h-9 ≈ 36px) en toda la planilla */
+.ax-ot .ot-input,
+.ax-ot .ot-select {
+  width: 100%;
+  min-height: 36px;
+  max-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  line-height: 1.25;
+  color: #111;
+}
+
+.ax-ot .ot-input[readonly] {
+  background: rgba(233, 236, 239, 0.92);
+  font-weight: 800;
+}
+
+.ax-ot .required::after {
+  content: " *";
+  color: #b42318;
+}
+
+.ax-ot .table-tintas {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--ax-ot-border);
+}
+
+.ax-ot .table-tintas th {
+  background: var(--ax-ot-table-head);
+  color: var(--ax-ot-header-fore);
+  font-weight: 900;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  padding: 8px;
+  border-bottom: 1px solid var(--ax-ot-border);
+}
+
+.ax-ot .section-header.section-sublam {
+  background: linear-gradient(180deg, #ddd6fe 0%, #c4b5fd 100%);
+  color: var(--ax-ot-sublam-fore);
+  border-color: #a78bfa;
+}
+
+.ax-ot .table-tintas td {
+  padding: 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.ax-ot .table-tintas tr:last-child td {
+  border-bottom: none;
+}
+
+.ax-ot .table-tintas input {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  min-height: 36px;
+  max-height: 36px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+/* Campos maestro (shadcn Input) misma caja que .ot-input */
+.ax-ot .ot-input-unified {
+  min-height: 36px;
+  max-height: 36px;
+  font-size: 13px;
+}
+
+/* Tabla tintas: scroll horizontal en pantallas estrechas (evita columnas inútiles) */
+.ax-ot .ot-tintas-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -2px;
+  padding-bottom: 2px;
+}
+
+.ax-ot .ot-tintas-wrap .table-tintas {
+  min-width: 520px;
+}
+
+@media (max-width: 1024px) {
+  .ax-ot .ot-two-col {
+    grid-template-columns: 1fr;
+  }
+  .ax-ot .ot-input,
+  .ax-ot .ot-select,
+  .ax-ot .table-tintas input {
+    min-height: 40px;
+    max-height: 40px;
+    font-size: 14px;
+  }
+  .ax-ot .ot-input-unified {
+    min-height: 40px;
+    max-height: 40px;
+  }
+}
+
+/* Teléfono: cabeceras un poco más compactas */
+@media (max-width: 639px) {
+  .ax-ot .section-header {
+    font-size: 11px;
+    padding: 8px 10px;
+  }
+  .ax-ot .section-body {
+    padding: 10px 10px 0.9rem;
+  }
+}
+
+@media print {
+  .ax-ot .no-print {
+    display: none !important;
+  }
+  .ax-ot .ot-tintas-wrap {
+    overflow: visible;
+  }
+  .ax-ot .ax-card,
+  .ax-ot .ax-section {
+    box-shadow: none !important;
+  }
+}
+

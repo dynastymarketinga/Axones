@@ -1,0 +1,7 @@
+# Este monorepo solo versiona backend/ y pulse-ui-react/ (+ README y .gitignore en raíz).
+# Ignorar referencia legado y notas en la raíz (no se suben a Git).
+/public/
+*.pdf
+AXONES-V2-CONTEXTO.md
+CONTEXTO-AXONES-V2.md
+PUBLIC-LEGADO.md

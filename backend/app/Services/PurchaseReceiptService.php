@@ -1,0 +1,286 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\InventoryMovementType;
+use App\Enums\PurchaseOrderStatus;
+use App\Models\Bobina;
+use App\Models\Material;
+use App\Models\PurchaseOrder;
+use App\Models\PurchaseOrderLine;
+use App\Models\PurchaseReceipt;
+use App\Models\PurchaseReceiptLine;
+use App\Models\User;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+
+class PurchaseReceiptService
+{
+    public function __construct(
+        private readonly InventoryLedgerService $ledger,
+    ) {}
+
+    /**
+     * @param  array{purchase_order_id?: int|null, without_purchase_order?: bool, exception_reason?: string|null, notes?: string|null, received_at?: string|null, lines: list<array{purchase_order_line_id?: int|null, material_id: int, quantity: string|float, bobina_count?: int|null, bobina_weight_kg?: string|float|null}>}  $data
+     */
+    public function store(array $data, User $user): PurchaseReceipt
+    {
+        $linesInput = Collection::make($data['lines'])->sortBy('material_id')->values()->all();
+
+        return DB::transaction(function () use ($data, $user, $linesInput) {
+            $without = (bool) ($data['without_purchase_order'] ?? false);
+
+            if ($without) {
+                if (empty(trim((string) ($data['exception_reason'] ?? '')))) {
+                    throw ValidationException::withMessages([
+                        'exception_reason' => ['Debe indicar el motivo cuando no hay orden de compra.'],
+                    ]);
+                }
+                if (! empty($data['purchase_order_id'])) {
+                    throw ValidationException::withMessages([
+                        'purchase_order_id' => ['No debe indicar OC si marca recepción sin OC.'],
+                    ]);
+                }
+            } elseif (empty($data['purchase_order_id'])) {
+                throw ValidationException::withMessages([
+                    'purchase_order_id' => ['Indique la orden de compra o marque recepción sin OC.'],
+                ]);
+            }
+
+            $receipt = PurchaseReceipt::query()->create([
+                'purchase_order_id' => $without ? null : (int) $data['purchase_order_id'],
+                'without_purchase_order' => $without,
+                'exception_reason' => $without ? $data['exception_reason'] : null,
+                'user_id' => $user->getKey(),
+                'received_at' => isset($data['received_at']) ? new \DateTimeImmutable($data['received_at']) : now(),
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            $po = null;
+            if (! $without) {
+                $po = PurchaseOrder::query()->whereKey((int) $data['purchase_order_id'])->lockForUpdate()->firstOrFail();
+                if ($po->status === PurchaseOrderStatus::Cancelled->value) {
+                    throw ValidationException::withMessages([
+                        'purchase_order_id' => ['La orden de compra está cancelada.'],
+                    ]);
+                }
+            }
+
+            foreach ($linesInput as $index => $line) {
+                $qty = (string) $line['quantity'];
+                $materialId = (int) $line['material_id'];
+                $material = Material::query()->whereKey($materialId)->lockForUpdate()->firstOrFail();
+
+                $polId = isset($line['purchase_order_line_id']) ? (int) $line['purchase_order_line_id'] : null;
+                $pol = null;
+
+                if (! $without && $po) {
+                    if (! $polId) {
+                        throw ValidationException::withMessages([
+                            "lines.$index.purchase_order_line_id" => ['Con OC debe indicar la línea de pedido.'],
+                        ]);
+                    }
+                    $pol = PurchaseOrderLine::query()->whereKey($polId)->lockForUpdate()->firstOrFail();
+                    if ((int) $pol->purchase_order_id !== (int) $po->getKey()) {
+                        throw ValidationException::withMessages([
+                            "lines.$index.purchase_order_line_id" => ['La línea no pertenece a esta OC.'],
+                        ]);
+                    }
+                    if ($pol->material_id && (int) $pol->material_id !== $materialId) {
+                        throw ValidationException::withMessages([
+                            "lines.$index.material_id" => ['El material debe coincidir con el definido en la línea de OC.'],
+                        ]);
+                    }
+                    $remaining = bcsub((string) $pol->quantity_ordered, (string) $pol->quantity_received, 3);
+                    if (bccomp($qty, $remaining, 3) === 1) {
+                        throw ValidationException::withMessages([
+                            "lines.$index.quantity" => ['La cantidad excede lo pendiente de la línea ('.$remaining.').'],
+                        ]);
+                    }
+                    $pol->quantity_received = bcadd((string) $pol->quantity_received, $qty, 3);
+                    $pol->save();
+                }
+
+                $bobinaCount = isset($line['bobina_count']) ? (int) $line['bobina_count'] : null;
+                $bobinaWeight = isset($line['bobina_weight_kg']) && $line['bobina_weight_kg'] !== null && $line['bobina_weight_kg'] !== ''
+                    ? (string) $line['bobina_weight_kg']
+                    : null;
+
+                // Requisito Axones: los materiales del área "material" se trazan por bobina (entidad única),
+                // así que deben indicar cuántas bobinas entran en la recepción.
+                if ($material->inventory_area === 'material' && (! $bobinaCount || $bobinaCount < 1)) {
+                    throw ValidationException::withMessages([
+                        "lines.$index.bobina_count" => ['Para materiales (bobinas) debe indicar la cantidad de bobinas recibidas.'],
+                    ]);
+                }
+
+                $receiptLine = PurchaseReceiptLine::query()->create([
+                    'purchase_receipt_id' => $receipt->getKey(),
+                    'purchase_order_line_id' => $polId,
+                    'material_id' => $materialId,
+                    'quantity' => $qty,
+                    'bobina_count' => $bobinaCount ?: null,
+                    'bobina_weight_kg' => $bobinaWeight,
+                ]);
+
+                // Si se indica bobina_count, registrar la entrada por bobina (sin duplicar el movimiento del total).
+                if ($bobinaCount && $bobinaCount > 0) {
+                    if ($bobinaWeight !== null) {
+                        // Validar que bobina_weight_kg * bobina_count = quantity (a 3 decimales)
+                        $expected = bcmul($bobinaWeight, (string) $bobinaCount, 3);
+                        if (bccomp($expected, $qty, 3) !== 0) {
+                            throw ValidationException::withMessages([
+                                "lines.$index.bobina_weight_kg" => ['El peso por bobina no cuadra con el total: '.$bobinaWeight.' × '.$bobinaCount.' = '.$expected.' (debe ser '.$qty.').'],
+                            ]);
+                        }
+                    }
+
+                    $this->createBobinasFromReceiptLine(
+                        material: $material,
+                        receipt: $receipt,
+                        receiptLine: $receiptLine,
+                        totalQty: $qty,
+                        bobinaCount: $bobinaCount,
+                        bobinaWeightKg: $bobinaWeight,
+                        user: $user,
+                        purchaseOrderLineId: $polId,
+                    );
+                } else {
+                    // Entrada normal (por cantidad)
+                    $this->ledger->apply(
+                        $material,
+                        InventoryMovementType::In,
+                        $qty,
+                        $user,
+                        'purchase_receipt',
+                        $receipt->getKey(),
+                        [
+                            'purchase_order_id' => $receipt->purchase_order_id,
+                            'purchase_order_line_id' => $polId,
+                        ],
+                        $receipt->received_at,
+                    );
+                }
+            }
+
+            if ($po) {
+                $po->refresh()->load('lines');
+                $this->syncPurchaseOrderStatus($po);
+            }
+
+            return $receipt->fresh(['lines.material', 'purchaseOrder.supplier', 'user']);
+        });
+    }
+
+    private function createBobinasFromReceiptLine(
+        Material $material,
+        PurchaseReceipt $receipt,
+        PurchaseReceiptLine $receiptLine,
+        string $totalQty,
+        int $bobinaCount,
+        ?string $bobinaWeightKg,
+        User $user,
+        ?int $purchaseOrderLineId,
+    ): void {
+        $prefix = 'PR'.$receipt->getKey().'-L'.$receiptLine->getKey().'-';
+
+        // Distribución de peso: si no se especifica, dividir y ajustar la última para que cuadre.
+        if ($bobinaWeightKg === null) {
+            $base = bcdiv($totalQty, (string) $bobinaCount, 3);
+            $acc = '0';
+            for ($i = 1; $i <= $bobinaCount; $i++) {
+                $w = $i < $bobinaCount ? $base : bcsub($totalQty, $acc, 3);
+                $acc = bcadd($acc, $w, 3);
+                $this->createOneBobina(
+                    material: $material,
+                    receipt: $receipt,
+                    receiptLine: $receiptLine,
+                    code: $prefix.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+                    weightKg: $w,
+                    user: $user,
+                    purchaseOrderLineId: $purchaseOrderLineId,
+                );
+            }
+
+            return;
+        }
+
+        for ($i = 1; $i <= $bobinaCount; $i++) {
+            $this->createOneBobina(
+                material: $material,
+                receipt: $receipt,
+                receiptLine: $receiptLine,
+                code: $prefix.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+                weightKg: $bobinaWeightKg,
+                user: $user,
+                purchaseOrderLineId: $purchaseOrderLineId,
+            );
+        }
+    }
+
+    private function createOneBobina(
+        Material $material,
+        PurchaseReceipt $receipt,
+        PurchaseReceiptLine $receiptLine,
+        string $code,
+        string $weightKg,
+        User $user,
+        ?int $purchaseOrderLineId,
+    ): void {
+        $bobina = Bobina::query()->create([
+            'material_id' => $material->getKey(),
+            'code' => $code,
+            'weight_kg' => $weightKg,
+            'status' => 'available',
+        ]);
+
+        $this->ledger->apply(
+            $material,
+            InventoryMovementType::In,
+            $weightKg,
+            $user,
+            'bobina',
+            (int) $bobina->getKey(),
+            [
+                'bobina_code' => $bobina->code,
+                'purchase_receipt_id' => $receipt->getKey(),
+                'purchase_receipt_line_id' => $receiptLine->getKey(),
+                'purchase_order_id' => $receipt->purchase_order_id,
+                'purchase_order_line_id' => $purchaseOrderLineId,
+            ],
+            $receipt->received_at,
+        );
+    }
+
+    private function syncPurchaseOrderStatus(PurchaseOrder $po): void
+    {
+        $lines = $po->lines;
+        if ($lines->isEmpty()) {
+            $po->status = PurchaseOrderStatus::Open->value;
+            $po->save();
+
+            return;
+        }
+
+        $allComplete = true;
+        foreach ($lines as $line) {
+            if (bccomp((string) $line->quantity_received, (string) $line->quantity_ordered, 3) === -1) {
+                $allComplete = false;
+                break;
+            }
+        }
+
+        $anyReceived = $lines->contains(fn ($l) => bccomp((string) $l->quantity_received, '0', 3) === 1);
+
+        if ($allComplete) {
+            $po->status = PurchaseOrderStatus::Completed->value;
+        } elseif ($anyReceived) {
+            $po->status = PurchaseOrderStatus::Partial->value;
+        } else {
+            $po->status = PurchaseOrderStatus::Open->value;
+        }
+
+        $po->save();
+    }
+}

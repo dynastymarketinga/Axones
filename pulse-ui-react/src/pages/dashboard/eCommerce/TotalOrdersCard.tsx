@@ -1,0 +1,84 @@
+import { Card, CardContent } from "@/components/ui/card"
+import { Area, AreaChart, XAxis } from "recharts"
+import {
+  ChartContainer,
+  type ChartConfig,
+} from "@/components/ui/chart"
+
+export const description = "An area chart with a legend"
+
+const chartData = [
+  { month: "January", desktop: 30 },
+  { month: "February", desktop: 55 },
+  { month: "March", desktop: 115 },
+  { month: "April", desktop: 62 },
+  { month: "May", desktop: 55 },
+  { month: "June", desktop: 20 },
+  { month: "July", desktop: 35 },
+]
+
+const chartConfig = {
+  desktop: {
+    label: "Revenue",
+    color: "hsl(var(--chart-3))",
+  }
+} satisfies ChartConfig
+
+export default function TottalOrdersCard() {
+    return (
+        <Card className="overflow-hidden">
+            <CardContent className="p-6">
+                <div className="mb-3">
+                    <p className="text-md text-muted-foreground">Total Orders</p>
+                    <h2 className="text-3xl font-semibold">8,274</h2>
+                 </div>
+                  <p className="text-sm flex gap-2 mb-5">
+                    <span className="text-green-600 font-semibold">+12.4%</span>
+                    from last month
+                  </p>
+                <ChartContainer config={chartConfig} className="h-14 w-full">
+                    <AreaChart
+                        accessibilityLayer
+                        data={chartData}
+                        margin={{
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                        }}
+                    >
+                        <defs>
+                            <linearGradient id="fillRevenueDesktop" x1="0" y1="0" x2="0" y2="1">
+                                <stop
+                                    offset="5%"
+                                    stopColor="#7928ca" // pink
+                                    stopOpacity={0.6}
+                                />
+                                <stop
+                                    offset="95%"
+                                    stopColor="#ff0080" // purple
+                                    stopOpacity={0}
+                                />
+                            </linearGradient>
+                        </defs>
+                        <XAxis
+                            hide
+                            dataKey="month"
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={0}
+                            tickFormatter={(value) => value.slice(0, 3)}
+                        />
+                        <Area
+                            dataKey="desktop"
+                            type="monotone"
+                            fill="url(#fillRevenueDesktop)"
+                            stroke="#7928ca"
+                            strokeWidth={2}
+                        />
+                    </AreaChart>
+                 </ChartContainer>
+            </CardContent>
+        </Card>
+    )
+} 

@@ -1,0 +1,184 @@
+<?php
+
+use App\Http\Controllers\Api\AreaRequestController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BobinaController;
+use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\ClientOrderController;
+use App\Http\Controllers\Api\CorteDispatchController;
+use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\DeliveryNoteController;
+use App\Http\Controllers\Api\GateMovementController;
+use App\Http\Controllers\Api\InventoryMovementController;
+use App\Http\Controllers\Api\InventoryMovementsController;
+use App\Http\Controllers\Api\InventoryReturnController;
+use App\Http\Controllers\Api\MaterialController;
+use App\Http\Controllers\Api\MaterialRequestController;
+use App\Http\Controllers\Api\MiscellaneousReceiptController;
+use App\Http\Controllers\Api\OperationalAlertController;
+use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\PurchaseOrderController;
+use App\Http\Controllers\Api\PurchaseReceiptController;
+use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\SupplierController;
+use App\Http\Controllers\Api\TintaMixtureController;
+use App\Http\Controllers\Api\VendorController;
+use App\Http\Controllers\Api\WorkOrderController;
+use App\Http\Controllers\Api\WorkOrderOrdenTrabajoController;
+use App\Http\Controllers\Api\WorkOrderCorteController;
+use App\Http\Controllers\Api\WorkOrderLaminacionController;
+use App\Http\Controllers\Api\WorkOrderMontajeController;
+use App\Http\Controllers\Api\WorkOrderNotaEntregaController;
+use App\Http\Controllers\Api\WorkOrderPrintingController;
+use App\Http\Controllers\Api\WorkOrderProductionSummaryController;
+use App\Http\Controllers\Api\WorkOrderQualityController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+
+Route::get('/ping', fn () => ['ok' => true, 'service' => 'axones-api']);
+
+Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/register', [AuthController::class, 'register']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/user', function (Request $request) {
+        return $request->user();
+    });
+    Route::post('/auth/logout', [AuthController::class, 'logout']);
+
+    Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+
+    Route::get('/alerts', [OperationalAlertController::class, 'index']);
+    Route::patch('/alerts/{operational_alert}/acknowledge', [OperationalAlertController::class, 'acknowledge']);
+
+    Route::get('/reports/inventory-daily', [ReportController::class, 'inventoryDaily']);
+    Route::get('/reports/consumption-by-client-product', [ReportController::class, 'consumptionByClientProduct']);
+    Route::get('/reports/rejected-bobinas', [ReportController::class, 'rejectedBobinas']);
+    Route::get('/reports/work-order-material-summary', [ReportController::class, 'workOrderMaterialSummary']);
+    Route::get('/reports/production-time-by-area', [ReportController::class, 'productionTimeByArea']);
+    Route::get('/reports/scrap-by-filters', [ReportController::class, 'scrapByFilters']);
+    Route::get('/reports/tinta-consumption-by-client', [ReportController::class, 'tintaConsumptionByClient']);
+
+    Route::get('/inventory-movements', [InventoryMovementsController::class, 'index']);
+
+    Route::get('/miscellaneous-receipts', [MiscellaneousReceiptController::class, 'index']);
+    Route::post('/miscellaneous-receipts', [MiscellaneousReceiptController::class, 'store']);
+    Route::get('/miscellaneous-receipts/{miscellaneous_receipt}', [MiscellaneousReceiptController::class, 'show']);
+    Route::get('/miscellaneous-receipts/{miscellaneous_receipt}/attachments/{miscellaneous_receipt_attachment}', [MiscellaneousReceiptController::class, 'downloadAttachment']);
+
+    Route::get('/clients', [ClientController::class, 'index']);
+    Route::post('/clients', [ClientController::class, 'store']);
+    Route::get('/clients/{client}', [ClientController::class, 'show']);
+    Route::patch('/clients/{client}', [ClientController::class, 'update']);
+
+    Route::get('/vendors', [VendorController::class, 'index']);
+    Route::post('/vendors', [VendorController::class, 'store']);
+    Route::get('/vendors/{vendor}', [VendorController::class, 'show']);
+    Route::patch('/vendors/{vendor}', [VendorController::class, 'update']);
+
+    Route::get('/client-orders', [ClientOrderController::class, 'index']);
+    Route::post('/client-orders', [ClientOrderController::class, 'store']);
+    Route::get('/client-orders/{client_order}', [ClientOrderController::class, 'show']);
+    Route::patch('/client-orders/{client_order}', [ClientOrderController::class, 'update']);
+
+    Route::get('/suppliers', [SupplierController::class, 'index']);
+    Route::post('/suppliers', [SupplierController::class, 'store']);
+    Route::get('/suppliers/{supplier}', [SupplierController::class, 'show']);
+    Route::patch('/suppliers/{supplier}', [SupplierController::class, 'update']);
+
+    Route::get('/products', [ProductController::class, 'index']);
+    Route::post('/products', [ProductController::class, 'store']);
+    Route::get('/products/{product}', [ProductController::class, 'show']);
+    Route::patch('/products/{product}', [ProductController::class, 'update']);
+
+    Route::get('/purchase-orders', [PurchaseOrderController::class, 'index']);
+    Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
+    Route::get('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'show']);
+    Route::patch('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'update']);
+
+    Route::get('/purchase-receipts', [PurchaseReceiptController::class, 'index']);
+    Route::post('/purchase-receipts', [PurchaseReceiptController::class, 'store']);
+    Route::get('/purchase-receipts/{purchase_receipt}', [PurchaseReceiptController::class, 'show']);
+
+    Route::get('/work-orders', [WorkOrderController::class, 'index']);
+    Route::get('/work-orders/programacion-board', [WorkOrderController::class, 'programacionBoard']);
+    Route::post('/work-orders', [WorkOrderController::class, 'store']);
+    Route::get('/work-orders/{work_order}', [WorkOrderController::class, 'show']);
+    Route::get('/work-orders/{work_order}/orden-produccion.pdf', [WorkOrderController::class, 'ordenProduccionPdf']);
+    Route::get('/work-orders/{work_order}/orden-trabajo', [WorkOrderOrdenTrabajoController::class, 'show']);
+    Route::put('/work-orders/{work_order}/orden-trabajo', [WorkOrderOrdenTrabajoController::class, 'update']);
+    Route::patch('/work-orders/{work_order}', [WorkOrderController::class, 'update']);
+    Route::get('/work-orders/{work_order}/production-summary', [WorkOrderProductionSummaryController::class, 'show']);
+
+    Route::get('/work-orders/{work_order}/quality', [WorkOrderQualityController::class, 'show']);
+    Route::put('/work-orders/{work_order}/quality', [WorkOrderQualityController::class, 'update']);
+    Route::get('/work-orders/{work_order}/quality/certificate', [WorkOrderQualityController::class, 'downloadCertificate']);
+
+    Route::get('/work-orders/{work_order}/printing', [WorkOrderPrintingController::class, 'show']);
+    Route::post('/work-orders/{work_order}/printing/time-segments/start', [WorkOrderPrintingController::class, 'startTimeSegment']);
+    Route::post('/work-orders/{work_order}/printing/time-segments/{printing_time_segment}/stop', [WorkOrderPrintingController::class, 'stopTimeSegment']);
+    Route::post('/work-orders/{work_order}/printing/bobina-usages', [WorkOrderPrintingController::class, 'storeBobinaUsage']);
+    Route::patch('/work-orders/{work_order}/printing/summary', [WorkOrderPrintingController::class, 'updateSummary']);
+    Route::put('/work-orders/{work_order}/printing/consumables', [WorkOrderPrintingController::class, 'updateConsumables']);
+
+    Route::get('/work-orders/{work_order}/corte', [WorkOrderCorteController::class, 'show']);
+    Route::post('/work-orders/{work_order}/corte/time-segments/start', [WorkOrderCorteController::class, 'startTimeSegment']);
+    Route::post('/work-orders/{work_order}/corte/time-segments/{corte_time_segment}/stop', [WorkOrderCorteController::class, 'stopTimeSegment']);
+    Route::post('/work-orders/{work_order}/corte/bobina-usages', [WorkOrderCorteController::class, 'storeBobinaUsage']);
+    Route::patch('/work-orders/{work_order}/corte/summary', [WorkOrderCorteController::class, 'updateSummary']);
+
+    Route::get('/work-orders/{work_order}/laminacion', [WorkOrderLaminacionController::class, 'show']);
+    Route::post('/work-orders/{work_order}/laminacion/time-segments/start', [WorkOrderLaminacionController::class, 'startTimeSegment']);
+    Route::post('/work-orders/{work_order}/laminacion/time-segments/{laminacion_time_segment}/stop', [WorkOrderLaminacionController::class, 'stopTimeSegment']);
+    Route::post('/work-orders/{work_order}/laminacion/bobina-usages', [WorkOrderLaminacionController::class, 'storeBobinaUsage']);
+    Route::patch('/work-orders/{work_order}/laminacion/summary', [WorkOrderLaminacionController::class, 'updateSummary']);
+
+    Route::get('/work-orders/{work_order}/montaje', [WorkOrderMontajeController::class, 'show']);
+    Route::post('/work-orders/{work_order}/montaje/time-segments/start', [WorkOrderMontajeController::class, 'startTimeSegment']);
+    Route::post('/work-orders/{work_order}/montaje/time-segments/{montaje_time_segment}/stop', [WorkOrderMontajeController::class, 'stopTimeSegment']);
+    Route::post('/work-orders/{work_order}/montaje/material-usages', [WorkOrderMontajeController::class, 'storeMaterialUsage']);
+    Route::patch('/work-orders/{work_order}/montaje/summary', [WorkOrderMontajeController::class, 'updateSummary']);
+
+    Route::get('/work-orders/{work_order}/nota-entrega/prefill', [WorkOrderNotaEntregaController::class, 'prefill']);
+
+    Route::get('/delivery-notes', [DeliveryNoteController::class, 'index']);
+    Route::post('/delivery-notes', [DeliveryNoteController::class, 'store']);
+    Route::get('/delivery-notes/{delivery_note}', [DeliveryNoteController::class, 'show']);
+    Route::patch('/delivery-notes/{delivery_note}', [DeliveryNoteController::class, 'update']);
+    Route::post('/delivery-notes/{delivery_note}/dispatch', [DeliveryNoteController::class, 'markDispatched']);
+
+    Route::get('/corte-dispatch/available', [CorteDispatchController::class, 'available']);
+
+    Route::get('/area-requests', [AreaRequestController::class, 'index']);
+    Route::post('/area-requests', [AreaRequestController::class, 'store']);
+    Route::patch('/area-requests/{area_request}', [AreaRequestController::class, 'update']);
+
+    Route::get('/gate-movements', [GateMovementController::class, 'index']);
+    Route::post('/gate-movements', [GateMovementController::class, 'store']);
+
+    Route::get('/material-requests', [MaterialRequestController::class, 'index']);
+    Route::post('/material-requests', [MaterialRequestController::class, 'store']);
+    Route::get('/material-requests/{material_request}', [MaterialRequestController::class, 'show']);
+    Route::patch('/material-requests/{material_request}', [MaterialRequestController::class, 'update']);
+    Route::post('/material-requests/{material_request}/authorize', [MaterialRequestController::class, 'authorizeRequest']);
+    Route::post('/material-requests/{material_request}/dispatch', [MaterialRequestController::class, 'invokeDispatch']);
+
+    Route::get('/materials', [MaterialController::class, 'index']);
+    Route::post('/materials', [MaterialController::class, 'store']);
+    Route::get('/materials/{material}', [MaterialController::class, 'show']);
+    Route::patch('/materials/{material}', [MaterialController::class, 'update']);
+
+    Route::get('/materials/{material}/movements', [InventoryMovementController::class, 'index']);
+    Route::post('/materials/{material}/movements', [InventoryMovementController::class, 'store']);
+
+    Route::get('/inventory-returns', [InventoryReturnController::class, 'index']);
+    Route::post('/inventory-returns', [InventoryReturnController::class, 'store']);
+    Route::post('/inventory-returns/{inventory_return}/accept', [InventoryReturnController::class, 'accept']);
+
+    Route::get('/bobinas', [BobinaController::class, 'index']);
+    Route::post('/bobinas', [BobinaController::class, 'store']);
+
+    Route::get('/tinta-mixtures', [TintaMixtureController::class, 'index']);
+    Route::post('/tinta-mixtures', [TintaMixtureController::class, 'store']);
+    Route::get('/tinta-mixtures/{tinta_mixture}', [TintaMixtureController::class, 'show']);
+});

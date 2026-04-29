@@ -20,13 +20,18 @@
         <p><strong>Producto:</strong> {{ $workOrder->product->name }} @if($workOrder->product->cpe) (CPE: {{ $workOrder->product->cpe }}) @endif</p>
     @endif
     @if($record)
-        <p><strong>Resultado:</strong> {{ $record->outcome }}</p>
+        <p><strong>Resultado:</strong> {{ $outcomeLabel ?? 'Pendiente' }}</p>
         @if($record->notes)
             <p><strong>Observaciones:</strong> {{ $record->notes }}</p>
+        @endif
+        @if($record->recorder)
+            <p><strong>Registrado por:</strong> {{ $record->recorder->name }}</p>
         @endif
     @else
         <p>Sin registro de calidad — complete el registro en el sistema.</p>
     @endif
+    <p><strong>Fecha de generación:</strong> {{ isset($generatedAt) ? $generatedAt->format('d/m/Y h:i A') : now()->format('d/m/Y h:i A') }}</p>
+    <p><strong>Generado por:</strong> {{ $generatedBy ?? 'Usuario no identificado' }}</p>
     <p style="margin-top:2rem;font-size:0.85rem;color:#555;">Documento generado por Sistema Axones.</p>
 </body>
 </html>

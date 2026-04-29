@@ -34,7 +34,7 @@ export default function VendorFormPage() {
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
     const from = st?.from?.trim()
-    return from && from.startsWith("/") ? from : "/axones/vendedores"
+    return from && from.startsWith("/") ? from : "/vendedores"
   }, [location.state])
 
   const load = useCallback(async () => {
@@ -102,7 +102,7 @@ export default function VendorFormPage() {
             {isEdit ? "Editar vendedor" : "Nuevo vendedor"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            API <code className="text-xs">/vendors</code>
+            Complete o actualice los datos del vendedor.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>

@@ -42,7 +42,7 @@ export default function ProductFormPage() {
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
     const from = st?.from?.trim()
-    return from && from.startsWith("/") ? from : "/axones/productos"
+    return from && from.startsWith("/") ? from : "/productos"
   }, [location.state])
 
   const validate = useCallback(
@@ -152,7 +152,7 @@ export default function ProductFormPage() {
             {isEdit ? "Editar producto" : "Nuevo producto"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            API <code className="text-xs">/products</code>
+            Defina nombre, código y atributos del producto.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>

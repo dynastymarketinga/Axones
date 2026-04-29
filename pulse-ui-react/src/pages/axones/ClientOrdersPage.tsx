@@ -62,7 +62,7 @@ import {
 
 const CODE_SEARCH_DEBOUNCE_MS = 400
 
-/** Valores enviados al API como `per_page` (paginación en servidor). */
+/** Valores de `per_page` usados en la petición (paginación en servidor). */
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
 export default function ClientOrdersPage() {
@@ -140,7 +140,7 @@ export default function ClientOrdersPage() {
       setRows(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudieron cargar las órdenes de cliente.")
+      else toast.error("No se pudieron cargar los pedidos del cliente.")
       setRows(null)
     } finally {
       setLoading(false)
@@ -176,20 +176,20 @@ export default function ClientOrdersPage() {
       <div className="space-y-6 w-full min-w-0 max-w-full">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between w-full min-w-0">
           <div className="min-w-0 flex-1 space-y-2 max-w-full">
-            <h1 className="text-2xl font-semibold tracking-tight">Órdenes de cliente</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Pedido del cliente</h1>
             <p className="text-muted-foreground text-sm max-w-2xl">
-              Listado de <strong className="text-foreground font-medium">órdenes de cliente</strong> — código, cliente y
+              Listado de <strong className="text-foreground font-medium">pedidos del cliente</strong> — código, cliente y
               filtros.
             </p>
           </div>
           <Button asChild className="shrink-0">
-            <Link to="/axones/ordenes-cliente/nueva">Nueva orden de cliente</Link>
+            <Link to="/ordenes-cliente/nueva">Nuevo pedido del cliente</Link>
           </Button>
         </div>
 
         <div className="flex flex-col gap-4 w-full min-w-0 lg:flex-row lg:flex-wrap lg:items-end">
           <div className="grid flex-1 min-w-0 gap-2 sm:min-w-[200px]">
-            <Label htmlFor="co-q">Buscar por código de orden</Label>
+            <Label htmlFor="co-q">Buscar por código de pedido</Label>
             <Input
               id="co-q"
               value={codeQuery}
@@ -284,7 +284,7 @@ export default function ClientOrdersPage() {
                   <HelpCircle className="h-3.5 w-3.5" />
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs p-3 text-left font-normal" side="top">
-                  <p className="mb-2 font-medium">Estados de la orden de cliente</p>
+                  <p className="mb-2 font-medium">Estados del pedido del cliente</p>
                   <ul className="list-disc pl-4 space-y-1 text-xs">
                     <li>
                       <strong>Abierta:</strong> el pedido sigue vigente para su flujo comercial.
@@ -385,7 +385,7 @@ export default function ClientOrdersPage() {
               ) : !rows?.data.length ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-muted-foreground">
-                    Sin órdenes de cliente.
+                    Sin pedidos del cliente.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -396,7 +396,7 @@ export default function ClientOrdersPage() {
                     <TableCell className="text-center tabular-nums text-muted-foreground w-12 px-2">{n}</TableCell>
                     <TableCell className="min-w-0 font-mono text-sm">
                       <Link
-                        to={`/axones/ordenes-cliente/${r.id}`}
+                        to={`/ordenes-cliente/${r.id}`}
                         className="text-primary font-medium hover:underline underline-offset-2 break-all"
                       >
                         {r.code}
@@ -420,7 +420,7 @@ export default function ClientOrdersPage() {
                           title="Ver detalle"
                           asChild
                         >
-                          <Link to={`/axones/ordenes-cliente/${r.id}`}>
+                          <Link to={`/ordenes-cliente/${r.id}`}>
                             <Eye className="h-4 w-4" />
                             <span className="sr-only">Ver</span>
                           </Link>
@@ -433,7 +433,7 @@ export default function ClientOrdersPage() {
                             title="Editar"
                             asChild
                           >
-                            <Link to={`/axones/ordenes-cliente/${r.id}/edit`}>
+                            <Link to={`/ordenes-cliente/${r.id}/edit`}>
                               <Pencil className="h-4 w-4" />
                               <span className="sr-only">Editar</span>
                             </Link>
@@ -567,7 +567,7 @@ export default function ClientOrdersPage() {
                   <Ban className="h-6 w-6" />
                 </div>
                 <DialogTitle className="text-center sm:text-left sm:leading-tight">
-                  ¿Anular esta orden de cliente?
+                  ¿Anular este pedido del cliente?
                 </DialogTitle>
               </div>
             </DialogHeader>

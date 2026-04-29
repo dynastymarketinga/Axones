@@ -25,7 +25,7 @@ export type ApiErrorBody = {
 }
 
 export async function loginRequest(
-  email: string,
+  login: string,
   password: string,
 ): Promise<LoginResponse> {
   const res = await fetch(`${apiBase()}/auth/login`, {
@@ -34,7 +34,7 @@ export async function loginRequest(
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ login: login.trim(), password }),
   })
 
   const data = (await res.json().catch(() => ({}))) as LoginResponse &
@@ -74,6 +74,26 @@ export class ApiError extends Error {
     this.status = status
     this.body = body
   }
+}
+
+export async function passwordResetRequest(login: string): Promise<{ message: string }> {
+  const res = await fetch(`${apiBase()}/auth/password-reset-request`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ login: login.trim() }),
+  })
+  const data = (await res.json().catch(() => ({}))) as { message?: string } & ApiErrorBody
+  if (!res.ok) {
+    throw new ApiError(
+      data.message || "No se pudo registrar la solicitud.",
+      res.status,
+      data,
+    )
+  }
+  return { message: data.message ?? "" }
 }
 
 type ApiFetchQuery = Record<string, string | number | undefined | null>

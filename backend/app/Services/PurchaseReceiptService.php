@@ -10,6 +10,7 @@ use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderLine;
 use App\Models\PurchaseReceipt;
 use App\Models\PurchaseReceiptLine;
+use App\Models\Supplier;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -22,36 +23,52 @@ class PurchaseReceiptService
     ) {}
 
     /**
-     * @param  array{purchase_order_id?: int|null, without_purchase_order?: bool, exception_reason?: string|null, notes?: string|null, received_at?: string|null, lines: list<array{purchase_order_line_id?: int|null, material_id: int, quantity: string|float, bobina_count?: int|null, bobina_weight_kg?: string|float|null}>}  $data
+     * @param  array{
+     *   purchase_order_id?: int|null,
+     *   supplier_id: int,
+     *   without_purchase_order?: bool,
+     *   exception_reason?: string|null,
+     *   supplier_name?: string|null,
+     *   invoice_number?: string|null,
+     *   purchase_order_reference?: string|null,
+     *   notes?: string|null,
+     *   received_at?: string|null,
+     *   lines: list<array{
+     *      purchase_order_line_id?: int|null,
+     *      material_id: int,
+     *      item_type: string,
+     *      quantity: string|float,
+     *      unit: string,
+     *      micras?: string|float|null,
+     *      ancho_mm?: string|float|null,
+     *      bobina_count?: int|null,
+     *      bobina_weight_kg?: string|float|null
+     *   }>
+     * }  $data
      */
     public function store(array $data, User $user): PurchaseReceipt
     {
         $linesInput = Collection::make($data['lines'])->sortBy('material_id')->values()->all();
 
         return DB::transaction(function () use ($data, $user, $linesInput) {
-            $without = (bool) ($data['without_purchase_order'] ?? false);
+            $hasPurchaseOrderId = ! empty($data['purchase_order_id']);
+            $without = (bool) ($data['without_purchase_order'] ?? false) || ! $hasPurchaseOrderId;
+            $supplier = Supplier::query()->whereKey((int) $data['supplier_id'])->lockForUpdate()->firstOrFail();
 
-            if ($without) {
-                if (empty(trim((string) ($data['exception_reason'] ?? '')))) {
-                    throw ValidationException::withMessages([
-                        'exception_reason' => ['Debe indicar el motivo cuando no hay orden de compra.'],
-                    ]);
-                }
-                if (! empty($data['purchase_order_id'])) {
-                    throw ValidationException::withMessages([
-                        'purchase_order_id' => ['No debe indicar OC si marca recepción sin OC.'],
-                    ]);
-                }
-            } elseif (empty($data['purchase_order_id'])) {
+            if ($without && $hasPurchaseOrderId) {
                 throw ValidationException::withMessages([
-                    'purchase_order_id' => ['Indique la orden de compra o marque recepción sin OC.'],
+                    'purchase_order_id' => ['No debe indicar OC administrativa cuando la recepción es por referencia.'],
                 ]);
             }
 
             $receipt = PurchaseReceipt::query()->create([
-                'purchase_order_id' => $without ? null : (int) $data['purchase_order_id'],
+                'purchase_order_id' => $hasPurchaseOrderId ? (int) $data['purchase_order_id'] : null,
+                'supplier_id' => (int) $supplier->getKey(),
+                'supplier_name' => $data['supplier_name'] ?? (string) $supplier->name,
+                'invoice_number' => $data['invoice_number'] ?? null,
+                'purchase_order_reference' => $data['purchase_order_reference'] ?? null,
                 'without_purchase_order' => $without,
-                'exception_reason' => $without ? $data['exception_reason'] : null,
+                'exception_reason' => $without ? ($data['exception_reason'] ?? null) : null,
                 'user_id' => $user->getKey(),
                 'received_at' => isset($data['received_at']) ? new \DateTimeImmutable($data['received_at']) : now(),
                 'notes' => $data['notes'] ?? null,
@@ -107,19 +124,15 @@ class PurchaseReceiptService
                     ? (string) $line['bobina_weight_kg']
                     : null;
 
-                // Requisito Axones: los materiales del área "material" se trazan por bobina (entidad única),
-                // así que deben indicar cuántas bobinas entran en la recepción.
-                if ($material->inventory_area === 'material' && (! $bobinaCount || $bobinaCount < 1)) {
-                    throw ValidationException::withMessages([
-                        "lines.$index.bobina_count" => ['Para materiales (bobinas) debe indicar la cantidad de bobinas recibidas.'],
-                    ]);
-                }
-
                 $receiptLine = PurchaseReceiptLine::query()->create([
                     'purchase_receipt_id' => $receipt->getKey(),
                     'purchase_order_line_id' => $polId,
                     'material_id' => $materialId,
+                    'item_type' => $line['item_type'] ?? $this->defaultItemTypeFromMaterial($material),
                     'quantity' => $qty,
+                    'unit' => $line['unit'] ?? (($material->unit && trim((string) $material->unit) !== '') ? (string) $material->unit : 'kg'),
+                    'micras' => isset($line['micras']) && $line['micras'] !== '' ? (string) $line['micras'] : null,
+                    'ancho_mm' => isset($line['ancho_mm']) && $line['ancho_mm'] !== '' ? (string) $line['ancho_mm'] : null,
                     'bobina_count' => $bobinaCount ?: null,
                     'bobina_weight_kg' => $bobinaWeight,
                 ]);
@@ -169,7 +182,7 @@ class PurchaseReceiptService
                 $this->syncPurchaseOrderStatus($po);
             }
 
-            return $receipt->fresh(['lines.material', 'purchaseOrder.supplier', 'user']);
+            return $receipt->fresh(['supplier', 'lines.material', 'purchaseOrder.supplier', 'user']);
         });
     }
 
@@ -282,5 +295,15 @@ class PurchaseReceiptService
         }
 
         $po->save();
+    }
+
+    private function defaultItemTypeFromMaterial(Material $material): string
+    {
+        return match ($material->inventory_area) {
+            'tintas' => 'tinta',
+            'quimicos' => 'quimico',
+            'miscelaneos' => 'miscelaneo',
+            default => 'sustrato',
+        };
     }
 }

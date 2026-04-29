@@ -23,7 +23,7 @@ class OperationalAlertsTest extends TestCase
 
     public function test_creates_alert_when_ot_line_exceeds_stock(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $mat = Material::query()->create([
             'sku' => 'AL-1',
             'name' => 'Mat alerta',
@@ -48,7 +48,7 @@ class OperationalAlertsTest extends TestCase
 
     public function test_lists_and_acknowledges_alerts(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-AL-1',
             'status' => WorkOrderStatus::Open->value,
@@ -73,7 +73,7 @@ class OperationalAlertsTest extends TestCase
     {
         config(['axones.alerts.scrap_percent_threshold' => 5]);
 
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-AL-2',
             'status' => WorkOrderStatus::Open->value,
@@ -94,7 +94,7 @@ class OperationalAlertsTest extends TestCase
     {
         config(['axones.alerts.scrap_percent_threshold' => 5]);
 
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-AL-C',
             'status' => WorkOrderStatus::Open->value,
@@ -118,7 +118,7 @@ class OperationalAlertsTest extends TestCase
     {
         config(['axones.alerts.scrap_percent_threshold' => 5]);
 
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-AL-L',
             'status' => WorkOrderStatus::Open->value,
@@ -143,7 +143,7 @@ class OperationalAlertsTest extends TestCase
         config(['axones.alerts.mount_seconds_threshold' => 120]);
 
         Carbon::setTestNow(Carbon::parse('2026-04-20 09:00:00'));
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-AL-3',
             'status' => WorkOrderStatus::Open->value,
@@ -172,7 +172,7 @@ class OperationalAlertsTest extends TestCase
 
     public function test_dashboard_includes_unread_alerts_count(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         OperationalAlert::query()->create([
             'alert_type' => OperationalAlertType::OtMaterialShortage->value,
             'severity' => 'critical',

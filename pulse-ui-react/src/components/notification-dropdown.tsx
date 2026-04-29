@@ -1,4 +1,7 @@
 import { Bell } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -9,6 +12,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { apiFetch, ApiError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Notification = {
@@ -21,71 +25,68 @@ type Notification = {
   color?: string
 }
 
-const notifications: Notification[] = [
-  {
-    id: 1,
-    title: "New order placed",
-    description: "Order #1234 has been placed",
-    time: "2m ago",
-    unread: true,
-    color: "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400",
-  },
-  {
-    id: 2,
-    title: "Payment received",
-    description: "₹4,500 received from client",
-    time: "1h ago",
-    color: "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400",
-  },
-  {
-    id: 3,
-    title: "New user registered",
-    description: "A new user joined your platform",
-    time: "3h ago",
-    color: "bg-violet-100 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400",
-  },
-  {
-    id: 4,
-    title: "Password changed",
-    description: "A user updated their account password",
-    time: "1h ago",
-    color: "bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400",
-  },
-  {
-  id: 5,
-  title: "Subscription renewed",
-  description: "A user renewed their subscription plan",
-  time: "10m ago",
-  color: "bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400",
-},
-{
-  id: 6,
-  title: "Support ticket opened",
-  description: "A user submitted a new support request",
-  time: "5m ago",
-  color: "bg-cyan-100 text-cyan-600 dark:bg-cyan-500/20 dark:text-cyan-400",
-},
-{
-  id: 7,
-  title: "New review received",
-  description: "A customer left a 5-star review",
-  time: "20m ago",
-  color: "bg-lime-100 text-lime-600 dark:bg-lime-500/20 dark:text-lime-400",
-},
-{
-  id: 8,
-  title: "Server restarted",
-  description: "Production server was successfully restarted",
-  time: "45m ago",
-  color: "bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400",
-},
-]
+type AlertApiRow = {
+  id: number
+  alert_type: string
+  severity: string
+  message: string
+  created_at: string
+  acknowledged_at: string | null
+}
+
+type AlertPage = {
+  data: AlertApiRow[]
+}
+
+function severityColor(severity?: string): string {
+  const s = (severity ?? "").toLowerCase().trim()
+  if (s === "critical") return "bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400"
+  if (s === "warning") return "bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+  return "bg-sky-100 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"
+}
 
 export function NotificationDropdown() {
-  const unreadCount = notifications.filter(n => n.unread).length
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<AlertApiRow[]>([])
+
+  async function load() {
+    try {
+      const res = await apiFetch<AlertPage>("alerts", {
+        query: { page: 1, per_page: 8 },
+      })
+      setRows(res.data ?? [])
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    void load()
+  }, [open])
+
+  const notifications = useMemo<Notification[]>(
+    () =>
+      rows.map((r) => ({
+        id: r.id,
+        title: r.alert_type.replaceAll("_", " "),
+        description: r.message,
+        time: new Date(r.created_at).toLocaleString("es-VE"),
+        unread: !r.acknowledged_at,
+        color: severityColor(r.severity),
+      })),
+    [rows],
+  )
+
+  const unreadCount = notifications.filter((n) => n.unread).length
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <div className="relative">
           <Button
@@ -111,9 +112,9 @@ export function NotificationDropdown() {
         className="w-80 p-0 rounded-xl border shadow-xl"
       >
         <DropdownMenuLabel className="flex items-center justify-between px-4 py-3">
-          <span>Notifications</span>
+          <span>Alertas</span>
           <span className="text-xs text-muted-foreground">
-            {unreadCount} unread
+            {unreadCount} sin leer
           </span>
         </DropdownMenuLabel>
 
@@ -160,8 +161,8 @@ export function NotificationDropdown() {
         </div>
 
         <div className="p-2 border-t">
-          <Button variant="ghost" className="w-full text-sm">
-            View all notifications
+          <Button variant="ghost" className="w-full text-sm" onClick={() => navigate("/alertas")}>
+            Ver todas las alertas
           </Button>
         </div>
       </DropdownMenuContent>

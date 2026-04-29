@@ -157,6 +157,252 @@ class InventoryReportsTest extends TestCase
         $this->assertStringContainsString('2026-04-15,in,1.000,1', $response->getContent());
     }
 
+    public function test_inventory_area_daily_returns_stock_final_day_rows(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $m = Material::query()->create([
+            'sku' => 'RPT-AREA-1',
+            'name' => 'Material area',
+            'inventory_area' => 'tintas',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $m->forceFill(['quantity_on_hand' => 120])->save();
+
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'in',
+            'quantity' => 10,
+            'occurred_at' => '2026-04-15 10:00:00',
+        ]);
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'out',
+            'quantity' => 3,
+            'occurred_at' => '2026-04-15 11:00:00',
+        ]);
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'out',
+            'quantity' => 5,
+            'occurred_at' => '2026-04-16 09:00:00',
+        ]);
+
+        $response = $this->getJson(
+            '/api/reports/inventory-area-daily?date=2026-04-15&inventory_area=tintas',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $response->assertJsonStructure([
+            'report_date',
+            'area',
+            'show_micras_ancho',
+            'rows',
+            'totals',
+            'materials_count',
+        ]);
+        $this->assertEquals('2026-04-15', $response->json('report_date'));
+        $this->assertEquals('tintas', $response->json('area'));
+        $this->assertTrue((bool) $response->json('show_micras_ancho'));
+        $this->assertEquals('125.000', $response->json('rows.0.stock_final_dia'));
+        $this->assertArrayNotHasKey('stock_inicial_dia', (array) $response->json('rows.0'));
+    }
+
+    public function test_inventory_area_daily_includes_micras_ancho_for_sustrato(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $m = Material::query()->create([
+            'sku' => 'RPT-SUST-1',
+            'name' => 'Sustrato test',
+            'inventory_area' => 'material',
+            'micras' => 18,
+            'ancho' => 700,
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $m->forceFill(['quantity_on_hand' => 50])->save();
+
+        $response = $this->getJson(
+            '/api/reports/inventory-area-daily?date=2026-04-15&inventory_area=material',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $this->assertTrue((bool) $response->json('show_micras_ancho'));
+        $this->assertEquals('18.000', $response->json('rows.0.micras'));
+        $this->assertEquals('700.000', $response->json('rows.0.ancho'));
+    }
+
+    public function test_inventory_area_daily_preview_returns_html(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $m = Material::query()->create([
+            'sku' => 'RPT-AREA-PRE',
+            'name' => 'Preview material',
+            'inventory_area' => 'quimicos',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $m->forceFill(['quantity_on_hand' => 8])->save();
+
+        $response = $this->get(
+            '/api/reports/inventory-area-daily/preview?date=2026-04-15&inventory_area=quimicos',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $this->assertStringContainsString('Inventario por area - stock final del dia', $response->getContent());
+    }
+
+    public function test_inventory_area_daily_pdf_download(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $m = Material::query()->create([
+            'sku' => 'RPT-AREA-PDF',
+            'name' => 'Pdf material',
+            'inventory_area' => 'miscelaneos',
+            'unit' => 'u',
+            'min_stock' => 0,
+        ]);
+        $m->forceFill(['quantity_on_hand' => 3])->save();
+
+        $response = $this->get(
+            '/api/reports/inventory-area-daily.pdf?date=2026-04-15&inventory_area=miscelaneos',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $this->assertStringContainsString('application/pdf', (string) $response->headers->get('content-type'));
+        $this->assertStringContainsString('inventory-area-daily-miscelaneos-2026-04-15.pdf', (string) $response->headers->get('content-disposition'));
+    }
+
+    public function test_inventory_movements_general_report_returns_summary_fields(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $m = Material::query()->create([
+            'sku' => 'RPT-MOV-1',
+            'name' => 'Mov material',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $m->forceFill(['quantity_on_hand' => 100])->save();
+
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'in',
+            'quantity' => 10,
+            'reference_type' => 'purchase_receipt',
+            'reference_id' => 999999,
+            'occurred_at' => '2026-04-24 10:00:00',
+        ]);
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'out',
+            'quantity' => 4,
+            'reference_type' => null,
+            'reference_id' => null,
+            'occurred_at' => '2026-04-25 11:00:00',
+        ]);
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'adjustment_sub',
+            'quantity' => 2,
+            'reference_type' => 'inventory_adjustment',
+            'reference_id' => null,
+            'occurred_at' => '2026-04-26 12:00:00',
+        ]);
+
+        $response = $this->getJson(
+            '/api/reports/inventory-movements-general?from=2026-04-21&to=2026-04-28',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $response->assertJsonStructure([
+            'from',
+            'to',
+            'summary' => [
+                'entries_total',
+                'exits_total',
+                'adjustment_total',
+                'adjustment_percent',
+                'invalid_reference_count',
+            ],
+            'entries_vs_exits_by_day',
+            'entries_vs_exits_by_week',
+            'top_materials',
+            'invalid_references',
+            'movements',
+        ]);
+        $this->assertEquals('10.000', $response->json('summary.entries_total'));
+        $this->assertEquals('6.000', $response->json('summary.exits_total'));
+        $this->assertEquals('2.000', $response->json('summary.adjustment_total'));
+        $this->assertEquals(2, $response->json('summary.invalid_reference_count'));
+
+        $invalidOnly = $this->getJson(
+            '/api/reports/inventory-movements-general?from=2026-04-21&to=2026-04-28&invalid_only=1',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $invalidOnly->assertOk();
+        $invalidRows = (array) $invalidOnly->json('movements');
+        $this->assertGreaterThan(0, count($invalidRows));
+        foreach ($invalidRows as $row) {
+            $this->assertTrue((bool) ($row['is_invalid_reference'] ?? false));
+        }
+    }
+
+    public function test_inventory_movements_general_preview_and_pdf_download(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $m = Material::query()->create([
+            'sku' => 'RPT-MOV-2',
+            'name' => 'Mov preview',
+            'inventory_area' => 'tintas',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $m->forceFill(['quantity_on_hand' => 50])->save();
+
+        InventoryMovement::query()->create([
+            'material_id' => $m->id,
+            'movement_type' => 'in',
+            'quantity' => 5,
+            'reference_type' => 'inventory_adjustment',
+            'reference_id' => null,
+            'occurred_at' => '2026-04-26 08:00:00',
+        ]);
+
+        $preview = $this->get(
+            '/api/reports/inventory-movements-general/preview?from=2026-04-21&to=2026-04-28',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $preview->assertOk();
+        $preview->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $this->assertStringContainsString('Movimientos generales de inventario', $preview->getContent());
+
+        $pdf = $this->get(
+            '/api/reports/inventory-movements-general.pdf?from=2026-04-21&to=2026-04-28',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $pdf->assertOk();
+        $this->assertStringContainsString('application/pdf', (string) $pdf->headers->get('content-type'));
+    }
+
     public function test_work_order_material_summary(): void
     {
         $user = User::factory()->create();
@@ -249,7 +495,7 @@ class InventoryReportsTest extends TestCase
 
     public function test_rejected_bobinas_report_requires_auth(): void
     {
-        $this->getJson('/api/reports/rejected-bobinas')->assertUnauthorized();
+        $this->getJson('/api/reports/rejected-bobinas?from=2026-04-01&to=2026-04-30')->assertUnauthorized();
     }
 
     public function test_rejected_bobinas_report_returns_structure(): void
@@ -266,7 +512,7 @@ class InventoryReportsTest extends TestCase
         ]);
         $mat->forceFill(['quantity_on_hand' => 5])->save();
 
-        $response = $this->getJson('/api/reports/rejected-bobinas', ['Authorization' => 'Bearer '.$token]);
+        $response = $this->getJson('/api/reports/rejected-bobinas?from=2026-04-01&to=2026-04-30', ['Authorization' => 'Bearer '.$token]);
 
         $response->assertOk();
         $response->assertJsonStructure([
@@ -277,5 +523,19 @@ class InventoryReportsTest extends TestCase
         $this->assertCount(1, $response->json('materials'));
         $this->assertEquals('BR-RPT', $response->json('materials.0.sku'));
         $this->assertEquals(0, $response->json('bobinas_total'));
+    }
+
+    public function test_consumption_report_supports_csv_download(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->get(
+            '/api/reports/consumption-by-client-product?from=2026-04-01&to=2026-04-30&format=csv',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $this->assertStringContainsString('no_data', $response->getContent());
     }
 }

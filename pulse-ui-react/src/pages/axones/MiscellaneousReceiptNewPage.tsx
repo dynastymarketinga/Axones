@@ -96,13 +96,11 @@ export default function MiscellaneousReceiptNewPage() {
             Nueva recepción misceláneos
           </h1>
           <p className="text-muted-foreground text-sm">
-            Comprobantes obligatorios ·{" "}
-            <code className="text-xs">POST /miscellaneous-receipts</code>{" "}
-            (multipart)
+            Los comprobantes son obligatorios; puede adjuntar varios archivos.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>
-          <Link to="/axones/miscelaneos">Ver historial</Link>
+          <Link to="/miscelaneos">Ver historial</Link>
         </Button>
       </div>
 

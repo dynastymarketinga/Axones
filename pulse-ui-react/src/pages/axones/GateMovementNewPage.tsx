@@ -54,11 +54,11 @@ export default function GateMovementNewPage() {
             Registrar entrada / salida
           </h1>
           <p className="text-muted-foreground text-sm">
-            Vigilancia · <code className="text-xs">POST /gate-movements</code>
+            Registre entradas y salidas en la caseta.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>
-          <Link to="/axones/vigilancia">Ver historial</Link>
+          <Link to="/vigilancia">Ver historial</Link>
         </Button>
       </div>
 

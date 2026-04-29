@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -25,6 +26,7 @@ import {
 
 type ReturnRow = {
   id: number
+  material_id?: number
   work_order_id: number | null
   status: string
   quantity: string
@@ -66,6 +68,17 @@ export default function InventoryReturnsPage() {
     void load()
   }, [load])
 
+  async function acceptReturn(id: number) {
+    try {
+      await apiFetch(`inventory-returns/${id}/accept`, { method: "POST" })
+      toast.success("Devolución aceptada; ingreso aplicado al inventario.")
+      void load()
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo aceptar la devolución.")
+    }
+  }
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div>
@@ -73,7 +86,8 @@ export default function InventoryReturnsPage() {
           Devoluciones a inventario
         </h1>
         <p className="text-muted-foreground text-sm">
-          Casadas con OT de impresión · <code>/inventory-returns</code>
+          Devoluciones a inventario vinculadas a órdenes de trabajo de
+          impresión.
         </p>
       </div>
 
@@ -112,18 +126,19 @@ export default function InventoryReturnsPage() {
               <TableHead>Cantidad</TableHead>
               <TableHead>Área destino</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={7} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows?.data.length ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={7} className="text-muted-foreground">
                   Sin devoluciones.
                 </TableCell>
               </TableRow>
@@ -142,6 +157,30 @@ export default function InventoryReturnsPage() {
                   <TableCell>{r.quantity}</TableCell>
                   <TableCell>{r.destination_area}</TableCell>
                   <TableCell>{r.status}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
+                      {r.status === "pending" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void acceptReturn(r.id)}
+                        >
+                          Aceptar ingreso
+                        </Button>
+                      ) : null}
+                      {r.destination_area === "bobinas_rechazadas" ? (
+                        <Button type="button" size="sm" variant="outline" asChild>
+                          <Link
+                            to={`/bobinas/registrar-rechazada?devolucion_id=${r.id}`}
+                            title="Registrar bobina única vinculada a esta devolución"
+                          >
+                            Bobina rechazada
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))
             )}

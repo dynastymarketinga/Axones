@@ -61,12 +61,11 @@ export default function VendorsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Vendedores</h1>
           <p className="text-muted-foreground text-sm">
-            Catálogo para asignar y filtrar por vendedor ·{" "}
-            <code>/vendors</code>
+            Catálogo para asignar y filtrar por vendedor.
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/vendedores/form" state={{ from }}>
+          <Link to="/vendedores/form" state={{ from }}>
             Nuevo vendedor
           </Link>
         </Button>
@@ -130,7 +129,7 @@ export default function VendorsPage() {
                   <TableCell className="text-right">
                     <Button variant="link" className="h-auto p-0" asChild>
                       <Link
-                        to={`/axones/vendedores/form?id=${v.id}`}
+                        to={`/vendedores/form?id=${v.id}`}
                         state={{ from }}
                       >
                         Editar

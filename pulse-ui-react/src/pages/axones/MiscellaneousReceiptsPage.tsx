@@ -60,11 +60,11 @@ export default function MiscellaneousReceiptsPage() {
             Recepciones misceláneas
           </h1>
           <p className="text-muted-foreground text-sm">
-            Con comprobantes adjuntos · <code>/miscellaneous-receipts</code>
+            Recepciones con comprobantes adjuntos.
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/miscelaneos/nuevo">Nueva recepción</Link>
+          <Link to="/miscelaneos/nuevo">Nueva recepción</Link>
         </Button>
       </div>
 

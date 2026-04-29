@@ -291,6 +291,8 @@
   padding: 0;
   border: none;
   min-width: 0;
+  position: relative;
+  padding-bottom: 18px;
 }
 
 .ax-ot .ot-label {
@@ -304,6 +306,34 @@
   line-height: 1.25;
   hyphens: auto;
   overflow-wrap: anywhere;
+}
+
+/* Alinear fila "Figura embobinado" con "N° Colores". */
+.ax-ot .ot-field-figure .ot-label-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.ax-ot .ot-field-align-figure .ot-label {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Reserva una línea de ayuda/error para no desalinear filas al mostrar validaciones. */
+.ax-ot .ot-field > .text-xs.text-destructive {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin-top: 0 !important;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Altura alineada con Input de shadcn (h-9 ≈ 36px) en toda la planilla */

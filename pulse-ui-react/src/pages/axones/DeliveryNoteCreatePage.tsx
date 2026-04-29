@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Link } from "react-router-dom"
+import { useCallback, useEffect, useState } from "react"
+import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -37,8 +37,20 @@ type Prefill = {
 }
 
 type EditableLine = PrefillLine & { include: boolean }
+type DispatchSelectionItem = {
+  corte_bobina_usage_id: number
+  work_order_id: number
+  product_id: number | null
+  description: string
+  quantity_kg: string
+  pallet_code: string
+  bobbin_count: number
+}
+
+const DISPATCH_SELECTION_KEY = "axones.dispatch.selection.v1"
 
 export default function DeliveryNoteCreatePage() {
+  const [searchParams] = useSearchParams()
   const [woId, setWoId] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -50,13 +62,11 @@ export default function DeliveryNoteCreatePage() {
   const [driverName, setDriverName] = useState("")
   const [vehicleNotes, setVehicleNotes] = useState("")
   const [notes, setNotes] = useState("")
+  const [autoloadedFromQuery, setAutoloadedFromQuery] = useState(false)
+  const [loadedFromDispatchSelection, setLoadedFromDispatchSelection] =
+    useState(false)
 
-  async function loadPrefill() {
-    const id = Number(woId)
-    if (!Number.isFinite(id) || id < 1) {
-      toast.error("Indique un ID de orden de trabajo válido.")
-      return
-    }
+  const loadPrefillById = useCallback(async (id: number) => {
     setLoading(true)
     setPrefill(null)
     try {
@@ -74,11 +84,66 @@ export default function DeliveryNoteCreatePage() {
       )
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar el prefill.")
+      else toast.error("No se pudo cargar la información de la orden.")
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  const loadPrefill = useCallback(async () => {
+    const id = Number(woId.trim())
+    if (!Number.isFinite(id) || id < 1) {
+      toast.error("Indique un ID de orden de trabajo válido.")
+      return
+    }
+    await loadPrefillById(id)
+  }, [woId, loadPrefillById])
+
+  useEffect(() => {
+    if (autoloadedFromQuery) return
+    const queryWoId = searchParams.get("woId")?.trim() ?? ""
+    const parsed = Number(queryWoId)
+    if (!Number.isFinite(parsed) || parsed < 1) return
+    setAutoloadedFromQuery(true)
+    setWoId(String(parsed))
+    void loadPrefillById(parsed)
+  }, [searchParams, autoloadedFromQuery, loadPrefillById])
+
+  useEffect(() => {
+    if (autoloadedFromQuery && !searchParams.get("woId")) {
+      setAutoloadedFromQuery(false)
+    }
+  }, [autoloadedFromQuery, searchParams])
+
+  useEffect(() => {
+    if (loadedFromDispatchSelection) return
+    if (searchParams.get("source") !== "despacho-corte") return
+    const raw = sessionStorage.getItem(DISPATCH_SELECTION_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as DispatchSelectionItem[]
+      if (!Array.isArray(parsed) || !parsed.length) return
+      setLoadedFromDispatchSelection(true)
+      setPrefill(null)
+      setLines(
+        parsed.map((line) => ({
+          pallet_code: line.pallet_code ?? "",
+          bobbin_count: Number(line.bobbin_count ?? 1),
+          quantity_kg: String(line.quantity_kg ?? "0.000"),
+          corte_bobina_usage_id: Number(line.corte_bobina_usage_id),
+          work_order_id: Number(line.work_order_id),
+          product_id: line.product_id ? Number(line.product_id) : null,
+          description: line.description ?? null,
+          include: Number(line.quantity_kg) > 0,
+        })),
+      )
+      setWoId("")
+      toast.success("Selección de despacho cargada para crear la nota.")
+      sessionStorage.removeItem(DISPATCH_SELECTION_KEY)
+    } catch {
+      sessionStorage.removeItem(DISPATCH_SELECTION_KEY)
+    }
+  }, [loadedFromDispatchSelection, searchParams])
 
   function updateLine(i: number, patch: Partial<EditableLine>) {
     setLines((prev) => prev.map((row, j) => (j === i ? { ...row, ...patch } : row)))
@@ -86,12 +151,12 @@ export default function DeliveryNoteCreatePage() {
 
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
-    if (!prefill) {
-      toast.error("Cargue primero el prefill de una OT.")
+    if (!lines.length) {
+      toast.error("No hay líneas disponibles para crear la nota.")
       return
     }
-    const seq = Number(sequentialNumber)
-    if (!Number.isFinite(seq) || seq < 1) {
+    const seq = sequentialNumber.trim() ? Number(sequentialNumber) : null
+    if (seq !== null && (!Number.isFinite(seq) || seq < 1)) {
       toast.error("Número secuencial inválido.")
       return
     }
@@ -114,12 +179,18 @@ export default function DeliveryNoteCreatePage() {
       return
     }
 
+    const uniqueWorkOrders = Array.from(
+      new Set(payloadLines.map((line) => line.work_order_id).filter(Boolean)),
+    )
+    const parentWorkOrderId =
+      uniqueWorkOrders.length === 1 ? uniqueWorkOrders[0] : null
+
     setSaving(true)
     try {
       await apiFetch("delivery-notes", {
         method: "POST",
         body: JSON.stringify({
-          work_order_id: prefill.work_order.id,
+          work_order_id: parentWorkOrderId,
           sequential_number: seq,
           document_date: documentDate || null,
           driver_name: driverName.trim() || null,
@@ -145,36 +216,36 @@ export default function DeliveryNoteCreatePage() {
             Nueva nota de entrega
           </h1>
           <p className="text-muted-foreground text-sm">
-            Desde saldos de corte · <code className="text-xs">POST /delivery-notes</code>
+            Genere la nota con el material pendiente de despacho.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/prefill-nota-entrega">Solo JSON (prefill)</Link>
+            <Link to="/prefill-nota-entrega">Vista previa de datos</Link>
           </Button>
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/notas-entrega">Historial</Link>
+            <Link to="/notas-entrega">Historial</Link>
           </Button>
         </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-card p-4 shadow-sm">
         <div className="grid gap-2">
-          <Label htmlFor="dn-wo">work_order_id</Label>
+          <Label htmlFor="dn-wo">ID de orden de trabajo</Label>
           <Input
             id="dn-wo"
             inputMode="numeric"
             value={woId}
             onChange={(ev) => setWoId(ev.target.value)}
-            placeholder="ej. 12"
+            placeholder="Ejemplo: 12"
           />
         </div>
         <Button type="button" onClick={() => void loadPrefill()} disabled={loading}>
-          {loading ? "…" : "Cargar prefill"}
+          {loading ? "…" : "Cargar datos"}
         </Button>
       </div>
 
-      {prefill ? (
+      {prefill || lines.length ? (
         <form onSubmit={(ev) => void submit(ev)} className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">

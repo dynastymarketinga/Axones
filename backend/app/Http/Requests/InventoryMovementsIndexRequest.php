@@ -29,6 +29,7 @@ class InventoryMovementsIndexRequest extends FormRequest
             'reference_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
             'search' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'invalid_only' => ['sometimes', 'nullable', 'boolean'],
             'per_page' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:200'],
         ];
     }

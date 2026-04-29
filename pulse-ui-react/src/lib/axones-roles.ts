@@ -8,144 +8,132 @@ import type { LucideIcon } from "lucide-react"
 const BOSS_ROLES = new Set(["boss", "admin", "jefe_supremo", "superadmin"])
 
 /** Jefes / admin: ven todo el menú Axones. */
-export function isAxonesFullAccess(role?: string | null): boolean {
+export function isAxonesFullAccess(
+  role?: string | null,
+  _userId?: number | null,
+): boolean {
   const r = normalizeRole(role)
-  if (!r || r === "general") return true
   return BOSS_ROLES.has(r)
 }
 
+const INVENTORY_CHIEF_URLS = new Set([
+  "resumen",
+  "alertas",
+  "clientes",
+  "vendedores",
+  "vendedores/form",
+  "productos",
+  "productos/form",
+  "proveedores",
+  "materiales",
+  "inventario-areas",
+  "movimientos-inventario",
+  "ordenes-compra",
+  "ordenes-compra/nueva",
+  "recepciones-oc",
+  "recepciones-nueva",
+  "miscelaneos",
+  "miscelaneos/nuevo",
+  "bobinas",
+  "bobinas/registrar-rechazada",
+  "devoluciones",
+  "despacho-corte",
+  "prefill-nota-entrega",
+  "nota-entrega-nueva",
+  "notas-entrega",
+  "solicitudes-material",
+  "reportes",
+])
+
 const INVENTORY_URLS = new Set([
-  "axones/resumen",
-  "axones/alertas",
-  "axones/clientes",
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/productos",
-  "axones/productos/form",
-  "axones/proveedores",
-  "axones/materiales",
-  "axones/inventario-areas",
-  "axones/movimientos-inventario",
-  "axones/ordenes-compra",
-  "axones/ordenes-compra/nueva",
-  "axones/recepciones-oc",
-  "axones/recepciones-nueva",
-  "axones/miscelaneos",
-  "axones/miscelaneos/nuevo",
-  "axones/bobinas",
-  "axones/devoluciones",
-  "axones/solicitudes-material",
-  "axones/reportes",
+  "inventario-areas",
+  "materiales",
+  "movimientos-inventario",
+  "recepciones-oc",
+  "recepciones-nueva",
+  "miscelaneos",
+  "miscelaneos/nuevo",
+  "bobinas",
+  "bobinas/registrar-rechazada",
+  "devoluciones",
+  "despacho-corte",
+  "prefill-nota-entrega",
+  "nota-entrega-nueva",
+  "notas-entrega",
+  "solicitudes-material",
 ])
 
 const PRINTING_URLS = new Set([
-  "axones/resumen",
-  "axones/alertas",
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/programacion",
-  "axones/impresion",
-  "axones/pedidos-cliente",
-  "axones/ordenes-cliente",
-  "axones/ordenes-cliente/nueva",
-  "axones/ordenes-trabajo",
-  "axones/solicitudes-area",
-  "axones/solicitudes-material",
-  "axones/calidad",
-  "axones/reportes",
-  "axones/mezclas-tinta",
+  "resumen",
+  "alertas",
+  "programacion",
+  "impresion",
+  "ordenes-trabajo",
+  "ordenes-trabajo-produccion",
+  "solicitudes-area",
+  "solicitudes-material",
+  "calidad",
+  "reportes",
+  "mezclas-tinta",
 ])
 
 const LAMINACION_URLS = new Set([
-  "axones/resumen",
-  "axones/alertas",
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/programacion",
-  "axones/laminacion",
-  "axones/pedidos-cliente",
-  "axones/ordenes-cliente",
-  "axones/ordenes-cliente/nueva",
-  "axones/ordenes-trabajo",
-  "axones/solicitudes-area",
-  "axones/solicitudes-material",
-  "axones/reportes",
+  "programacion",
+  "laminacion",
+  "ordenes-trabajo",
+  "solicitudes-area",
+  "solicitudes-material",
 ])
 
 const CORTE_URLS = new Set([
-  "axones/resumen",
-  "axones/alertas",
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/programacion",
-  "axones/corte",
-  "axones/pedidos-cliente",
-  "axones/ordenes-cliente",
-  "axones/ordenes-cliente/nueva",
-  "axones/ordenes-trabajo",
-  "axones/solicitudes-area",
-  "axones/solicitudes-material",
-  "axones/prefill-nota-entrega",
-  "axones/nota-entrega-nueva",
-  "axones/despacho-corte",
-  "axones/notas-entrega",
-  "axones/reportes",
+  "programacion",
+  "corte",
+  "ordenes-trabajo",
+  "solicitudes-area",
+  "solicitudes-material",
 ])
 
 const TINTAS_URLS = new Set([
-  "axones/resumen",
-  "axones/alertas",
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/tintas",
-  "axones/pedidos-cliente",
-  "axones/ordenes-cliente",
-  "axones/ordenes-cliente/nueva",
-  "axones/ordenes-trabajo",
-  "axones/materiales",
-  "axones/inventario-areas",
-  "axones/mezclas-tinta",
-  "axones/solicitudes-area",
-  "axones/reportes",
+  "tintas",
 ])
 
 const ADMIN_URLS = new Set([
-  "axones/resumen",
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/movimientos-inventario",
-  "axones/ordenes-trabajo",
-  "axones/despacho-corte",
-  "axones/notas-entrega",
-  "axones/nota-entrega-nueva",
-  "axones/prefill-nota-entrega",
-  "axones/reportes",
+  "ordenes-trabajo",
+  "despacho-corte",
+  "notas-entrega",
+  "nota-entrega-nueva",
+  "prefill-nota-entrega",
 ])
 
 const SOLICITANTE_URLS = new Set([
-  "axones/vendedores",
-  "axones/vendedores/form",
-  "axones/solicitudes-area",
-  "axones/solicitudes-material",
+  "solicitudes-area",
+  "solicitudes-material",
 ])
 
 /** ¿Puede el rol ver esta ruta del menú Axones? */
 export function isAxonesUrlAllowed(
   url: string,
   role?: string | null,
+  userId?: number | null,
 ): boolean {
-  if (url === "axones/asistente") return true
-  if (isAxonesFullAccess(role)) return true
+  if (url === "asistente") return true
+  if (isAxonesFullAccess(role, userId)) return true
+  if (url === "account/password-reset-requests") {
+    return isAxonesFullAccess(role, userId)
+  }
   const r = normalizeRole(role)
 
   if (r === "gate" || r === "vigilancia") {
-    return url === "axones/vigilancia" || url === "axones/vigilancia/nuevo"
+    return url === "vigilancia" || url === "vigilancia/nuevo"
+  }
+  if (r === "inventory_chief" || r === "jefe_inventario") {
+    return INVENTORY_CHIEF_URLS.has(url)
   }
   if (r === "inventory" || r === "inventario") {
     return INVENTORY_URLS.has(url)
   }
   if (r === "quality" || r === "calidad") {
-    return !url.startsWith("axones/vigilancia")
+    return !url.startsWith("vigilancia")
   }
   if (r === "printing" || r === "impresion") {
     return PRINTING_URLS.has(url)
@@ -179,36 +167,20 @@ function isBranch(
 }
 
 /**
- * Secciones de primer nivel visibles para cualquier rol (menú de navegación).
- * El backend puede seguir aplicando permisos en cada API.
- */
-const AXONES_MENU_SECTIONS_ALWAYS_VISIBLE = new Set([
-  "Producción",
-  "Vigilancia",
-])
-
-/**
  * Filtra el árbol de menú Axones: elimina hojas no permitidas y ramas vacías.
  */
 export function filterAxonesMenuTree(
   nodes: AxonesMenuNode[],
   role?: string | null,
+  userId?: number | null,
 ): AxonesMenuNode[] {
-  if (isAxonesFullAccess(role)) return nodes
+  if (isAxonesFullAccess(role, userId)) return nodes
 
+  const normalizedRole = normalizeRole(role)
   const out: AxonesMenuNode[] = []
   for (const node of nodes) {
     if (isBranch(node)) {
-      if (AXONES_MENU_SECTIONS_ALWAYS_VISIBLE.has(node.title)) {
-        out.push({
-          title: node.title,
-          url: "#",
-          icon: node.icon,
-          items: node.items,
-        })
-        continue
-      }
-      const children = filterAxonesMenuTree(node.items, role)
+      const children = filterAxonesMenuTree(node.items, role, userId)
       if (children.length > 0) {
         out.push({
           title: node.title,
@@ -217,7 +189,7 @@ export function filterAxonesMenuTree(
           items: children,
         })
       }
-    } else if (isAxonesUrlAllowed(node.url, role)) {
+    } else if (isAxonesUrlAllowed(node.url, role, userId)) {
       out.push(node)
     }
   }

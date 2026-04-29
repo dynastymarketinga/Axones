@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Enums\InventoryArea;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreMaterialRequest extends FormRequest
 {
@@ -23,11 +24,58 @@ class StoreMaterialRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'barcode' => ['nullable', 'string', 'max:64'],
             'inventory_area' => ['required', 'string', Rule::in(InventoryArea::values())],
+            'is_active' => ['sometimes', 'boolean'],
             'tinta_presentacion' => ['nullable', 'string', Rule::in(['original', 'solventada'])],
+            'micras' => ['nullable', 'numeric', 'min:0'],
+            'ancho' => ['nullable', 'numeric', 'min:0'],
             'unit' => ['nullable', 'string', 'max:16'],
             'min_stock' => ['nullable', 'numeric', 'min:0'],
             'quantity_on_hand' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $area = (string) $this->input('inventory_area', '');
+            $unit = (string) $this->input('unit', 'kg');
+
+            $requiresDimensions = in_array($area, [
+                InventoryArea::Material->value,
+                InventoryArea::BobinasRechazadas->value,
+            ], true);
+
+            if ($requiresDimensions) {
+                if (!$this->filled('micras')) {
+                    $validator->errors()->add('micras', 'Micras es obligatorio para este tipo.');
+                }
+                if (!$this->filled('ancho')) {
+                    $validator->errors()->add('ancho', 'Ancho es obligatorio para este tipo.');
+                }
+            }
+
+            if ($area === InventoryArea::Tintas->value && !$this->filled('tinta_presentacion')) {
+                $validator->errors()->add('tinta_presentacion', 'Presentación es obligatoria para tintas.');
+            }
+
+            $allowedUnits = $this->allowedUnitsByArea($area);
+            if (!in_array($unit, $allowedUnits, true)) {
+                $validator->errors()->add('unit', 'Unidad inválida para el área seleccionada.');
+            }
+        });
+    }
+
+    /**
+     * @return string[]
+     */
+    private function allowedUnitsByArea(string $area): array
+    {
+        return match ($area) {
+            InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
+            InventoryArea::Tintas->value => ['kg', 'litro'],
+            InventoryArea::Miscelaneos->value => ['unidad', 'caja', 'pack', 'kg'],
+            default => ['kg', 'm', 'rollo', 'litro', 'unidad', 'caja', 'pack'],
+        };
     }
 }

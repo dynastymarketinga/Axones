@@ -115,7 +115,7 @@ export default function ProductsPage() {
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/productos/form" state={{ from }}>
+          <Link to="/productos/form" state={{ from }}>
             Nuevo producto
           </Link>
         </Button>
@@ -216,7 +216,7 @@ export default function ProductsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="link" className="h-auto p-0" asChild>
-                      <Link to={`/axones/productos/form?id=${p.id}`} state={{ from }}>
+                      <Link to={`/productos/form?id=${p.id}`} state={{ from }}>
                         Editar
                       </Link>
                     </Button>

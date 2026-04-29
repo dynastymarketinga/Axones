@@ -101,6 +101,42 @@ class MaterialRequestSolicitudFormTest extends TestCase
             ->assertJsonPath('authorized_by', $boss->id);
     }
 
+    public function test_dispatch_without_authorize_fails(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-SOL-4',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $mat = Material::query()->create([
+            'sku' => 'M-S4',
+            'name' => 'Stock',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 10])->save();
+
+        $mr = $this->postJson('/api/material-requests', [
+            'work_order_id' => $wo->id,
+            'lines' => [
+                ['material_id' => $mat->id, 'quantity_requested' => 2],
+            ],
+        ], $h)->assertCreated();
+
+        $lineId = $mr->json('lines.0.id');
+
+        $this->postJson('/api/material-requests/'.$mr->json('id').'/dispatch', [
+            'lines' => [
+                ['material_request_line_id' => $lineId, 'quantity' => 2],
+            ],
+        ], $h)->assertUnprocessable();
+    }
+
     public function test_dispatch_free_text_line_without_inventory_movement(): void
     {
         $user = User::factory()->create();
@@ -131,6 +167,8 @@ class MaterialRequestSolicitudFormTest extends TestCase
 
         $line0 = $mr->json('lines.0.id');
         $line1 = $mr->json('lines.1.id');
+
+        $this->postJson('/api/material-requests/'.$mr->json('id').'/authorize', [], $h)->assertOk();
 
         $out = $this->postJson('/api/material-requests/'.$mr->json('id').'/dispatch', [
             'lines' => [

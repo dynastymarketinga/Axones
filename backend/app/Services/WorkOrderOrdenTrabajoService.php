@@ -59,6 +59,8 @@ class WorkOrderOrdenTrabajoService
             'tipoImpresion' => $tipoImpresion,
             'client_order_code' => $workOrder->clientOrder?->code,
             'client_order_reference' => $workOrder->client_order_reference,
+            'estadoOt' => (string) $workOrder->status,
+            'etapaOt' => $workOrder->board_stage?->value ?? (string) $workOrder->board_stage,
         ];
     }
 
@@ -83,6 +85,30 @@ class WorkOrderOrdenTrabajoService
         return WorkOrderTechnicalDocument::query()->updateOrCreate(
             ['work_order_id' => $workOrder->getKey()],
             ['form' => $form],
+        );
+    }
+
+    /**
+     * Fusiona solo claves del control de impresión (prefijo imp) sobre el formulario guardado.
+     *
+     * @param  array<string, mixed>  $incoming
+     */
+    public function mergePrintingKeysIntoForm(WorkOrder $workOrder, array $incoming): WorkOrderTechnicalDocument
+    {
+        $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
+        /** @var array<string, mixed> $existing */
+        $existing = is_array($doc?->form) ? $doc->form : [];
+
+        foreach ($incoming as $key => $value) {
+            $k = (string) $key;
+            if ($k !== '' && str_starts_with($k, 'imp')) {
+                $existing[$k] = $value;
+            }
+        }
+
+        return WorkOrderTechnicalDocument::query()->updateOrCreate(
+            ['work_order_id' => $workOrder->getKey()],
+            ['form' => $existing],
         );
     }
 }

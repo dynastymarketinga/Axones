@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { apiDownloadFile, apiFetch, ApiError } from "@/lib/api"
+import { apiDownloadFile, ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,32 +22,18 @@ export default function AxonesReportsPage() {
   const [woId, setWoId] = useState("")
   const [clientId, setClientId] = useState("")
   const [productId, setProductId] = useState("")
-  const [result, setResult] = useState<string>("")
   const [loading, setLoading] = useState(false)
 
-  async function run(
+  async function downloadCsv(
     path: string,
+    fallbackName: string,
     query: Record<string, string | number | undefined>,
   ) {
     setLoading(true)
-    setResult("")
     try {
-      const data = await apiFetch<unknown>(path, { query })
-      setResult(JSON.stringify(data, null, 2))
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("Error al generar el reporte.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function csvInventoryDaily() {
-    setLoading(true)
-    try {
-      await apiDownloadFile("reports/inventory-daily", {
-        query: { from, to, format: "csv" },
-        fallbackName: "inventory-daily.csv",
+      await apiDownloadFile(path, {
+        query: { ...query, format: "csv" },
+        fallbackName,
       })
       toast.success("Descarga iniciada.")
     } catch (e) {
@@ -58,23 +44,13 @@ export default function AxonesReportsPage() {
     }
   }
 
-  async function copyResult() {
-    if (!result) return
-    try {
-      await navigator.clipboard.writeText(result)
-      toast.success("Copiado al portapapeles.")
-    } catch {
-      toast.error("No se pudo copiar.")
-    }
-  }
-
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Reportes</h1>
         <p className="text-muted-foreground text-sm">
-          Consultas al API <code className="text-xs">/reports/*</code> con
-          vista por módulo. Use CSV donde esté disponible.
+          Informes por módulo y rango de fechas. Use exportación CSV donde esté
+          disponible.
         </p>
       </div>
 
@@ -117,34 +93,46 @@ export default function AxonesReportsPage() {
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="secondary"
-              disabled={loading}
-              onClick={() => void run("reports/inventory-daily", { from, to })}
-            >
-              Movimientos diarios (JSON)
-            </Button>
-            <Button
               variant="outline"
               disabled={loading}
-              onClick={() => void csvInventoryDaily()}
+              onClick={() =>
+                void downloadCsv("reports/inventory-daily", "inventory-daily.csv", {
+                  from,
+                  to,
+                })
+              }
             >
               Movimientos diarios (CSV)
             </Button>
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="outline"
+                disabled={loading}
+                onClick={() =>
+                  void downloadCsv(
+                    "reports/consumption-by-client-product",
+                    "consumption-by-client-product.csv",
+                    { from, to },
+                  )
+                }
+              >
+                Consumo por cliente y producto (CSV)
+              </Button>
+              <p className="text-muted-foreground max-w-xl text-xs">
+                Agrega consumo de material vinculado a órdenes de trabajo en el rango (cliente y producto).
+              </p>
+            </div>
             <Button
-              variant="secondary"
+              variant="outline"
               disabled={loading}
               onClick={() =>
-                void run("reports/consumption-by-client-product", { from, to })
+                void downloadCsv("reports/rejected-bobinas", "rejected-bobinas.csv", {
+                  from,
+                  to,
+                })
               }
             >
-              Consumo por cliente y producto
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={loading}
-              onClick={() => void run("reports/rejected-bobinas", {})}
-            >
-              Bobinas rechazadas
+              Bobinas rechazadas (CSV)
             </Button>
           </div>
         </TabsContent>
@@ -156,22 +144,30 @@ export default function AxonesReportsPage() {
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="secondary"
+              variant="outline"
               disabled={loading}
               onClick={() =>
-                void run("reports/production-time-by-area", { from, to })
+                void downloadCsv(
+                  "reports/production-time-by-area",
+                  "production-time-by-area.csv",
+                  { from, to },
+                )
               }
             >
-              Tiempos por área
+              Tiempos por área (CSV)
             </Button>
             <Button
-              variant="secondary"
+              variant="outline"
               disabled={loading}
               onClick={() =>
-                void run("reports/tinta-consumption-by-client", { from, to })
+                void downloadCsv(
+                  "reports/tinta-consumption-by-client",
+                  "tinta-consumption-by-client.csv",
+                  { from, to },
+                )
               }
             >
-              Consumo tintas por cliente
+              Consumo tintas por cliente (CSV)
             </Button>
           </div>
         </TabsContent>
@@ -182,7 +178,7 @@ export default function AxonesReportsPage() {
           </p>
           <div className="flex flex-wrap items-end gap-4">
             <div className="grid gap-2">
-              <Label>client_id</Label>
+              <Label>Cliente (ID opcional)</Label>
               <Input
                 inputMode="numeric"
                 value={clientId}
@@ -191,7 +187,7 @@ export default function AxonesReportsPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label>product_id</Label>
+              <Label>Producto (ID opcional)</Label>
               <Input
                 inputMode="numeric"
                 value={productId}
@@ -201,9 +197,10 @@ export default function AxonesReportsPage() {
             </div>
             <Button
               type="button"
+              variant="outline"
               disabled={loading}
               onClick={() =>
-                void run("reports/scrap-by-filters", {
+                void downloadCsv("reports/scrap-by-filters", "scrap-by-filters.csv", {
                   from,
                   to,
                   client_id: clientId.trim()
@@ -215,7 +212,7 @@ export default function AxonesReportsPage() {
                 })
               }
             >
-              Ejecutar reporte de mermas
+              Mermas (CSV)
             </Button>
           </div>
         </TabsContent>
@@ -227,7 +224,7 @@ export default function AxonesReportsPage() {
           </p>
           <div className="flex flex-wrap items-end gap-4">
             <div className="grid gap-2">
-              <Label>work_order_id</Label>
+              <Label>Orden de trabajo (ID)</Label>
               <Input
                 inputMode="numeric"
                 value={woId}
@@ -236,36 +233,21 @@ export default function AxonesReportsPage() {
             </div>
             <Button
               type="button"
+              variant="outline"
               disabled={loading || !woId.trim()}
               onClick={() =>
-                void run("reports/work-order-material-summary", {
-                  work_order_id: Number(woId),
-                })
+                void downloadCsv(
+                  "reports/work-order-material-summary",
+                  `work-order-material-summary-${woId}.csv`,
+                  { work_order_id: Number(woId) },
+                )
               }
             >
-              Ejecutar
+              Resumen OT (CSV)
             </Button>
           </div>
         </TabsContent>
       </Tabs>
-
-      {result ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void copyResult()}
-            >
-              Copiar JSON
-            </Button>
-          </div>
-          <pre className="max-h-[480px] overflow-auto rounded-xl border bg-muted p-4 text-xs">
-            {result}
-          </pre>
-        </div>
-      ) : null}
     </div>
   )
 }

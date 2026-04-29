@@ -52,7 +52,7 @@ export default function ClientOrderDetailPage() {
       setRow(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar la orden de cliente.")
+      else toast.error("No se pudo cargar el pedido del cliente.")
       setRow(null)
     } finally {
       setLoading(false)
@@ -87,7 +87,7 @@ export default function ClientOrderDetailPage() {
       <div className="p-4 md:p-6 space-y-4">
         <p className="text-destructive text-sm">Identificador no válido.</p>
         <Button variant="outline" asChild>
-          <Link to="/axones/ordenes-cliente">Volver al listado</Link>
+          <Link to="/ordenes-cliente">Volver al listado</Link>
         </Button>
       </div>
     )
@@ -106,7 +106,7 @@ export default function ClientOrderDetailPage() {
       <div className="p-4 md:p-6 space-y-4">
         <p className="text-muted-foreground text-sm">No se encontró la orden.</p>
         <Button variant="outline" asChild>
-          <Link to="/axones/ordenes-cliente">Volver al listado</Link>
+          <Link to="/ordenes-cliente">Volver al listado</Link>
         </Button>
       </div>
     )
@@ -118,12 +118,12 @@ export default function ClientOrderDetailPage() {
     <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Orden de cliente</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Pedido del cliente</h1>
           <p className="mt-1 font-mono text-sm text-foreground">{row.code}</p>
           <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
             Solicitud comercial. La producción vive en{" "}
             <Link
-              to="/axones/ordenes-trabajo"
+              to="/ordenes-trabajo"
               className="text-primary font-medium underline-offset-4 hover:underline"
             >
               órdenes de trabajo
@@ -133,7 +133,7 @@ export default function ClientOrderDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link to="/axones/ordenes-cliente">
+            <Link to="/ordenes-cliente">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Listado
             </Link>
@@ -144,7 +144,7 @@ export default function ClientOrderDetailPage() {
             asChild
           >
             <Link
-              to={`/axones/ordenes-trabajo?tab=lista&prefillCo=${row.id}`}
+              to={`/ordenes-trabajo?tab=lista&prefillCo=${row.id}`}
               title="Abre Órdenes de trabajo con esta OC para crear la planilla de producción"
             >
               Nueva OT (producción)
@@ -157,7 +157,7 @@ export default function ClientOrderDetailPage() {
                 size="sm"
                 asChild
               >
-                <Link to={`/axones/ordenes-cliente/${row.id}/edit`}>
+                <Link to={`/ordenes-cliente/${row.id}/edit`}>
                   <Pencil className="mr-2 h-4 w-4" />
                   Editar
                 </Link>
@@ -251,7 +251,7 @@ export default function ClientOrderDetailPage() {
               {wos.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={2} className="text-muted-foreground text-sm">
-                    Aún no hay OT vinculada a esta orden de cliente.
+                    Aún no hay OT vinculada a este pedido del cliente.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -260,7 +260,7 @@ export default function ClientOrderDetailPage() {
                     <TableCell className="font-mono text-sm">{w.code}</TableCell>
                     <TableCell>
                       <Button variant="link" className="h-auto p-0" asChild>
-                        <Link to={`/axones/ordenes-trabajo/${w.id}/produccion`}>Ver producción</Link>
+                        <Link to={`/ordenes-trabajo/${w.id}/produccion`}>Ver producción</Link>
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -285,7 +285,7 @@ export default function ClientOrderDetailPage() {
                 <Ban className="h-6 w-6" />
               </div>
               <DialogTitle className="text-center sm:text-left sm:leading-tight">
-                ¿Anular esta orden de cliente?
+                ¿Anular este pedido del cliente?
               </DialogTitle>
             </div>
           </DialogHeader>

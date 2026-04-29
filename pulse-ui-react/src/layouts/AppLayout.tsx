@@ -1,7 +1,6 @@
 import { Outlet } from "react-router-dom"
 import { AppSidebar } from "@/components/app-sidebar"
 import { NotificationDropdown } from "@/components/notification-dropdown"
-import { AppLauncherDropdown } from "@/components/appLauncher-dropdown"
 
 import {
   Breadcrumb,
@@ -17,22 +16,16 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { ThemeToggle } from "@/components/theme-toggle"
 import { GlobalSearch } from "@/components/global-search"
 
 import Footer from "@/layouts/Footer"
 
-import ThemeCustomizer from "@/components/theme-customizer"
-
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { LanguageDropdown } from "@/components/language-dropdown"
 
 export default function AppLayout() {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(true)
-
-  const [themesopen, themessetOpen] = useState(false)
 
   useEffect(() => {
     const onScroll = () => {
@@ -79,11 +72,11 @@ export default function AppLayout() {
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">Dashboard</BreadcrumbLink>
+                  <BreadcrumbLink href="#">Panel</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>Overview</BreadcrumbPage>
+                  <BreadcrumbPage>Resumen</BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
@@ -91,19 +84,11 @@ export default function AppLayout() {
 
           <div className="ml-auto px-6">
             <div className="flex items-center gap-1">
-              <ThemeCustomizer />
               <GlobalSearch />
-              <ThemeToggle />
-              <LanguageDropdown />
-              <AppLauncherDropdown />
               <div className="relative">
                 <NotificationDropdown />
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
-                  5
-                </span>
               </div>
             </div>
-            {themesopen && <ThemeCustomizer />}
           </div>
         </header>
 

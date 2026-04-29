@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { Truck } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -77,8 +78,8 @@ export default function MaterialRequestsPage() {
           Solicitudes de material
         </h1>
         <p className="text-muted-foreground text-sm">
-          Panel inventario · <code>/material-requests</code> (autorizar desde
-          aquí; despacho requiere líneas en el API)
+          Bandeja de inventario: autorice solicitudes aquí. El despacho solo
+          aplica cuando la solicitud tiene líneas cargadas.
         </p>
       </div>
 
@@ -142,7 +143,7 @@ export default function MaterialRequestsPage() {
                   <TableCell>
                     <Link
                       className="text-primary underline-offset-4 hover:underline"
-                      to={`/axones/ordenes-trabajo/${r.work_order_id}`}
+                      to={`/ordenes-trabajo/${r.work_order_id}`}
                     >
                       {r.work_order?.code ?? r.work_order_id}
                     </Link>
@@ -153,11 +154,21 @@ export default function MaterialRequestsPage() {
                   <TableCell>{r.status}</TableCell>
                   <TableCell>{r.lines_count ?? "—"}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="link" className="h-auto p-0" asChild>
-                      <Link to={`/axones/solicitudes-material/${r.id}`}>
-                        Abrir
-                      </Link>
-                    </Button>
+                    <div className="flex items-center justify-end gap-3">
+                      <Button variant="link" className="h-auto p-0" asChild>
+                        <Link to={`/solicitudes-material/${r.id}`}>
+                          Abrir
+                        </Link>
+                      </Button>
+                      {(r.status === "pending" || r.status === "partial") ? (
+                        <Button variant="default" size="sm" className="h-8" asChild>
+                          <Link to={`/solicitudes-material/${r.id}?despacho=1`} title="Ir a inventario y despachar">
+                            <Truck className="mr-1 h-3.5 w-3.5" />
+                            Despachar
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     {r.status === "pending" ? (

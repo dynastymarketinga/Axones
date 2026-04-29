@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { getStoredUser } from "@/lib/auth-storage"
 import type { LaravelPaginated } from "@/types/api"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -26,7 +28,21 @@ type AlertRow = {
   material?: { sku: string; name: string }
 }
 
+function areaLabelFromRole(role?: string | null, userId?: number | null): string {
+  if (Number(userId) === 1) return "Acceso total (ID 1)"
+  const r = (role ?? "").toLowerCase().trim()
+  if (r === "boss" || r === "admin" || r === "jefe_supremo" || r === "superadmin") return "Acceso total"
+  if (r === "printing" || r === "impresion") return "Impresión"
+  if (r === "laminacion") return "Laminación"
+  if (r === "corte") return "Corte"
+  if (r === "montaje") return "Montaje"
+  if (r === "tintas") return "Tintas"
+  return "General"
+}
+
 export default function AxonesOperationalAlertsPage() {
+  const session = getStoredUser()
+  const areaLabel = areaLabelFromRole(session?.role, session?.id)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<AlertRow> | null>(null)
@@ -70,8 +86,11 @@ export default function AxonesOperationalAlertsPage() {
             Alertas operativas
           </h1>
           <p className="text-muted-foreground text-sm">
-            <code>/alerts</code>
+            Incidencias y avisos que requieren atención.
           </p>
+          <div className="mt-2">
+            <Badge variant="outline">Área actual: {areaLabel}</Badge>
+          </div>
         </div>
         <Button type="button" variant="secondary" onClick={() => void load()}>
           Actualizar

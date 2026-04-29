@@ -13,16 +13,25 @@ class AuthController extends Controller
 {
     public function login(Request $request): JsonResponse
     {
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string'],
-        ]);
+        $credentials = $request->validate(
+            [
+                'login' => ['required', 'string', 'max:64', 'regex:/^[a-zA-Z0-9_.-]+$/'],
+                'password' => ['required', 'string'],
+            ],
+            [
+                'login.required' => 'El usuario es obligatorio.',
+                'login.max' => 'El usuario no debe superar 64 caracteres.',
+                'login.regex' => 'El usuario solo puede incluir letras, números, punto, guion y guion bajo.',
+                'password.required' => 'La contraseña es obligatoria.',
+            ]
+        );
 
-        $user = User::query()->where('email', $credentials['email'])->first();
+        $login = trim($credentials['login']);
+        $user = User::findByLogin($login);
 
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
-                'email' => ['Credenciales incorrectas.'],
+                'login' => ['Credenciales incorrectas.'],
             ]);
         }
 
@@ -35,6 +44,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'username' => $user->username,
                 'role' => $user->role ?? 'general',
             ],
         ]);

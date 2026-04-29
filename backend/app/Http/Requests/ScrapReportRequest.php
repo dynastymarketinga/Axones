@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ScrapReportRequest extends FormRequest
 {
@@ -21,6 +22,7 @@ class ScrapReportRequest extends FormRequest
             'to' => ['required', 'date', 'after_or_equal:from'],
             'client_id' => ['nullable', 'integer', 'exists:clients,id'],
             'product_id' => ['nullable', 'integer', 'exists:products,id'],
+            'format' => ['sometimes', 'string', Rule::in(['csv'])],
         ];
     }
 }

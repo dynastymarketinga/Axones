@@ -37,7 +37,7 @@ export default function SupplierFormPage() {
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
     const from = st?.from?.trim()
-    return from && from.startsWith("/") ? from : "/axones/proveedores"
+    return from && from.startsWith("/") ? from : "/proveedores"
   }, [location.state])
 
   const normalizeRif = useCallback((value: string): string => {
@@ -155,7 +155,7 @@ export default function SupplierFormPage() {
             {isEdit ? "Editar proveedor" : "Nuevo proveedor"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            API <code className="text-xs">/suppliers</code>
+            Complete o actualice los datos del proveedor.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>
@@ -249,7 +249,7 @@ export default function SupplierFormPage() {
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="s-address">Dirección</Label>
+            <Label htmlFor="s-address">Dirección (opcional)</Label>
             <Textarea
               id="s-address"
               rows={3}

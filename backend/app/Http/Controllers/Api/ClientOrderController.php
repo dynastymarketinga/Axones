@@ -17,10 +17,12 @@ class ClientOrderController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $sortDirection = strtolower(trim((string) $request->query('sort', 'asc'))) === 'desc' ? 'desc' : 'asc';
         $query = ClientOrder::query()
             ->with(['client', 'firstLineWithProduct.product'])
             ->withCount('lines')
-            ->orderByDesc('created_at');
+            ->orderBy('created_at', $sortDirection)
+            ->orderBy('id', $sortDirection);
 
         if ($request->query('client_id')) {
             $query->where('client_id', $request->query('client_id'));
@@ -30,8 +32,26 @@ class ClientOrderController extends Controller
             $query->where('status', $request->query('status'));
         }
 
-        if ($q = $request->query('q')) {
-            $query->where('code', 'like', '%'.$q.'%');
+        if ($q = trim((string) $request->query('q', ''))) {
+            $query->where(function ($inner) use ($q) {
+                $inner->where('code', 'like', '%'.$q.'%')
+                    ->orWhereHas('client', function ($clientQuery) use ($q) {
+                        $clientQuery->where('name', 'like', '%'.$q.'%');
+                    })
+                    ->orWhereHas('firstLineWithProduct.product', function ($productQuery) use ($q) {
+                        $productQuery->where('name', 'like', '%'.$q.'%');
+                    });
+            });
+
+            // Prioriza coincidencia exacta al inicio, luego starts-with; mantiene orden base asc/desc.
+            $query->orderByRaw(
+                'CASE
+                    WHEN code = ? THEN 0
+                    WHEN code LIKE ? THEN 1
+                    ELSE 2
+                END',
+                [$q, $q.'%']
+            );
         }
 
         if (filter_var($request->query('awaiting_ot'), FILTER_VALIDATE_BOOLEAN)) {

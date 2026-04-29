@@ -72,7 +72,7 @@ export default function AreaRequestsPage() {
           Solicitudes por área
         </h1>
         <p className="text-muted-foreground text-sm">
-          <code>/area-requests</code>
+          Solicitudes entre áreas de producción.
         </p>
       </div>
 

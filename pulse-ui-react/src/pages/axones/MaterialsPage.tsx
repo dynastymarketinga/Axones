@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { Search } from "lucide-react"
 import { toast } from "sonner"
 
@@ -38,6 +39,7 @@ export default function MaterialsPage() {
   const [q, setQ] = useState("")
   const [search, setSearch] = useState("")
   const [area, setArea] = useState<string>("all")
+  const [status, setStatus] = useState<"all" | "active" | "inactive">("all")
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<MaterialRow> | null>(null)
@@ -51,6 +53,8 @@ export default function MaterialsPage() {
           page,
           per_page: 30,
           inventory_area: area !== "all" ? area : undefined,
+          include_inactive: status === "all" ? "1" : undefined,
+          is_active: status === "active" ? "1" : status === "inactive" ? "0" : undefined,
         },
       })
       setRows(data)
@@ -61,7 +65,21 @@ export default function MaterialsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search, area])
+  }, [page, search, area, status])
+
+  async function toggleActive(row: MaterialRow) {
+    try {
+      await apiFetch<MaterialRow>(`materials/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: !(row.is_active ?? true) }),
+      })
+      toast.success(`Material ${row.is_active ? "inactivado" : "activado"}.`)
+      await load()
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo actualizar el estado del material.")
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -72,8 +90,14 @@ export default function MaterialsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Materiales</h1>
         <p className="text-muted-foreground text-sm">
-          Stock por SKU y área · <code>/materials</code>
+          Existencias por SKU y por área de almacén.
         </p>
+      </div>
+
+      <div className="flex justify-end">
+        <Button asChild>
+          <Link to="/materiales/nuevo">Nuevo material</Link>
+        </Button>
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
@@ -114,6 +138,25 @@ export default function MaterialsPage() {
             </SelectContent>
           </Select>
         </div>
+        <div className="grid w-full gap-2 lg:w-52">
+          <Label>Estado</Label>
+          <Select
+            value={status}
+            onValueChange={(v) => {
+              setStatus(v as "all" | "active" | "inactive")
+              setPage(1)
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="active">Activos</SelectItem>
+              <SelectItem value="inactive">Inactivos</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <Button
           type="button"
           onClick={() => {
@@ -133,21 +176,23 @@ export default function MaterialsPage() {
               <TableHead>SKU</TableHead>
               <TableHead>Nombre</TableHead>
               <TableHead>Área</TableHead>
+              <TableHead>Estado</TableHead>
               <TableHead>Stock</TableHead>
               <TableHead>Mín.</TableHead>
               <TableHead>Unidad</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows?.data.length ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Sin materiales.
                 </TableCell>
               </TableRow>
@@ -157,9 +202,24 @@ export default function MaterialsPage() {
                   <TableCell className="font-mono text-sm">{m.sku}</TableCell>
                   <TableCell>{m.name}</TableCell>
                   <TableCell>{m.inventory_area}</TableCell>
+                  <TableCell>{m.is_active ?? true ? "Activo" : "Inactivo"}</TableCell>
                   <TableCell>{m.quantity_on_hand}</TableCell>
                   <TableCell>{m.min_stock}</TableCell>
                   <TableCell>{m.unit}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" asChild>
+                        <Link to={`/materiales/${m.id}/editar`}>Editar</Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void toggleActive(m)}
+                      >
+                        {m.is_active ?? true ? "Inactivar" : "Activar"}
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))
             )}

@@ -33,6 +33,19 @@ type NoteRow = {
   work_order?: { code: string; client?: { name: string } }
 }
 
+function deliveryNoteStatusLabel(status: string): string {
+  switch (status) {
+    case "draft":
+      return "Borrador"
+    case "dispatched":
+      return "Despachada"
+    case "cancelled":
+      return "Cancelada"
+    default:
+      return status
+  }
+}
+
 export default function DeliveryNotesPage() {
   const [status, setStatus] = useState<string>("all")
   const [page, setPage] = useState(1)
@@ -70,7 +83,7 @@ export default function DeliveryNotesPage() {
           Notas de entrega
         </h1>
         <p className="text-muted-foreground text-sm">
-          Historial · <code>/delivery-notes</code>
+          Listado de notas emitidas y su estado.
         </p>
       </div>
 
@@ -89,9 +102,9 @@ export default function DeliveryNotesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="draft">draft</SelectItem>
-              <SelectItem value="dispatched">dispatched</SelectItem>
-              <SelectItem value="cancelled">cancelled</SelectItem>
+              <SelectItem value="draft">Borrador</SelectItem>
+              <SelectItem value="dispatched">Despachada</SelectItem>
+              <SelectItem value="cancelled">Cancelada</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -134,7 +147,7 @@ export default function DeliveryNotesPage() {
                     {n.code ?? "—"}
                   </TableCell>
                   <TableCell>{n.sequential_number ?? "—"}</TableCell>
-                  <TableCell>{n.status}</TableCell>
+                  <TableCell>{deliveryNoteStatusLabel(n.status)}</TableCell>
                   <TableCell>
                     {n.document_date ? String(n.document_date).slice(0, 10) : "—"}
                   </TableCell>

@@ -27,7 +27,7 @@ class ProductController extends Controller
             });
         }
 
-        return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
+        return response()->json($query->paginate(min((int) $request->query('per_page', 20), 200)));
     }
 
     public function store(StoreProductRequest $request): JsonResponse

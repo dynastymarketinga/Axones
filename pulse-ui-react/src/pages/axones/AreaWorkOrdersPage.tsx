@@ -50,7 +50,15 @@ function areaTitle(area: AreaKey): string {
   return "Área: Tintas"
 }
 
+function statusLabel(status: string): string {
+  if (status === "open") return "Abierta"
+  if (status === "completed") return "Completada"
+  if (status === "cancelled") return "Cancelada"
+  return status
+}
+
 export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
+  type ProcessFilter = "all" | "in_progress" | "done"
   const session = getStoredUser()
   const role = (session?.role ?? "").toLowerCase().trim()
   const [activeTab, setActiveTab] = useState<"mias" | "historial">("mias")
@@ -65,6 +73,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   const [status, setStatus] = useState<string>("all")
   const [boardStage, setBoardStage] = useState<string>("all")
+  const [processFilter, setProcessFilter] = useState<ProcessFilter>("all")
 
   const defaultBoardStage = BOARD_STAGE_BY_AREA[area]
 
@@ -74,6 +83,12 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   }, [activeTab, boardStage, defaultBoardStage])
 
   const queryStatus = status !== "all" ? status : undefined
+  const areaHistoryKeyByArea: Record<AreaKey, string | undefined> = {
+    printing: "impresion",
+    laminacion: "laminacion",
+    corte: "corte",
+    tintas: undefined,
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -86,6 +101,10 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             per_page: 20,
             board_stage: queryBoardStage,
             status: queryStatus,
+            area_history:
+              activeTab === "historial"
+                ? areaHistoryKeyByArea[area]
+                : undefined,
             client_order_reference: search || undefined,
           },
         },
@@ -98,7 +117,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     } finally {
       setLoading(false)
     }
-  }, [page, queryBoardStage, queryStatus, search])
+  }, [activeTab, area, page, queryBoardStage, queryStatus, search])
 
   useEffect(() => {
     void load()
@@ -113,15 +132,73 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     corte: "Corte",
     completada: "Completada",
   }
+  const stageOrder: Record<string, number> = {
+    nueva: 0,
+    pendiente: 1,
+    montaje: 2,
+    impresion: 3,
+    laminacion: 4,
+    corte: 5,
+    completada: 6,
+  }
+  const areaStageForProgress: Record<AreaKey, string> = {
+    printing: "impresion",
+    laminacion: "laminacion",
+    corte: "corte",
+    tintas: "impresion",
+  }
+
+  function processStateForArea(boardStage?: string | null): string {
+    if (!boardStage) return "Sin etapa"
+    const current = stageOrder[boardStage] ?? -1
+    const areaStage = stageOrder[areaStageForProgress[area]] ?? -1
+    if (current > areaStage) return "Hecho en área"
+    if (current === areaStage) return "En proceso"
+    return "Pendiente en área"
+  }
+  function processTagForArea(boardStage?: string | null): ProcessFilter {
+    if (!boardStage) return "all"
+    const current = stageOrder[boardStage] ?? -1
+    const areaStage = stageOrder[areaStageForProgress[area]] ?? -1
+    if (current > areaStage) return "done"
+    if (current === areaStage) return "in_progress"
+    return "all"
+  }
+  const historialRows = useMemo(() => {
+    const source = rows?.data ?? []
+    if (activeTab !== "historial" || processFilter === "all") return source
+    return source.filter((o) => processTagForArea(o.board_stage) === processFilter)
+  }, [activeTab, processFilter, rows?.data])
+  const historialCounts = useMemo(() => {
+    const source = rows?.data ?? []
+    let inProgress = 0
+    let done = 0
+    for (const row of source) {
+      const tag = processTagForArea(row.board_stage)
+      if (tag === "in_progress") inProgress += 1
+      if (tag === "done") done += 1
+    }
+    return {
+      all: source.length,
+      in_progress: inProgress,
+      done,
+    }
+  }, [rows?.data])
 
   function openUrl(woId: number): string {
+    if (area === "printing") {
+      return `/ordenes-trabajo/${woId}/produccion?tab=printing`
+    }
+    if (area === "laminacion") {
+      return `/ordenes-trabajo/${woId}/produccion?tab=laminacion`
+    }
     const tab = TAB_BY_AREA[area]
     // Ruta absoluta: evita que React Router la resuelva relativo al área (ej. /axones/impresion/axones/ordenes-trabajo/...)
-    return `/axones/ordenes-trabajo/${woId}?tab=${encodeURIComponent(tab)}`
+    return `/ordenes-trabajo/${woId}?tab=${encodeURIComponent(tab)}`
   }
 
   const nextStageByArea: Record<AreaKey, string | null> = {
-    printing: "laminacion",
+    printing: null,
     laminacion: "corte",
     corte: "completada",
     tintas: null,
@@ -185,9 +262,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
           <Button type="button" variant="secondary" onClick={() => void load()}>
             Actualizar
           </Button>
-          <Button type="button" asChild>
-            <Link to="/axones/ordenes-trabajo?tab=lista">Órdenes de trabajo</Link>
-          </Button>
+          {area !== "printing" ? (
+            <Button type="button" asChild>
+              <Link to="/ordenes-trabajo?tab=lista">Órdenes de trabajo</Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -195,6 +274,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
         value={activeTab}
         onValueChange={(v) => {
           setActiveTab(v as "mias" | "historial")
+          if (v === "historial") {
+            setStatus("all")
+            setBoardStage("all")
+            setProcessFilter("all")
+          }
           setPage(1)
         }}
       >
@@ -234,9 +318,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="open">open</SelectItem>
-                  <SelectItem value="completed">completed</SelectItem>
-                  <SelectItem value="cancelled">cancelled</SelectItem>
+                  <SelectItem value="open">Abierta</SelectItem>
+                  <SelectItem value="completed">Completada</SelectItem>
+                  <SelectItem value="cancelled">Cancelada</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -317,6 +401,32 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
         </TabsContent>
 
         <TabsContent value="historial" className="mt-4 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={processFilter === "all" ? "default" : "outline"}
+              onClick={() => setProcessFilter("all")}
+            >
+              Todo ({historialCounts.all})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={processFilter === "in_progress" ? "default" : "outline"}
+              onClick={() => setProcessFilter("in_progress")}
+            >
+              En proceso ({historialCounts.in_progress})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={processFilter === "done" ? "default" : "outline"}
+              onClick={() => setProcessFilter("done")}
+            >
+              Hecho en área ({historialCounts.done})
+            </Button>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="grid flex-1 gap-2">
               <Label htmlFor={`a-q2-${area}`}>Ref. pedido cliente</Label>
@@ -371,9 +481,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="open">open</SelectItem>
-                  <SelectItem value="completed">completed</SelectItem>
-                  <SelectItem value="cancelled">cancelled</SelectItem>
+                  <SelectItem value="open">Abierta</SelectItem>
+                  <SelectItem value="completed">Completada</SelectItem>
+                  <SelectItem value="cancelled">Cancelada</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -395,6 +505,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <TableHead>Código</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Producto</TableHead>
+                  <TableHead>Proceso en área</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Tablero</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
@@ -403,25 +514,26 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
+                    <TableCell colSpan={7} className="text-muted-foreground">
                       Cargando…
                     </TableCell>
                   </TableRow>
-                ) : !rows?.data.length ? (
+                ) : !historialRows.length ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
+                    <TableCell colSpan={7} className="text-muted-foreground">
                       Sin resultados.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.data.map((o) => (
+                  historialRows.map((o) => (
                     <TableRow key={o.id}>
                       <TableCell className="font-mono text-sm">
                         {o.code}
                       </TableCell>
                       <TableCell>{o.client?.name ?? "—"}</TableCell>
                       <TableCell>{o.product?.name ?? "—"}</TableCell>
-                      <TableCell>{o.status}</TableCell>
+                      <TableCell>{processStateForArea(o.board_stage)}</TableCell>
+                      <TableCell>{statusLabel(o.status)}</TableCell>
                       <TableCell>
                         {stageLabel[o.board_stage ?? ""] ??
                           (o.board_stage ?? "—")}

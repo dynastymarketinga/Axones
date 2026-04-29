@@ -120,6 +120,7 @@ class CorteDispatchService
                 'workOrder.client:id,name',
                 'workOrder.product:id,name,cpe',
                 'material:id,sku,name,unit',
+                'bobina:id,code',
             ])
             ->where('quantity_finished_kg', '>', 0)
             ->orderByDesc('id');
@@ -156,9 +157,82 @@ class CorteDispatchService
                 'quantity_dispatched_kg' => $this->quantityAllocatedToCorteUsage((int) $usage->getKey()),
                 'quantity_remaining_kg' => $remaining,
                 'bobina_id' => $usage->bobina_id,
+                'bobina_code' => $usage->bobina?->code,
+                'pallet_code' => $usage->bobina?->code ?? ($usage->bobina_id ? 'BOB-'.$usage->bobina_id : null),
+                'bobbin_count' => 1,
             ];
         }
 
         return $out;
+    }
+
+    /**
+     * Consolida saldo disponible por producto y conserva detalle por línea/paleta.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    public function groupAvailableByProduct(array $rows): array
+    {
+        $groups = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $productId = isset($row['product_id']) ? (int) $row['product_id'] : 0;
+            $groupKey = $productId > 0 ? 'p:'.$productId : 'p:unknown';
+            if (! isset($groups[$groupKey])) {
+                $groups[$groupKey] = [
+                    'product_id' => $row['product_id'] ?? null,
+                    'product_name' => $row['product_name'] ?? null,
+                    'product_cpe' => $row['product_cpe'] ?? null,
+                    'material_id' => $row['material_id'] ?? null,
+                    'material_sku' => $row['material_sku'] ?? null,
+                    'total_finished_kg' => '0.000',
+                    'total_dispatched_kg' => '0.000',
+                    'total_remaining_kg' => '0.000',
+                    'work_order_count' => 0,
+                    'rows' => [],
+                ];
+            }
+
+            $groups[$groupKey]['rows'][] = $row;
+            $groups[$groupKey]['total_finished_kg'] = bcadd(
+                $groups[$groupKey]['total_finished_kg'],
+                number_format((float) ($row['quantity_finished_kg'] ?? 0), 3, '.', ''),
+                3,
+            );
+            $groups[$groupKey]['total_dispatched_kg'] = bcadd(
+                $groups[$groupKey]['total_dispatched_kg'],
+                number_format((float) ($row['quantity_dispatched_kg'] ?? 0), 3, '.', ''),
+                3,
+            );
+            $groups[$groupKey]['total_remaining_kg'] = bcadd(
+                $groups[$groupKey]['total_remaining_kg'],
+                number_format((float) ($row['quantity_remaining_kg'] ?? 0), 3, '.', ''),
+                3,
+            );
+        }
+
+        foreach ($groups as $key => $group) {
+            $uniqueWorkOrders = [];
+            foreach ($group['rows'] as $detailRow) {
+                $woId = isset($detailRow['work_order_id']) ? (int) $detailRow['work_order_id'] : 0;
+                if ($woId > 0) {
+                    $uniqueWorkOrders[$woId] = true;
+                }
+            }
+            $groups[$key]['work_order_count'] = count($uniqueWorkOrders);
+        }
+
+        usort($groups, function (array $a, array $b): int {
+            return bccomp(
+                (string) ($b['total_remaining_kg'] ?? '0.000'),
+                (string) ($a['total_remaining_kg'] ?? '0.000'),
+                3,
+            );
+        });
+
+        return array_values($groups);
     }
 }

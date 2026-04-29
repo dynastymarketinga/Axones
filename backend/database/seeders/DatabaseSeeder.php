@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
+use App\Services\AxonesDemoDataService;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -12,32 +12,16 @@ class DatabaseSeeder extends Seeder
 
     /**
      * Seed the application's database.
+     *
+     * Carga un volumen amplio de datos demo (≈20 filas por tabla de dominio) para pruebas de UI.
+     * Usuarios locales (inventario@axones.local, etc.) y contraseña por defecto: password.
      */
     public function run(): void
     {
-        // inventory: menú acotado a inventario (ver pulse-ui: axones-roles).
-        User::query()->updateOrCreate(
-            ['email' => 'inventario@axones.local'],
-            [
-                'name' => 'Axones Inventario',
-                'role' => 'inventory',
-                'password' => 'password',
-            ],
-        );
+        $this->call(AxonesUsersSeeder::class);
 
-        // boss: revisión de todo el menú Axones (sin recortar por área).
-        User::query()->updateOrCreate(
-            ['email' => 'jefe@axones.local'],
-            [
-                'name' => 'Axones Jefe (revisión completa)',
-                'role' => 'boss',
-                'password' => 'password',
-            ],
-        );
-
-        $this->call(DemoClientsSeeder::class);
-        $this->call(DemoMaterialsSeeder::class);
-        $this->call(DemoClientOrdersSeeder::class);
-        $this->call(BackfillClientOrderLinesWithDefaultMaterialSeeder::class);
+        /** @var AxonesDemoDataService $demo */
+        $demo = app(AxonesDemoDataService::class);
+        $demo->seed(20);
     }
 }

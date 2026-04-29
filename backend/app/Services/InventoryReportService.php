@@ -14,11 +14,166 @@ use App\Models\PrintingBobinaUsage;
 use App\Models\Product;
 use App\Models\WorkOrder;
 use Carbon\Carbon;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class InventoryReportService
 {
+    /**
+     * Stock final del dia por material y area.
+     *
+     * @return array{
+     *   report_date: string,
+     *   area: string|null,
+     *   area_label: string,
+     *   show_micras_ancho: bool,
+     *   generated_at: string,
+     *   rows: list<array<string, mixed>>,
+     *   totals: array<string, string>,
+     *   materials_count: int
+     * }
+     */
+    public function inventoryAreaDailySnapshot(Carbon $date, ?string $area = null): array
+    {
+        $start = $date->copy()->startOfDay();
+        $end = $date->copy()->endOfDay();
+        $hasMicrasAncho = Schema::hasColumns('materials', ['micras', 'ancho']);
+
+        $afterDay = DB::table('inventory_movements as im')
+            ->select('im.material_id')
+            ->selectRaw("
+                SUM(
+                    CASE im.movement_type
+                        WHEN 'in' THEN im.quantity
+                        WHEN 'adjustment_add' THEN im.quantity
+                        WHEN 'out' THEN -im.quantity
+                        WHEN 'adjustment_sub' THEN -im.quantity
+                        ELSE 0
+                    END
+                ) as net_after_day
+            ")
+            ->where('im.occurred_at', '>', $end)
+            ->groupBy('im.material_id');
+
+        $query = Material::query()
+            ->from('materials as m')
+            ->leftJoinSub($afterDay, 'after_day', fn ($join) => $join->on('after_day.material_id', '=', 'm.id'))
+            ->orderBy('m.inventory_area')
+            ->orderBy('m.sku')
+            ->select([
+                'm.id',
+                'm.sku',
+                'm.name',
+                'm.inventory_area',
+                'm.unit',
+            ])
+            ->selectRaw('COALESCE(m.quantity_on_hand, 0) as current_stock')
+            ->selectRaw('COALESCE(after_day.net_after_day, 0) as net_after_day');
+
+        if ($hasMicrasAncho) {
+            $query->addSelect(['m.micras', 'm.ancho']);
+        }
+
+        if ($area !== null && $area !== '') {
+            $query->where('m.inventory_area', $area);
+        }
+
+        $rows = $query->get();
+
+        $totals = [
+            'stock_final_dia' => '0.000',
+        ];
+
+        $normalized = $rows->map(function ($row) use (&$totals, $hasMicrasAncho) {
+            $current = number_format((float) $row->current_stock, 3, '.', '');
+            $netAfter = number_format((float) $row->net_after_day, 3, '.', '');
+            $stockFinalDay = bcsub($current, $netAfter, 3);
+            $totals['stock_final_dia'] = bcadd($totals['stock_final_dia'], $stockFinalDay, 3);
+
+            return [
+                'material_id' => (int) $row->id,
+                'sku' => (string) $row->sku,
+                'name' => (string) $row->name,
+                'inventory_area' => (string) $row->inventory_area,
+                'micras' => $hasMicrasAncho && $row->micras !== null ? number_format((float) $row->micras, 3, '.', '') : null,
+                'ancho' => $hasMicrasAncho && $row->ancho !== null ? number_format((float) $row->ancho, 3, '.', '') : null,
+                'unit' => (string) $row->unit,
+                'stock_final_dia' => $stockFinalDay,
+            ];
+        })->values()->all();
+
+        $showMicrasAncho = true;
+
+        return [
+            'report_date' => $start->toDateString(),
+            'area' => $area,
+            'area_label' => $this->inventoryAreaLabel($area),
+            'show_micras_ancho' => $showMicrasAncho,
+            'generated_at' => now()->toIso8601String(),
+            'rows' => $normalized,
+            'totals' => $totals,
+            'materials_count' => count($normalized),
+        ];
+    }
+
+    private function inventoryAreaLabel(?string $area): string
+    {
+        return match ($area) {
+            InventoryArea::Material->value => 'Sustrato',
+            InventoryArea::Tintas->value => 'Tintas',
+            InventoryArea::CementerioTintas->value => 'Cementerio tintas',
+            InventoryArea::Quimicos->value => 'Quimicos',
+            InventoryArea::BobinasRechazadas->value => 'Bobinas rechazadas',
+            InventoryArea::Miscelaneos->value => 'Miscelaneos',
+            default => 'Todas las areas',
+        };
+    }
+
+    /**
+     * Convierte filas asociativas en CSV UTF-8.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    public function rowsToCsv(array $rows): string
+    {
+        if ($rows === []) {
+            return "no_data\n";
+        }
+
+        $headers = [];
+        foreach ($rows as $row) {
+            foreach (array_keys($row) as $key) {
+                if (! in_array($key, $headers, true)) {
+                    $headers[] = $key;
+                }
+            }
+        }
+
+        $stream = fopen('php://temp', 'r+');
+        fputcsv($stream, $headers);
+
+        foreach ($rows as $row) {
+            $line = [];
+            foreach ($headers as $header) {
+                $value = $row[$header] ?? null;
+                if (is_array($value) || is_object($value)) {
+                    $line[] = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    continue;
+                }
+                $line[] = $value;
+            }
+            fputcsv($stream, $line);
+        }
+
+        rewind($stream);
+        $csv = stream_get_contents($stream);
+        fclose($stream);
+
+        return (string) $csv;
+    }
+
     /**
      * Entrada/salida por fecha: detalle por día y tipo + totales por día.
      *
@@ -94,6 +249,264 @@ class InventoryReportService
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param  array{movement_type?: string|null, inventory_area?: string|null, reference_type?: string|null, invalid_only?: bool|null}  $filters
+     * @return array<string, mixed>
+     */
+    public function inventoryMovementsGeneralReport(Carbon $from, Carbon $to, array $filters = []): array
+    {
+        $baseQuery = DB::table('inventory_movements as im')
+            ->leftJoin('materials as m', 'm.id', '=', 'im.material_id')
+            ->leftJoin('users as u', 'u.id', '=', 'im.user_id')
+            ->whereBetween('im.occurred_at', [$from, $to]);
+
+        $this->applyInventoryMovementFilters($baseQuery, $filters);
+
+        $entries = (string) ((clone $baseQuery)
+            ->whereIn('im.movement_type', ['in', 'adjustment_add'])
+            ->sum('im.quantity'));
+        $exits = (string) ((clone $baseQuery)
+            ->whereIn('im.movement_type', ['out', 'adjustment_sub'])
+            ->sum('im.quantity'));
+        $adjustmentAdd = (string) ((clone $baseQuery)
+            ->where('im.movement_type', '=', 'adjustment_add')
+            ->sum('im.quantity'));
+        $adjustmentSub = (string) ((clone $baseQuery)
+            ->where('im.movement_type', '=', 'adjustment_sub')
+            ->sum('im.quantity'));
+        $totalMoved = (string) ((clone $baseQuery)->sum('im.quantity'));
+        $adjustmentTotal = bcadd($adjustmentAdd, $adjustmentSub, 3);
+        $adjustmentPercent = bccomp($totalMoved, '0', 3) === 1
+            ? number_format(((float) $adjustmentTotal / (float) $totalMoved) * 100, 2, '.', '')
+            : '0.00';
+
+        $driver = DB::connection()->getDriverName();
+        $dateExpr = $driver === 'sqlite' ? "strftime('%Y-%m-%d', im.occurred_at)" : 'DATE(im.occurred_at)';
+        $weekExpr = $driver === 'sqlite'
+            ? "strftime('%Y-%W', im.occurred_at)"
+            : "DATE_FORMAT(im.occurred_at, '%x-W%v')";
+
+        $byDay = (clone $baseQuery)
+            ->selectRaw("$dateExpr as day")
+            ->selectRaw("SUM(CASE WHEN im.movement_type IN ('in', 'adjustment_add') THEN im.quantity ELSE 0 END) as entries_qty")
+            ->selectRaw("SUM(CASE WHEN im.movement_type IN ('out', 'adjustment_sub') THEN im.quantity ELSE 0 END) as exits_qty")
+            ->groupBy(DB::raw($dateExpr))
+            ->orderBy('day')
+            ->get()
+            ->map(fn ($r) => [
+                'period' => (string) $r->day,
+                'entries_qty' => number_format((float) $r->entries_qty, 3, '.', ''),
+                'exits_qty' => number_format((float) $r->exits_qty, 3, '.', ''),
+            ])
+            ->values()
+            ->all();
+
+        $byWeek = (clone $baseQuery)
+            ->selectRaw("$weekExpr as week")
+            ->selectRaw("SUM(CASE WHEN im.movement_type IN ('in', 'adjustment_add') THEN im.quantity ELSE 0 END) as entries_qty")
+            ->selectRaw("SUM(CASE WHEN im.movement_type IN ('out', 'adjustment_sub') THEN im.quantity ELSE 0 END) as exits_qty")
+            ->groupBy(DB::raw($weekExpr))
+            ->orderBy('week')
+            ->get()
+            ->map(fn ($r) => [
+                'period' => (string) $r->week,
+                'entries_qty' => number_format((float) $r->entries_qty, 3, '.', ''),
+                'exits_qty' => number_format((float) $r->exits_qty, 3, '.', ''),
+            ])
+            ->values()
+            ->all();
+
+        $topMaterials = (clone $baseQuery)
+            ->select('m.id', 'm.sku', 'm.name', 'm.inventory_area', 'm.unit')
+            ->selectRaw('SUM(im.quantity) as total_qty')
+            ->selectRaw('COUNT(*) as movement_count')
+            ->groupBy('m.id', 'm.sku', 'm.name', 'm.inventory_area', 'm.unit')
+            ->orderByDesc('total_qty')
+            ->limit(10)
+            ->get()
+            ->map(fn ($r) => [
+                'material_id' => $r->id !== null ? (int) $r->id : null,
+                'sku' => (string) ($r->sku ?? ''),
+                'name' => (string) ($r->name ?? ''),
+                'inventory_area' => (string) ($r->inventory_area ?? ''),
+                'unit' => (string) ($r->unit ?? ''),
+                'total_qty' => number_format((float) $r->total_qty, 3, '.', ''),
+                'movement_count' => (int) $r->movement_count,
+            ])
+            ->values()
+            ->all();
+
+        $invalidRefQuery = (clone $baseQuery);
+        $this->applyInvalidReferenceFilter($invalidRefQuery);
+
+        $invalidReferenceCount = (clone $invalidRefQuery)->count();
+        $invalidReferences = (clone $invalidRefQuery)
+            ->select('im.id', 'im.occurred_at', 'im.reference_type', 'im.reference_id', 'im.movement_type', 'im.quantity', 'm.sku', 'm.name')
+            ->orderByDesc('im.occurred_at')
+            ->limit(50)
+            ->get()
+            ->map(fn ($r) => [
+                'id' => (int) $r->id,
+                'occurred_at' => (string) $r->occurred_at,
+                'reference_type' => $r->reference_type !== null ? (string) $r->reference_type : null,
+                'reference_id' => $r->reference_id !== null ? (int) $r->reference_id : null,
+                'movement_type' => (string) $r->movement_type,
+                'quantity' => number_format((float) $r->quantity, 3, '.', ''),
+                'sku' => (string) ($r->sku ?? ''),
+                'name' => (string) ($r->name ?? ''),
+            ])
+            ->values()
+            ->all();
+
+        $invalidIds = (clone $invalidRefQuery)->pluck('im.id')->all();
+        $invalidLookup = array_fill_keys(array_map('intval', $invalidIds), true);
+
+        $movements = (clone $baseQuery)
+            ->select([
+                'im.id',
+                'im.occurred_at',
+                'im.movement_type',
+                'im.quantity',
+                'im.reference_type',
+                'im.reference_id',
+                'm.sku as material_sku',
+                'm.name as material_name',
+                'm.inventory_area',
+                'm.unit',
+                'u.name as user_name',
+            ])
+            ->orderByDesc('im.occurred_at')
+            ->orderByDesc('im.id')
+            ->limit(500)
+            ->get()
+            ->map(function ($r) use ($invalidLookup) {
+                $ref = ($r->reference_type !== null && $r->reference_id !== null)
+                    ? $r->reference_type.' #'.$r->reference_id
+                    : '—';
+
+                return [
+                    'id' => (int) $r->id,
+                    'occurred_at' => (string) $r->occurred_at,
+                    'movement_type' => (string) $r->movement_type,
+                    'movement_label' => $this->inventoryMovementTypeLabel((string) $r->movement_type),
+                    'quantity' => number_format((float) $r->quantity, 3, '.', ''),
+                    'material_sku' => (string) ($r->material_sku ?? ''),
+                    'material_name' => (string) ($r->material_name ?? ''),
+                    'inventory_area' => (string) ($r->inventory_area ?? ''),
+                    'unit' => (string) ($r->unit ?? ''),
+                    'user_name' => (string) ($r->user_name ?? ''),
+                    'reference' => $ref,
+                    'is_invalid_reference' => isset($invalidLookup[(int) $r->id]),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'from' => $from->toDateString(),
+            'to' => $to->toDateString(),
+            'filters' => [
+                'movement_type' => $filters['movement_type'] ?? null,
+                'inventory_area' => $filters['inventory_area'] ?? null,
+                'reference_type' => $filters['reference_type'] ?? null,
+                'invalid_only' => (bool) ($filters['invalid_only'] ?? false),
+            ],
+            'summary' => [
+                'entries_total' => number_format((float) $entries, 3, '.', ''),
+                'exits_total' => number_format((float) $exits, 3, '.', ''),
+                'adjustment_total' => number_format((float) $adjustmentTotal, 3, '.', ''),
+                'adjustment_percent' => $adjustmentPercent,
+                'invalid_reference_count' => (int) $invalidReferenceCount,
+            ],
+            'entries_vs_exits_by_day' => $byDay,
+            'entries_vs_exits_by_week' => $byWeek,
+            'top_materials' => $topMaterials,
+            'invalid_references' => $invalidReferences,
+            'movements' => $movements,
+            'generated_at' => now()->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array{movement_type?: string|null, inventory_area?: string|null, reference_type?: string|null, invalid_only?: bool|null}  $filters
+     */
+    private function applyInventoryMovementFilters(QueryBuilder $query, array $filters): void
+    {
+        if (! empty($filters['movement_type'])) {
+            $query->where('im.movement_type', '=', $filters['movement_type']);
+        }
+        if (! empty($filters['inventory_area'])) {
+            $query->where('m.inventory_area', '=', $filters['inventory_area']);
+        }
+        if (! empty($filters['reference_type'])) {
+            $query->where('im.reference_type', '=', $filters['reference_type']);
+        }
+        if (! empty($filters['invalid_only']) && (bool) $filters['invalid_only'] === true) {
+            $this->applyInvalidReferenceFilter($query);
+        }
+    }
+
+    private function applyInvalidReferenceFilter(QueryBuilder $query): void
+    {
+        $query->where(function ($q) {
+            $q->whereNull('im.reference_type')
+                ->orWhere(function ($q2) {
+                    $q2->where('im.reference_type', '!=', 'inventory_adjustment')
+                        ->whereNull('im.reference_id');
+                })
+                ->orWhereNotIn('im.reference_type', [
+                    'purchase_receipt',
+                    'miscellaneous_receipt',
+                    'material_request',
+                    'inventory_return',
+                    'inventory_adjustment',
+                ])
+                ->orWhere(function ($q2) {
+                    $q2->where('im.reference_type', '=', 'purchase_receipt')
+                        ->whereNotExists(function ($x) {
+                            $x->selectRaw('1')
+                                ->from('purchase_receipts as pr')
+                                ->whereColumn('pr.id', 'im.reference_id');
+                        });
+                })
+                ->orWhere(function ($q2) {
+                    $q2->where('im.reference_type', '=', 'miscellaneous_receipt')
+                        ->whereNotExists(function ($x) {
+                            $x->selectRaw('1')
+                                ->from('miscellaneous_receipts as mr')
+                                ->whereColumn('mr.id', 'im.reference_id');
+                        });
+                })
+                ->orWhere(function ($q2) {
+                    $q2->where('im.reference_type', '=', 'material_request')
+                        ->whereNotExists(function ($x) {
+                            $x->selectRaw('1')
+                                ->from('material_requests as rq')
+                                ->whereColumn('rq.id', 'im.reference_id');
+                        });
+                })
+                ->orWhere(function ($q2) {
+                    $q2->where('im.reference_type', '=', 'inventory_return')
+                        ->whereNotExists(function ($x) {
+                            $x->selectRaw('1')
+                                ->from('inventory_returns as ir')
+                                ->whereColumn('ir.id', 'im.reference_id');
+                        });
+                });
+        });
+    }
+
+    private function inventoryMovementTypeLabel(string $type): string
+    {
+        return match ($type) {
+            'in' => 'Entrada',
+            'out' => 'Salida',
+            'adjustment_add' => 'Ajuste +',
+            'adjustment_sub' => 'Ajuste -',
+            default => $type,
+        };
     }
 
     /**

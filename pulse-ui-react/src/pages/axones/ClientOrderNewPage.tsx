@@ -3,14 +3,31 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { Plus, Trash2, UserPlus } from "lucide-react"
+import { Check, ChevronsUpDown, Plus, Trash2, UserPlus } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord } from "@/types/api"
+import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -23,20 +40,14 @@ import { cn } from "@/lib/utils"
 type LineDraft = {
   key: string
   product_id: string
-  material_id: string
   quantity: string
-  unit: string
-  description: string
 }
 
 function newLine(): LineDraft {
   return {
     key: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     product_id: "",
-    material_id: "",
     quantity: "1",
-    unit: "kg",
-    description: "",
   }
 }
 
@@ -47,33 +58,36 @@ export default function ClientOrderNewPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [clients, setClients] = useState<ClientRecord[]>([])
-  const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [products, setProducts] = useState<ProductRecord[]>([])
 
   const [clientId, setClientId] = useState<string>("")
   const [notes, setNotes] = useState("")
   const [lines, setLines] = useState<LineDraft[]>([newLine()])
+  const [productComboOpenKey, setProductComboOpenKey] = useState<string | null>(null)
+  const [createProductOpen, setCreateProductOpen] = useState(false)
+  const [createProductSaving, setCreateProductSaving] = useState(false)
+  const [createProductLineKey, setCreateProductLineKey] = useState<string | null>(null)
+  const [newProductName, setNewProductName] = useState("")
+  const [newProductCpe, setNewProductCpe] = useState("")
+  const [newProductMps, setNewProductMps] = useState("")
+  const [newProductBarcode, setNewProductBarcode] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [cl, mat, pr] = await Promise.all([
+      const [cl, pr] = await Promise.all([
         apiFetch<LaravelPaginated<ClientRecord>>("clients", {
           query: { per_page: 200, page: 1 },
-        }),
-        apiFetch<LaravelPaginated<MaterialRow>>("materials", {
-          query: { inventory_area: "material", per_page: 300, page: 1 },
         }),
         apiFetch<LaravelPaginated<ProductRecord>>("products", {
           query: { per_page: 200, page: 1 },
         }),
       ])
       setClients(cl.data ?? [])
-      setMaterials(mat.data ?? [])
       setProducts(pr.data ?? [])
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudieron cargar clientes, materiales o productos.")
+      else toast.error("No se pudieron cargar clientes o productos.")
     } finally {
       setLoading(false)
     }
@@ -102,6 +116,16 @@ export default function ClientOrderNewPage() {
     [clientId, clients],
   )
 
+  const selectedProductByLineKey = useMemo(() => {
+    const map = new Map<string, ProductRecord | null>()
+    for (const row of lines) {
+      const pid = row.product_id ? Number(row.product_id) : null
+      const product = pid ? products.find((p) => p.id === pid) ?? null : null
+      map.set(row.key, product)
+    }
+    return map
+  }, [lines, products])
+
   function updateLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   }
@@ -112,6 +136,49 @@ export default function ClientOrderNewPage() {
 
   function removeLine(i: number) {
     setLines((prev) => (prev.length <= 1 ? prev : prev.filter((_, j) => j !== i)))
+  }
+
+  function openCreateProductModal(lineKey: string | null = null) {
+    setCreateProductLineKey(lineKey)
+    setNewProductName("")
+    setNewProductCpe("")
+    setNewProductMps("")
+    setNewProductBarcode("")
+    setCreateProductOpen(true)
+  }
+
+  async function submitQuickProduct(e: React.FormEvent) {
+    e.preventDefault()
+    const name = newProductName.trim()
+    if (!name) {
+      toast.error("El nombre del producto es obligatorio.")
+      return
+    }
+    setCreateProductSaving(true)
+    try {
+      const cid = clientId ? Number(clientId) : null
+      const created = await apiFetch<ProductRecord>("products", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          client_id: Number.isFinite(cid) && (cid ?? 0) > 0 ? cid : null,
+          cpe: newProductCpe.trim() || null,
+          mps: newProductMps.trim() || null,
+          barcode: newProductBarcode.trim() || null,
+        }),
+      })
+      setProducts((prev) => [created, ...prev])
+      if (createProductLineKey) {
+        setLines((prev) => prev.map((line) => (line.key === createProductLineKey ? { ...line, product_id: String(created.id) } : line)))
+      }
+      setCreateProductOpen(false)
+      toast.success("Producto creado y seleccionado.")
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo crear el producto.")
+    } finally {
+      setCreateProductSaving(false)
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -125,31 +192,22 @@ export default function ClientOrderNewPage() {
     const payloadLines = lines
       .map((r) => {
         const product_id = r.product_id ? Number(r.product_id) : null
-        const material_id = r.material_id ? Number(r.material_id) : null
         const quantity = (r.quantity || "").trim() || "0"
         return {
           product_id: product_id && product_id > 0 ? product_id : null,
-          material_id: material_id && material_id > 0 ? material_id : null,
           quantity,
-          unit: (r.unit || "kg").trim() || "kg",
-          description: r.description.trim() || null,
         }
       })
-      .filter(
-        (l) =>
-          (l.product_id != null && l.product_id > 0) ||
-          (l.material_id != null && l.material_id > 0) ||
-          (l.description && l.description.length > 0),
-      )
+      .filter((l) => l.product_id != null && l.product_id > 0)
 
     if (payloadLines.length === 0) {
-      toast.error("Agregue al menos una línea con producto, material o descripción.")
+      toast.error("Agregue al menos una línea con producto seleccionado.")
       return
     }
 
     for (const l of payloadLines) {
       if (Number(l.quantity) <= 0) {
-        toast.error("Cada línea con cantidad debe ser mayor a cero.")
+        toast.error("Cada línea debe tener una cantidad a solicitar mayor a cero.")
         return
       }
     }
@@ -164,25 +222,25 @@ export default function ClientOrderNewPage() {
           lines: payloadLines,
         }),
       })
-      toast.success(`Orden de cliente ${res.code ?? ""} creada.`.trim())
-      nav("/axones/ordenes-cliente")
+      toast.success(`Pedido del cliente ${res.code ?? ""} creado.`.trim())
+      nav("/ordenes-cliente")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo guardar la orden de cliente.")
+      else toast.error("No se pudo guardar el pedido del cliente.")
     } finally {
       setSaving(false)
     }
   }
 
   const newClientLink = {
-    pathname: "/axones/clientes/form" as const,
-    state: { from: "/axones/ordenes-cliente/nueva" as const },
+    pathname: "/clientes/form" as const,
+    state: { from: "/ordenes-cliente/nueva" as const },
   }
 
   if (loading) {
     return (
       <div className="p-4 md:p-6">
-        <p className="text-muted-foreground text-sm">Cargando clientes y materiales…</p>
+        <p className="text-muted-foreground text-sm">Cargando clientes y productos…</p>
       </div>
     )
   }
@@ -191,17 +249,11 @@ export default function ClientOrderNewPage() {
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 max-w-3xl">
-          <h1 className="text-2xl font-semibold tracking-tight">Nueva orden de cliente</h1>
-          <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-            Elija <span className="text-foreground font-medium">el cliente</span> y defina las{" "}
-            <span className="text-foreground font-medium">líneas</span> del pedido: producto (datos maestros), material de
-            inventario y/o descripción, con cantidad y unidad. Use las notas para referencias internas (entrega, contacto,
-            etc.).
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Nuevo pedido del cliente</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/ordenes-cliente">Volver al listado</Link>
+            <Link to="/ordenes-cliente">Volver al listado</Link>
           </Button>
         </div>
       </div>
@@ -261,6 +313,15 @@ export default function ClientOrderNewPage() {
                 Nuevo cliente
               </Link>
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="shrink-0"
+              onClick={() => openCreateProductModal(null)}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Nuevo producto
+            </Button>
           </div>
 
           {selectedClient ? (
@@ -293,14 +354,7 @@ export default function ClientOrderNewPage() {
         </div>
 
         <div className="space-y-3 border-t pt-6">
-          <div>
-            <h2 className="text-base font-semibold">Líneas de la solicitud *</h2>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Cada línea es un renglón del pedido. Puede mezclar <span className="text-foreground">producto</span>,{" "}
-              <span className="text-foreground">material</span> o solo <span className="text-foreground">descripción</span>;
-              indique al menos un dato y una cantidad válida por línea.
-            </p>
-          </div>
+          <h2 className="text-base font-semibold">Líneas de la solicitud *</h2>
 
           {lines.map((row, i) => (
             <div
@@ -308,69 +362,97 @@ export default function ClientOrderNewPage() {
               className="grid gap-4 rounded-xl border border-border bg-muted/20 p-4 sm:grid-cols-2"
             >
               <div className="grid gap-2 sm:col-span-2">
-                <Label>Producto (maestro, opcional)</Label>
-                <Select
-                  value={row.product_id || SELECT_NONE}
-                  onValueChange={(v) => updateLine(i, { product_id: v === SELECT_NONE ? "" : v })}
-                >
-                  <SelectTrigger className="h-11 bg-background text-foreground">
-                    <SelectValue placeholder="Sin producto" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SELECT_NONE}>Sin producto</SelectItem>
-                    {productsForClient.map((p) => (
-                      <SelectItem key={p.id} value={String(p.id)}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Producto</Label>
+                <Popover open={productComboOpenKey === row.key} onOpenChange={(open) => setProductComboOpenKey(open ? row.key : null)}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={productComboOpenKey === row.key}
+                      className="h-11 w-full justify-between bg-background text-foreground font-normal"
+                    >
+                      <span className="truncate text-left">
+                        {selectedProductByLineKey.get(row.key)?.name ?? "Seleccione un producto"}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]" align="start">
+                    <Command shouldFilter>
+                      <CommandInput placeholder="Buscar por nombre, C.P.E. o barra…" />
+                      <CommandList>
+                        <CommandEmpty>
+                          <div className="space-y-2 p-2 text-sm">
+                            <p>No hay productos que coincidan.</p>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setProductComboOpenKey(null)
+                                openCreateProductModal(row.key)
+                              }}
+                            >
+                              <Plus className="mr-2 h-4 w-4" />
+                              Crear producto
+                            </Button>
+                          </div>
+                        </CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            value="sin-producto"
+                            onSelect={() => {
+                              updateLine(i, { product_id: "" })
+                              setProductComboOpenKey(null)
+                            }}
+                          >
+                            <Check className={cn("mr-2 h-4 w-4", row.product_id ? "opacity-0" : "opacity-100")} />
+                            Sin producto
+                          </CommandItem>
+                          {productsForClient.map((p) => (
+                            <CommandItem
+                              key={p.id}
+                              value={`${p.name} ${p.cpe ?? ""} ${p.barcode ?? ""}`}
+                              onSelect={() => {
+                                updateLine(i, { product_id: String(p.id) })
+                                setProductComboOpenKey(null)
+                              }}
+                            >
+                              <Check className={cn("mr-2 h-4 w-4", row.product_id === String(p.id) ? "opacity-100" : "opacity-0")} />
+                              <span className="truncate">{p.name}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
-              <div className="grid gap-2">
-                <Label>Material (inventario)</Label>
-                <Select
-                  value={row.material_id || SELECT_NONE}
-                  onValueChange={(v) => updateLine(i, { material_id: v === SELECT_NONE ? "" : v })}
-                >
-                  <SelectTrigger className="h-11 bg-background text-foreground">
-                    <SelectValue placeholder="Sin material" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-64">
-                    <SelectItem value={SELECT_NONE}>Sin material</SelectItem>
-                    {materials.map((m) => (
-                      <SelectItem key={m.id} value={String(m.id)}>
-                        {m.sku} — {m.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+
+              <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
+                <div className="grid gap-2">
+                  <Label>C.P.E.</Label>
+                  <Input value={selectedProductByLineKey.get(row.key)?.cpe ?? ""} readOnly className="h-11 bg-background" placeholder="Dato maestro" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>M.P.P.S.</Label>
+                  <Input value={selectedProductByLineKey.get(row.key)?.mps ?? ""} readOnly className="h-11 bg-background" placeholder="Dato maestro" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Cod. barra</Label>
+                  <Input value={selectedProductByLineKey.get(row.key)?.barcode ?? ""} readOnly className="h-11 bg-background" placeholder="Dato maestro" />
+                </div>
               </div>
+
               <div className="grid gap-2">
-                <Label>Cantidad *</Label>
+                <Label>Cantidad a solicitar *</Label>
                 <Input
                   type="text"
                   inputMode="decimal"
                   className="h-11 bg-background"
                   value={row.quantity}
                   onChange={(e) => updateLine(i, { quantity: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Unidad</Label>
-                <Input
-                  className="h-11 bg-background"
-                  value={row.unit}
-                  onChange={(e) => updateLine(i, { unit: e.target.value })}
-                  placeholder="kg"
-                />
-              </div>
-              <div className="grid gap-2 sm:col-span-2">
-                <Label>Descripción (solo si no usa producto ni material)</Label>
-                <Input
-                  className="h-11 bg-background"
-                  value={row.description}
-                  onChange={(e) => updateLine(i, { description: e.target.value })}
-                  placeholder="Servicio u otra descripción"
                 />
               </div>
               <div className="flex sm:col-span-2">
@@ -395,13 +477,58 @@ export default function ClientOrderNewPage() {
 
         <div className="flex flex-wrap gap-2 border-t pt-2">
           <Button type="submit" size="lg" disabled={saving} className="min-w-40">
-            {saving ? "Guardando…" : "Guardar orden de cliente"}
+            {saving ? "Guardando…" : "Guardar pedido del cliente"}
           </Button>
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/ordenes-cliente">Cancelar</Link>
+            <Link to="/ordenes-cliente">Cancelar</Link>
           </Button>
         </div>
       </form>
+
+      <Dialog open={createProductOpen} onOpenChange={setCreateProductOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Nuevo producto</DialogTitle>
+            <DialogDescription>Creación rápida desde pedido del cliente.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(ev) => void submitQuickProduct(ev)} className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="quick-product-name">Nombre *</Label>
+              <Input id="quick-product-name" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} required />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="quick-product-client">Cliente</Label>
+              <Input
+                id="quick-product-client"
+                value={selectedClient ? `${selectedClient.name}${selectedClient.rif ? ` · ${selectedClient.rif}` : ""}` : "Sin cliente"}
+                readOnly
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-2">
+                <Label htmlFor="quick-product-cpe">C.P.E.</Label>
+                <Input id="quick-product-cpe" value={newProductCpe} onChange={(e) => setNewProductCpe(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="quick-product-mps">M.P.P.S.</Label>
+                <Input id="quick-product-mps" value={newProductMps} onChange={(e) => setNewProductMps(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="quick-product-barcode">Cod. barra</Label>
+                <Input id="quick-product-barcode" value={newProductBarcode} onChange={(e) => setNewProductBarcode(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateProductOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createProductSaving}>
+                {createProductSaving ? "Creando…" : "Crear producto"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

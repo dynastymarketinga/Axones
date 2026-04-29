@@ -156,9 +156,20 @@ class MaterialRequestService
                     'material_request' => ['La solicitud está cancelada.'],
                 ]);
             }
+            if ($mr->authorized_by === null) {
+                throw ValidationException::withMessages([
+                    'material_request' => ['La solicitud debe estar autorizada antes de despachar.'],
+                ]);
+            }
             if ($mr->status === MaterialRequestStatus::Dispatched->value) {
                 throw ValidationException::withMessages([
                     'material_request' => ['La solicitud ya fue despachada por completo.'],
+                ]);
+            }
+
+            if ($mr->authorized_by === null) {
+                throw ValidationException::withMessages([
+                    'material_request' => ['Debe autorizar la solicitud antes de despachar.'],
                 ]);
             }
 

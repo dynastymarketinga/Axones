@@ -27,7 +27,11 @@ class CorteDispatchController extends Controller
             $productId !== null && $productId !== '' ? (int) $productId : null,
             $clientId !== null && $clientId !== '' ? (int) $clientId : null,
         );
+        $groups = $this->corteDispatch->groupAvailableByProduct($rows);
 
-        return response()->json(['rows' => $rows]);
+        return response()->json([
+            'rows' => $rows,
+            'groups' => $groups,
+        ]);
     }
 }

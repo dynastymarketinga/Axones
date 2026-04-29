@@ -49,7 +49,7 @@ export default function ClientFormPage() {
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
     const from = st?.from?.trim()
-    return from && from.startsWith("/") ? from : "/axones/clientes"
+    return from && from.startsWith("/") ? from : "/clientes"
   }, [location.state])
 
   const normalizeRif = useCallback((value: string): string => {
@@ -207,7 +207,7 @@ export default function ClientFormPage() {
             {isEdit ? "Editar cliente" : "Nuevo cliente"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            API <code className="text-xs">/clients</code>
+            Complete o actualice los datos de contacto y facturación del cliente.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>

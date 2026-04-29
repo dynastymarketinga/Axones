@@ -10,11 +10,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useUIThemeStore } from "@/store/ui-theme.store"   // ✅ ADD THIS
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
-  const { setTheme: setCustomTheme } = useUIThemeStore()   // ✅ ADD THIS
 
   const [mounted, setMounted] = useState(false)
 
@@ -40,11 +38,8 @@ export function ThemeToggle() {
             variant="ghost"
             size="icon"
             className="relative rounded-full [&_svg]:size-5"
-            onClick={() => {
-              setCustomTheme("")              // ✅ REMOVE custom theme
-              setTheme(isDark ? "light" : "dark") // ✅ APPLY system theme
-            }}
-            aria-label="Toggle theme"
+            onClick={() => setTheme(isDark ? "light" : "dark")}
+            aria-label={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
           >
             <Sun
               className={`transition-all ${
@@ -59,7 +54,7 @@ export function ThemeToggle() {
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          {isDark ? "Switch to light mode" : "Switch to dark mode"}
+          {isDark ? "Modo claro" : "Modo oscuro"}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

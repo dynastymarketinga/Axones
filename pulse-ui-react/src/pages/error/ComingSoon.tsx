@@ -4,8 +4,6 @@ import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useTheme } from "next-themes"
-import { Sun, Moon } from "lucide-react"
 
 // ✅ Type added
 type TimeLeft = {
@@ -16,7 +14,6 @@ type TimeLeft = {
 }
 
 export default function ComingSoon() {
-  const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   // ✅ typed state
@@ -65,22 +62,6 @@ export default function ComingSoon() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center px-6 overflow-hidden bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-blue-500/20 transition-colors duration-300">
-
-      {/* Theme Toggle */}
-      <div className="absolute top-6 right-6">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          className="bg-background/60 border-border supports-[backdrop-filter]:backdrop-blur-md"
-        >
-          {theme === "dark" ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-        </Button>
-      </div>
 
       {/* Glow */}
       <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-primary/20 dark:bg-primary/10 blur-[140px] rounded-full -z-10" />

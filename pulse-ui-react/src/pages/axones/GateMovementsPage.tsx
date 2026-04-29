@@ -68,11 +68,11 @@ export default function GateMovementsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Vigilancia</h1>
           <p className="text-muted-foreground text-sm">
-            Entradas / salidas · <code>/gate-movements</code>
+            Registro de entradas y salidas por la vigilancia.
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/vigilancia/nuevo">Registrar movimiento</Link>
+          <Link to="/vigilancia/nuevo">Registrar movimiento</Link>
         </Button>
       </div>
 

@@ -1,86 +1,17 @@
 import { createBrowserRouter, Navigate } from "react-router-dom"
+import type { ReactElement } from "react"
 
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
-
-import AnalyticsDashboard from "@/pages/dashboard/analytics/AnalyticsDashboard"
-import EcommerceDashboard from "@/pages/dashboard/eCommerce/EcommerceDashboard"
-import CrmDashboard from "@/pages/dashboard/crm/CrmDashboard"
-
-import ChartsPage from "@/pages/charts/recharts/ReChartsPage"
-
-import DataWidgetsPage from "@/pages/widgets/data/DataWidgetsPage"
-import StatisticsWidgetsPage from "@/pages/widgets/statistics/StatisticsWidgetsPage"
-
 import LoginPage from "@/auth/basic/LoginPage"
-import RegisterPage from "@/auth/basic/RegisterPage"
-import ForgotPasswordPage from "@/auth/basic/ForgotPasswordPage"
-
+import RequestPasswordResetPage from "@/auth/basic/RequestPasswordResetPage"
 import NotFound from "@/pages/NotFound"
 import ErrorPage from "@/pages/ErrorPage"
-import Documentation from "@/pages/Documentation"
-import { ResetPasswordForm } from "@/auth/basic/ResetPasswordForm"
-import { VerifyEmailForm } from "@/auth/basic/VerifyEmailForm"
-import { PasswordResetSuccess } from "@/auth/basic/PasswordResetSuccess"
-import CoverLoginPage from "@/auth/cover/CoverLoginPage"
-import CoverForgotPasswordPage from "@/auth/cover/CoverForgotPasswordPage"
-import CoverRegisterPage from "@/auth/cover/CoverRegisterPage"
-import CoverResetPasswordPage from "@/auth/cover/CoverResetPasswordPage"
-import CoverVerifyEmailPage from "@/auth/cover/CoverVerifyEmailPage"
-import CoverPasswordResetSuccessPage from "@/auth/cover/CoverPasswordResetSuccessPage"
-import ProductList from "@/pages/eCommerce/ProductList"
-import ProductGrid from "@/pages/eCommerce/ProductGrid"
-import AddProduct from "@/pages/eCommerce/AddProduct"
-import CategoryList from "@/pages/eCommerce/CategoryList"
-import OrderList from "@/pages/eCommerce/OrderList"
-import OrderDetails from "@/pages/eCommerce/OrderDetails"
-import InvoicePage from "@/pages/eCommerce/Invoice"
-import InvoiceCard from "@/pages/eCommerce/InvoiceCard"
-import CustomerList from "@/pages/eCommerce/CustomerList"
-import CustomerDetails from "@/pages/eCommerce/CustomerDetails"
-import ChatBox from "@/pages/apps/Chatbox"
-import CalendarPage from "@/pages/apps/CalendarPage"
-import FileManagerPage from "@/pages/apps/FileManager"
-import AlertsPage from "@/pages/alerts/AlertsPage"
-import AccordionPage from "@/pages/accordion/AccordionPage"
-import SoonerPage from "@/pages/sooner/SoonerPage"
-import BadgesPage from "@/pages/badges/BadgesPage"
-import ButtonsPage from "@/pages/buttons/ButtonsPage"
-import CardsPage from "@/pages/cards/CardsPage"
-import ListGroupPage from "@/pages/listgroups/ListGroupPage"
-import CarouselPage from "@/pages/carousels/CarouselPage"
-import AvatarShowcase from "@/pages/mediaobject/AvatarShowcase"
-import NavbarsPage from "@/pages/navbars/NavbarsPage"
-import ProgressPage from "@/pages/progressbars/ProgressPage"
-import SpinnerExamples from "@/pages/spinners/SpinnerExamples"
-import Boxicons from "@/pages/icons/Boxicons"
-import IconBootstrap from "@/pages/icons/Bootstrap"
-import LucideIconsPage from "@/pages/icons/LucideIconsPage"
-import PricingPage from "@/pages/pricing/PricingPage"
-import FAQPage from "@/pages/FAQPage"
 import Error404 from "@/pages/error/Error404"
 import Error500 from "@/pages/error/Error500"
 import ComingSoon from "@/pages/error/ComingSoon"
-import ReChartsPage from "@/pages/charts/recharts/ReChartsPage"
-import ApexChartsPage from "@/pages/charts/apexcharts/ApexChartsPage"
 import UserProfile from "@/pages/account/UserProfile"
-import EditProfile from "@/pages/account/EditProfile"
-import PasswordSettings from "@/pages/account/PasswordSettings"
-import NotificationSettings from "@/pages/account/NotificationSettings"
-import BasicTables from "@/pages/tables/BasicTables"
-import AdvanceTablesPage from "@/pages/tables/advance-tables/AdvanceTable"
-import DataTablePage from "@/pages/tables/DataTablePage"
-import BasicInput from "@/pages/forms/BasicInputs"
-import FormInputGroup from "@/pages/forms/FormInputGroup"
-import ChecksAndRadios from "@/pages/forms/ChecksAndRadios"
-import FormLayouts from "@/pages/forms/FormLayouts"
-import WizardPage from "@/pages/forms/wizard/WizardPage"
-import FormTextEditor from "@/pages/forms/FormTextEditor"
-import FileUpload01 from "@/pages/forms/fileupload/FileUpload01"
-import DatePickerPage from "@/pages/forms/datepicker/DatePickerPage"
-import SelectExamplesPage from "@/pages/forms/select/SelectExamplesPage"
-import FormRepeater from "@/pages/forms/FormRepeater"
-import LandingPage from "@/pages/dashboard/analytics/LandingPage"
+import PasswordResetRequestsPage from "@/pages/account/PasswordResetRequestsPage"
 import ClientsPage from "@/pages/axones/ClientsPage"
 import ProductsPage from "@/pages/axones/ProductsPage"
 import SuppliersPage from "@/pages/axones/SuppliersPage"
@@ -90,11 +21,14 @@ import ClientOrderNewPage from "@/pages/axones/ClientOrderNewPage"
 import ClientOrderDetailPage from "@/pages/axones/ClientOrderDetailPage"
 import ClientOrderEditPage from "@/pages/axones/ClientOrderEditPage"
 import InventoryMovementsPage from "@/pages/axones/InventoryMovementsPage"
+import InventoryMovementsPreviewPage from "@/pages/axones/InventoryMovementsPreviewPage"
 import MaterialsPage from "@/pages/axones/MaterialsPage"
+import MaterialFormPage from "@/pages/axones/MaterialFormPage"
 import MaterialRequestsPage from "@/pages/axones/MaterialRequestsPage"
 import PurchaseReceiptsPage from "@/pages/axones/PurchaseReceiptsPage"
 import MiscellaneousReceiptsPage from "@/pages/axones/MiscellaneousReceiptsPage"
 import BobinasPage from "@/pages/axones/BobinasPage"
+import BobinaRejectedRegisterPage from "@/pages/axones/BobinaRejectedRegisterPage"
 import InventoryReturnsPage from "@/pages/axones/InventoryReturnsPage"
 import ProgramacionBoardPage from "@/pages/axones/ProgramacionBoardPage"
 import WorkOrdersHubPage from "@/pages/axones/WorkOrdersHubPage"
@@ -110,7 +44,9 @@ import AxonesOperationalAlertsPage from "@/pages/axones/AxonesOperationalAlertsP
 import AxonesReportsPage from "@/pages/axones/AxonesReportsPage"
 import TintaMixturesPage from "@/pages/axones/TintaMixturesPage"
 import QualityWorkOrderPage from "@/pages/axones/QualityWorkOrderPage"
+import QualityCertificatePreviewPage from "@/pages/axones/QualityCertificatePreviewPage"
 import MaterialsInventoryHubPage from "@/pages/axones/MaterialsInventoryHubPage"
+import InventoryAreaPreviewPage from "@/pages/axones/InventoryAreaPreviewPage"
 import ClientFormPage from "@/pages/axones/ClientFormPage"
 import ProductFormPage from "@/pages/axones/ProductFormPage"
 import SupplierFormPage from "@/pages/axones/SupplierFormPage"
@@ -118,6 +54,7 @@ import VendorsPage from "@/pages/axones/VendorsPage"
 import VendorFormPage from "@/pages/axones/VendorFormPage"
 import PurchaseOrderNewPage from "@/pages/axones/PurchaseOrderNewPage"
 import PurchaseReceiptNewPage from "@/pages/axones/PurchaseReceiptNewPage"
+import PurchaseReceiptPreviewPage from "@/pages/axones/PurchaseReceiptPreviewPage"
 import MiscellaneousReceiptNewPage from "@/pages/axones/MiscellaneousReceiptNewPage"
 import GateMovementNewPage from "@/pages/axones/GateMovementNewPage"
 import MaterialRequestDetailPage from "@/pages/axones/MaterialRequestDetailPage"
@@ -127,188 +64,146 @@ import AreaPrintingPage from "@/pages/axones/AreaPrintingPage"
 import AreaLaminacionPage from "@/pages/axones/AreaLaminacionPage"
 import AreaCortePage from "@/pages/axones/AreaCortePage"
 import AreaTintasPage from "@/pages/axones/AreaTintasPage"
+import { getStoredUser } from "@/lib/auth-storage"
+import { isAxonesUrlAllowed } from "@/lib/axones-roles"
 
-export const router = createBrowserRouter (
+function guardAxonesRoute({
+  routeKey,
+  element,
+}: {
+  routeKey: string
+  element: ReactElement
+}): ReactElement {
+  const user = getStoredUser()
+  const allowed = isAxonesUrlAllowed(routeKey, user?.role, user?.id)
+  if (!allowed) return <Navigate to="/resumen" replace />
+  return element
+}
+
+export const router = createBrowserRouter(
   [
-    // 🔐 AUTH ROUTES
+    // AUTH ROUTES
     {
       element: <AuthLayout />,
       errorElement: <ErrorPage />,
       children: [
-        {path: "auth/basic/login", element: <LoginPage /> },
-        {path: "auth/basic/register", element: <RegisterPage /> },
-        {path: "auth/basic/forgot-password", element: <ForgotPasswordPage /> },
-        {path: "auth/basic/reset-password", element: <ResetPasswordForm /> },
-        {path: "auth/basic/verify-email", element: <VerifyEmailForm /> },
-        {path: "auth/basic/password-reset-success", element: <PasswordResetSuccess /> },
-
-        {path: "auth/cover/login", element: <CoverLoginPage /> },
-        {path: "auth/cover/register", element: <CoverRegisterPage /> },
-        {path: "auth/cover/forgot-password", element: <CoverForgotPasswordPage /> },
-        {path: "auth/cover/new-password", element: <CoverResetPasswordPage /> },
-        {path: "auth/cover/password-reset-success", element: <CoverPasswordResetSuccessPage /> },
-        {path: "auth/cover/verify-email", element: <CoverVerifyEmailPage /> },
-
-        {path: "error/error-404", element: <Error404 /> },
-        {path: "error/error-500", element: <Error500 /> },
-        {path: "error/coming-soon", element: <ComingSoon /> },
-
+        { path: "auth/basic/login", element: <LoginPage /> },
+        { path: "auth/basic/request-reset", element: <RequestPasswordResetPage /> },
+        { path: "error/error-404", element: <Error404 /> },
+        { path: "error/error-500", element: <Error500 /> },
+        { path: "error/coming-soon", element: <ComingSoon /> },
       ],
     },
 
-    // 📊 APP ROUTES
+    // APP ROUTES
     {
       element: <AppLayout />,
       errorElement: <ErrorPage />,
       children: [
         { index: true, element: <AxonesDashboardPage /> },
-        {path: "dashboard/analytics", element: <AnalyticsDashboard /> },
-        {path: "dashboard/crm", element: <CrmDashboard /> },
-        {path: "dashboard/eCommerce", element: <EcommerceDashboard /> },
-        {path: "dashboard/landing-page", element: <LandingPage /> },
-        
-        {path: "dashboard/charts", element: <ChartsPage /> },
-        {path: "widgets/data", element: <DataWidgetsPage /> },
-        {path: "widgets/statistics", element: <StatisticsWidgetsPage /> },
-        {path: "docs", element: <Documentation /> },
-
-        { path: "axones/resumen", element: <AxonesDashboardPage /> },
-        { path: "axones/alertas", element: <AxonesOperationalAlertsPage /> },
-        { path: "axones/clientes", element: <ClientsPage /> },
-        { path: "axones/clientes/form", element: <ClientFormPage /> },
-        { path: "axones/vendedores", element: <VendorsPage /> },
-        { path: "axones/vendedores/form", element: <VendorFormPage /> },
-        { path: "axones/productos", element: <ProductsPage /> },
-        { path: "axones/productos/form", element: <ProductFormPage /> },
-        { path: "axones/proveedores", element: <SuppliersPage /> },
-        { path: "axones/proveedores/form", element: <SupplierFormPage /> },
-        { path: "axones/ordenes-compra", element: <PurchaseOrdersPage /> },
-        { path: "axones/ordenes-compra/nueva", element: <PurchaseOrderNewPage /> },
-        { path: "axones/ordenes-cliente", element: <ClientOrdersPage /> },
-        { path: "axones/ordenes-cliente/nueva", element: <ClientOrderNewPage /> },
-        { path: "axones/ordenes-cliente/:coId/edit", element: <ClientOrderEditPage /> },
-        { path: "axones/ordenes-cliente/:coId", element: <ClientOrderDetailPage /> },
-        { path: "axones/pedidos-cliente", element: <ClientOrdersPage /> },
-        { path: "axones/materiales", element: <MaterialsPage /> },
-        { path: "axones/inventario-areas", element: <MaterialsInventoryHubPage /> },
+        { path: "resumen", element: guardAxonesRoute({ routeKey: "resumen", element: <AxonesDashboardPage /> }) },
+        { path: "alertas", element: guardAxonesRoute({ routeKey: "alertas", element: <AxonesOperationalAlertsPage /> }) },
+        { path: "clientes", element: guardAxonesRoute({ routeKey: "clientes", element: <ClientsPage /> }) },
+        { path: "clientes/form", element: guardAxonesRoute({ routeKey: "clientes", element: <ClientFormPage /> }) },
+        { path: "vendedores", element: guardAxonesRoute({ routeKey: "vendedores", element: <VendorsPage /> }) },
+        { path: "vendedores/form", element: guardAxonesRoute({ routeKey: "vendedores/form", element: <VendorFormPage /> }) },
+        { path: "productos", element: guardAxonesRoute({ routeKey: "productos", element: <ProductsPage /> }) },
+        { path: "productos/form", element: guardAxonesRoute({ routeKey: "productos", element: <ProductFormPage /> }) },
+        { path: "proveedores", element: guardAxonesRoute({ routeKey: "proveedores", element: <SuppliersPage /> }) },
+        { path: "proveedores/form", element: guardAxonesRoute({ routeKey: "proveedores", element: <SupplierFormPage /> }) },
+        { path: "ordenes-compra", element: guardAxonesRoute({ routeKey: "ordenes-compra", element: <PurchaseOrdersPage /> }) },
+        { path: "ordenes-compra/nueva", element: guardAxonesRoute({ routeKey: "ordenes-compra/nueva", element: <PurchaseOrderNewPage /> }) },
+        { path: "ordenes-cliente", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrdersPage /> }) },
+        { path: "ordenes-cliente/nueva", element: guardAxonesRoute({ routeKey: "ordenes-cliente/nueva", element: <ClientOrderNewPage /> }) },
+        { path: "ordenes-cliente/:coId/edit", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderEditPage /> }) },
+        { path: "ordenes-cliente/:coId", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderDetailPage /> }) },
+        { path: "pedidos-cliente", element: guardAxonesRoute({ routeKey: "pedidos-cliente", element: <ClientOrdersPage /> }) },
+        { path: "materiales", element: guardAxonesRoute({ routeKey: "materiales", element: <MaterialsPage /> }) },
+        { path: "materiales/nuevo", element: guardAxonesRoute({ routeKey: "materiales", element: <MaterialFormPage /> }) },
+        { path: "materiales/:id/editar", element: guardAxonesRoute({ routeKey: "materiales", element: <MaterialFormPage /> }) },
+        { path: "inventario-areas", element: guardAxonesRoute({ routeKey: "inventario-areas", element: <MaterialsInventoryHubPage /> }) },
         {
-          path: "axones/movimientos-inventario",
-          element: <InventoryMovementsPage />,
-        },
-        { path: "axones/recepciones-oc", element: <PurchaseReceiptsPage /> },
-        { path: "axones/recepciones-nueva", element: <PurchaseReceiptNewPage /> },
-        {
-          path: "axones/miscelaneos",
-          element: <MiscellaneousReceiptsPage />,
-        },
-        { path: "axones/miscelaneos/nuevo", element: <MiscellaneousReceiptNewPage /> },
-        { path: "axones/bobinas", element: <BobinasPage /> },
-        { path: "axones/devoluciones", element: <InventoryReturnsPage /> },
-        {
-          path: "axones/solicitudes-material",
-          element: <MaterialRequestsPage />,
+          path: "inventario-areas/vista-previa",
+          element: guardAxonesRoute({ routeKey: "inventario-areas", element: <InventoryAreaPreviewPage /> }),
         },
         {
-          path: "axones/solicitudes-material/:id",
-          element: <MaterialRequestDetailPage />,
-        },
-        { path: "axones/programacion", element: <ProgramacionBoardPage /> },
-        { path: "axones/impresion", element: <AreaPrintingPage /> },
-        { path: "axones/laminacion", element: <AreaLaminacionPage /> },
-        { path: "axones/corte", element: <AreaCortePage /> },
-        { path: "axones/tintas", element: <AreaTintasPage /> },
-        { path: "axones/ordenes-trabajo", element: <WorkOrdersHubPage /> },
-        {
-          path: "axones/ordenes-trabajo/nueva",
-          element: <Navigate to="/axones/ordenes-trabajo" replace />,
+          path: "movimientos-inventario",
+          element: guardAxonesRoute({ routeKey: "movimientos-inventario", element: <InventoryMovementsPage /> }),
         },
         {
-          path: "axones/ordenes-trabajo/:woId",
-          element: <WorkOrderPlanillaPage />,
+          path: "movimientos-inventario/vista-previa",
+          element: guardAxonesRoute({ routeKey: "movimientos-inventario", element: <InventoryMovementsPreviewPage /> }),
+        },
+        { path: "recepciones-oc", element: guardAxonesRoute({ routeKey: "recepciones-oc", element: <PurchaseReceiptsPage /> }) },
+        {
+          path: "recepciones-oc/:id/vista-previa",
+          element: guardAxonesRoute({ routeKey: "recepciones-oc", element: <PurchaseReceiptPreviewPage /> }),
+        },
+        { path: "recepciones-nueva", element: guardAxonesRoute({ routeKey: "recepciones-nueva", element: <PurchaseReceiptNewPage /> }) },
+        {
+          path: "miscelaneos",
+          element: guardAxonesRoute({ routeKey: "miscelaneos", element: <MiscellaneousReceiptsPage /> }),
+        },
+        { path: "miscelaneos/nuevo", element: guardAxonesRoute({ routeKey: "miscelaneos/nuevo", element: <MiscellaneousReceiptNewPage /> }) },
+        { path: "bobinas", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinasPage /> }) },
+        {
+          path: "bobinas/registrar-rechazada",
+          element: guardAxonesRoute({ routeKey: "bobinas/registrar-rechazada", element: <BobinaRejectedRegisterPage /> }),
+        },
+        { path: "devoluciones", element: guardAxonesRoute({ routeKey: "devoluciones", element: <InventoryReturnsPage /> }) },
+        {
+          path: "solicitudes-material",
+          element: guardAxonesRoute({ routeKey: "solicitudes-material", element: <MaterialRequestsPage /> }),
         },
         {
-          path: "axones/ordenes-trabajo/:woId/produccion",
-          element: <WorkOrderDetailPage />,
+          path: "solicitudes-material/:id",
+          element: guardAxonesRoute({ routeKey: "solicitudes-material", element: <MaterialRequestDetailPage /> }),
         },
-        { path: "axones/prefill-nota-entrega", element: <PrefillNotaEntregaPage /> },
-        { path: "axones/nota-entrega-nueva", element: <DeliveryNoteCreatePage /> },
-        { path: "axones/despacho-corte", element: <CorteDispatchPage /> },
-        { path: "axones/notas-entrega", element: <DeliveryNotesPage /> },
-        { path: "axones/calidad", element: <QualityWorkOrderPage /> },
-        { path: "axones/solicitudes-area", element: <AreaRequestsPage /> },
-        { path: "axones/vigilancia", element: <GateMovementsPage /> },
-        { path: "axones/vigilancia/nuevo", element: <GateMovementNewPage /> },
-        { path: "axones/reportes", element: <AxonesReportsPage /> },
-        { path: "axones/asistente", element: <AxonesChatPage /> },
-        { path: "axones/mezclas-tinta", element: <TintaMixturesPage /> },
-
-        // 🛍️ E-COMMERCE
-        {path: "eCommerce/product-list", element: <ProductList /> },
-        {path: "eCommerce/product-grid", element: <ProductGrid /> },
-        {path: "eCommerce/add-product", element: <AddProduct /> },
-        {path: "eCommerce/categories", element: <CategoryList /> },
-        {path: "eCommerce/order-list", element: <OrderList /> },
-        {path: "eCommerce/order-details", element: <OrderDetails /> },
-        {path: "eCommerce/customer-list", element: <CustomerList /> },
-        {path: "eCommerce/customer-details", element: <CustomerDetails /> },
-        {path: "eCommerce/invoice", element: <InvoicePage /> },
-
-        // application routes
-        {path: "app/chatbox", element: <ChatBox /> },
-        {path: "app/invoice-card", element: <InvoiceCard/> },
-        {path: "app/calendar", element: <CalendarPage /> },
-        {path: "app/file-manager", element: <FileManagerPage /> },
-
-        // component 
-        {path: "components/alerts", element: <AlertsPage /> },
-        {path: "components/accordion", element: <AccordionPage/>},
-        {path: "components/sooner", element: <SoonerPage/>},
-        {path: "components/badges", element: <BadgesPage/>},
-        {path: "components/buttons", element: <ButtonsPage/>},
-        {path: "components/cards", element: <CardsPage/>},
-        {path: "components/list-groups", element: <ListGroupPage/>},
-        {path: "components/carousels", element: <CarouselPage/>},
-        {path: "components/media-object", element: <AvatarShowcase/>},
-        {path: "components/navbars", element: <NavbarsPage/>},
-        {path: "components/progress", element: <ProgressPage/>},
-        {path: "components/spinners", element: <SpinnerExamples/>},
-
-         // boxicons
-        {path: "icons/boxicons", element: <Boxicons/>},
-        {path: "icons/bootstrap", element: <IconBootstrap/>},
-        {path: "icons/lucide", element: <LucideIconsPage/>},
-        {path: "pricing/pricing-tables", element: <PricingPage/>},
-        {path: "faq", element: <FAQPage/>},
-
-        // charts
-        {path: "charts/recharts", element: <ReChartsPage/>},
-        {path: "charts/apex-charts", element: <ApexChartsPage/>},
+        { path: "programacion", element: guardAxonesRoute({ routeKey: "programacion", element: <ProgramacionBoardPage /> }) },
+        { path: "impresion", element: guardAxonesRoute({ routeKey: "impresion", element: <AreaPrintingPage /> }) },
+        { path: "laminacion", element: guardAxonesRoute({ routeKey: "laminacion", element: <AreaLaminacionPage /> }) },
+        { path: "corte", element: guardAxonesRoute({ routeKey: "corte", element: <AreaCortePage /> }) },
+        { path: "tintas", element: guardAxonesRoute({ routeKey: "tintas", element: <AreaTintasPage /> }) },
+        { path: "ordenes-trabajo", element: guardAxonesRoute({ routeKey: "ordenes-trabajo", element: <WorkOrdersHubPage /> }) },
+        {
+          path: "ordenes-trabajo/nueva",
+          element: guardAxonesRoute({ routeKey: "ordenes-trabajo", element: <Navigate to="/ordenes-trabajo" replace /> }),
+        },
+        {
+          path: "ordenes-trabajo/:woId",
+          element: guardAxonesRoute({ routeKey: "ordenes-trabajo", element: <WorkOrderPlanillaPage /> }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/produccion",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo-produccion",
+            element: <WorkOrderDetailPage />,
+          }),
+        },
+        { path: "prefill-nota-entrega", element: guardAxonesRoute({ routeKey: "prefill-nota-entrega", element: <PrefillNotaEntregaPage /> }) },
+        { path: "nota-entrega-nueva", element: guardAxonesRoute({ routeKey: "nota-entrega-nueva", element: <DeliveryNoteCreatePage /> }) },
+        { path: "despacho-corte", element: guardAxonesRoute({ routeKey: "despacho-corte", element: <CorteDispatchPage /> }) },
+        { path: "notas-entrega", element: guardAxonesRoute({ routeKey: "notas-entrega", element: <DeliveryNotesPage /> }) },
+        { path: "calidad", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityWorkOrderPage /> }) },
+        { path: "calidad/vista-previa", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityCertificatePreviewPage /> }) },
+        { path: "solicitudes-area", element: guardAxonesRoute({ routeKey: "solicitudes-area", element: <AreaRequestsPage /> }) },
+        { path: "vigilancia", element: guardAxonesRoute({ routeKey: "vigilancia", element: <GateMovementsPage /> }) },
+        { path: "vigilancia/nuevo", element: guardAxonesRoute({ routeKey: "vigilancia/nuevo", element: <GateMovementNewPage /> }) },
+        { path: "reportes", element: guardAxonesRoute({ routeKey: "reportes", element: <AxonesReportsPage /> }) },
+        { path: "asistente", element: guardAxonesRoute({ routeKey: "asistente", element: <AxonesChatPage /> }) },
+        { path: "mezclas-tinta", element: guardAxonesRoute({ routeKey: "mezclas-tinta", element: <TintaMixturesPage /> }) },
 
         // account
-        {path: "account/profile", element: <UserProfile/>},
-        {path: "account/edit-profile", element: <EditProfile/>},
-        {path: "account/password-setting", element: <PasswordSettings/>},
-        {path: "account/notifications", element: <NotificationSettings/>},
+        { path: "account/profile", element: <UserProfile /> },
+        {
+          path: "account/password-reset-requests",
+          element: guardAxonesRoute({
+            routeKey: "account/password-reset-requests",
+            element: <PasswordResetRequestsPage />,
+          }),
+        },
 
-        // Tables
-        {path: "tables/basic-tables", element: <BasicTables/>},
-        {path: "tables/advanced-tables", element: <AdvanceTablesPage/>},
-        {path: "tables/data-tables", element: <DataTablePage/>},
-
-        // Forms
-        {path: "forms/basic-inputs", element: <BasicInput/>},
-        {path: "forms/input-groups", element: <FormInputGroup/>},
-        {path: "forms/radio-checkboxes", element: <ChecksAndRadios/>},
-        {path: "forms/form-layouts", element: <FormLayouts/>},
-        {path: "forms/form-wizard", element: <WizardPage/>},
-        {path: "forms/text-editor", element: <FormTextEditor/>},
-        {path: "forms/file-upload", element: <FileUpload01/>},
-        {path: "forms/date-pickers", element: <DatePickerPage/>},
-        {path: "forms/select", element: <SelectExamplesPage/>},
-        {path: "forms/form-repeat", element: <FormRepeater/>},
-        
-        
-        // ✅ 404 HANDLER
+        // 404 HANDLER
         { path: "*", element: <NotFound /> },
       ],
     },

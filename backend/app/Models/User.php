@@ -22,9 +22,23 @@ class User extends Authenticatable
     protected $fillable = [
         'name',
         'email',
+        'username',
         'password',
         'role',
     ];
+
+    /**
+     * Buscar exclusivamente por nombre de usuario único.
+     */
+    public static function findByLogin(string $login): ?self
+    {
+        $login = trim($login);
+        if ($login === '') {
+            return null;
+        }
+
+        return static::query()->where('username', $login)->first();
+    }
 
     /**
      * The attributes that should be hidden for serialization.

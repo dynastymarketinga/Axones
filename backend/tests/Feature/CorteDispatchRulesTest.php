@@ -30,14 +30,14 @@ class CorteDispatchRulesTest extends TestCase
         $client = Client::query()->create(['name' => 'C-D', 'rif' => 'J-700']);
         $product = Product::query()->create(['client_id' => $client->id, 'name' => 'P-D', 'cpe' => 'CPE-D']);
         $wo = WorkOrder::query()->create([
-            'code' => 'OT-D-1',
+            'code' => 'OT-D-'.uniqid(),
             'client_id' => $client->id,
             'product_id' => $product->id,
             'status' => WorkOrderStatus::Open->value,
             'created_by' => $user->id,
         ]);
         $mat = Material::query()->create([
-            'sku' => 'M-D',
+            'sku' => 'M-D-'.uniqid(),
             'name' => 'Mat',
             'inventory_area' => 'material',
             'unit' => 'kg',
@@ -65,6 +65,15 @@ class CorteDispatchRulesTest extends TestCase
         $this->assertNotEmpty($rows);
         $match = collect($rows)->firstWhere('corte_bobina_usage_id', $usage->id);
         $this->assertEquals('50.000', $match['quantity_remaining_kg']);
+        $this->assertArrayHasKey('pallet_code', $match);
+        $this->assertArrayHasKey('bobbin_count', $match);
+
+        $groups = $this->getJson('/api/corte-dispatch/available', $h)->json('groups');
+        $this->assertNotEmpty($groups);
+        $firstGroup = collect($groups)->first();
+        $this->assertArrayHasKey('total_remaining_kg', $firstGroup);
+        $this->assertArrayHasKey('rows', $firstGroup);
+        $this->assertNotEmpty($firstGroup['rows']);
 
         $this->postJson('/api/delivery-notes', [
             'lines' => [[
@@ -178,5 +187,43 @@ class CorteDispatchRulesTest extends TestCase
 
         $rows2 = $this->getJson('/api/corte-dispatch/available', $h)->json('rows');
         $this->assertNotEmpty(collect($rows2)->where('corte_bobina_usage_id', $usage->id));
+    }
+
+    public function test_store_from_multiple_work_orders_is_listed_in_delivery_history(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $usageA = $this->createCorteUsageWithFinished(12);
+        $usageB = $this->createCorteUsageWithFinished(15);
+
+        $created = $this->postJson('/api/delivery-notes', [
+            'work_order_id' => null,
+            'lines' => [
+                [
+                    'corte_bobina_usage_id' => $usageA->id,
+                    'work_order_id' => $usageA->work_order_id,
+                    'product_id' => $usageA->workOrder?->product_id,
+                    'quantity_kg' => 5,
+                    'pallet_code' => 'PAL-A',
+                    'bobbin_count' => 1,
+                ],
+                [
+                    'corte_bobina_usage_id' => $usageB->id,
+                    'work_order_id' => $usageB->work_order_id,
+                    'product_id' => $usageB->workOrder?->product_id,
+                    'quantity_kg' => 4,
+                    'pallet_code' => 'PAL-B',
+                    'bobbin_count' => 1,
+                ],
+            ],
+        ], $h)->assertCreated();
+
+        $noteId = $created->json('id');
+        $this->assertNotNull($noteId);
+
+        $history = $this->getJson('/api/delivery-notes', $h)->assertOk()->json('data');
+        $match = collect($history)->firstWhere('id', $noteId);
+        $this->assertNotNull($match);
+        $this->assertCount(2, $match['lines'] ?? []);
     }
 }

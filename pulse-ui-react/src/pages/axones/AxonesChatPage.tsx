@@ -13,8 +13,8 @@ export default function AxonesChatPage() {
           Asistente Axones
         </h1>
         <p className="text-muted-foreground text-sm">
-          Módulo de chat previsto en el alcance del sistema. Aquí se integrará
-          el bot cuando exista endpoint y políticas de datos.
+          Asistente conversacional: cuando esté disponible, se integrará en
+          esta pantalla.
         </p>
       </div>
 
@@ -24,12 +24,11 @@ export default function AxonesChatPage() {
         </CardHeader>
         <CardContent className="space-y-4 text-sm text-muted-foreground">
           <p>
-            No hay servicio de conversación configurado en el API Laravel
-            actual. Esta pantalla evita enlazar al chat de demostración de la
-            plantilla Pulse.
+            Aún no hay un asistente de conversación activo. Esta pantalla
+            sustituye al chat de demostración de la plantilla.
           </p>
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/resumen">Volver al panel</Link>
+            <Link to="/resumen">Volver al panel</Link>
           </Button>
         </CardContent>
       </Card>

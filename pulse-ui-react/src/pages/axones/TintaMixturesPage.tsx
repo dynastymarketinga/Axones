@@ -56,7 +56,7 @@ export default function TintaMixturesPage() {
             Mezclas de tinta
           </h1>
           <p className="text-muted-foreground text-sm">
-            <code>/tinta-mixtures</code>
+            Listado de mezclas y lotes de tinta.
           </p>
         </div>
         <Button type="button" variant="secondary" onClick={() => void load()}>

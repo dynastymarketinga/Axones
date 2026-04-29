@@ -5,9 +5,11 @@ namespace App\Http\Requests;
 use App\Enums\WorkOrderBoardStage;
 use App\Enums\WorkOrderSchedulingStatus;
 use App\Enums\WorkOrderStatus;
+use App\Models\Product;
 use App\Models\WorkOrder;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class WorkOrderUpdateRequest extends FormRequest
 {
@@ -54,5 +56,36 @@ class WorkOrderUpdateRequest extends FormRequest
             'originating_area' => ['sometimes', 'nullable', 'string', 'max:32'],
             'material_request_notes' => ['sometimes', 'nullable', 'string'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v): void {
+            /** @var WorkOrder $wo */
+            $wo = $this->route('work_order');
+            if (! $wo) {
+                return;
+            }
+            if (! $this->has('product_id')) {
+                return;
+            }
+            $pid = $this->input('product_id');
+            if ($pid === null || $pid === '') {
+                return;
+            }
+            $newClientId = $this->has('client_id') ? $this->input('client_id') : $wo->client_id;
+            if ($newClientId === null) {
+                $v->errors()->add('product_id', 'Debe asignar cliente a la OT antes de elegir producto.');
+
+                return;
+            }
+            $ok = Product::query()
+                ->where('id', (int) $pid)
+                ->where('client_id', (int) $newClientId)
+                ->exists();
+            if (! $ok) {
+                $v->errors()->add('product_id', 'El producto no pertenece al cliente de esta orden de trabajo.');
+            }
+        });
     }
 }

@@ -107,11 +107,11 @@ export default function PurchaseOrdersPage() {
             Órdenes de compra
           </h1>
           <p className="text-muted-foreground text-sm">
-            Material solicitado a proveedores · <code>/purchase-orders</code>
+            Material solicitado a proveedores.
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/ordenes-compra/nueva" state={{ from }}>
+          <Link to="/ordenes-compra/nueva" state={{ from }}>
             Nueva OC
           </Link>
         </Button>

@@ -92,11 +92,11 @@ export default function ClientsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
           <p className="text-muted-foreground text-sm">
-            Datos maestros sincronizados con el API de Axones.
+            Catálogo de clientes del sistema.
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/clientes/form" state={{ from }}>
+          <Link to="/clientes/form" state={{ from }}>
             Nuevo cliente
           </Link>
         </Button>
@@ -194,7 +194,7 @@ export default function ClientsPage() {
                   <TableCell>{c.phone ?? "—"}</TableCell>
                   <TableCell className="text-right">
                     <Button variant="link" className="h-auto p-0" asChild>
-                      <Link to={`/axones/clientes/form?id=${c.id}`} state={{ from }}>
+                      <Link to={`/clientes/form?id=${c.id}`} state={{ from }}>
                         Editar
                       </Link>
                     </Button>

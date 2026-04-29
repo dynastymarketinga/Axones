@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useId, useState } from "react"
 import { Eye, EyeOff } from "lucide-react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { loginRequest } from "@/lib/api"
 import { setAuthSession } from "@/lib/auth-storage"
@@ -22,10 +22,10 @@ export function LoginForm({
 }: React.ComponentPropsWithoutRef<"div">) {
   const navigate = useNavigate()
   const formId = useId()
-  const emailId = `${formId}-email`
+  const loginId = `${formId}-login`
   const passwordId = `${formId}-password`
   const [showPassword, setShowPassword] = useState(false)
-  const [email, setEmail] = useState("")
+  const [loginValue, setLoginValue] = useState("")
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
@@ -35,14 +35,14 @@ export function LoginForm({
     setFieldError(null)
     setSubmitting(true)
     try {
-      const data = await loginRequest(email.trim(), password)
+      const data = await loginRequest(loginValue.trim(), password)
       setAuthSession(data.token, data.user)
       toast.success(`Hola, ${data.user.name}`)
-      navigate("/axones/resumen", { replace: true })
+      navigate("/resumen", { replace: true })
     } catch (unknown) {
       const err = unknown as Error & ApiErrorBody
       const first =
-        err.errors?.email?.[0] ||
+        err.errors?.login?.[0] ||
         err.errors?.password?.[0] ||
         err.message ||
         "Error al iniciar sesión."
@@ -59,7 +59,7 @@ export function LoginForm({
         <CardHeader className="space-y-1 pb-4 text-center">
           <CardTitle className="text-xl font-semibold tracking-tight">Iniciar sesión</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Sistema de gestión operativa. Usa el correo y la contraseña de tu usuario.
+            Sistema de gestión operativa. Usa tu nombre de usuario y la contraseña.
           </p>
         </CardHeader>
         <CardContent>
@@ -71,22 +71,21 @@ export function LoginForm({
                 </p>
               ) : null}
               <div className="grid gap-2">
-                <Label htmlFor={emailId} className="text-foreground">
-                  Correo
+                <Label htmlFor={loginId} className="text-foreground">
+                  Usuario
                 </Label>
                 <Input
-                  id={emailId}
-                  name="email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
+                  id={loginId}
+                  name="login"
+                  type="text"
+                  autoComplete="username"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck={false}
-                  placeholder="correo@empresa.com"
+                  placeholder="usuario"
                   required
-                  value={email}
-                  onChange={(ev) => setEmail(ev.target.value)}
+                  value={loginValue}
+                  onChange={(ev) => setLoginValue(ev.target.value)}
                   disabled={submitting}
                   className="h-11"
                 />
@@ -124,6 +123,14 @@ export function LoginForm({
               <Button type="submit" className="h-11 w-full" disabled={submitting} size="lg">
                 {submitting ? "Entrando…" : "Entrar"}
               </Button>
+              <p className="text-center text-sm text-muted-foreground">
+                <Link
+                  to="../request-reset"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  Solicitar restablecimiento de contraseña
+                </Link>
+              </p>
             </div>
           </form>
         </CardContent>

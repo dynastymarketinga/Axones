@@ -222,7 +222,7 @@ export default function AxonesDashboardPage() {
         title: "Solicitudes por despachar",
         hint: "Pendiente o con entrega parcial.",
         value: data.material_requests_pending,
-        href: "/axones/solicitudes-material",
+        href: "/solicitudes-material",
         icon: Inbox,
         ringClass: "border-l-sky-500/80",
         iconClass: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
@@ -239,7 +239,7 @@ export default function AxonesDashboardPage() {
         title: "Órdenes sin fecha de programa",
         hint: "Candidatas a asignar en el tablero.",
         value: data.work_orders_pending_programming,
-        href: "/axones/programacion",
+        href: "/programacion",
         icon: CalendarClock,
         ringClass: "border-l-violet-500/80",
         iconClass: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
@@ -248,7 +248,7 @@ export default function AxonesDashboardPage() {
         title: "Órdenes en programación",
         hint: "En curso en el calendario de planta.",
         value: data.work_orders_in_programming,
-        href: "/axones/programacion",
+        href: "/programacion",
         icon: CalendarDays,
         ringClass: "border-l-fuchsia-500/80",
         iconClass: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
@@ -257,7 +257,7 @@ export default function AxonesDashboardPage() {
         title: "Alertas sin leer",
         hint: "Pendiente de atención del equipo.",
         value: data.operational_alerts_unread,
-        href: "/axones/alertas",
+        href: "/alertas",
         icon: Bell,
         ringClass: "border-l-rose-500/80",
         iconClass: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
@@ -266,7 +266,7 @@ export default function AxonesDashboardPage() {
         title: "Movimientos hoy en inventario",
         hint: "Entradas, salidas y ajustes del día.",
         value: data.movements_today,
-        href: "/axones/movimientos-inventario",
+        href: "/movimientos-inventario",
         icon: TrendingUp,
         ringClass: "border-l-cyan-500/80",
         iconClass: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
@@ -488,7 +488,7 @@ export default function AxonesDashboardPage() {
                 )}
                 <p className="text-center text-sm">
                   <Link
-                    to="/axones/solicitudes-material"
+                    to="/solicitudes-material"
                     className="text-primary font-medium hover:underline"
                   >
                     Abrir listado de solicitudes
@@ -544,7 +544,7 @@ export default function AxonesDashboardPage() {
                 </BarChart>
               </ChartContainer>
               <p className="text-muted-foreground mt-2 text-center text-sm">
-                <Link to="/axones/programacion" className="text-primary font-medium hover:underline">
+                <Link to="/programacion" className="text-primary font-medium hover:underline">
                   Ir al tablero de programación
                 </Link>
               </p>

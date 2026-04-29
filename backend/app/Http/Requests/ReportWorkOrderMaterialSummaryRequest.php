@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ReportWorkOrderMaterialSummaryRequest extends FormRequest
 {
@@ -18,6 +19,7 @@ class ReportWorkOrderMaterialSummaryRequest extends FormRequest
     {
         return [
             'work_order_id' => ['required', 'integer', 'exists:work_orders,id'],
+            'format' => ['sometimes', 'string', Rule::in(['csv'])],
         ];
     }
 }

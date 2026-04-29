@@ -49,7 +49,7 @@ export default function PurchaseOrderNewPage() {
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
     const from = st?.from?.trim()
-    return from && from.startsWith("/") ? from : "/axones/ordenes-compra"
+    return from && from.startsWith("/") ? from : "/ordenes-compra"
   }, [location.state])
 
   useEffect(() => {
@@ -153,7 +153,7 @@ export default function PurchaseOrderNewPage() {
             Nueva orden de compra
           </h1>
           <p className="text-muted-foreground text-sm">
-            API <code className="text-xs">POST /purchase-orders</code>
+            Indique proveedor, líneas y condiciones de la compra.
           </p>
         </div>
         <Button type="button" variant="outline" asChild>

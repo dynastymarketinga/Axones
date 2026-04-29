@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\InventoryMovementsIndexRequest;
 use App\Models\InventoryMovement;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Database\Eloquent\Builder;
 
 class InventoryMovementsController extends Controller
 {
@@ -50,6 +51,59 @@ class InventoryMovementsController extends Controller
             $query->where('reference_type', $filters['reference_type']);
         }
 
+        $applyInvalidReferenceFilter = function (Builder $q): void {
+            $q->where(function (Builder $inner) {
+                $inner->whereNull('reference_type')
+                    ->orWhere(function (Builder $x) {
+                        $x->where('reference_type', '!=', 'inventory_adjustment')
+                            ->whereNull('reference_id');
+                    })
+                    ->orWhereNotIn('reference_type', [
+                        'purchase_receipt',
+                        'miscellaneous_receipt',
+                        'material_request',
+                        'inventory_return',
+                        'inventory_adjustment',
+                    ])
+                    ->orWhere(function (Builder $x) {
+                        $x->where('reference_type', 'purchase_receipt')
+                            ->whereNotExists(function ($sub) {
+                                $sub->selectRaw('1')
+                                    ->from('purchase_receipts as pr')
+                                    ->whereColumn('pr.id', 'inventory_movements.reference_id');
+                            });
+                    })
+                    ->orWhere(function (Builder $x) {
+                        $x->where('reference_type', 'miscellaneous_receipt')
+                            ->whereNotExists(function ($sub) {
+                                $sub->selectRaw('1')
+                                    ->from('miscellaneous_receipts as mr')
+                                    ->whereColumn('mr.id', 'inventory_movements.reference_id');
+                            });
+                    })
+                    ->orWhere(function (Builder $x) {
+                        $x->where('reference_type', 'material_request')
+                            ->whereNotExists(function ($sub) {
+                                $sub->selectRaw('1')
+                                    ->from('material_requests as rq')
+                                    ->whereColumn('rq.id', 'inventory_movements.reference_id');
+                            });
+                    })
+                    ->orWhere(function (Builder $x) {
+                        $x->where('reference_type', 'inventory_return')
+                            ->whereNotExists(function ($sub) {
+                                $sub->selectRaw('1')
+                                    ->from('inventory_returns as ir')
+                                    ->whereColumn('ir.id', 'inventory_movements.reference_id');
+                            });
+                    });
+            });
+        };
+
+        if (! empty($filters['invalid_only']) && (bool) $filters['invalid_only'] === true) {
+            $applyInvalidReferenceFilter($query);
+        }
+
         if (array_key_exists('reference_id', $filters) && $filters['reference_id'] !== null) {
             $query->where('reference_id', $filters['reference_id']);
         }
@@ -67,6 +121,23 @@ class InventoryMovementsController extends Controller
 
         $perPage = min((int) ($filters['per_page'] ?? $request->query('per_page', 50)), 200);
 
-        return response()->json($query->paginate($perPage));
+        $paginator = $query->paginate($perPage);
+        $ids = $paginator->getCollection()->pluck('id')->all();
+        $invalidIds = [];
+        if ($ids !== []) {
+            $invalidQuery = InventoryMovement::query()->whereIn('id', $ids);
+            $applyInvalidReferenceFilter($invalidQuery);
+            $invalidIds = $invalidQuery->pluck('id')->all();
+        }
+        $invalidLookup = array_fill_keys($invalidIds, true);
+        $paginator->setCollection(
+            $paginator->getCollection()->map(function (InventoryMovement $m) use ($invalidLookup) {
+                $m->setAttribute('is_invalid_reference', isset($invalidLookup[$m->id]));
+
+                return $m;
+            })
+        );
+
+        return response()->json($paginator);
     }
 }

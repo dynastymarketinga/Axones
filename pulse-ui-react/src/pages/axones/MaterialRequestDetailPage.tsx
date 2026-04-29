@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -30,6 +30,7 @@ type Detail = {
   id: number
   work_order_id: number
   status: string
+  authorized_by?: number | null
   work_order?: {
     code: string
     client?: Pick<ClientRecord, "name">
@@ -48,6 +49,7 @@ type BobinaRow = {
 
 export default function MaterialRequestDetailPage() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const rid = id ? Number(id) : NaN
 
   const [loading, setLoading] = useState(true)
@@ -115,6 +117,18 @@ export default function MaterialRequestDetailPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (loading || !detail) return
+    if (searchParams.get("despacho") !== "1") return
+    const t = window.setTimeout(() => {
+      document.getElementById("panel-despacho")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      })
+    }, 100)
+    return () => window.clearTimeout(t)
+  }, [loading, detail, searchParams])
 
   async function dispatch() {
     if (!detail) return
@@ -190,11 +204,12 @@ export default function MaterialRequestDetailPage() {
             Solicitud #{rid}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Autorice desde el listado; aquí despacha cantidades contra inventario.
+            Autorice desde el listado; aquí selecciona cantidades o bobinas y despacha contra inventario
+            (ligado a la OT).
           </p>
         </div>
         <Button type="button" variant="outline" asChild>
-          <Link to="/axones/solicitudes-material">Volver</Link>
+          <Link to="/solicitudes-material">Volver</Link>
         </Button>
       </div>
 
@@ -207,7 +222,7 @@ export default function MaterialRequestDetailPage() {
               <span className="text-muted-foreground">OT: </span>
               <Link
                 className="text-primary underline-offset-4 hover:underline"
-                to={`/axones/ordenes-trabajo/${detail.work_order_id}`}
+                to={`/ordenes-trabajo/${detail.work_order_id}`}
               >
                 {detail.work_order?.code ?? detail.work_order_id}
               </Link>
@@ -224,8 +239,13 @@ export default function MaterialRequestDetailPage() {
               <span className="text-muted-foreground">Estado: </span>
               {detail.status}
             </div>
+            <div>
+              <span className="text-muted-foreground">Autorización: </span>
+              {detail.authorized_by != null ? "Sí" : "Pendiente"}
+            </div>
           </div>
 
+          <div id="panel-despacho" className="space-y-4 scroll-mt-4">
           <div className="rounded-xl border bg-card overflow-x-auto shadow-sm">
             <Table>
               <TableHeader>
@@ -351,17 +371,18 @@ export default function MaterialRequestDetailPage() {
               disabled={
                 dispatching ||
                 detail.status === "cancelled" ||
-                detail.status === "dispatched"
+                detail.status === "dispatched" ||
+                detail.authorized_by == null
               }
             >
               {dispatching ? "Procesando…" : "Despachar selección"}
             </Button>
-            {detail.status === "pending" ? (
+            {detail.authorized_by == null ? (
               <p className="text-muted-foreground text-xs">
-                Pendiente de autorización en el listado; el backend puede
-                permitir despacho según política interna.
+                Debe pulsar <strong>Autorizar</strong> en el listado de solicitudes antes de despachar.
               </p>
             ) : null}
+          </div>
           </div>
         </>
       )}

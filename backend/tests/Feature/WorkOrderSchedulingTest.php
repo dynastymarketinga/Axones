@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\WorkOrderBoardStage;
 use App\Enums\WorkOrderSchedulingStatus;
+use App\Models\Client;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -70,5 +71,40 @@ class WorkOrderSchedulingTest extends TestCase
             ['Authorization' => 'Bearer '.$token],
         )->assertOk();
         $this->assertGreaterThanOrEqual(1, count($filtered->json('data')));
+    }
+
+    public function test_work_order_supports_general_q_search_by_code_reference_and_client(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $client = Client::query()->create([
+            'name' => 'Cliente Aurora',
+            'rif' => 'J-12345678-9',
+        ]);
+
+        $created = $this->postJson('/api/work-orders', [
+            'client_id' => $client->id,
+            'client_order_reference' => 'PED-AUR-777',
+            'notes' => 'OT de prueba búsqueda',
+            'auto_create_material_request' => false,
+        ], ['Authorization' => 'Bearer '.$token])->assertCreated();
+
+        $code = (string) $created->json('code');
+
+        $byCode = $this->getJson('/api/work-orders?q='.urlencode($code), [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+        $this->assertCount(1, $byCode->json('data'));
+
+        $byRef = $this->getJson('/api/work-orders?q=PED-AUR', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+        $this->assertCount(1, $byRef->json('data'));
+
+        $byClient = $this->getJson('/api/work-orders?q=Aurora', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+        $this->assertCount(1, $byClient->json('data'));
     }
 }

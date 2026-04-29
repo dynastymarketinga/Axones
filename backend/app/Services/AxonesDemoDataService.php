@@ -4,21 +4,35 @@ namespace App\Services;
 
 use App\Enums\InventoryArea;
 use App\Enums\InventoryMovementType;
+use App\Enums\PrintingChemicalType;
 use App\Enums\PurchaseOrderStatus;
 use App\Enums\WorkOrderBoardStage;
 use App\Enums\WorkOrderSchedulingStatus;
 use App\Enums\WorkOrderStatus;
+use App\Models\AreaRequest;
+use App\Models\Bobina;
 use App\Models\Client;
 use App\Models\ClientOrder;
 use App\Models\ClientOrderLine;
+use App\Models\CorteBobinaUsage;
+use App\Models\CorteTimeSegment;
+use App\Models\DeliveryNote;
+use App\Models\DeliveryNoteLine;
 use App\Models\GateMovement;
 use App\Models\InventoryReturn;
+use App\Models\LaminacionBobinaUsage;
+use App\Models\LaminacionTimeSegment;
 use App\Models\Material;
-use App\Models\MaterialRequest;
 use App\Models\MaterialRequestLine;
 use App\Models\MiscellaneousReceipt;
 use App\Models\MiscellaneousReceiptAttachment;
+use App\Models\MontajeMaterialUsage;
+use App\Models\MontajeTimeSegment;
 use App\Models\OperationalAlert;
+use App\Models\PrintingBobinaUsage;
+use App\Models\PrintingChemicalUsage;
+use App\Models\PrintingInkControlLine;
+use App\Models\PrintingTimeSegment;
 use App\Models\Product;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderLine;
@@ -30,24 +44,38 @@ use App\Models\TintaMixtureComponent;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\WorkOrder;
+use App\Models\WorkOrderCorteSummary;
+use App\Models\WorkOrderLaminacionSummary;
 use App\Models\WorkOrderLine;
+use App\Models\WorkOrderMontajeSummary;
+use App\Models\WorkOrderPrintingSummary;
 use App\Models\WorkOrderProductionItem;
 use App\Models\WorkOrderQualityRecord;
+use App\Models\WorkOrderTechnicalDocument;
+use App\Support\DemoTintaCatalogRows;
+use Carbon\Carbon;
+use Illuminate\Http\File;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class AxonesDemoDataService
 {
+    private int $demoVolume = 20;
+
     public function __construct(
         private readonly InventoryLedgerService $ledger,
         private readonly PurchaseReceiptService $purchaseReceipts,
         private readonly MaterialRequestService $materialRequests,
     ) {}
 
-    public function seed(): array
+    /**
+     * @param  int  $demoVolume  Filas objetivo por tabla de dominio (5–200). Tablas con UNIQUE por OT (resúmenes)
+     *                           usan como mínimo esta cantidad de órdenes de trabajo.
+     */
+    public function seed(int $demoVolume = 20): array
     {
+        $this->demoVolume = max(5, min(200, $demoVolume));
         // TRUNCATE hace commit implícito en MySQL: no lo corremos dentro de transacción.
         $this->cleanDomainData(keepUsers: true);
 
@@ -63,19 +91,27 @@ class AxonesDemoDataService
             $suppliers = $this->seedSuppliers();
 
             $materials = $this->seedMaterials($inventoryUser);
+            $tintaCatalog = $this->seedTintaCatalogMaterials();
+            $materials = array_merge($materials, $tintaCatalog);
             $products = $this->seedProducts($clients);
+            $products = array_merge($products, $this->seedExtraProductsForFirstClient($clients[0]));
+            $this->seedProductInkMaterialForDemo($products, $tintaCatalog);
 
             $purchaseOrders = $this->seedPurchaseOrdersAndReceipts($suppliers, $materials, $inventoryUser);
             $this->seedMiscReceipts($materials, $inventoryUser);
             $this->seedGateMovements($boss);
 
             $clientOrders = $this->seedClientOrders($clients, $products, $materials);
+            $bobinas = $this->seedBobinas($materials);
             $workOrders = $this->seedWorkOrders($clientOrders, $clients, $products, $materials, $printingUser);
 
             $this->seedRequestsAndDispatch($workOrders, $materials, $inventoryUser);
             $this->seedQuality($workOrders, $boss);
-            $this->seedReturnsAndRejectedBobinas($workOrders, $materials, $printingUser);
+            $this->seedReturnsAndRejectedBobinas($workOrders, $materials);
             $this->seedAlerts($boss);
+
+            $this->seedHeavyDemoGraph($workOrders, $materials, $bobinas, $printingUser, $boss);
+            $this->seedAuxiliaryVolume($workOrders, $materials, $products, $printingUser, $inventoryUser, $boss);
 
             return [
                 'users' => array_map(fn (User $u) => $u->only(['id', 'name', 'email', 'role']), $users),
@@ -85,6 +121,8 @@ class AxonesDemoDataService
                 'materials' => count($materials),
                 'purchase_orders' => count($purchaseOrders),
                 'work_orders' => count($workOrders),
+                'bobinas' => count($bobinas),
+                'demo_volume' => $this->demoVolume,
             ];
         });
     }
@@ -99,10 +137,16 @@ class AxonesDemoDataService
     private function seedUsers(): array
     {
         $mk = function (string $email, string $name, string $role): User {
+            $base = strtolower((string) preg_replace('/[^a-zA-Z0-9._-]/', '', strstr($email, '@', true) ?: $email));
+            $domain = strtolower((string) strstr($email, '@'));
+            $suffix = $domain === '@axones.demo' ? '_demo' : '';
+            $username = ($base !== '' ? $base : 'user').$suffix;
+
             return User::query()->updateOrCreate(
                 ['email' => $email],
                 [
                     'name' => $name,
+                    'username' => $username,
                     'role' => $role,
                     'password' => Hash::make('password'),
                 ],
@@ -138,35 +182,28 @@ class AxonesDemoDataService
     }
 
     /**
-     * @param array<int, Vendor> $vendors
+     * @param  array<int, Vendor>  $vendors
      * @return array<int, Client>
      */
     private function seedClients(array $vendors): array
     {
-        return [
-            Client::query()->create([
-                'name' => 'Millennium C.A.',
-                'rif' => 'J-12345678-9',
+        $nv = count($vendors);
+        $out = [];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $out[] = Client::query()->create([
+                'name' => 'Cliente demo volumen '.$i,
+                'rif' => 'J-4'.str_pad((string) (100000 + $i), 7, '0', STR_PAD_LEFT).'-'.($i % 10),
                 'state' => 'Portuguesa',
                 'city' => 'Acarigua',
-                'vendor_id' => $vendors[0]->getKey(),
-                'address' => 'Zona Industrial, Portuguesa',
-                'vendor_name' => 'Vendedor Demo',
-                'email' => 'compras@millennium.demo',
-                'phone' => '+58 412-0000000',
-            ]),
-            Client::query()->create([
-                'name' => 'Supermercado La Plaza',
-                'rif' => 'J-98765432-1',
-                'state' => 'Portuguesa',
-                'city' => 'Guanare',
-                'vendor_id' => $vendors[1]->getKey(),
-                'address' => 'Centro, Portuguesa',
-                'vendor_name' => 'Vendedor Demo',
-                'email' => 'admin@plaza.demo',
-                'phone' => '+58 414-0000000',
-            ]),
-        ];
+                'vendor_id' => $vendors[($i - 1) % $nv]->getKey(),
+                'address' => 'Zona demo '.$i.', Portuguesa',
+                'vendor_name' => 'Vendedor asignado',
+                'email' => 'cliente.demo'.$i.'@axones.demo',
+                'phone' => '+58 412-'.str_pad((string) (1000000 + $i), 7, '0', STR_PAD_LEFT),
+            ]);
+        }
+
+        return $out;
     }
 
     /**
@@ -174,31 +211,34 @@ class AxonesDemoDataService
      */
     private function seedVendors(): array
     {
-        return [
-            Vendor::query()->create(['name' => 'Vendedor Demo', 'active' => true]),
-            Vendor::query()->create(['name' => 'Vendedor Demo 2', 'active' => true]),
-            Vendor::query()->create(['name' => 'Vendedor Demo 3', 'active' => true]),
-        ];
+        $out = [];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $out[] = Vendor::query()->create([
+                'name' => 'Vendedor demo n°'.$i,
+                'active' => true,
+            ]);
+        }
+
+        return $out;
     }
 
+    /**
+     * @return array<int, Supplier>
+     */
     private function seedSuppliers(): array
     {
-        return [
-            Supplier::query()->create([
-                'name' => 'Proveedor Polímeros',
-                'rif' => 'J-11111111-1',
-                'email' => 'ventas@polimeros.demo',
-                'phone' => '+58 424-0000000',
-                'address' => 'Valencia, Carabobo',
-            ]),
-            Supplier::query()->create([
-                'name' => 'Proveedor Tintas',
-                'rif' => 'J-22222222-2',
-                'email' => 'ventas@tintas.demo',
-                'phone' => '+58 426-0000000',
-                'address' => 'Maracay, Aragua',
-            ]),
-        ];
+        $out = [];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $out[] = Supplier::query()->create([
+                'name' => 'Proveedor demo '.$i,
+                'rif' => 'J-5'.str_pad((string) (100000 + $i), 7, '0', STR_PAD_LEFT).'-'.($i % 10),
+                'email' => 'ventas.demo'.$i.'@proveedor.axones.demo',
+                'phone' => '+58 424-'.str_pad((string) (2000000 + $i), 7, '0', STR_PAD_LEFT),
+                'address' => 'Dirección fiscal demo '.$i,
+            ]);
+        }
+
+        return $out;
     }
 
     private function seedMaterials(User $inventoryUser): array
@@ -223,65 +263,173 @@ class AxonesDemoDataService
                     ['reason' => 'Stock inicial demo'],
                 );
             }
+
             return $m;
         };
 
         $out = [];
 
-        // Material
-        $out[] = $make('MAT-PEBD-25', 'PEBD 25 micras', InventoryArea::Material->value, 'kg', '500.000', '1200.000');
-        $out[] = $make('MAT-BOPP-20', 'BOPP 20 micras', InventoryArea::Material->value, 'kg', '300.000', '800.000');
+        $areaCycle = [
+            InventoryArea::Material,
+            InventoryArea::Material,
+            InventoryArea::Tintas,
+            InventoryArea::Tintas,
+            InventoryArea::Quimicos,
+            InventoryArea::Miscelaneos,
+            InventoryArea::CementerioTintas,
+            InventoryArea::BobinasRechazadas,
+        ];
 
-        // Tintas
-        $out[] = $make('TIN-BLK', 'Tinta Negro', InventoryArea::Tintas->value, 'kg', '10.000', '80.000');
-        $out[] = $make('TIN-RED', 'Tinta Rojo', InventoryArea::Tintas->value, 'kg', '10.000', '60.000');
-
-        // Cementerio
-        $out[] = $make('CEM-MIX-01', 'Sobrante mezcla OT', InventoryArea::CementerioTintas->value, 'kg', '0.000', '15.000');
-
-        // Químicos
-        $out[] = $make('Q-ALC', 'Alcohol', InventoryArea::Quimicos->value, 'kg', '5.000', '40.000');
-        $out[] = $make('Q-NPA', 'NPA', InventoryArea::Quimicos->value, 'kg', '5.000', '30.000');
-
-        // Bobinas rechazadas (inventario)
-        $out[] = $make('BR-001', 'Bobina rechazada genérica', InventoryArea::BobinasRechazadas->value, 'kg', '0.000', '0.000');
-
-        // Misceláneos
-        $out[] = $make('MIS-CINTA', 'Cinta adhesiva', InventoryArea::Miscelaneos->value, 'u', '20.000', '100.000');
-        $out[] = $make('MIS-GUANTE', 'Guantes', InventoryArea::Miscelaneos->value, 'caja', '5.000', '25.000');
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $area = $areaCycle[($i - 1) % count($areaCycle)];
+            $unit = $area === InventoryArea::Miscelaneos ? 'u' : 'kg';
+            $initial = match ($area) {
+                InventoryArea::BobinasRechazadas => '0.000',
+                InventoryArea::CementerioTintas => '20.000',
+                default => '120.000',
+            };
+            $sku = 'AX-BULK-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT);
+            $out[] = $make(
+                $sku,
+                'Material plancha demo '.$i.' ('.$area->value.')',
+                $area->value,
+                $unit,
+                '5.000',
+                $initial,
+            );
+        }
 
         return $out;
     }
 
+    /**
+     * @param  array<int, Client>  $clients
+     * @return array<int, Product>
+     */
     private function seedProducts(array $clients): array
     {
-        return [
-            Product::query()->create([
-                'client_id' => $clients[0]->getKey(),
-                'name' => 'Empaque salchichas 500g',
-                'cpe' => 'CPE-500',
-                'barcode' => '1234567890123',
-                'mps' => 'MPS-500',
+        $nc = count($clients);
+        $out = [];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $out[] = Product::query()->create([
+                'client_id' => $clients[($i - 1) % $nc]->getKey(),
+                'name' => 'Producto demo '.$i,
+                'cpe' => 'CPE-DEMO-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+                'barcode' => '770'.str_pad((string) (100000000 + $i), 10, '0', STR_PAD_LEFT),
+                'mps' => 'MPS-DEMO-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
                 'print_type' => 'Flexografía',
-                'structure' => 'BOPP 20 + PEBD 25',
-            ]),
-            Product::query()->create([
-                'client_id' => $clients[1]->getKey(),
-                'name' => 'Etiqueta precio',
-                'cpe' => 'CPE-ETQ',
-                'barcode' => '9876543210987',
-                'mps' => 'MPS-ETQ',
-                'print_type' => 'Flexografía',
-                'structure' => 'Papel + adhesivo',
-            ]),
-        ];
+                'structure' => 'Estructura demo '.$i,
+            ]);
+        }
+
+        return $out;
     }
 
+    /**
+     * Más de un producto maestro con el mismo `client_id` (primer cliente = «Cliente demo volumen 1») para probar
+     * el buscador de producto en la planilla de orden de trabajo.
+     *
+     * @return list<Product>
+     */
+    private function seedExtraProductsForFirstClient(Client $firstClient): array
+    {
+        // Mismo `client_id` que «Cliente demo volumen 1» (primer cliente) para probar el desplegable:
+        // ya existe «Producto demo 1» (seedProducts); aquí: Arroz / Salsa / Maripán y un extra.
+        $rows = [
+            ['name' => 'Polar Tuca — Arroz 1kg', 'cpe' => 'CPE-PT-AR-001', 'mps' => 'MPS-PT-AR-001', 'barcode' => '7700900100001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 25 + PEBD (arroz)'],
+            ['name' => 'Polar Tuca — Salsa 400g', 'cpe' => 'CPE-PT-SA-001', 'mps' => 'MPS-PT-SA-001', 'barcode' => '7700900100002', 'print_type' => 'Flexografía', 'structure' => 'BOPP 20 (salsa)'],
+            ['name' => 'Polar Tuca — Maripán 6u', 'cpe' => 'CPE-PT-MA-001', 'mps' => 'MPS-PT-MA-001', 'barcode' => '7700900100003', 'print_type' => 'Flexografía', 'structure' => 'BOPP 18 (maripán)'],
+            ['name' => 'Polar Tuca — Salchichas 500g', 'cpe' => 'CPE-PT-SS-001', 'mps' => 'MPS-PT-SS-001', 'barcode' => '7700900100004', 'print_type' => 'Flexografía', 'structure' => 'PE/PE 90 + impresión carnes'],
+        ];
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = Product::query()->create([
+                'client_id' => $firstClient->getKey(),
+                'name' => $r['name'],
+                'cpe' => $r['cpe'],
+                'barcode' => $r['barcode'],
+                'mps' => $r['mps'],
+                'print_type' => $r['print_type'],
+                'structure' => $r['structure'],
+            ]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Catálogo de tintas (área `tintas`) para el desplegable de planilla y filtro por producto.
+     *
+     * @return list<Material>
+     */
+    private function seedTintaCatalogMaterials(): array
+    {
+        $out = [];
+        foreach (DemoTintaCatalogRows::all() as $r) {
+            $sku = trim($r['sku']);
+            if ($sku === '') {
+                continue;
+            }
+            $name = $r['name'].' — '.$r['presentacion'];
+            $n = 0;
+            $uniqueSku = $sku;
+            while (Material::query()->where('sku', $uniqueSku)->exists()) {
+                $n++;
+                $uniqueSku = $sku.'-'.$n;
+            }
+            $out[] = Material::query()->create([
+                'sku' => $uniqueSku,
+                'name' => $name,
+                'inventory_area' => InventoryArea::Tintas->value,
+                'tinta_presentacion' => $r['presentacion'],
+                'unit' => 'kg',
+                'min_stock' => 0,
+                'notes' => 'Catálogo planilla (demo/real Axones)',
+            ]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Fila 1: solo las primeras N tintas del catálogo (p. ej. 12) para probar el filtro por `product_id`.
+     * El resto de productos: sin filas en `product_ink_material` → la API ofrece todo el catálogo.
+     */
+    private function seedProductInkMaterialForDemo(array $products, array $tintaCatalog): void
+    {
+        if (count($products) === 0 || count($tintaCatalog) === 0) {
+            return;
+        }
+        $first = $products[0];
+        $subset = array_slice($tintaCatalog, 0, min(12, count($tintaCatalog)));
+        $now = now();
+        foreach ($subset as $m) {
+            DB::table('product_ink_material')->updateOrInsert(
+                ['product_id' => $first->getKey(), 'material_id' => $m->getKey()],
+                ['created_at' => $now, 'updated_at' => $now]
+            );
+        }
+    }
+
+    /**
+     * @param  array<int, Supplier>  $suppliers
+     * @param  array<int, Material>  $materials
+     * @return list<PurchaseOrder|PurchaseReceipt>
+     */
     private function seedPurchaseOrdersAndReceipts(array $suppliers, array $materials, User $inventoryUser): array
     {
+        $matsMat = collect($materials)->where('inventory_area', InventoryArea::Material->value)->values();
+        $m0 = $matsMat->get(0) ?? $materials[0];
+        $m1 = $matsMat->get(1) ?? $materials[1];
+        $tinta = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Tintas->value);
+        $quim = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Quimicos->value);
+        if (! $tinta || ! $quim) {
+            throw new \RuntimeException('Materiales de tinta/químico requeridos para la demo.');
+        }
+
         $po1 = PurchaseOrder::query()->create([
             'supplier_id' => $suppliers[0]->getKey(),
-            'code' => 'OC-DEMO-001',
+            'code' => 'OC-DEMO-00001',
             'status' => PurchaseOrderStatus::Open->value,
             'ordered_at' => now()->subDays(4),
             'notes' => 'OC demo',
@@ -289,7 +437,7 @@ class AxonesDemoDataService
         $line1 = PurchaseOrderLine::query()->create([
             'purchase_order_id' => $po1->getKey(),
             'description' => 'Material PEBD',
-            'material_id' => $materials[0]->getKey(),
+            'material_id' => $m0->getKey(),
             'quantity_ordered' => '500.000',
             'quantity_received' => '0.000',
             'unit' => 'kg',
@@ -297,13 +445,12 @@ class AxonesDemoDataService
         $line2 = PurchaseOrderLine::query()->create([
             'purchase_order_id' => $po1->getKey(),
             'description' => 'BOPP',
-            'material_id' => $materials[1]->getKey(),
+            'material_id' => $m1->getKey(),
             'quantity_ordered' => '300.000',
             'quantity_received' => '0.000',
             'unit' => 'kg',
         ]);
 
-        // Registrar recepción casada con OC usando el service (actualiza inventario y cantidades recibidas)
         $receipt = $this->purchaseReceipts->store([
             'purchase_order_id' => $po1->getKey(),
             'without_purchase_order' => false,
@@ -312,20 +459,19 @@ class AxonesDemoDataService
             'lines' => [
                 [
                     'purchase_order_line_id' => $line1->getKey(),
-                    'material_id' => $materials[0]->getKey(),
+                    'material_id' => $m0->getKey(),
                     'quantity' => '200.000',
                     'bobina_count' => 4,
                 ],
                 [
                     'purchase_order_line_id' => $line2->getKey(),
-                    'material_id' => $materials[1]->getKey(),
+                    'material_id' => $m1->getKey(),
                     'quantity' => '150.000',
                     'bobina_count' => 3,
                 ],
             ],
         ], $inventoryUser);
 
-        // Segunda recepción sin OC (stock)
         $receipt2 = $this->purchaseReceipts->store([
             'without_purchase_order' => true,
             'exception_reason' => 'Stock de seguridad demo',
@@ -333,209 +479,317 @@ class AxonesDemoDataService
             'received_at' => now()->subDays(2)->toDateTimeString(),
             'lines' => [
                 [
-                    'material_id' => $materials[2]->getKey(),
+                    'material_id' => $tinta->getKey(),
                     'quantity' => '10.000',
                 ],
                 [
-                    'material_id' => $materials[5]->getKey(),
+                    'material_id' => $quim->getKey(),
                     'quantity' => '5.000',
                 ],
             ],
         ], $inventoryUser);
 
-        // Persist objects for counts
-        return [$po1->fresh(), $receipt->fresh(), $receipt2->fresh()];
+        $out = [$po1->fresh(), $receipt->fresh(), $receipt2->fresh()];
+        $ns = count($suppliers);
+        $nm = count($materials);
+
+        for ($i = 2; $i <= $this->demoVolume; $i++) {
+            $po = PurchaseOrder::query()->create([
+                'supplier_id' => $suppliers[($i - 1) % $ns]->getKey(),
+                'code' => 'OC-DEMO-'.str_pad((string) $i, 5, '0', STR_PAD_LEFT),
+                'status' => PurchaseOrderStatus::Open->value,
+                'ordered_at' => now()->subDays(5),
+                'notes' => 'OC volumen demo',
+            ]);
+            PurchaseOrderLine::query()->create([
+                'purchase_order_id' => $po->getKey(),
+                'description' => 'Línea OC demo '.$i,
+                'material_id' => $materials[($i - 1) % $nm]->getKey(),
+                'quantity_ordered' => '100.000',
+                'quantity_received' => '0.000',
+                'unit' => 'kg',
+            ]);
+            $out[] = $po->fresh();
+        }
+
+        return $out;
     }
 
+    /**
+     * @param  array<int, Material>  $materials
+     */
     private function seedMiscReceipts(array $materials, User $inventoryUser): void
     {
-        // Crear archivo demo para adjuntar
         $dir = 'demo_files';
         Storage::disk('local')->put($dir.'/factura-demo.txt', 'Factura demo Axones');
         $path = Storage::disk('local')->path($dir.'/factura-demo.txt');
+        $nm = count($materials);
 
-        $receipt = MiscellaneousReceipt::query()->create([
-            'material_id' => $materials[array_key_last($materials)]->getKey(),
-            'quantity' => '10.000',
-            'user_id' => $inventoryUser->getKey(),
-            'invoice_reference' => 'FAC-DEMO-001',
-            'notes' => 'Ingreso misceláneo demo',
-            'received_at' => now()->subDay(),
-        ]);
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $receipt = MiscellaneousReceipt::query()->create([
+                'material_id' => $materials[($i - 1) % $nm]->getKey(),
+                'quantity' => '10.000',
+                'user_id' => $inventoryUser->getKey(),
+                'invoice_reference' => 'FAC-DEMO-'.str_pad((string) $i, 5, '0', STR_PAD_LEFT),
+                'notes' => 'Ingreso misceláneo demo '.$i,
+                'received_at' => now()->subDays($i % 14),
+            ]);
 
-        $stored = Storage::disk('local')->putFileAs(
-            'miscellaneous_receipts/'.$receipt->getKey(),
-            new \Illuminate\Http\File($path),
-            'factura-demo.txt',
-        );
+            $rel = 'miscellaneous_receipts/'.$receipt->getKey().'/adjunto-'.$i.'.txt';
+            if ($i === 1) {
+                $stored = Storage::disk('local')->putFileAs(
+                    'miscellaneous_receipts/'.$receipt->getKey(),
+                    new File($path),
+                    'factura-demo.txt',
+                );
+                MiscellaneousReceiptAttachment::query()->create([
+                    'miscellaneous_receipt_id' => $receipt->getKey(),
+                    'disk' => 'local',
+                    'path' => $stored,
+                    'original_name' => 'factura-demo.txt',
+                    'mime_type' => 'text/plain',
+                    'size_bytes' => Storage::disk('local')->size($stored),
+                ]);
+            } else {
+                Storage::disk('local')->put($rel, 'Comprobante demo Axones #'.$i);
+                MiscellaneousReceiptAttachment::query()->create([
+                    'miscellaneous_receipt_id' => $receipt->getKey(),
+                    'disk' => 'local',
+                    'path' => $rel,
+                    'original_name' => 'adjunto-'.$i.'.txt',
+                    'mime_type' => 'text/plain',
+                    'size_bytes' => Storage::disk('local')->size($rel),
+                ]);
+            }
 
-        MiscellaneousReceiptAttachment::query()->create([
-            'miscellaneous_receipt_id' => $receipt->getKey(),
-            'disk' => 'local',
-            'path' => $stored,
-            'original_name' => 'factura-demo.txt',
-            'mime_type' => 'text/plain',
-            'size_bytes' => Storage::disk('local')->size($stored),
-        ]);
-
-        $this->ledger->apply(
-            $receipt->material,
-            InventoryMovementType::In,
-            (string) $receipt->quantity,
-            $inventoryUser,
-            'miscellaneous_receipt',
-            (int) $receipt->getKey(),
-            ['invoice_reference' => $receipt->invoice_reference],
-            $receipt->received_at,
-        );
+            $this->ledger->apply(
+                $receipt->material,
+                InventoryMovementType::In,
+                (string) $receipt->quantity,
+                $inventoryUser,
+                'miscellaneous_receipt',
+                (int) $receipt->getKey(),
+                ['invoice_reference' => $receipt->invoice_reference],
+                $receipt->received_at,
+            );
+        }
     }
 
     private function seedGateMovements(User $boss): void
     {
-        GateMovement::query()->create([
-            'direction' => 'in',
-            'notes' => 'Camión proveedor (demo)',
-            'photo_path' => null,
-            'user_id' => $boss->getKey(),
-            'occurred_at' => now()->subHours(6),
-        ]);
-        GateMovement::query()->create([
-            'direction' => 'out',
-            'notes' => 'Salida de despacho (demo)',
-            'photo_path' => null,
-            'user_id' => $boss->getKey(),
-            'occurred_at' => now()->subHours(2),
-        ]);
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            GateMovement::query()->create([
+                'direction' => $i % 2 === 1 ? 'in' : 'out',
+                'notes' => 'Movimiento caseta demo '.$i.' — '.($i % 2 === 1 ? 'entrada' : 'salida'),
+                'photo_path' => null,
+                'user_id' => $boss->getKey(),
+                'occurred_at' => now()->subHours($i + 1),
+            ]);
+        }
     }
 
+    /**
+     * @param  array<int, Client>  $clients
+     * @param  array<int, Product>  $products
+     * @param  array<int, Material>  $materials
+     * @return array<int, ClientOrder>
+     */
     private function seedClientOrders(array $clients, array $products, array $materials): array
     {
-        $co = ClientOrder::query()->create([
-            'client_id' => $clients[0]->getKey(),
-            'code' => 'PC-DEMO-001',
-            'status' => 'open',
-            'notes' => 'Pedido cliente demo',
-        ]);
+        $nc = count($clients);
+        $np = count($products);
+        $nm = count($materials);
+        $out = [];
 
-        ClientOrderLine::query()->create([
-            'client_order_id' => $co->getKey(),
-            'product_id' => $products[0]->getKey(),
-            'material_id' => $materials[0]->getKey(),
-            'quantity' => '500.000',
-            'unit' => 'kg',
-            'notes' => 'Requiere material PEBD',
-        ]);
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $co = ClientOrder::query()->create([
+                'client_id' => $clients[($i - 1) % $nc]->getKey(),
+                'code' => 'PC-DEMO-'.str_pad((string) $i, 5, '0', STR_PAD_LEFT),
+                'status' => 'open',
+                'notes' => 'Pedido cliente demo '.$i,
+            ]);
 
-        return [$co->fresh()];
+            ClientOrderLine::query()->create([
+                'client_order_id' => $co->getKey(),
+                'product_id' => $products[($i - 1) % $np]->getKey(),
+                'material_id' => $materials[($i - 1) % $nm]->getKey(),
+                'quantity' => (string) (100 + $i).'.000',
+                'unit' => 'kg',
+                'notes' => 'Línea pedido demo '.$i,
+            ]);
+
+            $out[] = $co->fresh();
+        }
+
+        return $out;
     }
 
+    /**
+     * @param  array<int, Material>  $materials
+     * @return array<int, Bobina>
+     */
+    private function seedBobinas(array $materials): array
+    {
+        $matsMat = collect($materials)->where('inventory_area', InventoryArea::Material->value)->values();
+        if ($matsMat->isEmpty()) {
+            return [];
+        }
+
+        $out = [];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $mat = $matsMat[($i - 1) % $matsMat->count()];
+            $out[] = Bobina::query()->create([
+                'material_id' => $mat->getKey(),
+                'code' => 'BOB-BULK-'.str_pad((string) $i, 5, '0', STR_PAD_LEFT),
+                'weight_kg' => (string) (90 + $i).'.000',
+                'status' => 'available',
+            ]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<int, ClientOrder>  $clientOrders
+     * @param  array<int, Client>  $clients
+     * @param  array<int, Product>  $products
+     * @param  array<int, Material>  $materials
+     * @return array<int, WorkOrder>
+     */
     private function seedWorkOrders(array $clientOrders, array $clients, array $products, array $materials, User $printingUser): array
     {
-        $wo1 = WorkOrder::query()->create([
-            'code' => 'OT-DEMO-001',
-            'client_order_reference' => $clientOrders[0]->code,
-            'client_order_id' => $clientOrders[0]->getKey(),
-            'client_id' => $clients[0]->getKey(),
-            'product_id' => $products[0]->getKey(),
-            'status' => WorkOrderStatus::Open->value,
-            'scheduling_status' => WorkOrderSchedulingStatus::PendingProgramming->value,
-            'board_stage' => WorkOrderBoardStage::Nueva->value,
-            'notes' => 'OT demo en pendiente por OT',
-            'created_by' => $printingUser->getKey(),
-            'document_number' => WorkOrder::nextDocumentNumber(),
-            'document_date' => now()->toDateString(),
-        ]);
+        $nco = count($clientOrders);
+        $nc = count($clients);
+        $np = count($products);
+        $nm = count($materials);
+        $matLine = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Material->value)
+            ?? $materials[0];
 
-        WorkOrderLine::query()->create([
-            'work_order_id' => $wo1->getKey(),
-            'material_id' => $materials[0]->getKey(),
-            'quantity' => '120.000',
-            'notes' => 'Consumo estimado',
-        ]);
+        $stages = [
+            WorkOrderBoardStage::Nueva,
+            WorkOrderBoardStage::Impresion,
+            WorkOrderBoardStage::Laminacion,
+            WorkOrderBoardStage::Corte,
+            WorkOrderBoardStage::Montaje,
+        ];
 
-        WorkOrderProductionItem::query()->create([
-            'work_order_id' => $wo1->getKey(),
-            'position' => 0,
-            'quantity' => '500.000',
-            'quantity_unit' => 'Kg',
-            'product_description' => 'Empaque salchichas 500g',
-            'technical_specs' => 'Flexografía · 4 colores',
-        ]);
+        $out = [];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $co = $clientOrders[($i - 1) % $nco];
+            $stage = $i <= 5 ? $stages[$i - 1] : WorkOrderBoardStage::Impresion;
+            $sched = $stage === WorkOrderBoardStage::Nueva
+                ? WorkOrderSchedulingStatus::PendingProgramming
+                : WorkOrderSchedulingStatus::InProgramming;
+            $status = $stage === WorkOrderBoardStage::Nueva
+                ? WorkOrderStatus::Open
+                : WorkOrderStatus::InProgress;
 
-        // OT2 ya en impresión para ver pantalla por área
-        $wo2 = WorkOrder::query()->create([
-            'code' => 'OT-DEMO-002',
-            'client_order_reference' => 'PC-DEMO-002',
-            'client_id' => $clients[1]->getKey(),
-            'product_id' => $products[1]->getKey(),
-            'status' => WorkOrderStatus::InProgress->value,
-            'scheduling_status' => WorkOrderSchedulingStatus::InProgramming->value,
-            'board_stage' => WorkOrderBoardStage::Impresion->value,
-            'notes' => 'OT demo en impresión',
-            'created_by' => $printingUser->getKey(),
-            'document_number' => WorkOrder::nextDocumentNumber(),
-            'document_date' => now()->toDateString(),
-        ]);
+            $wo = WorkOrder::query()->create([
+                'code' => WorkOrder::nextCode(),
+                'client_order_reference' => $co->code,
+                'client_order_id' => $co->getKey(),
+                'client_id' => $clients[($i - 1) % $nc]->getKey(),
+                'product_id' => $products[($i - 1) % $np]->getKey(),
+                'status' => $status->value,
+                'scheduling_status' => $sched->value,
+                'board_stage' => $stage->value,
+                'notes' => 'OT demo volumen '.$i,
+                'created_by' => $printingUser->getKey(),
+                'document_number' => WorkOrder::nextDocumentNumber(),
+                'document_date' => now()->toDateString(),
+            ]);
 
-        // OT3 en laminación
-        $wo3 = WorkOrder::query()->create([
-            'code' => 'OT-DEMO-003',
-            'client_order_reference' => 'PC-DEMO-003',
-            'client_id' => $clients[0]->getKey(),
-            'product_id' => $products[0]->getKey(),
-            'status' => WorkOrderStatus::InProgress->value,
-            'scheduling_status' => WorkOrderSchedulingStatus::InProgramming->value,
-            'board_stage' => WorkOrderBoardStage::Laminacion->value,
-            'notes' => 'OT demo en laminación',
-            'created_by' => $printingUser->getKey(),
-            'document_number' => WorkOrder::nextDocumentNumber(),
-            'document_date' => now()->toDateString(),
-        ]);
+            WorkOrderLine::query()->create([
+                'work_order_id' => $wo->getKey(),
+                'material_id' => $matLine->getKey(),
+                'quantity' => (string) (50 + $i).'.000',
+                'notes' => 'Consumo estimado demo',
+            ]);
 
-        // OT4 en corte
-        $wo4 = WorkOrder::query()->create([
-            'code' => 'OT-DEMO-004',
-            'client_order_reference' => 'PC-DEMO-004',
-            'client_id' => $clients[0]->getKey(),
-            'product_id' => $products[0]->getKey(),
-            'status' => WorkOrderStatus::InProgress->value,
-            'scheduling_status' => WorkOrderSchedulingStatus::InProgramming->value,
-            'board_stage' => WorkOrderBoardStage::Corte->value,
-            'notes' => 'OT demo en corte',
-            'created_by' => $printingUser->getKey(),
-            'document_number' => WorkOrder::nextDocumentNumber(),
-            'document_date' => now()->toDateString(),
-        ]);
+            WorkOrderProductionItem::query()->create([
+                'work_order_id' => $wo->getKey(),
+                'position' => 0,
+                'quantity' => (string) (200 + $i).'.000',
+                'quantity_unit' => 'Kg',
+                'product_description' => 'Ítem producción demo '.$i,
+                'technical_specs' => 'Flexografía · demo',
+            ]);
 
-        // OT5 en montaje (para esa pestaña en detalle OT)
-        $wo5 = WorkOrder::query()->create([
-            'code' => 'OT-DEMO-005',
-            'client_order_reference' => 'PC-DEMO-005',
-            'client_id' => $clients[1]->getKey(),
-            'product_id' => $products[1]->getKey(),
-            'status' => WorkOrderStatus::InProgress->value,
-            'scheduling_status' => WorkOrderSchedulingStatus::InProgramming->value,
-            'board_stage' => WorkOrderBoardStage::Montaje->value,
-            'notes' => 'OT demo en montaje',
-            'created_by' => $printingUser->getKey(),
-            'document_number' => WorkOrder::nextDocumentNumber(),
-            'document_date' => now()->toDateString(),
-        ]);
+            // Precarga de planificación + impresión para pruebas del módulo (evita formularios vacíos).
+            WorkOrderTechnicalDocument::query()->updateOrCreate(
+                ['work_order_id' => $wo->getKey()],
+                [
+                    'form' => [
+                        'fechaOrden' => now()->toDateString(),
+                        'numeroOrden' => $wo->document_number ?: $wo->code,
+                        'pedidoKg' => number_format((float) (100 + $i), 3, '.', ''),
+                        'maquina' => $i % 2 === 0 ? 'COMEXI 2' : 'COMEXI 1',
+                        'frecuencia' => '250±2',
+                        'anchoCorteMontaje' => '330±2',
+                        'numBandas' => (string) max(1, ($i % 4) + 1),
+                        'numRepeticion' => (string) (($i % 6) + 1),
+                        'desarrollo' => (string) (450 + $i),
+                        'anchoMontaje' => (string) (300 + $i),
+                        'figuraEmbobinadoMontaje' => (string) (($i % 8) + 1),
+                        'obsMontaje' => 'Precarga planificación demo '.$i,
+                        'pinonImp' => (string) (820 + $i),
+                        'lineaCorte' => 'LC-'.str_pad((string) $i, 3, '0', STR_PAD_LEFT),
+                        'figEmbImpDisplay' => (string) (($i % 8) + 1),
+                        'sustratosVirgenImp' => [
+                            ['material_id' => (string) $matLine->getKey(), 'kg' => (string) (20 + $i)],
+                        ],
+                        'kgIngresadoImp' => (string) (22 + $i),
+                        'kgSalidaImp' => (string) (20 + $i),
+                        'mermaImp' => (string) (2),
+                        'metrosImp' => (string) (900 + $i * 10),
+                        'tintaColor1' => 'AMARILLO · BF-1564',
+                        'tintaAnilox1' => '3.00',
+                        'tintaVisc1' => '18',
+                        'tintaObs1' => 'Precarga demo',
+                        'impTurno' => $i % 2 === 0 ? 'diurno' : 'nocturno',
+                        'impGrupo' => ['A', 'B', 'C'][$i % 3],
+                        'impOperador' => 'Operador demo '.$i,
+                        'impAyudante' => 'Ayudante demo '.$i,
+                        'impSupervisor' => 'Supervisor demo '.$i,
+                        'impTimerState' => 'stopped',
+                        'impTimerEffectiveAccSec' => 1200 + ($i * 10),
+                        'impTimerDeadAccSec' => 120,
+                        'impEntradaBobinasKg' => array_fill(0, 26, ''),
+                        'impSalidaBobinasKg' => array_fill(0, 22, ''),
+                        'impDevolucionBuenaKg' => '0',
+                        'impDevolucionRechazadaKg' => '0',
+                        'impScrapTransparenteKg' => '0.5',
+                        'impScrapImpresoKg' => '0.2',
+                    ],
+                ],
+            );
 
-        return [$wo1->fresh(), $wo2->fresh(), $wo3->fresh(), $wo4->fresh(), $wo5->fresh()];
+            $out[] = $wo->fresh();
+        }
+
+        return $out;
     }
 
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     */
     private function seedRequestsAndDispatch(array $workOrders, array $materials, User $inventoryUser): void
     {
-        // Crear solicitud material para OT2 y despachar parcial
         $wo = $workOrders[1];
+        $mat0 = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Material->value)
+            ?? $materials[0];
+        $tinta = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Tintas->value);
+        if (! $tinta) {
+            return;
+        }
 
         $mr = $this->materialRequests->storePendingRequest(
             $wo->fresh(),
             $inventoryUser,
             [
-                ['material_id' => $materials[0]->getKey(), 'quantity_requested' => '20.000'],
-                ['material_id' => $materials[2]->getKey(), 'quantity_requested' => '2.000'],
+                ['material_id' => $mat0->getKey(), 'quantity_requested' => '20.000'],
+                ['material_id' => $tinta->getKey(), 'quantity_requested' => '2.000'],
             ],
             'printing',
             'Solicitud demo desde OT',
@@ -555,6 +809,9 @@ class AxonesDemoDataService
         $this->materialRequests->dispatch($mr, $dispatchLines, $inventoryUser);
     }
 
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     */
     private function seedQuality(array $workOrders, User $boss): void
     {
         WorkOrderQualityRecord::query()->updateOrCreate(
@@ -562,15 +819,17 @@ class AxonesDemoDataService
             [
                 'outcome' => 'approved',
                 'notes' => 'Calidad demo',
-                'created_by' => $boss->getKey(),
-                'updated_by' => $boss->getKey(),
+                'recorded_by' => $boss->getKey(),
             ],
         );
     }
 
-    private function seedReturnsAndRejectedBobinas(array $workOrders, array $materials, User $printingUser): void
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     */
+    private function seedReturnsAndRejectedBobinas(array $workOrders, array $materials): void
     {
-        // Devolución demo: destino bobinas_rechazadas (requiere work_order_id)
         $rejectedMat = collect($materials)->first(
             fn (Material $m) => $m->inventory_area === InventoryArea::BobinasRechazadas->value
         );
@@ -578,25 +837,298 @@ class AxonesDemoDataService
             return;
         }
 
-        InventoryReturn::query()->create([
-            'material_id' => $rejectedMat->getKey(),
-            'work_order_id' => $workOrders[1]->getKey(),
-            'destination_area' => InventoryArea::BobinasRechazadas->value,
-            'quantity' => '5.000',
-            'status' => 'pending',
-            'reason' => 'Bobinas rechazadas (demo)',
-        ]);
+        $nw = count($workOrders);
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            InventoryReturn::query()->create([
+                'material_id' => $rejectedMat->getKey(),
+                'work_order_id' => $workOrders[($i - 1) % $nw]->getKey(),
+                'destination_area' => InventoryArea::BobinasRechazadas->value,
+                'quantity' => (string) (2 + ($i % 8)).'.000',
+                'status' => $i % 3 === 0 ? 'accepted' : 'pending',
+                'reason' => 'Devolución inventario demo '.$i,
+            ]);
+        }
     }
 
     private function seedAlerts(User $boss): void
     {
-        OperationalAlert::query()->create([
-            'alert_type' => 'mount_time_exceeded',
-            'severity' => 'info',
-            'message' => 'Datos demo cargados.',
-            'metadata' => ['tag' => 'demo'],
-            'created_by' => $boss->getKey(),
-        ]);
+        $types = ['mount_time_exceeded', 'low_stock', 'dispatch_delay', 'quality_hold', 'machine_idle'];
+        $sev = ['info', 'warning', 'critical'];
+
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            OperationalAlert::query()->create([
+                'alert_type' => $types[($i - 1) % count($types)],
+                'severity' => $sev[($i - 1) % count($sev)],
+                'message' => 'Alerta operativa demo '.$i.' — datos de prueba.',
+                'metadata' => ['tag' => 'demo', 'idx' => $i],
+                'created_by' => $boss->getKey(),
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     * @param  array<int, Bobina>  $bobinas
+     */
+    private function seedHeavyDemoGraph(
+        array $workOrders,
+        array $materials,
+        array $bobinas,
+        User $printingUser,
+        User $boss,
+    ): void {
+        $tintas = collect($materials)->where('inventory_area', InventoryArea::Tintas->value)->values();
+        $matLine = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Material->value)
+            ?? $materials[0];
+        $nb = count($bobinas);
+
+        foreach ($workOrders as $idx => $wo) {
+            $wid = (int) $wo->getKey();
+            $existingDoc = WorkOrderTechnicalDocument::query()->where('work_order_id', $wid)->first();
+            $existingForm = is_array($existingDoc?->form) ? $existingDoc->form : [];
+            WorkOrderTechnicalDocument::query()->updateOrCreate(
+                ['work_order_id' => $wid],
+                ['form' => array_merge($existingForm, ['version' => 1, 'demo_index' => $idx + 1])],
+            );
+
+            WorkOrderPrintingSummary::query()->firstOrCreate(
+                ['work_order_id' => $wid],
+                ['scrap_percent' => '1.250', 'notes' => 'Resumen impresión (demo)'],
+            );
+            WorkOrderCorteSummary::query()->firstOrCreate(
+                ['work_order_id' => $wid],
+                ['scrap_percent' => '0.800', 'notes' => 'Resumen corte (demo)'],
+            );
+            WorkOrderLaminacionSummary::query()->firstOrCreate(
+                ['work_order_id' => $wid],
+                ['scrap_percent' => '1.100', 'solvent_quantity_kg' => '3.000', 'notes' => 'Resumen laminación (demo)'],
+            );
+            WorkOrderMontajeSummary::query()->firstOrCreate(
+                ['work_order_id' => $wid],
+                ['scrap_percent' => '0.500', 'notes' => 'Resumen montaje (demo)'],
+            );
+
+            if ($wid !== (int) $workOrders[1]->getKey()) {
+                WorkOrderQualityRecord::query()->firstOrCreate(
+                    ['work_order_id' => $wid],
+                    [
+                        'outcome' => 'pending',
+                        'notes' => 'Registro calidad pendiente (demo)',
+                        'recorded_by' => $boss->getKey(),
+                    ],
+                );
+            }
+
+            $t0 = Carbon::now()->subDays($idx % 10)->subHours($idx + 1);
+            PrintingTimeSegment::query()->create([
+                'work_order_id' => $wid,
+                'machine_code' => 'IMP-'.str_pad((string) (($idx % 4) + 1), 2, '0', STR_PAD_LEFT),
+                'segment_type' => 'mount',
+                'started_at' => $t0,
+                'ended_at' => (clone $t0)->addMinutes(25),
+                'user_id' => $printingUser->getKey(),
+                'notes' => 'Montaje demo',
+            ]);
+
+            $bob = $nb > 0 ? $bobinas[$idx % $nb] : null;
+            PrintingBobinaUsage::query()->create([
+                'work_order_id' => $wid,
+                'bobina_id' => $bob?->getKey(),
+                'material_id' => $bob ? (int) $bob->material_id : $matLine->getKey(),
+                'quantity_used_kg' => '6.000',
+                'quantity_finished_kg' => '5.500',
+                'notes' => 'Uso bobina demo',
+            ]);
+
+            $chemType = PrintingChemicalType::cases()[$idx % 3];
+            PrintingChemicalUsage::query()->updateOrCreate(
+                ['work_order_id' => $wid, 'chemical_type' => $chemType->value],
+                [
+                    'quantity_loaded_kg' => '4.000',
+                    'quantity_return_kg' => '0.500',
+                    'notes' => 'Consumible demo',
+                ],
+            );
+
+            $tinMat = $tintas->get($idx % max(1, $tintas->count()));
+            if ($tinMat) {
+                PrintingInkControlLine::query()->create([
+                    'work_order_id' => $wid,
+                    'material_id' => $tinMat->getKey(),
+                    'position' => $idx % 8,
+                    'quantity_original_kg' => '12.000',
+                    'quantity_solventada_kg' => '2.500',
+                    'quantity_return_kg' => '1.000',
+                    'notes' => 'Control tinta demo',
+                ]);
+            }
+
+            CorteTimeSegment::query()->create([
+                'work_order_id' => $wid,
+                'machine_code' => 'COR-01',
+                'segment_type' => 'production',
+                'started_at' => $t0,
+                'ended_at' => (clone $t0)->addMinutes(40),
+                'user_id' => $printingUser->getKey(),
+                'notes' => 'Corte demo',
+            ]);
+            CorteBobinaUsage::query()->create([
+                'work_order_id' => $wid,
+                'bobina_id' => $bob?->getKey(),
+                'material_id' => $matLine->getKey(),
+                'quantity_used_kg' => '7.000',
+                'quantity_finished_kg' => '6.800',
+                'notes' => 'Corte bobina demo',
+            ]);
+
+            LaminacionTimeSegment::query()->create([
+                'work_order_id' => $wid,
+                'machine_code' => 'LAM-01',
+                'segment_type' => 'production',
+                'started_at' => $t0,
+                'ended_at' => (clone $t0)->addMinutes(35),
+                'user_id' => $printingUser->getKey(),
+                'notes' => 'Laminación demo',
+            ]);
+            LaminacionBobinaUsage::query()->create([
+                'work_order_id' => $wid,
+                'bobina_id' => $bob?->getKey(),
+                'material_id' => $matLine->getKey(),
+                'quantity_used_kg' => '8.000',
+                'quantity_finished_kg' => '7.900',
+                'notes' => 'Laminación bobina demo',
+            ]);
+
+            MontajeTimeSegment::query()->create([
+                'work_order_id' => $wid,
+                'machine_code' => 'MON-01',
+                'segment_type' => 'production',
+                'started_at' => $t0,
+                'ended_at' => (clone $t0)->addMinutes(20),
+                'user_id' => $printingUser->getKey(),
+                'notes' => 'Montaje demo',
+            ]);
+            MontajeMaterialUsage::query()->create([
+                'work_order_id' => $wid,
+                'material_id' => $matLine->getKey(),
+                'quantity' => '3.000',
+                'unit' => 'kg',
+                'notes' => 'Material montaje demo',
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     * @param  array<int, Supplier>  $suppliers
+     * @param  array<int, Product>  $products
+     */
+    private function seedAuxiliaryVolume(
+        array $workOrders,
+        array $materials,
+        array $products,
+        User $printingUser,
+        User $inventoryUser,
+        User $boss,
+    ): void {
+        $nw = count($workOrders);
+        $nm = count($materials);
+        $np = count($products);
+        $tintas = collect($materials)->where('inventory_area', InventoryArea::Tintas->value)->values();
+
+        $mat0 = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Material->value)
+            ?? $materials[0];
+        $tinta = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Tintas->value);
+
+        for ($i = 2; $i <= $this->demoVolume; $i++) {
+            $targetWo = $workOrders[$i % $nw];
+            $this->materialRequests->storePendingRequest(
+                $targetWo->fresh(),
+                $inventoryUser,
+                [
+                    ['material_id' => $mat0->getKey(), 'quantity_requested' => (string) (5 + $i).'.000'],
+                    $tinta ? ['material_id' => $tinta->getKey(), 'quantity_requested' => '1.000'] : ['description' => 'Repuesto varios', 'quantity_requested' => '1.000'],
+                ],
+                'printing',
+                'Solicitud volumen '.$i,
+                now()->toDateString(),
+                null,
+                'IMP-'.str_pad((string) (($i % 3) + 1), 2, '0', STR_PAD_LEFT),
+            );
+        }
+
+        $areas = ['printing', 'laminacion', 'corte', 'montaje', 'tintas'];
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            AreaRequest::query()->create([
+                'area' => $areas[($i - 1) % count($areas)],
+                'title' => 'Solicitud de área demo '.$i,
+                'body' => 'Detalle de la solicitud demo '.$i.'.',
+                'status' => $i % 4 === 0 ? 'done' : 'pending',
+                'work_order_id' => $workOrders[($i - 1) % $nw]->getKey(),
+                'requested_by' => $printingUser->getKey(),
+            ]);
+        }
+
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $dn = DeliveryNote::query()->create([
+                'sequential_number' => DeliveryNote::nextSequentialNumber(),
+                'code' => DeliveryNote::nextCode(),
+                'work_order_id' => $workOrders[($i - 1) % $nw]->getKey(),
+                'document_date' => now()->toDateString(),
+                'driver_name' => 'Conductor demo '.$i,
+                'vehicle_notes' => 'Unidad '.$i,
+                'status' => $i % 2 === 0 ? 'dispatched' : 'draft',
+                'user_id' => $boss->getKey(),
+                'dispatched_at' => $i % 2 === 0 ? now()->subHours($i) : null,
+                'notes' => 'Nota de entrega demo '.$i,
+            ]);
+
+            DeliveryNoteLine::query()->create([
+                'delivery_note_id' => $dn->getKey(),
+                'work_order_id' => $workOrders[($i - 1) % $nw]->getKey(),
+                'product_id' => $products[($i - 1) % $np]->getKey(),
+                'description' => 'Línea ND demo '.$i,
+                'quantity_kg' => (string) (50 + $i).'.000',
+                'pallet_code' => 'PAL-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+                'bobbin_count' => 1 + ($i % 4),
+            ]);
+        }
+
+        $quim = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Quimicos->value);
+        for ($i = 1; $i <= $this->demoVolume; $i++) {
+            $outMat = $tintas->get($i % max(1, $tintas->count())) ?? $materials[($i - 1) % $nm];
+            $mix = TintaMixture::query()->create([
+                'output_material_id' => $outMat->getKey(),
+                'notes' => 'Mezcla demo '.$i,
+                'created_by' => $printingUser->getKey(),
+            ]);
+            TintaMixtureComponent::query()->create([
+                'tinta_mixture_id' => $mix->getKey(),
+                'material_id' => ($quim ?? $mat0)->getKey(),
+                'quantity' => (string) (1 + ($i % 5)).'.000',
+            ]);
+        }
+
+        while (PurchaseReceipt::query()->count() < $this->demoVolume) {
+            $k = PurchaseReceipt::query()->count() + 1;
+            $pr = PurchaseReceipt::query()->create([
+                'purchase_order_id' => null,
+                'without_purchase_order' => true,
+                'exception_reason' => 'Recepción volumen demo '.$k,
+                'user_id' => $inventoryUser->getKey(),
+                'received_at' => now()->subDays($k % 20),
+                'notes' => 'Recepción directa demo',
+            ]);
+            PurchaseReceiptLine::query()->create([
+                'purchase_receipt_id' => $pr->getKey(),
+                'purchase_order_line_id' => null,
+                'material_id' => $materials[($k - 1) % $nm]->getKey(),
+                'quantity' => '15.000',
+            ]);
+        }
+
     }
 
     private function cleanDomainData(bool $keepUsers): void
@@ -640,6 +1172,7 @@ class AxonesDemoDataService
             'work_order_lines',
             'work_order_technical_documents',
             'work_orders',
+            'product_ink_material',
             'products',
             'suppliers',
             'clients',
@@ -672,4 +1205,3 @@ class AxonesDemoDataService
         }
     }
 }
-

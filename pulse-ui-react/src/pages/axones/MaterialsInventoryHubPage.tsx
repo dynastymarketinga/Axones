@@ -1,11 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
-import { apiFetch, ApiError } from "@/lib/api"
+import { apiDownloadFile, apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
@@ -17,7 +19,7 @@ import {
 } from "@/components/ui/table"
 
 const AREAS = [
-  { value: "material", label: "Material" },
+  { value: "material", label: "Sustrato" },
   { value: "tintas", label: "Tintas" },
   { value: "cementerio_tintas", label: "Cementerio tintas" },
   { value: "quimicos", label: "Químicos" },
@@ -60,21 +62,22 @@ function MaterialsTable({ area }: { area: string }) {
             <TableRow>
               <TableHead>SKU</TableHead>
               <TableHead>Nombre</TableHead>
-              <TableHead>Stock</TableHead>
-              <TableHead>Mín.</TableHead>
+              <TableHead>Micras (u)</TableHead>
+              <TableHead>Ancho (mm)</TableHead>
+              <TableHead>Stock final</TableHead>
               <TableHead>Unidad</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows.length ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   Sin ítems en esta área.
                 </TableCell>
               </TableRow>
@@ -83,8 +86,9 @@ function MaterialsTable({ area }: { area: string }) {
                 <TableRow key={m.id}>
                   <TableCell className="font-mono text-sm">{m.sku}</TableCell>
                   <TableCell>{m.name}</TableCell>
+                  <TableCell>{m.micras ?? "-"}</TableCell>
+                  <TableCell>{m.ancho ?? "-"}</TableCell>
                   <TableCell>{m.quantity_on_hand}</TableCell>
-                  <TableCell>{m.min_stock}</TableCell>
                   <TableCell>{m.unit}</TableCell>
                 </TableRow>
               ))
@@ -97,6 +101,41 @@ function MaterialsTable({ area }: { area: string }) {
 }
 
 export default function MaterialsInventoryHubPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [activeArea, setActiveArea] = useState<(typeof AREAS)[number]["value"]>("material")
+  const [reportDate, setReportDate] = useState(() => searchParams.get("date") ?? new Date().toISOString().slice(0, 10))
+  const [reportLoading, setReportLoading] = useState(false)
+
+  useEffect(() => {
+    const areaFromQuery = searchParams.get("area")
+    if (areaFromQuery && AREAS.some((a) => a.value === areaFromQuery)) {
+      setActiveArea(areaFromQuery as (typeof AREAS)[number]["value"])
+    }
+  }, [searchParams])
+
+  function openInventoryAreaPreview() {
+    navigate(
+      `/inventario-areas/vista-previa?date=${encodeURIComponent(reportDate)}&inventory_area=${encodeURIComponent(activeArea)}`,
+    )
+  }
+
+  async function downloadInventoryAreaPdf() {
+    setReportLoading(true)
+    try {
+      await apiDownloadFile("reports/inventory-area-daily.pdf", {
+        query: { date: reportDate, inventory_area: activeArea },
+        fallbackName: `inventory-area-daily-${activeArea}-${reportDate}.pdf`,
+      })
+      toast.success("PDF generado.")
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo generar el PDF.")
+    } finally {
+      setReportLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div>
@@ -104,12 +143,44 @@ export default function MaterialsInventoryHubPage() {
           Inventario por área
         </h1>
         <p className="text-muted-foreground text-sm">
-          Las 6 áreas de inventario en una sola pantalla (pestañas). Datos desde{" "}
-          <code>/materials?inventory_area=…</code>
+          Las seis áreas de inventario en una sola pantalla (pestañas).
         </p>
       </div>
 
-      <Tabs defaultValue="material" className="w-full">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="grid gap-1">
+          <span className="text-xs text-muted-foreground">Fecha de corte</span>
+          <Input
+            type="date"
+            value={reportDate}
+            onChange={(ev) => setReportDate(ev.target.value)}
+            className="w-[180px]"
+          />
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={reportLoading}
+          onClick={openInventoryAreaPreview}
+        >
+          Vista previa
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={reportLoading}
+          onClick={() => void downloadInventoryAreaPdf()}
+        >
+          Generar PDF
+        </Button>
+      </div>
+
+      <Tabs
+        defaultValue="material"
+        value={activeArea}
+        onValueChange={(value) => setActiveArea(value as (typeof AREAS)[number]["value"])}
+        className="w-full"
+      >
         <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
           {AREAS.map((a) => (
             <TabsTrigger key={a.value} value={a.value} className="text-xs sm:text-sm">

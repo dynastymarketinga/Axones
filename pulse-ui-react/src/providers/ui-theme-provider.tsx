@@ -1,36 +1,32 @@
 import { useEffect } from "react"
-import { useUIThemeStore } from "@/store/ui-theme.store"
 
-const CUSTOM_THEMES = [
-  "dark-blue",
-  "classic-light",
-  "gaussian-black",
-  "semi-dark",
-]
+/** Clases de paletas antiguas (ya no se usan en UI). */
+const LEGACY_PALETTE_CLASSES = ["dark-blue", "gaussian-black", "semi-dark"]
 
+const UI_THEME_STORAGE_KEY = "ui-theme"
+
+/**
+ * Aplica siempre la paleta **classic-light** en `<html>` (la que define variables en `index.css`).
+ * No depende de localStorage: se limpia la clave antigua `ui-theme` por compatibilidad.
+ * Claro/oscuro lo sigue manejando `next-themes` (`light` / `dark` en la misma etiqueta).
+ */
 export default function UIThemeProvider({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const { theme } = useUIThemeStore()
-
   useEffect(() => {
-  const html = document.documentElement
-
-  // remove all custom themes
-  CUSTOM_THEMES.forEach((t) => html.classList.remove(t))
-
-  if (theme) {
-    // remove next-themes classes
-    html.classList.remove("dark", "light")
-
-    // apply custom theme
-    html.classList.add(theme)
-  }
-
-  // ✅ if theme is "", do nothing → next-themes takes over
-}, [theme])
+    try {
+      localStorage.removeItem(UI_THEME_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+    const html = document.documentElement
+    LEGACY_PALETTE_CLASSES.forEach((c) => html.classList.remove(c))
+    if (!html.classList.contains("classic-light")) {
+      html.classList.add("classic-light")
+    }
+  }, [])
 
   return <>{children}</>
 }

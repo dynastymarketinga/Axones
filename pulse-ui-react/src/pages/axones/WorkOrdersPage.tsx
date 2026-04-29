@@ -63,11 +63,11 @@ export default function WorkOrdersPage() {
             Órdenes de trabajo
           </h1>
           <p className="text-muted-foreground text-sm">
-            Documento maestro · <code>/work-orders</code>
+            Documento central de producción: seguimiento por fases.
           </p>
         </div>
         <Button asChild variant="secondary">
-          <Link to="/axones/ordenes-trabajo">Ir a órdenes de trabajo</Link>
+          <Link to="/ordenes-trabajo">Ir a órdenes de trabajo</Link>
         </Button>
       </div>
 
@@ -135,7 +135,7 @@ export default function WorkOrdersPage() {
                   <TableCell>
                     <Link
                       className="text-primary text-sm underline-offset-4 hover:underline"
-                      to={`/axones/ordenes-trabajo/${o.id}`}
+                      to={`/ordenes-trabajo/${o.id}`}
                     >
                       Abrir
                     </Link>

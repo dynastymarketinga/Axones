@@ -130,7 +130,6 @@ export default function ProgramacionBoardPage() {
     if (stage === "nueva") return [{ stage: "pendiente", label: "Enviar a programación" }]
     if (stage === "pendiente") return [{ stage: "montaje", label: "Pasar a Montaje" }]
     if (stage === "montaje") return [{ stage: "impresion", label: "Pasar a Impresión" }]
-    if (stage === "impresion") return [{ stage: "laminacion", label: "Pasar a Laminación" }]
     if (stage === "laminacion") return [{ stage: "corte", label: "Pasar a Corte" }]
     if (stage === "corte") return [{ stage: "completada", label: "Marcar completada" }]
     return []
@@ -143,10 +142,7 @@ export default function ProgramacionBoardPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Programación</h1>
           <p className="text-muted-foreground text-sm max-w-3xl">
             La primera columna es <span className="text-foreground font-medium">Pendiente por OT</span>: órdenes de trabajo recién creadas o aún
-            sin pasar a programación operativa. Después sigue <span className="text-foreground font-medium">Programación</span> y el resto de fases.{" "}
-            <span className="opacity-80">
-              <code>/work-orders/programacion-board</code>
-            </span>
+            sin pasar a programación operativa. Después sigue <span className="text-foreground font-medium">Programación</span> y el resto de fases.
           </p>
         </div>
         <Button type="button" variant="secondary" onClick={() => void load()}>
@@ -182,7 +178,7 @@ export default function ProgramacionBoardPage() {
                       className="rounded-lg border bg-muted/40 p-3 text-sm"
                     >
                       <Link
-                        to={`/axones/ordenes-trabajo/${o.id}`}
+                        to={`/ordenes-trabajo/${o.id}`}
                         className="block transition hover:opacity-90"
                       >
                         <div className="font-mono font-medium">{o.code}</div>

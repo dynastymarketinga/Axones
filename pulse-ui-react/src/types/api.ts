@@ -88,10 +88,19 @@ export type MaterialRow = {
   id: number
   sku: string
   name: string
+  barcode?: string | null
   inventory_area: string
+  is_active?: boolean
+  micras?: string | null
+  ancho?: string | null
   unit: string
   quantity_on_hand: string
   min_stock: string
+  /** Superficie / Laminada / etc. (solo catálogo de tintas). */
+  tinta_presentacion?: string | null
+  notes?: string | null
+  created_at?: string
+  updated_at?: string
 }
 
 /** Detalle completo de OT (GET /work-orders/:id) */
@@ -169,6 +178,9 @@ export type WorkOrderDetailRecord = {
     status: string
     lines?: Array<{ id: number; quantity_requested: string; quantity_dispatched?: string }>
   }>
+  technical_document?: {
+    form?: Record<string, unknown> | null
+  } | null
 }
 
 export type InventoryMovementRow = {
@@ -178,6 +190,7 @@ export type InventoryMovementRow = {
   occurred_at: string
   reference_type: string | null
   reference_id: number | null
+  is_invalid_reference?: boolean
   material?: {
     sku: string
     name: string
@@ -223,6 +236,13 @@ export type WorkOrderListRow = {
   client?: Pick<ClientRecord, "id" | "name">
   product?: Pick<ProductRecord, "id" | "name">
   client_order?: { id: number; code?: string }
+  creator?: Pick<UserRecord, "id" | "name" | "role"> | null
+}
+
+export type UserRecord = {
+  id: number
+  name: string
+  role?: string | null
 }
 
 export type ProgramacionBoardResponse = {

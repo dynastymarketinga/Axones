@@ -19,6 +19,13 @@ class InventoryReturnController extends Controller
         private readonly InventoryLedgerService $ledger,
     ) {}
 
+    public function show(InventoryReturn $inventoryReturn): JsonResponse
+    {
+        $inventoryReturn->load(['material', 'workOrder']);
+
+        return response()->json($inventoryReturn);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = InventoryReturn::query()->with(['material', 'workOrder'])->orderByDesc('created_at');

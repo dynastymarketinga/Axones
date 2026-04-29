@@ -13,7 +13,9 @@ class WorkOrderStoreRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        $role = strtolower(trim((string) ($this->user()?->role ?? '')));
+
+        return ! in_array($role, ['printing', 'impresion'], true);
     }
 
     /**

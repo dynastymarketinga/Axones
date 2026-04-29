@@ -325,8 +325,8 @@ export default function AreaTintasPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Área: Tintas</h1>
           <p className="text-muted-foreground text-sm">
-            Seleccione una OT y registre consumo de tintas/químicos. Guarda en{" "}
-            <code className="text-xs">PUT /work-orders/{"{id}"}/printing/consumables</code>.
+            Seleccione una OT y registre el consumo de tintas y químicos. Los
+            cambios quedan guardados al confirmar.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -334,7 +334,7 @@ export default function AreaTintasPage() {
             Actualizar
           </Button>
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/ordenes-trabajo">Ir a OTs</Link>
+            <Link to="/ordenes-trabajo">Ir a OTs</Link>
           </Button>
         </div>
       </div>
@@ -545,7 +545,7 @@ export default function AreaTintasPage() {
             </Button>
             {Number.isFinite(woNum) && woNum > 0 ? (
               <Button type="button" variant="outline" asChild>
-                <Link to={`/axones/ordenes-trabajo/${woNum}?tab=printing`}>
+                <Link to={`/ordenes-trabajo/${woNum}?tab=printing`}>
                   Abrir OT (Impresión)
                 </Link>
               </Button>
@@ -730,7 +730,7 @@ export default function AreaTintasPage() {
                   Actualizar
                 </Button>
                 <Button type="button" variant="outline" asChild>
-                  <Link to="/axones/mezclas-tinta">Ver pantalla completa</Link>
+                  <Link to="/mezclas-tinta">Ver pantalla completa</Link>
                 </Button>
               </div>
               <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">

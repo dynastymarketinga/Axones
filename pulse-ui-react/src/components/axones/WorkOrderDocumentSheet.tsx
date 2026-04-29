@@ -16,13 +16,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 
 type LineDraft = {
   key: string
@@ -55,23 +48,22 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-const WINDING_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
 export function WorkOrderDocumentSheet({
   workOrder,
   workOrderId,
+  readOnly = false,
   onSaved,
 }: {
   workOrder: WorkOrderDetailRecord
   workOrderId: number
+  /** Operadores de impresión: solo consultan maestro/pedido; no editan líneas ni ficha. */
+  readOnly?: boolean
   onSaved: () => void | Promise<void>
 }) {
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [materialQ, setMaterialQ] = useState("")
   const [linesDraft, setLinesDraft] = useState<LineDraft[]>([])
-  const [winding, setWinding] = useState<string>("none")
   const [autoCreateMr, setAutoCreateMr] = useState(true)
-  const [saving, setSaving] = useState(false)
 
   const loadMaterials = useCallback(async (q: string) => {
     try {
@@ -114,14 +106,8 @@ export function WorkOrderDocumentSheet({
     } else {
       setLinesDraft([newLineRow()])
     }
-    setWinding(
-      workOrder.winding_figure != null && workOrder.winding_figure > 0
-        ? String(workOrder.winding_figure)
-        : "none",
-    )
   }, [
     workOrder.id,
-    workOrder.winding_figure,
     workOrder.lines,
   ])
 
@@ -138,6 +124,7 @@ export function WorkOrderDocumentSheet({
   }, [workOrder.material_requests])
 
   async function saveSheet() {
+    if (readOnly) return
     const filled = linesDraft.filter((r) => r.material_id !== "")
     if (filled.length !== linesDraft.length) {
       toast.error(
@@ -163,14 +150,11 @@ export function WorkOrderDocumentSheet({
       }
     }
 
-    setSaving(true)
     try {
       await apiFetch<WorkOrderDetailRecord>(`work-orders/${workOrderId}`, {
         method: "PATCH",
         body: JSON.stringify({
           lines: linesPayload,
-          winding_figure:
-            winding === "none" || winding === "" ? null : Number(winding),
           auto_create_material_request: autoCreateMr && linesPayload.length > 0,
         }),
       })
@@ -179,28 +163,6 @@ export function WorkOrderDocumentSheet({
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo guardar la ficha.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function saveWindingOnly() {
-    setSaving(true)
-    try {
-      await apiFetch<WorkOrderDetailRecord>(`work-orders/${workOrderId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          winding_figure:
-            winding === "none" || winding === "" ? null : Number(winding),
-        }),
-      })
-      toast.success("Figura de embobinado guardada.")
-      await onSaved()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo guardar la figura.")
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -218,6 +180,11 @@ export function WorkOrderDocumentSheet({
           <p className="text-muted-foreground text-xs">
             Datos que en papel vienen en la cabecera: cliente, producto y pedido
             (precarga desde datos maestros).
+            {readOnly ? (
+              <span className="mt-1 block text-amber-800 dark:text-amber-200">
+                Solo lectura: la ficha de materiales la gestiona Calidad / planificación.
+              </span>
+            ) : null}
           </p>
         </CardHeader>
         <CardContent className="grid gap-4 text-sm md:grid-cols-2">
@@ -333,8 +300,8 @@ export function WorkOrderDocumentSheet({
               </div>
             ) : (
               <p className="text-muted-foreground text-xs">
-                Esta OT no está ligada a una orden de cliente en el sistema.
-                Puede enlazarse al crear o editar la OT por API / módulo de
+                Esta OT no está ligada a un pedido del cliente en el sistema.
+                Puede enlazarse al crear o editar la orden desde el módulo de
                 pedidos.
               </p>
             )}
@@ -360,243 +327,6 @@ export function WorkOrderDocumentSheet({
         </CardContent>
       </Card>
 
-      <Card className="border-l-4 border-rose-500 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base font-semibold">
-            Materiales (inventario)
-          </CardTitle>
-          <p className="text-muted-foreground text-xs">
-            Sustratos virgen / capas (bilaminado, trilaminado): elija bobina o
-            material del área <strong>material</strong>. Cada fila es una capa o
-            bobina distinta.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="grid flex-1 gap-2">
-              <Label htmlFor="wo-mat-q">Buscar en inventario material</Label>
-              <Input
-                id="wo-mat-q"
-                placeholder="SKU, nombre o código…"
-                value={materialQ}
-                onChange={(ev) => setMaterialQ(ev.target.value)}
-              />
-            </div>
-          </div>
-
-          {!canReplaceLines ? (
-            <p className="text-destructive text-xs">
-              No se pueden cambiar las líneas de materiales: ya hay despachos en
-              solicitudes ligadas a esta OT. Revise en{" "}
-              <Link
-                to="/axones/solicitudes-material"
-                className="underline underline-offset-2"
-              >
-                Solicitudes de materiales
-              </Link>
-              .
-            </p>
-          ) : null}
-
-          {canReplaceLines ? (
-            <div className="space-y-3">
-              {linesDraft.map((row, idx) => (
-                <div
-                  key={row.key}
-                  className="flex flex-col gap-2 rounded-lg border p-3 md:flex-row md:items-end"
-                >
-                  <div className="grid flex-1 gap-2">
-                    <Label>Material {idx + 1}</Label>
-                    <Select
-                      value={row.material_id || undefined}
-                      onValueChange={(v) => {
-                        setLinesDraft((prev) =>
-                          prev.map((r) =>
-                            r.key === row.key ? { ...r, material_id: v } : r,
-                          ),
-                        )
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar del inventario…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {materials.map((m) => (
-                          <SelectItem key={m.id} value={String(m.id)}>
-                            {m.sku} · {m.name} ({m.quantity_on_hand} {m.unit})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid w-full gap-2 md:w-32">
-                    <Label>Cantidad</Label>
-                    <Input
-                      value={row.quantity}
-                      onChange={(ev) => {
-                        const v = ev.target.value
-                        setLinesDraft((prev) =>
-                          prev.map((r) =>
-                            r.key === row.key ? { ...r, quantity: v } : r,
-                          ),
-                        )
-                      }}
-                    />
-                  </div>
-                  <div className="grid flex-1 gap-2">
-                    <Label>Notas</Label>
-                    <Input
-                      value={row.notes}
-                      placeholder="Opcional"
-                      onChange={(ev) => {
-                        const v = ev.target.value
-                        setLinesDraft((prev) =>
-                          prev.map((r) =>
-                            r.key === row.key ? { ...r, notes: v } : r,
-                          ),
-                        )
-                      }}
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="shrink-0"
-                    disabled={linesDraft.length <= 1}
-                    onClick={() =>
-                      setLinesDraft((prev) =>
-                        prev.filter((r) => r.key !== row.key),
-                      )
-                    }
-                    aria-label="Eliminar fila"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {(workOrder.lines ?? []).length ? (
-                workOrder.lines.map((ln, idx) => (
-                  <li
-                    key={ln.id}
-                    className="rounded-lg border bg-muted/20 px-3 py-2"
-                  >
-                    <span className="font-medium">Capa {idx + 1}: </span>
-                    {ln.material
-                      ? `${ln.material.sku} · ${ln.material.name}`
-                      : `Material #${ln.material_id}`}
-                    {" · "}
-                    {ln.quantity}{" "}
-                    {ln.material?.unit ? ln.material.unit : ""}
-                    {ln.notes ? ` · ${ln.notes}` : ""}
-                  </li>
-                ))
-              ) : (
-                <li className="text-muted-foreground">Sin líneas registradas.</li>
-              )}
-            </ul>
-          )}
-
-          {canReplaceLines ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setLinesDraft((prev) => [...prev, newLineRow()])}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Agregar capa / material (trilaminado)
-            </Button>
-          ) : null}
-
-          {canReplaceLines ? (
-            <div className="flex items-start gap-2">
-              <Checkbox
-                id="wo-auto-mr"
-                checked={autoCreateMr}
-                onCheckedChange={(v) => setAutoCreateMr(v === true)}
-              />
-              <label
-                htmlFor="wo-auto-mr"
-                className="text-muted-foreground text-xs leading-snug"
-              >
-                Tras guardar, generar una nueva solicitud de materiales con
-                estas líneas (solo si aún no hay despachos; las solicitudes
-                anteriores no despachadas se reemplazan).
-              </label>
-            </div>
-          ) : null}
-
-          {workOrder.material_requests?.length ? (
-            <p className="text-muted-foreground text-xs">
-              Solicitudes:{" "}
-              {workOrder.material_requests
-                .map((mr) => `#${mr.id} (${mr.status})`)
-                .join(", ")}
-              .{" "}
-              <Link
-                to="/axones/solicitudes-material"
-                className="text-primary underline underline-offset-2"
-              >
-                Abrir panel
-              </Link>
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card className="border-l-4 border-violet-500 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base font-semibold">
-            Figura de embobinado
-          </CardTitle>
-          <p className="text-muted-foreground text-xs">
-            Número de figura como en la OT impresa; más adelante se pueden
-            sustituir por dibujos seleccionables.
-          </p>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-4">
-          <div className="grid gap-2">
-            <Label>Figura</Label>
-            <Select value={winding} onValueChange={setWinding}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Sin definir" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Sin definir</SelectItem>
-                {WINDING_OPTIONS.map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    Figura {n}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-wrap gap-2">
-        {canReplaceLines ? (
-          <Button
-            type="button"
-            disabled={saving}
-            onClick={() => void saveSheet()}
-          >
-            {saving ? "Guardando…" : "Guardar materiales y figura"}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant={canReplaceLines ? "outline" : "default"}
-          disabled={saving}
-          onClick={() => void saveWindingOnly()}
-        >
-          {saving ? "Guardando…" : "Guardar solo figura de embobinado"}
-        </Button>
-      </div>
     </div>
   )
 }

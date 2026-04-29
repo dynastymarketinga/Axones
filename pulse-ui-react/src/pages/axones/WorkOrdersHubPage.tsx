@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { Search } from "lucide-react"
+import { ArrowRightCircle, CircleHelp, Search } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -36,13 +36,9 @@ import {
 type MachineValue =
   | ""
   | "COMEXI 1"
-  | "COMEXI 2"
   | "COMEXI 3"
-  | "NEXUS"
-  | "NEXUS 2"
   | "Cortadora China"
   | "Cortadora Permaco"
-  | "Cortadora Novograf"
 
 const MACHINE_OPTIONS: Array<{
   group: string
@@ -51,30 +47,28 @@ const MACHINE_OPTIONS: Array<{
   {
     group: "Impresión",
     options: [
-      { value: "COMEXI 1", label: "COMEXI 1 (Planchas 067)" },
-      { value: "COMEXI 2", label: "COMEXI 2" },
-      { value: "COMEXI 3", label: "COMEXI 3 (Planchas 045)" },
+      { value: "COMEXI 1", label: "COMEXI 1" },
+      { value: "COMEXI 3", label: "COMEXI 3" },
     ],
   },
   {
     group: "Laminación",
     options: [
-      { value: "NEXUS", label: "NEXUS (Principal)" },
-      { value: "NEXUS 2", label: "NEXUS 2" },
-    ],
-  },
-  {
-    group: "Corte",
-    options: [
       { value: "Cortadora China", label: "Cortadora China" },
       { value: "Cortadora Permaco", label: "Cortadora Permaco" },
-      { value: "Cortadora Novograf", label: "Cortadora Novograf" },
     ],
   },
 ]
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
+}
+
+function normalizeTipoImpresionEstructura(value: unknown): "superficie" | "reverso" {
+  const raw = readString(value).toLowerCase().trim()
+  if (raw.includes("superf")) return "superficie"
+  if (raw.includes("revers")) return "reverso"
+  return "reverso"
 }
 
 function formMachine(row: WorkOrderListRow): string {
@@ -93,18 +87,6 @@ function formPedidoKg(row: WorkOrderListRow): string {
   return "—"
 }
 
-function formPrioridad(row: WorkOrderListRow): string {
-  const doc = row.technical_document?.form
-  if (!doc) return "—"
-  return readString(doc.prioridad) || "—"
-}
-
-function formEstadoOrden(row: WorkOrderListRow): string {
-  const doc = row.technical_document?.form
-  if (!doc) return row.board_stage ?? row.status ?? "—"
-  return readString(doc.estadoOrden) || row.board_stage || row.status || "—"
-}
-
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—"
   try {
@@ -120,18 +102,47 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
+type SupervisorFilter = "all" | "created" | "in_progress" | "completed"
+
+function statusLabel(value: string | null | undefined): string {
+  const s = (value ?? "").toLowerCase().trim()
+  if (s === "open") return "Abierta"
+  if (s === "in_progress") return "En proceso"
+  if (s === "completed") return "Completada"
+  if (s === "cancelled") return "Cancelada"
+  return value?.trim() || "—"
+}
+
+function boardStageLabel(value: string | null | undefined): string {
+  const s = (value ?? "").toLowerCase().trim()
+  if (s === "nueva") return "Creada (pendiente OT)"
+  if (s === "pendiente") return "Programación"
+  if (s === "montaje") return "Montaje"
+  if (s === "impresion") return "Impresión"
+  if (s === "laminacion") return "Laminación"
+  if (s === "corte") return "Corte / Embalaje"
+  if (s === "completada") return "Completada"
+  return value?.trim() || "—"
+}
+
+function supervisorBucket(row: WorkOrderListRow): Exclude<SupervisorFilter, "all"> {
+  const stage = (row.board_stage ?? "").toLowerCase().trim()
+  const status = (row.status ?? "").toLowerCase().trim()
+  if (status === "completed" || stage === "completada") return "completed"
+  if (stage === "nueva") return "created"
+  return "in_progress"
+}
+
 export default function WorkOrdersHubPage() {
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
-  const tab = (searchParams.get("tab") ?? "").toLowerCase().trim()
-
-  const [activeTab, setActiveTab] = useState(tab === "orden" ? "orden" : "lista")
 
   const [q, setQ] = useState("")
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
+  const [supervisorFilter, setSupervisorFilter] = useState<SupervisorFilter>("all")
 
   const [creating, setCreating] = useState(false)
   const [coLoading, setCoLoading] = useState(false)
@@ -141,8 +152,6 @@ export default function WorkOrdersHubPage() {
   const [coDetailLoading, setCoDetailLoading] = useState(false)
 
   const [maquina, setMaquina] = useState<MachineValue>("")
-  const [planchas, setPlanchas] = useState("")
-  const showPlanchas = maquina === "COMEXI 1" || maquina === "COMEXI 3"
 
   const canImportMaterialFromCo = useMemo(() => {
     if (!coDetail?.lines?.length) return false
@@ -191,7 +200,7 @@ export default function WorkOrdersHubPage() {
         query: {
           page,
           per_page: 20,
-          client_order_reference: search || undefined,
+          q: search || undefined,
         },
       })
       setRows(data)
@@ -208,12 +217,12 @@ export default function WorkOrdersHubPage() {
     setCoLoading(true)
     try {
       const data = await apiFetch<LaravelPaginated<ClientOrderRow>>("client-orders", {
-        query: { per_page: 50, page: 1 },
+        query: { per_page: 100, page: 1, sort: "asc" },
       })
       setClientOrders(data.data ?? [])
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudieron cargar las órdenes de cliente.")
+      else toast.error("No se pudieron cargar los pedidos del cliente.")
       setClientOrders([])
     } finally {
       setCoLoading(false)
@@ -224,35 +233,24 @@ export default function WorkOrdersHubPage() {
     void loadList()
   }, [loadList])
 
-  const createHelp = useMemo(
-    () => (
-      <Card className="border-l-4 border-sky-500">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Orden de trabajo (OT)</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground space-y-2">
-          <p>
-            La <span className="text-foreground font-medium">OT (orden de trabajo)</span> es el documento maestro de
-            producción: una sola planilla con{" "}
-            <span className="text-foreground font-medium">cabecera, producto, montaje, impresión, laminación, corte</span> y{" "}
-            <span className="text-foreground font-medium">programación</span>, guardada en el servidor.
-          </p>
-          <p>
-            Primero debe existir una <span className="text-foreground font-medium">orden de cliente</span> en{" "}
-            <Link to="/axones/ordenes-cliente" className="text-primary font-medium underline-offset-4 hover:underline">
-              Órdenes de cliente
-            </Link>
-            , con lo que el cliente solicita. Al vincularla aquí, el sistema prepara la producción con los datos que
-            correspondan; el pedido del cliente sigue administrándose en su módulo.
-          </p>
-          <p>
-            Seleccione la <span className="text-foreground font-medium">OC</span>, la <span className="text-foreground font-medium">máquina</span> (opcional) y <span className="text-foreground font-medium">Crear orden</span>; luego abra la OT para completar el resto.
-          </p>
-        </CardContent>
-      </Card>
-    ),
-    [],
-  )
+  const visibleRows = useMemo(() => {
+    const all = rows?.data ?? []
+    if (supervisorFilter === "all") return all
+    return all.filter((r) => supervisorBucket(r) === supervisorFilter)
+  }, [rows?.data, supervisorFilter])
+
+  const supervisorCounts = useMemo(() => {
+    const all = rows?.data ?? []
+    const created = all.filter((r) => supervisorBucket(r) === "created").length
+    const inProgress = all.filter((r) => supervisorBucket(r) === "in_progress").length
+    const completed = all.filter((r) => supervisorBucket(r) === "completed").length
+    return {
+      all: all.length,
+      created,
+      in_progress: inProgress,
+      completed,
+    }
+  }, [rows?.data])
 
   function clientOrderLabel(c: ClientOrderRow): string {
     const parts = [c.code, c.client?.name, c.first_line_with_product?.product?.name]
@@ -264,7 +262,7 @@ export default function WorkOrdersHubPage() {
   async function createOt() {
     const coId = clientOrderId.trim() ? Number(clientOrderId) : null
     if (!coId || !Number.isFinite(coId) || coId < 1) {
-      toast.error("Seleccione una orden de cliente (OC) ya registrada.")
+      toast.error("Seleccione un pedido del cliente (OC) ya registrado.")
       return
     }
     setCreating(true)
@@ -283,20 +281,31 @@ export default function WorkOrdersHubPage() {
 
       // Guardar el “maestro” de la planilla (maquina/planchas) en el JSON del documento OT.
       if (maquina) {
+        const payload = await apiFetch<{ prefill: Record<string, unknown>; form: Record<string, unknown> | null }>(
+          `work-orders/${res.id}/orden-trabajo`,
+        )
+        const currentForm = {
+          ...(payload.prefill ?? {}),
+          ...(payload.form ?? {}),
+        } as Record<string, unknown>
+        const tipoImpresionEstructura = normalizeTipoImpresionEstructura(
+          readString(currentForm.tipoImpresionEstructura) || readString(currentForm.tipoImpresion),
+        )
+
         await apiFetch(`work-orders/${res.id}/orden-trabajo`, {
           method: "PUT",
           body: JSON.stringify({
             form: {
+              ...currentForm,
               maquina,
-              planchas: showPlanchas ? (planchas.trim() || null) : null,
+              tipoImpresionEstructura,
             },
           }),
         })
       }
 
       toast.success("OT creada.")
-      setActiveTab("orden")
-      nav(`/axones/ordenes-trabajo/${res.id}`)
+      nav(`/ordenes-trabajo/${res.id}`)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo crear la OT.")
@@ -307,12 +316,9 @@ export default function WorkOrdersHubPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {createHelp}
-
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v)}>
+      <Tabs value="lista">
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="lista">Lista de órdenes de trabajo</TabsTrigger>
-          <TabsTrigger value="orden">Orden de trabajo</TabsTrigger>
         </TabsList>
 
         <TabsContent value="lista" className="mt-4 space-y-4">
@@ -349,20 +355,16 @@ export default function WorkOrdersHubPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Crear orden de trabajo</CardTitle>
+              <CardTitle className="text-base text-center text-black">Crear orden de trabajo</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <p className="md:col-span-3 text-sm text-muted-foreground">
-                Elija la <span className="font-medium text-foreground">orden de cliente</span> y pulse{" "}
-                <span className="font-medium text-foreground">Crear orden</span>. Se abrirá la planilla de esta OT para
-                completar producción. Si aún no tiene pedido registrado, créelo en{" "}
-                <Link to="/axones/ordenes-cliente/nueva" className="font-medium text-primary underline-offset-4 hover:underline">
-                  Nueva orden de cliente
-                </Link>
-                .
+                Seleccione el <span className="font-medium text-foreground">pedido del cliente</span> y la{" "}
+                <span className="font-medium text-foreground">máquina</span>, luego pulse{" "}
+                <span className="font-medium text-foreground">Crear orden</span>.
               </p>
               <div className="grid gap-2 md:col-span-2">
-                <Label>Orden de cliente (OC) a vincular *</Label>
+                <Label>Pedido del cliente (OC) a vincular *</Label>
                 <Select
                   value={clientOrderId}
                   onValueChange={(v) => setClientOrderId(v)}
@@ -412,17 +414,6 @@ export default function WorkOrdersHubPage() {
                 </select>
               </div>
 
-              {showPlanchas ? (
-                <div className="grid gap-2 md:col-span-2">
-                  <Label>Planchas</Label>
-                  <Input
-                    placeholder="Ej: 067"
-                    value={planchas}
-                    onChange={(ev) => setPlanchas(ev.target.value)}
-                  />
-                </div>
-              ) : null}
-
               <div className="md:col-span-3">
                 <Button type="button" onClick={() => void createOt()} disabled={creating}>
                   {creating ? "Creando…" : "Crear orden"}
@@ -431,53 +422,84 @@ export default function WorkOrdersHubPage() {
             </CardContent>
           </Card>
 
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-slate-700 shadow-sm">
+            <p className="flex items-start gap-2">
+              <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
+              <span>
+                <span className="font-medium text-slate-900">Paso siguiente:</span> pulse{" "}
+                <span className="font-semibold text-slate-900">Abrir planilla existente</span>.
+              </span>
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant={supervisorFilter === "all" ? "default" : "outline"} onClick={() => setSupervisorFilter("all")}>
+              Todas ({supervisorCounts.all})
+            </Button>
+            <Button type="button" size="sm" variant={supervisorFilter === "created" ? "default" : "outline"} onClick={() => setSupervisorFilter("created")}>
+              Creadas ({supervisorCounts.created})
+            </Button>
+            <Button type="button" size="sm" variant={supervisorFilter === "in_progress" ? "default" : "outline"} onClick={() => setSupervisorFilter("in_progress")}>
+              En proceso ({supervisorCounts.in_progress})
+            </Button>
+            <Button type="button" size="sm" variant={supervisorFilter === "completed" ? "default" : "outline"} onClick={() => setSupervisorFilter("completed")}>
+              Completadas ({supervisorCounts.completed})
+            </Button>
+          </div>
+
           <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>N° Orden</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Máquina</TableHead>
-                  <TableHead>Kg</TableHead>
-                  <TableHead>Prioridad</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
+                  <TableHead className="text-center text-black">N° Orden</TableHead>
+                  <TableHead className="text-center text-black">Fecha</TableHead>
+                  <TableHead className="text-center text-black">Cliente</TableHead>
+                  <TableHead className="text-center text-black">Producto</TableHead>
+                  <TableHead className="text-center text-black">Máquina</TableHead>
+                  <TableHead className="text-center text-black">Etapa real</TableHead>
+                  <TableHead className="text-center text-black">Estado OT</TableHead>
+                  <TableHead className="text-center text-black">Creada por</TableHead>
+                  <TableHead className="text-center text-black">Kg</TableHead>
+                  <TableHead className="text-center text-black">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-muted-foreground">
+                    <TableCell colSpan={10} className="text-muted-foreground">
                       Cargando…
                     </TableCell>
                   </TableRow>
-                ) : !rows?.data.length ? (
+                ) : !visibleRows.length ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-muted-foreground">
-                      Sin órdenes.
+                    <TableCell colSpan={10} className="text-muted-foreground">
+                      Sin órdenes para este filtro.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.data.map((o) => (
-                    <TableRow key={o.id}>
-                      <TableCell className="font-mono text-sm">{o.code}</TableCell>
-                      <TableCell>{formatDate(o.document_date)}</TableCell>
-                      <TableCell>{o.client?.name ?? "—"}</TableCell>
-                      <TableCell>{o.product?.name ?? "—"}</TableCell>
-                      <TableCell>{formMachine(o)}</TableCell>
-                      <TableCell>{formPedidoKg(o)}</TableCell>
-                      <TableCell>{formPrioridad(o)}</TableCell>
-                      <TableCell>{formEstadoOrden(o)}</TableCell>
-                      <TableCell>
-                        <Link
-                          className="text-primary text-sm underline-offset-4 hover:underline"
-                          to={`/axones/ordenes-trabajo/${o.id}`}
-                          onClick={() => setActiveTab("orden")}
+                  visibleRows.map((o) => (
+                    <TableRow key={o.id} className="text-sm transition-colors hover:bg-muted/50">
+                      <TableCell className="font-mono text-sm py-3.5">{o.code}</TableCell>
+                      <TableCell className="py-3.5">{formatDate(o.document_date)}</TableCell>
+                      <TableCell className="py-3.5">{o.client?.name ?? "—"}</TableCell>
+                      <TableCell className="py-3.5">{o.product?.name ?? "—"}</TableCell>
+                      <TableCell className="py-3.5">{formMachine(o)}</TableCell>
+                      <TableCell className="py-3.5">{boardStageLabel(o.board_stage)}</TableCell>
+                      <TableCell className="py-3.5">{statusLabel(o.status)}</TableCell>
+                      <TableCell className="py-3.5">{o.creator?.name ?? "—"}</TableCell>
+                      <TableCell className="py-3.5">{formPedidoKg(o)}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <Button
+                          asChild
+                          size="sm"
+                          variant="secondary"
+                          className="gap-1.5"
                         >
-                          Abrir
-                        </Link>
+                          <Link to={`/ordenes-trabajo/${o.id}`}>
+                            <ArrowRightCircle className="h-4 w-4" />
+                            Abrir planilla existente
+                          </Link>
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))
@@ -511,25 +533,6 @@ export default function WorkOrdersHubPage() {
               </div>
             </div>
           ) : null}
-        </TabsContent>
-
-        <TabsContent value="orden" className="mt-4 space-y-2">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Orden de trabajo</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground space-y-2">
-              <p>
-                Selecciona una orden desde <span className="text-foreground font-medium">Lista de órdenes</span> y
-                presiona <span className="text-foreground font-medium">Abrir</span>. Aquí verás el formulario completo
-                con las secciones: cabecera, datos del producto, montaje, impresión, laminación, corte y
-                programación.
-              </p>
-              <p>
-                (En progreso) Esta pestaña será la planilla 1:1 como el diseño original, guardando todo por orden.
-              </p>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
     </div>

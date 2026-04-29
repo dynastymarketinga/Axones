@@ -58,7 +58,7 @@ export default function ClientOrderEditPage() {
       setNotes(co.notes ?? "")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar la orden de cliente.")
+      else toast.error("No se pudo cargar el pedido del cliente.")
       setOrderCode("")
       setOrder(null)
     } finally {
@@ -88,7 +88,7 @@ export default function ClientOrderEditPage() {
       })
       toast.success("Orden anulada.")
       setCancelDialogOpen(false)
-      nav(`/axones/ordenes-cliente/${order.id}`)
+      nav(`/ordenes-cliente/${order.id}`)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo anular la orden.")
@@ -112,19 +112,19 @@ export default function ClientOrderEditPage() {
           notes: notes.trim() || null,
         }),
       })
-      toast.success("Orden de cliente actualizada.")
-      nav(`/axones/ordenes-cliente/${orderId}`)
+      toast.success("Pedido del cliente actualizado.")
+      nav(`/ordenes-cliente/${orderId}`)
     } catch (err) {
       if (err instanceof ApiError) toast.error(err.message)
-      else toast.error("No se pudo guardar la orden de cliente.")
+      else toast.error("No se pudo guardar el pedido del cliente.")
     } finally {
       setSaving(false)
     }
   }
 
   const newClientLink = {
-    pathname: "/axones/clientes/form" as const,
-    state: { from: `/axones/ordenes-cliente/${orderId}/edit` as const },
+    pathname: "/clientes/form" as const,
+    state: { from: `/ordenes-cliente/${orderId}/edit` as const },
   }
 
   const client = order?.client
@@ -134,7 +134,7 @@ export default function ClientOrderEditPage() {
       <div className="p-4 md:p-6">
         <p className="text-destructive text-sm">Identificador de orden no válido.</p>
         <Button className="mt-4" variant="outline" asChild>
-          <Link to="/axones/ordenes-cliente">Volver al listado</Link>
+          <Link to="/ordenes-cliente">Volver al listado</Link>
         </Button>
       </div>
     )
@@ -143,7 +143,7 @@ export default function ClientOrderEditPage() {
   if (loading) {
     return (
       <div className="p-4 md:p-6">
-        <p className="text-muted-foreground text-sm">Cargando orden de cliente…</p>
+        <p className="text-muted-foreground text-sm">Cargando pedido del cliente…</p>
       </div>
     )
   }
@@ -153,7 +153,7 @@ export default function ClientOrderEditPage() {
       <div className="p-4 md:p-6">
         <p className="text-muted-foreground text-sm">No se encontró la orden.</p>
         <Button className="mt-4" variant="outline" asChild>
-          <Link to="/axones/ordenes-cliente">Volver al listado</Link>
+          <Link to="/ordenes-cliente">Volver al listado</Link>
         </Button>
       </div>
     )
@@ -163,7 +163,7 @@ export default function ClientOrderEditPage() {
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Editar orden de cliente</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Editar pedido del cliente</h1>
           <p className="text-foreground/90 mt-1 font-mono text-sm">{orderCode}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <span>Estado</span>
@@ -195,10 +195,10 @@ export default function ClientOrderEditPage() {
             </Button>
           ) : null}
           <Button type="button" variant="outline" size="sm" asChild>
-            <Link to={`/axones/ordenes-cliente/${orderId}`}>Ver detalle</Link>
+            <Link to={`/ordenes-cliente/${orderId}`}>Ver detalle</Link>
           </Button>
           <Button type="button" variant="default" size="sm" asChild>
-            <Link to="/axones/ordenes-cliente">Volver al listado</Link>
+            <Link to="/ordenes-cliente">Volver al listado</Link>
           </Button>
         </div>
       </div>
@@ -267,7 +267,7 @@ export default function ClientOrderEditPage() {
             {saving ? "Guardando…" : "Guardar cambios"}
           </Button>
           <Button type="button" variant="outline" asChild>
-            <Link to="/axones/ordenes-cliente">Cancelar</Link>
+            <Link to="/ordenes-cliente">Cancelar</Link>
           </Button>
         </div>
       </form>
@@ -286,7 +286,7 @@ export default function ClientOrderEditPage() {
                 <Ban className="h-6 w-6" />
               </div>
               <DialogTitle className="text-center sm:text-left sm:leading-tight">
-                ¿Anular esta orden de cliente?
+                ¿Anular este pedido del cliente?
               </DialogTitle>
             </div>
           </DialogHeader>

@@ -11,13 +11,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\WorkOrderStoreRequest;
 use App\Http\Requests\WorkOrderUpdateRequest;
 use App\Models\ClientOrder;
+use App\Models\ClientOrderLine;
 use App\Models\User;
 use App\Models\WorkOrder;
-use App\Models\ClientOrderLine;
 use App\Models\WorkOrderLine;
 use App\Models\WorkOrderProductionItem;
 use App\Services\MaterialRequestService;
 use App\Services\OperationalAlertService;
+use App\Services\ProductionNotificationService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,12 +31,13 @@ class WorkOrderController extends Controller
     public function __construct(
         private readonly MaterialRequestService $materialRequests,
         private readonly OperationalAlertService $alerts,
+        private readonly ProductionNotificationService $productionNotifications,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
         $query = WorkOrder::query()
-            ->with(['client', 'product', 'clientOrder', 'technicalDocument'])
+            ->with(['client', 'product', 'clientOrder', 'technicalDocument', 'creator'])
             ->withCount(['materialRequests', 'lines', 'productionItems'])
             ->orderByDesc('created_at');
 
@@ -53,10 +55,40 @@ class WorkOrderController extends Controller
 
         if ($request->query('board_stage')) {
             $query->where('board_stage', $request->query('board_stage'));
+        } elseif ($areaHistory = $request->query('area_history')) {
+            $stages = match (strtolower(trim((string) $areaHistory))) {
+                'printing', 'impresion' => [
+                    WorkOrderBoardStage::Impresion->value,
+                    WorkOrderBoardStage::Laminacion->value,
+                    WorkOrderBoardStage::Corte->value,
+                    WorkOrderBoardStage::Completada->value,
+                ],
+                'laminacion' => [
+                    WorkOrderBoardStage::Laminacion->value,
+                    WorkOrderBoardStage::Corte->value,
+                    WorkOrderBoardStage::Completada->value,
+                ],
+                'corte' => [
+                    WorkOrderBoardStage::Corte->value,
+                    WorkOrderBoardStage::Completada->value,
+                ],
+                default => [],
+            };
+            if ($stages !== []) {
+                $query->whereIn('board_stage', $stages);
+            }
         }
 
-        if ($q = $request->query('client_order_reference')) {
-            $query->where('client_order_reference', 'like', '%' . $q . '%');
+        if ($q = trim((string) $request->query('q', ''))) {
+            $query->where(function ($inner) use ($q) {
+                $inner->where('code', 'like', '%'.$q.'%')
+                    ->orWhere('client_order_reference', 'like', '%'.$q.'%')
+                    ->orWhereHas('client', function ($clientQ) use ($q) {
+                        $clientQ->where('name', 'like', '%'.$q.'%');
+                    });
+            });
+        } elseif ($q = $request->query('client_order_reference')) {
+            $query->where('client_order_reference', 'like', '%'.$q.'%');
         }
 
         if ($request->query('client_order_id')) {
@@ -78,7 +110,7 @@ class WorkOrderController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        $grouped = $orders->groupBy(fn(WorkOrder $o) => $o->board_stage->value);
+        $grouped = $orders->groupBy(fn (WorkOrder $o) => $o->board_stage->value);
         $columns = [];
         foreach (WorkOrderBoardStage::cases() as $case) {
             $columns[$case->value] = $grouped->get($case->value, collect())->values();
@@ -129,7 +161,7 @@ class WorkOrderController extends Controller
         $data['document_date'] = $data['document_date'] ?? now()->toDateString();
 
         if ($linesInput !== []) {
-            $bom = array_map(static fn(array $l) => [
+            $bom = array_map(static fn (array $l) => [
                 'material_id' => (int) $l['material_id'],
                 'quantity_requested' => $l['quantity'],
             ], $linesInput);
@@ -151,7 +183,7 @@ class WorkOrderController extends Controller
             $this->syncProductionItems($order, $productionItemsInput);
 
             if ($linesInput !== [] && $autoCreate) {
-                $mrLines = array_map(static fn(array $l) => [
+                $mrLines = array_map(static fn (array $l) => [
                     'material_id' => (int) $l['material_id'],
                     'quantity_requested' => $l['quantity'],
                 ], $linesInput);
@@ -176,8 +208,10 @@ class WorkOrderController extends Controller
             ]);
         });
 
+        $this->productionNotifications->notifyOnWorkOrderCreated($order, $request->user());
+
         if ($linesInput !== []) {
-            $linesForAlerts = array_map(static fn(array $l) => [
+            $linesForAlerts = array_map(static fn (array $l) => [
                 'material_id' => (int) $l['material_id'],
                 'quantity' => $l['quantity'],
             ], $linesInput);
@@ -197,6 +231,7 @@ class WorkOrderController extends Controller
             'lines.material',
             'productionItems',
             'materialRequests.lines.material',
+            'technicalDocument',
         ]);
 
         return response()->json($work_order);
@@ -213,7 +248,7 @@ class WorkOrderController extends Controller
         $pdf = Pdf::loadView('pdf.orden_produccion', ['order' => $work_order])
             ->setPaper('a4', 'portrait');
 
-        return $pdf->download('orden-produccion-' . $fileBase . '.pdf');
+        return $pdf->download('orden-produccion-'.$fileBase.'.pdf');
     }
 
     public function update(WorkOrderUpdateRequest $request, WorkOrder $work_order): JsonResponse
@@ -280,7 +315,7 @@ class WorkOrderController extends Controller
         ]);
 
         if ($linesInput !== null && $linesInput !== []) {
-            $linesForAlerts = array_map(static fn(array $l) => [
+            $linesForAlerts = array_map(static fn (array $l) => [
                 'material_id' => (int) $l['material_id'],
                 'quantity' => $l['quantity'],
             ], $linesInput);
@@ -322,7 +357,7 @@ class WorkOrderController extends Controller
         $this->assertWorkOrderLinesReplaceable($wo);
 
         if ($linesInput !== []) {
-            $bom = array_map(static fn(array $l) => [
+            $bom = array_map(static fn (array $l) => [
                 'material_id' => (int) $l['material_id'],
                 'quantity_requested' => $l['quantity'],
             ], $linesInput);
@@ -346,7 +381,7 @@ class WorkOrderController extends Controller
         }
 
         if ($linesInput !== [] && $autoCreate) {
-            $mrLines = array_map(static fn(array $l) => [
+            $mrLines = array_map(static fn (array $l) => [
                 'material_id' => (int) $l['material_id'],
                 'quantity_requested' => $l['quantity'],
             ], $linesInput);
@@ -473,7 +508,7 @@ class WorkOrderController extends Controller
             }
             $note = $line->notes;
             if ($line->description) {
-                $note = $note ? trim((string) $note . ' | ' . $line->description) : $line->description;
+                $note = $note ? trim((string) $note.' | '.$line->description) : $line->description;
             }
 
             $out[] = [

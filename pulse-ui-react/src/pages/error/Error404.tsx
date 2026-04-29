@@ -2,29 +2,10 @@
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
-import { useTheme } from "next-themes"
-import { Sun, Moon } from "lucide-react"
 
 export default function Error404() {
-    const { theme, setTheme } = useTheme()
   return (
     <div className="relative min-h-screen flex items-center justify-center px-6 overflow-hidden bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-blue-500/20">
-      {/* Theme Toggle */}
-      <div className="absolute top-6 right-6">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          className="bg-background/60 border-border supports-[backdrop-filter]:backdrop-blur-md"
-        >
-          {theme === "dark" ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-        </Button>
-      </div>
-      
       {/* Background Glow Blobs */}
       <div className="absolute top-0 left-0 w-96 h-96 bg-purple-500/30 blur-3xl rounded-full -z-10"></div>
       <div className="absolute bottom-0 right-0 w-96 h-96 bg-indigo-500/30 blur-3xl rounded-full -z-10"></div>

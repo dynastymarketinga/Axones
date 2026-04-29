@@ -11,7 +11,11 @@ class PurchaseReceiptLine extends Model
         'purchase_receipt_id',
         'purchase_order_line_id',
         'material_id',
+        'item_type',
         'quantity',
+        'unit',
+        'micras',
+        'ancho_mm',
         'bobina_count',
         'bobina_weight_kg',
     ];
@@ -20,6 +24,8 @@ class PurchaseReceiptLine extends Model
     {
         return [
             'quantity' => 'decimal:3',
+            'micras' => 'decimal:3',
+            'ancho_mm' => 'decimal:3',
             'bobina_weight_kg' => 'decimal:3',
         ];
     }

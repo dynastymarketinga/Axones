@@ -45,6 +45,10 @@ class WorkOrderMaterialRequestTest extends TestCase
         $mrResponse->assertCreated();
         $lineId = $mrResponse->json('lines.0.id');
 
+        $this->postJson('/api/material-requests/'.$mrResponse->json('id').'/authorize', [], [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+
         $dispatch = $this->postJson('/api/material-requests/'.$mrResponse->json('id').'/dispatch', [
             'lines' => [
                 ['material_request_line_id' => $lineId, 'quantity' => 30],
@@ -91,6 +95,10 @@ class WorkOrderMaterialRequestTest extends TestCase
 
         $lineId = $mrResponse->json('lines.0.id');
         $mrId = $mrResponse->json('id');
+
+        $this->postJson("/api/material-requests/$mrId/authorize", [], [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
 
         $this->postJson("/api/material-requests/$mrId/dispatch", [
             'lines' => [
@@ -139,6 +147,10 @@ class WorkOrderMaterialRequestTest extends TestCase
             'quantity_dispatched' => 0,
         ]);
         $lineId = $mr->lines->first()->id;
+
+        $this->postJson("/api/material-requests/$mr->id/authorize", [], [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
 
         $this->postJson("/api/material-requests/$mr->id/dispatch", [
             'lines' => [

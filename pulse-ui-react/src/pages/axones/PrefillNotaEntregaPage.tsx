@@ -29,7 +29,7 @@ export default function PrefillNotaEntregaPage() {
       setJson(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar el prefill.")
+      else toast.error("No se pudo cargar la información de la orden.")
     } finally {
       setLoading(false)
     }
@@ -39,25 +39,24 @@ export default function PrefillNotaEntregaPage() {
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Prefill nota de entrega
+          Vista previa de nota de entrega
         </h1>
         <p className="text-muted-foreground text-sm">
-          Vista previa desde corte ·{" "}
-          <code>/work-orders/{"{id}"}/nota-entrega/prefill</code>
+          Revise cantidades desde corte antes de emitir la nota.
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">OT</CardTitle>
+          <CardTitle className="text-base">Orden de trabajo</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="ne-wo">work_order_id</Label>
+            <Label htmlFor="ne-wo">ID de orden de trabajo</Label>
             <Input
               id="ne-wo"
               inputMode="numeric"
-              placeholder="ej. 12"
+              placeholder="Ejemplo: 12"
               value={woId}
               onChange={(ev) => setWoId(ev.target.value)}
             />

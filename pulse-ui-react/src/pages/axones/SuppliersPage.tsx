@@ -64,11 +64,11 @@ export default function SuppliersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Proveedores</h1>
           <p className="text-muted-foreground text-sm">
-            Datos maestros · API <code className="text-xs">/suppliers</code>
+            Proveedores usados en compras y órdenes de compra.
           </p>
         </div>
         <Button type="button" asChild>
-          <Link to="/axones/proveedores/form" state={{ from }}>
+          <Link to="/proveedores/form" state={{ from }}>
             Nuevo proveedor
           </Link>
         </Button>
@@ -139,7 +139,7 @@ export default function SuppliersPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="link" className="h-auto p-0" asChild>
-                      <Link to={`/axones/proveedores/form?id=${s.id}`} state={{ from }}>
+                      <Link to={`/proveedores/form?id=${s.id}`} state={{ from }}>
                         Editar
                       </Link>
                     </Button>

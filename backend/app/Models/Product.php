@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Product extends Model
 {
@@ -20,5 +21,12 @@ class Product extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    /** Tints allowed for planilla when this product is selected (pivot; vacío = no filtrar en API). */
+    public function inkMaterials(): BelongsToMany
+    {
+        return $this->belongsToMany(Material::class, 'product_ink_material')
+            ->withTimestamps();
     }
 }

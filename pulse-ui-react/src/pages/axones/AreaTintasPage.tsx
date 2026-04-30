@@ -300,6 +300,7 @@ export default function AreaTintasPage() {
           output_sku,
           output_name: name,
           output_inventory_area: mixArea,
+          output_tinta_subarea: mixArea === "tintas" ? "superficie" : null,
           unit: "kg",
           notes: mixNotes.trim() || null,
           components: comps,

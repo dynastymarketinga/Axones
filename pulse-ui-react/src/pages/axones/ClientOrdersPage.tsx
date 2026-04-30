@@ -11,6 +11,7 @@ import type {
   ClientRecord,
   LaravelPaginated,
 } from "@/types/api"
+import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -151,6 +152,8 @@ export default function ClientOrdersPage() {
     void load()
   }, [load])
 
+  const showInitialSkeleton = loading && rows === null
+
   async function runCancelAnular() {
     if (pendingCancelId == null) return
     const id = pendingCancelId
@@ -187,7 +190,14 @@ export default function ClientOrdersPage() {
           </Button>
         </div>
 
-        <div className="flex flex-col gap-4 w-full min-w-0 lg:flex-row lg:flex-wrap lg:items-end">
+        {showInitialSkeleton ? (
+          <div className="space-y-4">
+            <PageLoadingBlock />
+            <PageLoadingBlock />
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-4 w-full min-w-0 lg:flex-row lg:flex-wrap lg:items-end">
           <div className="grid flex-1 min-w-0 gap-2 sm:min-w-[200px]">
             <Label htmlFor="co-q">Buscar por código de pedido</Label>
             <Input
@@ -377,11 +387,7 @@ export default function ClientOrdersPage() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground">
-                    Cargando…
-                  </TableCell>
-                </TableRow>
+                <LoadingTableRow colSpan={5} />
               ) : !rows?.data.length ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-muted-foreground">
@@ -487,7 +493,7 @@ export default function ClientOrdersPage() {
           </Table>
         </div>
 
-        {rows ? (
+            {rows ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 text-sm">
             <p className="text-muted-foreground min-w-0">
               {rows.total === 0
@@ -546,7 +552,9 @@ export default function ClientOrdersPage() {
               </div>
             </div>
           </div>
-        ) : null}
+            ) : null}
+          </>
+        )}
 
         <Dialog
           open={pendingCancelId !== null}

@@ -114,7 +114,11 @@ export default function WorkOrderPrintingInkTable({
                                 </CommandEmpty>
                                 <CommandGroup>
                                   {tintaMateriales.map((m) => {
-                                    const v = [m.name, m.sku, m.tinta_presentacion ?? ""]
+                                    const v = [
+                                      m.name,
+                                      m.sku,
+                                      ...(m.tinta_subareas ?? []).map((s) => s.subarea),
+                                    ]
                                       .filter(Boolean)
                                       .join(" ")
                                     const label = formatTintaCatalogLabel(m)

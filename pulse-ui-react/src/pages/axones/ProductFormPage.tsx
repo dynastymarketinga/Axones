@@ -6,10 +6,19 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
+import { InlineSpinner } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -29,15 +38,16 @@ export default function ProductFormPage() {
   const [clients, setClients] = useState<ClientRecord[]>([])
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
-  const [clientId, setClientId] = useState<string>("none")
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [clientId, setClientId] = useState<string>("")
   const [name, setName] = useState("")
   const [cpe, setCpe] = useState("")
-  const [barcode, setBarcode] = useState("")
   const [mps, setMps] = useState("")
   const [printType, setPrintType] = useState("")
   const [structure, setStructure] = useState("")
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false)
 
-  const [errors, setErrors] = useState<{ name?: string; barcode?: string }>({})
+  const [errors, setErrors] = useState<{ client_id?: string; name?: string }>({})
 
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
@@ -46,18 +56,18 @@ export default function ProductFormPage() {
   }, [location.state])
 
   const validate = useCallback(
-    (draft?: { name?: string; barcode?: string }) => {
+    (draft?: { name?: string; clientId?: string }) => {
       const n = (draft?.name ?? name).trim()
-      const b = (draft?.barcode ?? barcode).trim()
+      const cid = Number(draft?.clientId ?? clientId)
       const next: typeof errors = {}
-      if (!n) next.name = "El nombre es obligatorio."
-      if (b && !/^[0-9A-Za-z\-_.]+$/.test(b)) {
-        next.barcode = "Código de barra inválido."
+      if (!Number.isFinite(cid) || cid < 1) {
+        next.client_id = "El cliente es obligatorio."
       }
+      if (!n) next.name = "El nombre es obligatorio."
       setErrors(next)
       return next
     },
-    [barcode, name],
+    [clientId, name],
   )
 
   useEffect(() => {
@@ -84,11 +94,10 @@ export default function ProductFormPage() {
       const p = await apiFetch<ProductRecord>(`products/${productId}`)
       setName(p.name ?? "")
       setCpe(p.cpe ?? "")
-      setBarcode(p.barcode ?? "")
       setMps(p.mps ?? "")
       setPrintType(p.print_type ?? "")
       setStructure(p.structure ?? "")
-      setClientId(p.client_id ? String(p.client_id) : "none")
+      setClientId(p.client_id ? String(p.client_id) : "")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar el producto.")
@@ -110,13 +119,16 @@ export default function ProductFormPage() {
     }
     setSaving(true)
     try {
-      const cid =
-        clientId !== "none" && clientId !== "" ? Number(clientId) : null
+      const cid = Number(clientId)
+      if (!Number.isFinite(cid) || cid < 1) {
+        toast.error("Seleccione un cliente para el producto.")
+        setErrors((prev) => ({ ...prev, client_id: "El cliente es obligatorio." }))
+        return
+      }
       const body = {
         name: name.trim(),
         client_id: cid,
         cpe: cpe.trim() || null,
-        barcode: barcode.trim() || null,
         mps: mps.trim() || null,
         print_type: printType.trim() || null,
         structure: structure.trim() || null,
@@ -152,12 +164,17 @@ export default function ProductFormPage() {
             {isEdit ? "Editar producto" : "Nuevo producto"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Defina nombre, código y atributos del producto.
+            Cree el producto terminado que luego se usa en pedidos y OT.
           </p>
         </div>
-        <Button type="button" variant="outline" asChild>
-          <Link to={returnTo}>Volver al listado</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={() => setHelpOpen(true)}>
+            Ayuda
+          </Button>
+          <Button type="button" variant="outline" asChild>
+            <Link to={returnTo}>Volver al listado</Link>
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -169,13 +186,20 @@ export default function ProductFormPage() {
         >
           <div className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2 md:col-span-2">
-              <Label>Cliente (opcional)</Label>
-              <Select value={clientId} onValueChange={setClientId}>
+              <Label>Cliente *</Label>
+              <Select
+                value={clientId}
+                onValueChange={(value) => {
+                  setClientId(value)
+                  if (errors.client_id) {
+                    setErrors((prev) => ({ ...prev, client_id: undefined }))
+                  }
+                }}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Sin cliente" />
+                  <SelectValue placeholder="Seleccione cliente" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Sin cliente</SelectItem>
                   {clients.map((c) => (
                     <SelectItem key={c.id} value={String(c.id)}>
                       {c.name}
@@ -183,6 +207,9 @@ export default function ProductFormPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {errors.client_id ? (
+                <p className="text-destructive text-xs">{errors.client_id}</p>
+              ) : null}
             </div>
 
             <div className="grid gap-2 md:col-span-2">
@@ -210,26 +237,6 @@ export default function ProductFormPage() {
                 onChange={(ev) => setCpe(ev.target.value)}
                 placeholder="Ej. 0421496219"
               />
-              <p className="text-muted-foreground text-xs">
-                Dato de registro / permiso que va en el envase plástico.
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="p-barcode">Código de barra</Label>
-              <Input
-                id="p-barcode"
-                value={barcode}
-                onChange={(ev) => {
-                  setBarcode(ev.target.value)
-                  if (errors.barcode) validate({ barcode: ev.target.value })
-                }}
-                onBlur={() => validate()}
-                aria-invalid={Boolean(errors.barcode)}
-              />
-              {errors.barcode ? (
-                <p className="text-destructive text-xs">{errors.barcode}</p>
-              ) : null}
             </div>
 
             <div className="grid gap-2">
@@ -259,19 +266,55 @@ export default function ProductFormPage() {
                 onChange={(ev) => setStructure(ev.target.value)}
                 placeholder="Ej. PEBD 630×26 + PEBD 630×26 (bilaminado)"
               />
-              <p className="text-muted-foreground text-xs">
-                Composición de capas como en la OT; para trilaminado indique cada
-                capa (se podrá ampliar en la orden con selección desde
-                inventario).
-              </p>
             </div>
           </div>
 
           <Button type="submit" disabled={saving}>
-            {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear producto"}
+            {saving ? (
+              <span className="inline-flex items-center gap-2">
+                {isEdit || logoLoadFailed ? (
+                  <InlineSpinner />
+                ) : (
+                  <img
+                    src="/logo%20axones.jpg.jpeg"
+                    alt="Axones"
+                    className="h-4 w-4 rounded-full object-cover"
+                    style={{ animation: "spin 1s linear infinite" }}
+                    onError={() => setLogoLoadFailed(true)}
+                  />
+                )}
+                {isEdit ? "Guardando..." : "Creando producto..."}
+              </span>
+            ) : isEdit ? (
+              "Guardar cambios"
+            ) : (
+              "Crear producto"
+            )}
           </Button>
         </form>
       )}
+
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Guía rápida: Nuevo producto</DialogTitle>
+            <DialogDescription>
+              Esta pantalla crea productos terminados, no insumos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p><strong>Qué hace:</strong> registra el producto final que se vende o se fabrica para cliente.</p>
+            <p><strong>Cuándo usarla:</strong> cuando aparece una nueva presentación comercial o técnica.</p>
+            <p><strong>Qué pasa después:</strong> ese producto se usa en pedidos de cliente y en órdenes de trabajo.</p>
+            <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo, 3) Ingreso de material cuando llegue físicamente.</p>
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setHelpOpen(false)}>
+              Entendido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
+import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -25,6 +26,8 @@ type PoLineDraft = {
   unit: string
 }
 
+type OcTemplateMap = Record<string, PoLineDraft[]>
+
 const emptyLine = (): PoLineDraft => ({
   description: "",
   material_id: "",
@@ -32,15 +35,39 @@ const emptyLine = (): PoLineDraft => ({
   unit: "kg",
 })
 
+const OC_PREFS_KEY = "axones_oc_prefs_v1"
+const OC_CODE_SEQ_KEY = "axones_oc_code_seq_v1"
+
+function buildAutoPoCode(): string {
+  const year = new Date().getFullYear()
+  const seqRaw = window.localStorage.getItem(OC_CODE_SEQ_KEY)
+  const seqMap = seqRaw ? (JSON.parse(seqRaw) as Record<string, number>) : {}
+  const next = (seqMap[String(year)] ?? 0) + 1
+  seqMap[String(year)] = next
+  window.localStorage.setItem(OC_CODE_SEQ_KEY, JSON.stringify(seqMap))
+  return `OC-${year}-${String(next).padStart(3, "0")}`
+}
+
+function lineHasAnyValue(line: PoLineDraft): boolean {
+  return Boolean(
+    line.description.trim() ||
+      line.material_id.trim() ||
+      line.quantity_ordered.trim() ||
+      line.unit.trim() !== "kg",
+  )
+}
+
 export default function PurchaseOrderNewPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [saving, setSaving] = useState(false)
+  const [templatesBySupplier, setTemplatesBySupplier] = useState<OcTemplateMap>({})
 
   const [supplierId, setSupplierId] = useState("")
   const [code, setCode] = useState("")
+  const [codeTouched, setCodeTouched] = useState(false)
   const [status, setStatus] = useState<string>("open")
   const [orderedAt, setOrderedAt] = useState("")
   const [notes, setNotes] = useState("")
@@ -51,6 +78,29 @@ export default function PurchaseOrderNewPage() {
     const from = st?.from?.trim()
     return from && from.startsWith("/") ? from : "/ordenes-compra"
   }, [location.state])
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem(OC_PREFS_KEY)
+    if (!raw) {
+      if (!codeTouched && !code.trim()) {
+        setCode(buildAutoPoCode())
+      }
+      return
+    }
+    try {
+      const prefs = JSON.parse(raw) as {
+        last_supplier_id?: string
+        templates_by_supplier?: OcTemplateMap
+      }
+      if (prefs.last_supplier_id) setSupplierId(prefs.last_supplier_id)
+      setTemplatesBySupplier(prefs.templates_by_supplier ?? {})
+    } catch {
+      setTemplatesBySupplier({})
+    }
+    if (!codeTouched && !code.trim()) {
+      setCode(buildAutoPoCode())
+    }
+  }, [code, codeTouched])
 
   useEffect(() => {
     let c = false
@@ -80,6 +130,14 @@ export default function PurchaseOrderNewPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const payload = {
+      last_supplier_id: supplierId || "",
+      templates_by_supplier: templatesBySupplier,
+    }
+    window.localStorage.setItem(OC_PREFS_KEY, JSON.stringify(payload))
+  }, [supplierId, templatesBySupplier])
+
   function addLine() {
     setLines((prev) => [...prev, emptyLine()])
   }
@@ -92,6 +150,52 @@ export default function PurchaseOrderNewPage() {
 
   function removeLine(i: number) {
     setLines((prev) => prev.filter((_, j) => j !== i))
+  }
+
+  const hasTemplateForSelectedSupplier = Boolean(
+    supplierId && templatesBySupplier[supplierId]?.length,
+  )
+  const hasDirtyLines = lines.some(lineHasAnyValue)
+
+  function saveSupplierTemplate() {
+    if (!supplierId) {
+      toast.error("Seleccione un proveedor para guardar plantilla.")
+      return
+    }
+    const cleanLines = lines
+      .filter(lineHasAnyValue)
+      .map((line) => ({
+        description: line.description.trim(),
+        material_id: line.material_id.trim(),
+        quantity_ordered: line.quantity_ordered.trim(),
+        unit: line.unit.trim() || "kg",
+      }))
+    if (!cleanLines.length) {
+      toast.error("No hay líneas con datos para guardar como plantilla.")
+      return
+    }
+    setTemplatesBySupplier((prev) => ({ ...prev, [supplierId]: cleanLines }))
+    toast.success("Plantilla guardada para este proveedor.")
+  }
+
+  function applySupplierTemplate() {
+    if (!supplierId) {
+      toast.error("Seleccione un proveedor para aplicar plantilla.")
+      return
+    }
+    const template = templatesBySupplier[supplierId]
+    if (!template?.length) {
+      toast.error("Este proveedor no tiene plantilla guardada.")
+      return
+    }
+    if (hasDirtyLines) {
+      const ok = window.confirm(
+        "Ya hay líneas con datos. ¿Desea reemplazarlas por la plantilla del proveedor?",
+      )
+      if (!ok) return
+    }
+    setLines(template.map((line) => ({ ...line })))
+    toast.success("Plantilla aplicada.")
   }
 
   async function submit(ev: React.FormEvent) {
@@ -186,7 +290,10 @@ export default function PurchaseOrderNewPage() {
             <Input
               id="po-code"
               value={code}
-              onChange={(ev) => setCode(ev.target.value)}
+              onChange={(ev) => {
+                setCodeTouched(true)
+                setCode(ev.target.value)
+              }}
               placeholder="ej. OC-2026-001"
             />
           </div>
@@ -227,9 +334,25 @@ export default function PurchaseOrderNewPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium">Líneas</h2>
-            <Button type="button" size="sm" variant="secondary" onClick={addLine}>
-              Añadir línea
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={saveSupplierTemplate}
+                disabled={!supplierId}
+              >
+                Guardar plantilla
+              </Button>
+              {hasTemplateForSelectedSupplier ? (
+                <Button type="button" size="sm" variant="outline" onClick={applySupplierTemplate}>
+                  Aplicar plantilla
+                </Button>
+              ) : null}
+              <Button type="button" size="sm" variant="secondary" onClick={addLine}>
+                Añadir línea
+              </Button>
+            </div>
           </div>
           <div className="space-y-4">
             {lines.map((line, i) => (
@@ -301,7 +424,7 @@ export default function PurchaseOrderNewPage() {
         </div>
 
         <Button type="submit" disabled={saving}>
-          {saving ? "Guardando…" : "Crear orden"}
+          <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Crear orden" />
         </Button>
       </form>
     </div>

@@ -13,11 +13,7 @@ class ClientController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Client::query()->with('vendor')->orderBy('name');
-
-        if ($request->query('vendor_id')) {
-            $query->where('vendor_id', $request->query('vendor_id'));
-        }
+        $query = Client::query()->orderBy('name');
 
         if ($q = $request->query('q')) {
             $query->where(function ($w) use ($q) {
@@ -34,18 +30,18 @@ class ClientController extends Controller
     {
         $client = Client::query()->create($request->validated());
 
-        return response()->json($client->load('vendor'), 201);
+        return response()->json($client, 201);
     }
 
     public function show(Client $client): JsonResponse
     {
-        return response()->json($client->load('vendor'));
+        return response()->json($client);
     }
 
     public function update(UpdateClientRequest $request, Client $client): JsonResponse
     {
         $client->update($request->validated());
 
-        return response()->json($client->fresh()->load('vendor'));
+        return response()->json($client->fresh());
     }
 }

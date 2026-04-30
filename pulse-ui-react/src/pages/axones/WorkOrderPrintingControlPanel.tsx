@@ -5,7 +5,6 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -43,23 +42,6 @@ type ProductionSummaryPayload = {
       quantity_used_kg?: number | string | null
       quantity_finished_kg?: number | string | null
     }>
-  } | null
-}
-
-type BobinaRow = {
-  id: number
-  code: string
-  status: string
-  weight_kg: string | null
-  material_id: number
-  material?: {
-    id: number
-    sku: string
-    name: string
-    inventory_area?: string
-  } | null
-  inventory_return?: {
-    work_order_id: number | null
   } | null
 }
 
@@ -204,11 +186,6 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
   const [productionSummary, setProductionSummary] = useState<ProductionSummaryPayload | null>(null)
-  const [bobinaRows, setBobinaRows] = useState<BobinaRow[]>([])
-  const [bobinaSearch, setBobinaSearch] = useState("")
-  const [bobinaMaterialFilter, setBobinaMaterialFilter] = useState<string>("all")
-  const [bobinaLoading, setBobinaLoading] = useState(false)
-  const [materialOptions, setMaterialOptions] = useState<MaterialRow[]>([])
 
   const load = useCallback(async () => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -216,7 +193,13 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
     try {
       const payload = await apiFetch<OrdenTrabajoPayload>(`work-orders/${workOrderId}/orden-trabajo`)
       setPrefill(payload.prefill ?? {})
-      setForm(mergePrefill(payload.prefill ?? {}, payload.form))
+      const mergedForm = mergePrefill(payload.prefill ?? {}, payload.form)
+      setForm({
+        ...mergedForm,
+        // Scrap del turno siempre inicia en 0 para nueva captura operativa.
+        impScrapTransparenteKg: "0",
+        impScrapImpresoKg: "0",
+      })
       try {
         const summary = await apiFetch<ProductionSummaryPayload>(
           `work-orders/${workOrderId}/production-summary`,
@@ -240,117 +223,70 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
     void load()
   }, [load])
 
-  const loadBobinas = useCallback(async () => {
-    setBobinaLoading(true)
-    try {
-      const materialId =
-        bobinaMaterialFilter !== "all" ? Number(bobinaMaterialFilter) : undefined
-      const res = await apiFetch<LaravelPaginated<BobinaRow>>("bobinas", {
-        query: {
-          status: "available",
-          per_page: 200,
-          page: 1,
-          material_id:
-            materialId && Number.isFinite(materialId) && materialId > 0
-              ? materialId
-              : undefined,
-        },
-      })
-      setBobinaRows(res.data ?? [])
-    } catch {
-      setBobinaRows([])
-    } finally {
-      setBobinaLoading(false)
-    }
-  }, [bobinaMaterialFilter])
-
-  useEffect(() => {
-    void loadBobinas()
-  }, [loadBobinas])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await apiFetch<LaravelPaginated<MaterialRow>>("materials", {
-          query: { inventory_area: "material", per_page: 200, page: 1 },
-        })
-        if (!cancelled) setMaterialOptions(res.data ?? [])
-      } catch {
-        if (!cancelled) setMaterialOptions([])
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const filteredBobinas = useMemo(() => {
-    const q = bobinaSearch.trim().toLowerCase()
-    if (!q) return bobinaRows
-    return bobinaRows.filter((b) => {
-      const haystack = [
-        b.code,
-        b.material?.sku ?? "",
-        b.material?.name ?? "",
-        b.status,
-      ]
-        .join(" ")
-        .toLowerCase()
-      return haystack.includes(q)
-    })
-  }, [bobinaRows, bobinaSearch])
-
   const entradaBobinas = useMemo(() => getNumericSeries(form, "impEntradaBobinasKg", 26), [form])
   const salidaBobinas = useMemo(() => getNumericSeries(form, "impSalidaBobinasKg", 22), [form])
   const entradaBobinasMeta = useMemo(() => getMetaSeries(form, "impEntradaBobinasMeta", 26), [form])
   const salidaBobinasMeta = useMemo(() => getMetaSeries(form, "impSalidaBobinasMeta", 22), [form])
-  const totalEntrada = useMemo(() => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaBobinas])
+  const totalEntradaTurnoActual = useMemo(
+    () => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0),
+    [entradaBobinas],
+  )
   const totalSalida = useMemo(() => salidaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [salidaBobinas])
   const scrapTransparente = readNumber(form.impScrapTransparenteKg)
   const scrapImpreso = readNumber(form.impScrapImpresoKg)
   const totalScrap = scrapTransparente + scrapImpreso
   const devolucionBuena = readNumber(form.impDevolucionBuenaKg)
   const devolucionRechazada = readNumber(form.impDevolucionRechazadaKg)
-  const materialConsumido = Math.max(0, totalEntrada - devolucionBuena - devolucionRechazada)
-  const mermaCalc = materialConsumido - totalSalida - totalScrap
+  const materialConsumido = Math.max(0, totalEntradaTurnoActual - devolucionBuena - devolucionRechazada)
+  const mermaCalcRaw = materialConsumido - totalSalida - totalScrap
+  const mermaManual = toFiniteOrNull(form.impMermaKg)
+  const mermaCalc = mermaManual ?? Math.abs(mermaCalcRaw)
   const refilPct = materialConsumido > 0 ? (totalScrap / materialConsumido) * 100 : 0
   const pedidoTotalKg = readNumber(form.pedidoKg ?? prefill.pedidoKg)
   const summaryPrinting = productionSummary?.printing
-  const historicalEntrada = (summaryPrinting?.bobina_usages ?? []).reduce(
+  const historicalBobinaUsages = summaryPrinting?.bobina_usages ?? []
+  const historicalSegments = summaryPrinting?.time_segments_recent ?? []
+  const hasHistoricalPrinting = historicalBobinaUsages.length > 0 || historicalSegments.length > 0
+  const historicalEntrada = historicalBobinaUsages.reduce(
     (acc, row) => acc + readNumber(row.quantity_used_kg),
     0,
   )
-  const historicalSalida = (summaryPrinting?.bobina_usages ?? []).reduce(
+  const historicalSalida = historicalBobinaUsages.reduce(
     (acc, row) => acc + readNumber(row.quantity_finished_kg),
     0,
   )
-  const historicalTurns = (summaryPrinting?.time_segments_recent ?? []).filter(
+  const historicalTurns = historicalSegments.filter(
     (seg) => seg.segment_type === "production" && !!seg.ended_at,
   ).length
-  const producedBaseline =
-    historicalSalida > 0
-      ? historicalSalida
-      : readNumber(form.impAcumuladoProducidoKg)
-  const producidoAcumuladoKg = producedBaseline > 0 ? producedBaseline : totalSalida
+  const inferredHistoricalTurns =
+    historicalTurns > 0 ? historicalTurns : historicalEntrada > 0 || historicalSalida > 0 ? 1 : 0
+  const formProducedBaseline = readNumber(form.impAcumuladoProducidoKg)
+  const formProducidoAcumuladoKg = formProducedBaseline > 0 ? formProducedBaseline : totalSalida
+  const producidoAcumuladoKg = hasHistoricalPrinting ? historicalSalida : formProducidoAcumuladoKg
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
-  const turnosRegistrados =
-    historicalTurns > 0
-      ? historicalTurns
-      : Math.max(0, Math.floor(readNumber(form.impRegistrosTurnos)))
-  const totalEntradaAcumulada = historicalEntrada > 0 ? historicalEntrada : totalEntrada
-  const totalScrapAcumulado = totalScrap
-  const ultimoTurnoLabel =
+  const formTurnosRegistrados = Math.max(0, Math.floor(readNumber(form.impRegistrosTurnos)))
+  const turnosRegistrados = hasHistoricalPrinting ? inferredHistoricalTurns : formTurnosRegistrados
+  const totalEntradaAcumulada = hasHistoricalPrinting ? historicalEntrada : totalEntradaTurnoActual
+  const formScrapAcumulado = readNumber(form.impScrapAcumuladoKg)
+  const totalScrapAcumulado = formScrapAcumulado > 0 ? formScrapAcumulado : totalScrap
+  const hasOpenHistoricalProductionSegment =
     summaryPrinting?.open_time_segment?.segment_type === "production" &&
     !summaryPrinting?.open_time_segment?.ended_at
-      ? "Turno en ejecución"
-      : readString(form.impTimerState) === "completed"
+  const formUltimoTurnoLabel =
+    readString(form.impTimerState) === "completed"
       ? "Turno finalizado"
       : readString(form.impTimerState) === "stopped"
         ? "Turno cerrado"
-        : turnosRegistrados > 0
+        : formTurnosRegistrados > 0
           ? "Turno cerrado"
           : "Sin producción previa"
+  const ultimoTurnoLabel = hasHistoricalPrinting
+    ? hasOpenHistoricalProductionSegment
+      ? "Turno en ejecución"
+      : turnosRegistrados > 0
+        ? "Turno cerrado"
+        : "Sin producción previa"
+    : formUltimoTurnoLabel
 
   const [timerTick, setTimerTick] = useState(0)
   const [pauseReason, setPauseReason] = useState("")
@@ -371,10 +307,6 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
     quantity: "",
     reason: "",
   })
-  const startupState = readString(form.impStartupState) || "pending"
-  const startupRunning = startupState === "running"
-  const startupAcc = readNumber(form.impStartupAccSec)
-  const startupLastStartAt = readNumber(form.impStartupLastStartAtMs)
   const pauseReasons = [
     "Cambio de bobina",
     "Ajuste de máquina",
@@ -397,8 +329,6 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
   const lastResumeAt = readNumber(form.impTimerLastResumeAtMs)
   const pauseAt = readNumber(form.impTimerPauseAtMs)
   const nowMs = Date.now() + timerTick * 0
-  const startupSec =
-    startupAcc + (startupRunning && startupLastStartAt > 0 ? (nowMs - startupLastStartAt) / 1000 : 0)
   const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
   const deadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
   const totalSec = effectiveSec + deadSec
@@ -424,8 +354,10 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
     const MAX_METRAJE = 1000000
     const MAX_TOTAL_ENTRADA = 50000
 
-    if (totalEntrada > MAX_TOTAL_ENTRADA) {
-      warnings.push(`Total entrada elevado (${totalEntrada.toFixed(2)} Kg). Verifique unidad y captura.`)
+    if (totalEntradaTurnoActual > MAX_TOTAL_ENTRADA) {
+      warnings.push(
+        `Total entrada elevado (${totalEntradaTurnoActual.toFixed(2)} Kg). Verifique unidad y captura.`,
+      )
     }
     if (devolucionBuena > MAX_DEVOLUCION_KG) {
       warnings.push(`Devolución buena alta (${devolucionBuena.toFixed(2)} Kg).`)
@@ -445,51 +377,26 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
       const n = readNumber(v)
       if (n > MAX_BOBINA_KG) warnings.push(`Salida bobina ${idx + 1} fuera de rango (${n.toFixed(2)} Kg).`)
     })
-    if (Math.abs(mermaCalc) > Math.max(5000, pedidoTotalKg * 5)) {
-      warnings.push(`Merma atípica (${mermaCalc.toFixed(2)} Kg). Revise entradas/salidas/devoluciones.`)
+    if (Math.abs(mermaCalcRaw) > Math.max(5000, pedidoTotalKg * 5)) {
+      warnings.push(`Merma atípica (${mermaCalcRaw.toFixed(2)} Kg). Revise entradas/salidas/devoluciones.`)
     }
     return warnings
   }, [
-    totalEntrada,
+    totalEntradaTurnoActual,
     devolucionBuena,
     devolucionRechazada,
     form.impMetrajeProduccion,
     entradaBobinas,
     salidaBobinas,
-    mermaCalc,
+    mermaCalcRaw,
     pedidoTotalKg,
   ])
 
   useEffect(() => {
-    if (!timerRunning && !timerPaused && !startupRunning) return
+    if (!timerRunning && !timerPaused) return
     const id = window.setInterval(() => setTimerTick((n) => n + 1), 1000)
     return () => window.clearInterval(id)
-  }, [timerPaused, timerRunning, startupRunning])
-
-  function startStartupTimer() {
-    const now = Date.now()
-    setForm((prev) => ({
-      ...prev,
-      impStartupState: "running",
-      impStartupLastStartAtMs: now,
-      impStartupAccSec: readNumber(prev.impStartupAccSec),
-    }))
-  }
-
-  function stopStartupTimer() {
-    if (!startupRunning) return
-    const now = Date.now()
-    setForm((prev) => ({
-      ...prev,
-      impStartupState: "stopped",
-      impStartupAccSec:
-        readNumber(prev.impStartupAccSec) +
-        (readNumber(prev.impStartupLastStartAtMs) > 0
-          ? (now - readNumber(prev.impStartupLastStartAtMs)) / 1000
-          : 0),
-      impStartupLastStartAtMs: 0,
-    }))
-  }
+  }, [timerPaused, timerRunning])
 
   function startProductionTimer() {
     const now = Date.now()
@@ -501,14 +408,6 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
       impTimerPauseAtMs: 0,
       impTimerEffectiveAccSec: readNumber(prev.impTimerEffectiveAccSec),
       impTimerDeadAccSec: readNumber(prev.impTimerDeadAccSec),
-      impStartupState:
-        readString(prev.impStartupState) === "running" ? "stopped" : readString(prev.impStartupState),
-      impStartupAccSec:
-        readString(prev.impStartupState) === "running" && readNumber(prev.impStartupLastStartAtMs) > 0
-          ? readNumber(prev.impStartupAccSec) +
-            (now - readNumber(prev.impStartupLastStartAtMs)) / 1000
-          : readNumber(prev.impStartupAccSec),
-      impStartupLastStartAtMs: readString(prev.impStartupState) === "running" ? 0 : readNumber(prev.impStartupLastStartAtMs),
     }))
   }
 
@@ -733,9 +632,10 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
       impMetrajeProduccion: normalizeNumericString(form.impMetrajeProduccion),
       impScrapTransparenteKg: normalizeNumericString(form.impScrapTransparenteKg),
       impScrapImpresoKg: normalizeNumericString(form.impScrapImpresoKg),
+      impScrapAcumuladoKg: normalizeNumericString(totalScrapAcumulado),
+      impMermaKg: normalizeNumericString(form.impMermaKg),
       impTimerEffectiveAccSec: normalizeNumericString(form.impTimerEffectiveAccSec),
       impTimerDeadAccSec: normalizeNumericString(form.impTimerDeadAccSec),
-      impStartupAccSec: normalizeNumericString(form.impStartupAccSec),
     }
     setSaving(true)
     try {
@@ -763,22 +663,6 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border bg-card p-3">
-        <div className="text-sm font-medium">Tiempo de Arranque</div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-          <Badge variant="outline">{readString(prefill.code) || `OT-${workOrderId}`}</Badge>
-          <Badge variant={startupRunning ? "default" : "secondary"}>
-            {startupRunning ? "En progreso" : startupState === "stopped" ? "Detenido" : "Pendiente"}
-          </Badge>
-          <span className="font-mono">{formatTimerHms(startupSec)}</span>
-          <Button type="button" size="sm" variant="outline" onClick={startStartupTimer} disabled={startupRunning}>
-            Iniciar arranque
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={stopStartupTimer} disabled={!startupRunning}>
-            Detener arranque
-          </Button>
-        </div>
-      </div>
       {outlierWarnings.length > 0 ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
           <div className="mb-1 font-semibold">Advertencias de captura (no bloqueantes)</div>
@@ -795,7 +679,8 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
         producidoAcumuladoKg={producidoAcumuladoKg}
         faltanteKg={faltanteKg}
         turnosRegistrados={turnosRegistrados}
-        totalEntrada={totalEntradaAcumulada}
+        totalEntradaAcumulada={totalEntradaAcumulada}
+        totalEntradaTurno={totalEntradaTurnoActual}
         totalScrap={totalScrapAcumulado}
         ultimoTurnoLabel={ultimoTurnoLabel}
         timerState={timerState}
@@ -822,6 +707,7 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
         salidaBobinas={salidaBobinas}
         salidaMeta={salidaBobinasMeta}
         mermaCalc={mermaCalc}
+        mermaRaw={readNumberString(form.impMermaKg)}
         metrajeRaw={readNumberString(form.impMetrajeProduccion)}
         scrapTransparenteRaw={readNumberString(form.impScrapTransparenteKg)}
         scrapImpresoRaw={readNumberString(form.impScrapImpresoKg)}
@@ -857,6 +743,7 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
           setNumericSeries(setForm, "impSalidaBobinasKg", next)
         }}
         onOpenSalidaLabel={(idx) => openLabelEditor("salida", idx)}
+        onSetMerma={(v) => setKey(setForm, "impMermaKg", v)}
         onSetMetraje={(v) => setKey(setForm, "impMetrajeProduccion", v)}
         onSetScrapTransparente={(v) => setKey(setForm, "impScrapTransparenteKg", v)}
         onSetScrapImpreso={(v) => setKey(setForm, "impScrapImpresoKg", v)}
@@ -873,74 +760,6 @@ export default function WorkOrderPrintingControlPanel({ workOrderId }: { workOrd
         onLabelClear={clearLabelEditor}
         onLabelSave={saveLabelEditor}
       />
-
-      <div className="rounded-lg border bg-card p-3">
-        <div className="mb-2 text-sm font-medium">Bobinas individuales (opcional)</div>
-        <div className="grid gap-2 md:grid-cols-[1fr_220px]">
-          <Input
-            placeholder="Buscar código o material…"
-            value={bobinaSearch}
-            onChange={(e) => setBobinaSearch(e.target.value)}
-          />
-          <select
-            className="ot-select h-9"
-            value={bobinaMaterialFilter}
-            onChange={(e) => setBobinaMaterialFilter(e.target.value)}
-          >
-            <option value="all">Todos los materiales</option>
-            {materialOptions.map((m) => (
-              <option key={m.id} value={String(m.id)}>
-                {m.sku} · {m.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="mt-2 text-xs text-muted-foreground">
-          Bobinas disponibles: {filteredBobinas.length}
-        </div>
-        <div className="mt-2 overflow-x-auto rounded border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>
-                <th className="p-2 text-left">Código</th>
-                <th className="p-2 text-left">Material</th>
-                <th className="p-2 text-left">Estado</th>
-                <th className="p-2 text-left">Kg</th>
-                <th className="p-2 text-left">OT devolución</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bobinaLoading ? (
-                <tr>
-                  <td className="p-2 text-muted-foreground" colSpan={5}>
-                    Cargando bobinas…
-                  </td>
-                </tr>
-              ) : filteredBobinas.length === 0 ? (
-                <tr>
-                  <td className="p-2 text-muted-foreground" colSpan={5}>
-                    No hay bobinas disponibles con estos filtros
-                  </td>
-                </tr>
-              ) : (
-                filteredBobinas.map((b) => (
-                  <tr key={b.id}>
-                    <td className="p-2 font-mono text-xs">{b.code || `B-${b.id}`}</td>
-                    <td className="p-2">
-                      {b.material
-                        ? `${b.material.sku} · ${b.material.name}`
-                        : `Material #${b.material_id}`}
-                    </td>
-                    <td className="p-2">{b.status}</td>
-                    <td className="p-2">{b.weight_kg ?? "—"}</td>
-                    <td className="p-2">{b.inventory_return?.work_order_id ?? "—"}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       <div className="rounded-lg border bg-card p-3">
         <div className="mb-2 text-sm font-medium">Observaciones</div>

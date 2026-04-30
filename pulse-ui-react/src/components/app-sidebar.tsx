@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useLocation } from "react-router-dom"
-import { CircleUserRound, GalleryVerticalEnd } from "lucide-react"
+import { CircleUserRound } from "lucide-react"
 
 import { NavMain, type MenuItem } from "@/components/nav-main"
 import { NavUser } from "@/components/nav-user"
@@ -27,7 +27,6 @@ const data = {
   teams: [
     {
       name: "Axones",
-      logo: GalleryVerticalEnd,
       plan: "Sistema operativo",
     },
   ],

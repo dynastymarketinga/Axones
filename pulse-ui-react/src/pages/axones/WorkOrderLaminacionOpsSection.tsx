@@ -80,6 +80,8 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
   const adhesivoConsumido = Number(props.adhesivoEntradaRaw || 0) - Number(props.adhesivoSobroRaw || 0)
   const catalizadorConsumido = Number(props.catalizadorEntradaRaw || 0) - Number(props.catalizadorSobroRaw || 0)
   const acetatoConsumido = Number(props.acetatoEntradaRaw || 0) - Number(props.acetatoSobroRaw || 0)
+  const entradaImpresaCount = props.entradaImpresaBobinas.filter((v) => Number(v) > 0).length
+  const entradaVirgenCount = props.entradaVirgenBobinas.filter((v) => Number(v) > 0).length
 
   return (
     <>
@@ -167,12 +169,20 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
           {props.entradaImpresaBobinas.map((val, idx) => <div key={`ent-imp-${idx}`} className="space-y-1"><Label className="ot-label">{idx + 1}</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={val} onChange={(e) => props.onEntradaImpresaChange(idx, e.target.value)} placeholder="0" /></div>)}
         </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaImpresaCount}</p></div>
+          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Peso total</span><p className="font-semibold">{props.totalEntradaImpresa.toFixed(2)} Kg</p></div>
+        </div>
       </div>
 
       <div className="mt-3 rounded-lg border border-rose-200/70 bg-rose-50/40 p-3">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900">Ingreso de bobinas virgen (Kg)</div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
           {props.entradaVirgenBobinas.map((val, idx) => <div key={`ent-virg-${idx}`} className="space-y-1"><Label className="ot-label">{idx + 1}</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={val} onChange={(e) => props.onEntradaVirgenChange(idx, e.target.value)} placeholder="0" /></div>)}
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaVirgenCount}</p></div>
+          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Peso total</span><p className="font-semibold">{props.totalEntradaVirgen.toFixed(2)} Kg</p></div>
         </div>
       </div>
 

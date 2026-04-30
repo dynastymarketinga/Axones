@@ -74,7 +74,6 @@ class WorkOrderImportClientOrderLinesTest extends TestCase
             'client_id' => $client->id,
             'name' => 'Etiqueta demo',
             'cpe' => 'CPE-D',
-            'barcode' => '111',
             'mps' => 'MPS-D',
             'print_type' => 'Superficie',
             'structure' => '1 capa',

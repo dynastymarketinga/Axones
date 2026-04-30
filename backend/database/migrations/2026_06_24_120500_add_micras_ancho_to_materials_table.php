@@ -8,16 +8,36 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('materials', function (Blueprint $table) {
-            $table->decimal('micras', 10, 3)->nullable()->after('tinta_presentacion');
-            $table->decimal('ancho', 10, 3)->nullable()->after('micras');
-        });
+        if (! Schema::hasColumn('materials', 'micras')) {
+            Schema::table('materials', function (Blueprint $table) {
+                if (Schema::hasColumn('materials', 'tinta_presentacion')) {
+                    $table->decimal('micras', 10, 3)->nullable()->after('tinta_presentacion');
+                } else {
+                    $table->decimal('micras', 10, 3)->nullable();
+                }
+            });
+        }
+
+        if (! Schema::hasColumn('materials', 'ancho')) {
+            Schema::table('materials', function (Blueprint $table) {
+                $table->decimal('ancho', 10, 3)->nullable()->after('micras');
+            });
+        }
     }
 
     public function down(): void
     {
         Schema::table('materials', function (Blueprint $table) {
-            $table->dropColumn(['micras', 'ancho']);
+            $drop = [];
+            if (Schema::hasColumn('materials', 'micras')) {
+                $drop[] = 'micras';
+            }
+            if (Schema::hasColumn('materials', 'ancho')) {
+                $drop[] = 'ancho';
+            }
+            if ($drop !== []) {
+                $table->dropColumn($drop);
+            }
         });
     }
 };

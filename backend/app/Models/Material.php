@@ -13,8 +13,6 @@ class Material extends Model
         'name',
         'barcode',
         'inventory_area',
-        'is_active',
-        'tinta_presentacion',
         'micras',
         'ancho',
         'unit',
@@ -29,7 +27,6 @@ class Material extends Model
             'quantity_on_hand' => 'decimal:3',
             'micras' => 'decimal:3',
             'ancho' => 'decimal:3',
-            'is_active' => 'boolean',
         ];
     }
 
@@ -42,5 +39,17 @@ class Material extends Model
     {
         return $this->belongsToMany(Product::class, 'product_ink_material')
             ->withTimestamps();
+    }
+
+    /** Productos vinculados a sustratos (inventario área material). */
+    public function substrateProducts(): BelongsToMany
+    {
+        return $this->belongsToMany(Product::class, 'material_product')
+            ->withTimestamps();
+    }
+
+    public function tintaSubareas(): HasMany
+    {
+        return $this->hasMany(TintaSubarea::class);
     }
 }

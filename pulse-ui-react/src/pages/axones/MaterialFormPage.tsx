@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
+import { Barcode, Boxes, CalendarDays, Check, ChevronDown, ChevronsUpDown, Layers, Package2, Ruler, ScanLine, Scale, StickyNote, Warehouse } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { MaterialRow } from "@/types/api"
+import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Calendar as UiCalendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
 import {
   Dialog,
   DialogContent,
@@ -19,24 +21,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-
-const AREAS = [
-  "material",
-  "tintas",
-  "cementerio_tintas",
-  "quimicos",
-  "bobinas_rechazadas",
-  "miscelaneos",
-] as const
-
-const UNITS_BY_AREA: Record<(typeof AREAS)[number], string[]> = {
-  material: ["kg", "m", "rollo"],
-  bobinas_rechazadas: ["kg", "m", "rollo"],
-  tintas: ["kg", "litro"],
-  miscelaneos: ["unidad", "caja", "pack", "kg"],
-  quimicos: ["kg", "litro", "unidad"],
-  cementerio_tintas: ["kg", "litro"],
-}
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 
 type DuplicateCheckResponse = {
   has_duplicates: boolean
@@ -46,8 +47,65 @@ type DuplicateCheckResponse = {
     sku: string
     name: string
     inventory_area: string
-    is_active: boolean
   }>
+}
+
+type NewProductDraft = {
+  name: string
+  clientId: string
+}
+
+type InventoryTab = "sustratos" | "tintas" | "quimicos" | "miscelaneo"
+const MISC_UNITS = ["kg", "unidad", "m", "rollo"] as const
+const FILTER_INPUT_CLASS = "border-primary/25 bg-background/90 focus-visible:ring-primary/40"
+
+function formatApiDateToDisplay(value: string): string {
+  const trimmed = value.trim()
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+  if (!match) return "dd/mm/aaaa"
+  return `${match[3]}/${match[2]}/${match[1]}`
+}
+
+function parseApiDate(value: string): Date | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return undefined
+  const [, year, month, day] = match
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+  if (
+    parsed.getFullYear() !== Number(year) ||
+    parsed.getMonth() !== Number(month) - 1 ||
+    parsed.getDate() !== Number(day)
+  ) return undefined
+  return parsed
+}
+
+function formatDateToApi(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function normalizeDecimalInput(raw: string): string {
+  const normalized = raw.replace(",", ".").replace(/[^0-9.]/g, "")
+  const firstDot = normalized.indexOf(".")
+  if (firstDot === -1) return normalized
+  const integerPart = normalized.slice(0, firstDot + 1)
+  const decimalPart = normalized.slice(firstDot + 1).replace(/\./g, "").slice(0, 2)
+  return `${integerPart}${decimalPart}`
+}
+
+function formatToTwoDecimals(raw: string | number | null | undefined): string {
+  const n = Number(String(raw ?? "0").replace(",", "."))
+  if (!Number.isFinite(n)) return "0.00"
+  return n.toFixed(2)
+}
+
+function inferTabFromArea(area?: string | null): InventoryTab {
+  if (area === "tintas" || area === "cementerio_tintas") return "tintas"
+  if (area === "quimicos") return "quimicos"
+  if (area === "miscelaneos") return "miscelaneo"
+  return "sustratos"
 }
 
 export default function MaterialFormPage() {
@@ -59,20 +117,35 @@ export default function MaterialFormPage() {
 
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [tab, setTab] = useState<InventoryTab>("sustratos")
   const [sku, setSku] = useState("")
   const [name, setName] = useState("")
   const [barcode, setBarcode] = useState("")
-  const [inventoryArea, setInventoryArea] = useState<(typeof AREAS)[number]>("material")
-  const [unit, setUnit] = useState("kg")
-  const [tintaPresentacion, setTintaPresentacion] = useState<"original" | "solventada" | "">("")
   const [micras, setMicras] = useState("")
   const [ancho, setAncho] = useState("")
-  const [minStock, setMinStock] = useState("0")
   const [notes, setNotes] = useState("")
-  const [isActive, setIsActive] = useState(true)
+  const [minStock, setMinStock] = useState("0.00")
+  const [quantity, setQuantity] = useState("0.00")
+  const [receivedOn, setReceivedOn] = useState("")
+  const [products, setProducts] = useState<ProductRecord[]>([])
+  const [clients, setClients] = useState<ClientRecord[]>([])
+  const [productComboOpen, setProductComboOpen] = useState(false)
+  const [productModalOpen, setProductModalOpen] = useState(false)
+  const [creatingProduct, setCreatingProduct] = useState(false)
+  const [newProductDraft, setNewProductDraft] = useState<NewProductDraft>({ name: "", clientId: "" })
+  const [selectedProductIds, setSelectedProductIds] = useState<number[]>([])
+  const [tintaSubarea, setTintaSubarea] = useState<"laminacion" | "superficie" | "prueba_laminacion" | "laminacion_nueva">("laminacion")
+  const [consumibleUnit, setConsumibleUnit] = useState<(typeof MISC_UNITS)[number]>("unidad")
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateCheckResponse["matches"]>([])
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null)
+  const [skuError, setSkuError] = useState(false)
+  const [nameError, setNameError] = useState(false)
+  const [micrasError, setMicrasError] = useState(false)
+  const [anchoError, setAnchoError] = useState(false)
+  const [tintaSubareaError, setTintaSubareaError] = useState(false)
+  const [receivedOnError, setReceivedOnError] = useState(false)
 
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
@@ -88,14 +161,15 @@ export default function MaterialFormPage() {
       setSku(row.sku ?? "")
       setName(row.name ?? "")
       setBarcode(row.barcode ?? "")
-      setInventoryArea((AREAS.includes((row.inventory_area ?? "") as (typeof AREAS)[number]) ? row.inventory_area : "material") as (typeof AREAS)[number])
-      setUnit(row.unit ?? "kg")
-      setTintaPresentacion((row.tinta_presentacion as "original" | "solventada" | null) ?? "")
+      setTab(inferTabFromArea(row.inventory_area))
+      setTintaSubarea((row.tinta_subareas?.[0]?.subarea as "laminacion" | "superficie" | "prueba_laminacion" | "laminacion_nueva") || "laminacion")
       setMicras(row.micras ?? "")
       setAncho(row.ancho ?? "")
-      setMinStock(row.min_stock ?? "0")
+      setMinStock(formatToTwoDecimals(row.min_stock))
       setNotes(row.notes ?? "")
-      setIsActive(row.is_active ?? true)
+      setQuantity(formatToTwoDecimals(row.quantity_on_hand))
+      setConsumibleUnit(MISC_UNITS.includes((row.unit ?? "") as (typeof MISC_UNITS)[number]) ? (row.unit as (typeof MISC_UNITS)[number]) : "unidad")
+      setSelectedProductIds((row.substrate_products ?? []).map((p) => p.id))
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar el material.")
@@ -108,39 +182,107 @@ export default function MaterialFormPage() {
     void load()
   }, [load])
 
-  const requiresDimensions = inventoryArea === "material" || inventoryArea === "bobinas_rechazadas"
-  const requiresTintaPresentacion = inventoryArea === "tintas"
-  const availableUnits = UNITS_BY_AREA[inventoryArea] ?? ["kg"]
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<ProductRecord>>("products", {
+          query: { per_page: 300, page: 1 },
+        })
+        if (!cancelled) setProducts(res.data)
+      } catch {
+        if (!cancelled) setProducts([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
-    if (!availableUnits.includes(unit)) {
-      setUnit(availableUnits[0] ?? "kg")
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<ClientRecord>>("clients", {
+          query: { per_page: 100, page: 1 },
+        })
+        if (!cancelled) setClients(res.data)
+      } catch {
+        if (!cancelled) setClients([])
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-  }, [availableUnits, unit])
+  }, [])
 
-  useEffect(() => {
-    if (!requiresDimensions) {
-      setMicras("")
-      setAncho("")
-    }
-    if (!requiresTintaPresentacion) {
-      setTintaPresentacion("")
-    }
-  }, [requiresDimensions, requiresTintaPresentacion])
+  const selectedProductsLabel = useMemo(() => {
+    if (!selectedProductIds.length) return "Seleccione productos..."
+    const names = products
+      .filter((p) => selectedProductIds.includes(p.id))
+      .map((p) => p.name)
+      .filter(Boolean)
+    if (!names.length) return "Seleccione productos..."
+    if (names.length === 1) return names[0]
+    return `${names[0]} +${names.length - 1}`
+  }, [products, selectedProductIds])
 
-  function buildPayload() {
+  function buildPayloadByTab() {
+    const commonNotes = [notes.trim(), receivedOn ? `Fecha ingreso: ${receivedOn}` : null]
+      .filter(Boolean)
+      .join("\n")
+
+    if (tab === "sustratos") {
+      return {
+        sku: sku.trim().toUpperCase(),
+        name: name.trim(),
+        barcode: barcode.trim() || null,
+        inventory_area: "material",
+        unit: "kg",
+        micras: Number(micras || "0"),
+        ancho: Number(ancho || "0"),
+        min_stock: Number(minStock || "0"),
+        quantity_on_hand: Number(quantity || "0"),
+        product_ids: selectedProductIds,
+        notes: commonNotes || null,
+      }
+    }
+    if (tab === "tintas") {
+      return {
+        sku: sku.trim().toUpperCase(),
+        name: name.trim(),
+        barcode: null,
+        inventory_area: "tintas",
+        unit: "kg",
+        min_stock: Number(minStock || "0"),
+        quantity_on_hand: Number(quantity || "0"),
+        tinta_subarea: tintaSubarea,
+        notes: notes.trim() || null,
+      }
+    }
+    if (tab === "quimicos") {
+      return {
+        sku: sku.trim().toUpperCase(),
+        name: name.trim(),
+        barcode: null,
+        inventory_area: "quimicos",
+        unit: "kg",
+        min_stock: Number(minStock || "0"),
+        quantity_on_hand: Number(quantity || "0"),
+        notes: notes.trim() || null,
+      }
+    }
     return {
       sku: sku.trim().toUpperCase(),
       name: name.trim(),
-      barcode: barcode.trim() || null,
-      inventory_area: inventoryArea,
-      unit: unit.trim() || "kg",
-      tinta_presentacion: requiresTintaPresentacion ? tintaPresentacion || null : null,
-      micras: requiresDimensions ? Number(micras || "0") : null,
-      ancho: requiresDimensions ? Number(ancho || "0") : null,
+      barcode: null,
+      inventory_area: "miscelaneos",
+      unit: MISC_UNITS.includes(consumibleUnit as (typeof MISC_UNITS)[number]) ? consumibleUnit : "unidad",
+      micras: null,
+      ancho: null,
       min_stock: Number(minStock || "0"),
+      quantity_on_hand: Number(quantity || "0"),
       notes: notes.trim() || null,
-      is_active: isActive,
     }
   }
 
@@ -171,20 +313,53 @@ export default function MaterialFormPage() {
 
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
-    if (!sku.trim() || !name.trim()) {
-      toast.error("SKU y nombre son obligatorios.")
+
+    const skuOk = sku.trim().length > 0
+    const nameOk = name.trim().length > 0
+    const micrasOk = tab !== "sustratos" || (micras.trim().length > 0 && Number(micras) > 0)
+    const anchoOk = tab !== "sustratos" || (ancho.trim().length > 0 && Number(ancho) > 0)
+    const tintaSubareaOk = tab !== "tintas" || Boolean(tintaSubarea)
+    const receivedOnOk = receivedOn.trim().length > 0
+
+    setSkuError(!skuOk)
+    setNameError(!nameOk)
+    setMicrasError(!micrasOk)
+    setAnchoError(!anchoOk)
+    setTintaSubareaError(!tintaSubareaOk)
+    setReceivedOnError(!receivedOnOk)
+
+    const activeSkuId =
+      tab === "sustratos"
+        ? "material-sku"
+        : tab === "tintas"
+          ? "material-sku-tintas"
+          : tab === "quimicos"
+            ? "material-sku-quimicos"
+            : "material-sku-miscelaneo"
+    const activeMicrasId = "material-micras"
+
+    if (!skuOk || !nameOk) {
+      document.getElementById(activeSkuId)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("Código y nombre son obligatorios.")
       return
     }
-    if (requiresDimensions && (!micras.trim() || !ancho.trim())) {
-      toast.error("Micras y ancho son obligatorios para sustrato/bobinas.")
+    if (!micrasOk || !anchoOk) {
+      document.getElementById(activeMicrasId)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("Micras y ancho deben ser mayores a 0 para sustratos.")
       return
     }
-    if (requiresTintaPresentacion && !tintaPresentacion) {
-      toast.error("La presentación es obligatoria para tintas.")
+    if (!tintaSubareaOk) {
+      document.getElementById("material-tinta-subarea")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("La subárea es obligatoria para tintas.")
+      return
+    }
+    if (!receivedOnOk) {
+      document.getElementById("material-received-on")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("La fecha de ingreso es obligatoria.")
       return
     }
 
-    const payload = buildPayload()
+    const payload = buildPayloadByTab()
     try {
       const d = await apiFetch<DuplicateCheckResponse>("materials/check-duplicates", {
         query: {
@@ -207,6 +382,50 @@ export default function MaterialFormPage() {
     await persist(payload)
   }
 
+  function toggleProduct(productId: number) {
+    setSelectedProductIds((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId],
+    )
+  }
+
+  async function createProductQuickly() {
+    const name = newProductDraft.name.trim()
+    const clientId = Number(newProductDraft.clientId)
+    if (!name) {
+      toast.error("Indique el nombre del producto.")
+      return
+    }
+    if (!Number.isFinite(clientId) || clientId < 1) {
+      toast.error("Seleccione el cliente para crear el producto.")
+      return
+    }
+    setCreatingProduct(true)
+    try {
+      const created = await apiFetch<ProductRecord>("products", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          client_id: clientId,
+          cpe: null,
+          barcode: null,
+          mps: null,
+          print_type: "Sustrato",
+          structure: null,
+        }),
+      })
+      setProducts((prev) => [...prev, created].sort((a, b) => (a.name || "").localeCompare(b.name || "")))
+      setSelectedProductIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]))
+      setProductModalOpen(false)
+      setNewProductDraft({ name: "", clientId: "" })
+      toast.success("Producto creado y vinculado.")
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo crear el producto.")
+    } finally {
+      setCreatingProduct(false)
+    }
+  }
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -215,126 +434,237 @@ export default function MaterialFormPage() {
             {isEdit ? "Editar material" : "Nuevo material"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Gestione datos maestros de materiales para recepción y producción.
+            Cree insumos de inventario para recepción y producción.
           </p>
         </div>
-        <Button type="button" variant="outline" asChild>
-          <Link to={returnTo}>Volver al listado</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={() => setHelpOpen(true)}>
+            Ayuda
+          </Button>
+          <Button type="button" variant="outline" asChild>
+            <Link to={returnTo}>Volver al listado</Link>
+          </Button>
+        </div>
       </div>
 
       {loading ? (
         <p className="text-muted-foreground text-sm">Cargando…</p>
       ) : (
-        <form onSubmit={(ev) => void submit(ev)} className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="m-sku">Código / SKU *</Label>
-              <Input id="m-sku" value={sku} onChange={(ev) => setSku(ev.target.value.toUpperCase())} required />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="m-name">Nombre *</Label>
-              <Input id="m-name" value={name} onChange={(ev) => setName(ev.target.value)} required />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="m-area">Área</Label>
-              <select
-                id="m-area"
-                className="border-input bg-background h-10 rounded-md border px-3 text-sm"
-                value={inventoryArea}
-                onChange={(ev) => setInventoryArea(ev.target.value as (typeof AREAS)[number])}
-              >
-                {AREAS.map((a) => (
-                  <option key={a} value={a}>{a}</option>
-                ))}
-              </select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="m-unit">Unidad</Label>
-              <select
-                id="m-unit"
-                className="border-input bg-background h-10 rounded-md border px-3 text-sm"
-                value={unit}
-                onChange={(ev) => setUnit(ev.target.value)}
-              >
-                {availableUnits.map((u) => (
-                  <option key={u} value={u}>{u}</option>
-                ))}
-              </select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="m-min">Stock mínimo</Label>
-              <Input id="m-min" type="number" min="0" step="0.001" value={minStock} onChange={(ev) => setMinStock(ev.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="m-barcode">Código de barras</Label>
-              <Input id="m-barcode" value={barcode} onChange={(ev) => setBarcode(ev.target.value)} />
-            </div>
-            {requiresTintaPresentacion ? (
-              <div className="grid gap-2">
-                <Label htmlFor="m-tinta-presentacion">Presentación tinta *</Label>
-                <select
-                  id="m-tinta-presentacion"
-                  className="border-input bg-background h-10 rounded-md border px-3 text-sm"
-                  value={tintaPresentacion}
-                  onChange={(ev) => setTintaPresentacion(ev.target.value as "original" | "solventada" | "")}
-                  required
-                >
-                  <option value="">Seleccione...</option>
-                  <option value="original">Original</option>
-                  <option value="solventada">Solventada</option>
-                </select>
+        <form noValidate onSubmit={(ev) => void submit(ev)} className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as InventoryTab)}>
+            <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-4">
+              <TabsTrigger value="sustratos">Sustratos</TabsTrigger>
+              <TabsTrigger value="tintas">Tintas</TabsTrigger>
+              <TabsTrigger value="quimicos">Químicos</TabsTrigger>
+              <TabsTrigger value="miscelaneo">Misceláneo</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="sustratos" className="mt-4 rounded-xl border-l-4 border-l-emerald-500 bg-emerald-50/30 p-4">
+              <h1 className="mb-4 text-center text-2xl font-extrabold tracking-wide text-emerald-900">SUSTRATOS</h1>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-2"><Label htmlFor="material-sku">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku" value={sku} onChange={(ev) => {
+                  setSku(ev.target.value.toUpperCase())
+                  if (skuError) setSkuError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-name">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name" value={name} onChange={(ev) => {
+                  setName(ev.target.value)
+                  if (nameError) setNameError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-micras">Micras *</Label><div className="group/field relative"><ScanLine className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", micrasError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-micras" type="number" min="0" step="0.001" value={micras} onChange={(ev) => {
+                  setMicras(ev.target.value)
+                  if (micrasError) setMicrasError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, micrasError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-ancho">Ancho *</Label><div className="group/field relative"><Ruler className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", anchoError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-ancho" type="number" min="0" step="0.001" value={ancho} onChange={(ev) => {
+                  setAncho(ev.target.value)
+                  if (anchoError) setAnchoError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, anchoError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                <div className="grid gap-2 md:col-span-3">
+                  <Label>Productos vinculados (opcional)</Label>
+                  <div className="flex items-center gap-2">
+                    <Popover open={productComboOpen} onOpenChange={setProductComboOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={productComboOpen}
+                          className={cn("h-10 flex-1 justify-between font-normal", FILTER_INPUT_CLASS)}
+                        >
+                          <span className={cn("truncate text-left", !selectedProductIds.length && "text-muted-foreground")}>
+                            {selectedProductsLabel}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                        <Command shouldFilter>
+                          <CommandInput placeholder="Buscar producto..." />
+                          <CommandList className="max-h-60">
+                            <CommandEmpty>Sin productos disponibles.</CommandEmpty>
+                            <CommandGroup>
+                              {products.map((p) => (
+                                <CommandItem
+                                  key={p.id}
+                                  value={p.name}
+                                  onSelect={() => toggleProduct(p.id)}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      selectedProductIds.includes(p.id) ? "opacity-100" : "opacity-0",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  {p.name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    {products.length ? (
+                      <Button type="button" variant="outline" onClick={() => setProductModalOpen(true)}>
+                        + Nuevo producto
+                      </Button>
+                    ) : null}
+                  </div>
+                  {!products.length ? (
+                    <div className="rounded-md border border-dashed border-primary/30 bg-background/80 p-3">
+                      <p className="text-muted-foreground text-sm">Aun no hay productos creados para vincular.</p>
+                      <Button className="mt-2" type="button" size="sm" variant="secondary" onClick={() => setProductModalOpen(true)}>
+                        Crear producto ahora
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            ) : null}
-            {requiresDimensions ? (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="m-micras">Micras *</Label>
-                  <Input
-                    id="m-micras"
-                    type="number"
-                    min="0"
-                    step="0.001"
-                    value={micras}
-                    onChange={(ev) => setMicras(ev.target.value)}
-                    required
-                  />
+            </TabsContent>
+
+            <TabsContent value="tintas" className="mt-4 rounded-xl border-l-4 border-l-blue-500 bg-blue-50/30 p-4">
+              <h1 className="mb-4 text-center text-2xl font-extrabold tracking-wide text-blue-900">TINTAS</h1>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-2"><Label htmlFor="material-name-tintas">Color / Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name-tintas" value={name} onChange={(ev) => {
+                  setName(ev.target.value)
+                  if (nameError) setNameError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-sku-tintas">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku-tintas" value={sku} onChange={(ev) => {
+                  setSku(ev.target.value.toUpperCase())
+                  if (skuError) setSkuError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                <div className="grid gap-2"><Label>Subárea *</Label>
+                  <div className="group/field relative">
+                    <Layers className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", tintaSubareaError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden />
+                    <select id="material-tinta-subarea" className={cn("border-input h-10 w-full appearance-none rounded-md border px-3 pl-10 pr-10 text-sm", FILTER_INPUT_CLASS, tintaSubareaError ? "border-red-500 focus-visible:ring-red-500" : "")} value={tintaSubarea} onChange={(ev) => {
+                    setTintaSubarea(ev.target.value as typeof tintaSubarea)
+                    if (tintaSubareaError) setTintaSubareaError(false)
+                  }}>
+                    <option value="laminacion">Laminación</option>
+                    <option value="superficie">Superficie</option>
+                    <option value="prueba_laminacion">Prueba laminación</option>
+                    <option value="laminacion_nueva">Laminación nueva</option>
+                  </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="m-ancho">Ancho *</Label>
-                  <Input
-                    id="m-ancho"
-                    type="number"
-                    min="0"
-                    step="0.001"
-                    value={ancho}
-                    onChange={(ev) => setAncho(ev.target.value)}
-                    required
-                  />
+                <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="quimicos" className="mt-4 rounded-xl border-l-4 border-l-amber-500 bg-amber-50/30 p-4">
+              <h1 className="mb-4 text-center text-2xl font-extrabold tracking-wide text-amber-900">QUIMICOS</h1>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-2"><Label htmlFor="material-sku-quimicos">Cod *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku-quimicos" value={sku} onChange={(ev) => {
+                  setSku(ev.target.value.toUpperCase())
+                  if (skuError) setSkuError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-name-quimicos">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name-quimicos" value={name} onChange={(ev) => {
+                  setName(ev.target.value)
+                  if (nameError) setNameError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="miscelaneo" className="mt-4 rounded-xl border-l-4 border-l-violet-500 bg-violet-50/30 p-4">
+              <h1 className="mb-4 text-center text-2xl font-extrabold tracking-wide text-violet-900">MISCELÁNEO</h1>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-2"><Label htmlFor="material-sku-miscelaneo">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku-miscelaneo" value={sku} onChange={(ev) => {
+                  setSku(ev.target.value.toUpperCase())
+                  if (skuError) setSkuError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-name-miscelaneo">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name-miscelaneo" value={name} onChange={(ev) => {
+                  setName(ev.target.value)
+                  if (nameError) setNameError(false)
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                <div className="grid gap-2"><Label>Cantidad</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                <div className="grid gap-2"><Label>Unidad</Label>
+                  <div className="group/field relative">
+                  <Boxes className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden />
+                    <select className={cn("border-input h-10 w-full appearance-none rounded-md border px-3 pl-10 pr-10 text-sm", FILTER_INPUT_CLASS)} value={consumibleUnit} onChange={(ev) => setConsumibleUnit(ev.target.value as (typeof MISC_UNITS)[number])}>
+                    <option value="kg">kg</option>
+                    <option value="unidad">unidad</option>
+                    <option value="m">m</option>
+                    <option value="rollo">rollo</option>
+                  </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  </div>
                 </div>
-              </>
-            ) : null}
-          </div>
+                <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+              </div>
+            </TabsContent>
+          </Tabs>
 
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <div>
-              <p className="text-sm font-medium">Estado</p>
-              <p className="text-muted-foreground text-xs">Inactivo no aparece para nuevas recepciones.</p>
+          <div className="space-y-4 rounded-xl border border-primary/15 bg-background/60 p-4">
+            <div className="grid gap-2 md:max-w-sm">
+              <Label htmlFor="material-received-on">Fecha de ingreso *</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    id="material-received-on"
+                    type="button"
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      FILTER_INPUT_CLASS,
+                      receivedOnError ? "border-red-500 focus-visible:ring-red-500" : "",
+                    )}
+                  >
+                    <CalendarDays className="mr-2 h-4 w-4 text-primary" />
+                    {formatApiDateToDisplay(receivedOn)}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <UiCalendar
+                    mode="single"
+                    selected={parseApiDate(receivedOn)}
+                    onSelect={(date) => {
+                      setReceivedOn(date ? formatDateToApi(date) : "")
+                      if (receivedOnError) setReceivedOnError(false)
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm">{isActive ? "Activo" : "Inactivo"}</span>
-              <Switch checked={isActive} onCheckedChange={setIsActive} />
+
+            <div className="grid gap-2">
+              <Label htmlFor="m-notes">Notas</Label>
+              <div className="group/field relative">
+                <StickyNote className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within/field:text-primary" aria-hidden />
+                <Textarea className={cn("pl-10", FILTER_INPUT_CLASS)} id="m-notes" rows={3} value={notes} onChange={(ev) => setNotes(ev.target.value)} />
+              </div>
+            </div>
+
+            <div className="flex justify-center pt-1">
+              <Button type="submit" disabled={saving}>
+                {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear material"}
+              </Button>
             </div>
           </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="m-notes">Notas</Label>
-            <Textarea id="m-notes" rows={3} value={notes} onChange={(ev) => setNotes(ev.target.value)} />
-          </div>
-
-          <Button type="submit" disabled={saving}>
-            {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear material"}
-          </Button>
         </form>
       )}
 
@@ -343,13 +673,13 @@ export default function MaterialFormPage() {
           <DialogHeader>
             <DialogTitle>Posible duplicado detectado</DialogTitle>
             <DialogDescription>
-              Se encontraron materiales similares por SKU o por Nombre + Área.
+              Se encontraron materiales similares por Código o por Nombre + Área.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-56 overflow-auto rounded-md border p-2 text-sm">
             {duplicateMatches.map((m) => (
               <div key={m.id} className="border-b px-2 py-1 last:border-b-0">
-                {m.sku} — {m.name} ({m.inventory_area}) · {m.is_active ? "Activo" : "Inactivo"}
+                {m.sku} — {m.name} ({m.inventory_area})
               </div>
             ))}
           </div>
@@ -366,6 +696,91 @@ export default function MaterialFormPage() {
               }}
             >
               Continuar y guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={productModalOpen}
+        onOpenChange={(open) => {
+          setProductModalOpen(open)
+          if (!open && !creatingProduct) setNewProductDraft({ name: "", clientId: "" })
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Crear producto rápido</DialogTitle>
+            <DialogDescription>
+              Cree un producto básico sin salir de este formulario. El cliente es obligatorio.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label>Cliente *</Label>
+              <Select
+                value={newProductDraft.clientId}
+                onValueChange={(value) => setNewProductDraft((prev) => ({ ...prev, clientId: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccione cliente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clients.map((client) => (
+                    <SelectItem key={client.id} value={String(client.id)}>
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="new-product-name">Nombre *</Label>
+              <Input
+                id="new-product-name"
+                value={newProductDraft.name}
+                onChange={(ev) => setNewProductDraft((prev) => ({ ...prev, name: ev.target.value }))}
+                placeholder="Ej: BOLSA CPE"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Tipo de impresión (auto)</Label>
+              <Input value="Sustrato" readOnly />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setProductModalOpen(false)}
+              disabled={creatingProduct}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void createProductQuickly()} disabled={creatingProduct}>
+              {creatingProduct ? "Creando producto..." : "Crear y usar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Guía rápida: Nuevo material</DialogTitle>
+            <DialogDescription>
+              Esta pantalla crea insumos, no productos terminados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p><strong>Qué hace:</strong> registra materiales de inventario como sustrato, tinta, químico o misceláneo.</p>
+            <p><strong>Cuándo usarla:</strong> cuando un insumo nuevo debe existir en el maestro antes de recibir o consumir.</p>
+            <p><strong>Relación con producción:</strong> los materiales creados aquí luego se consumen en OT y movimientos.</p>
+            <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo, 3) Ingreso de material cuando llegue físicamente.</p>
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setHelpOpen(false)}>
+              Entendido
             </Button>
           </DialogFooter>
         </DialogContent>

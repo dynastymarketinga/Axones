@@ -52,7 +52,6 @@ $tables = [
     'products',
     'suppliers',
     'clients',
-    'vendors',
     'cache',
     'cache_locks',
     'jobs',

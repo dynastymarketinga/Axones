@@ -56,7 +56,7 @@ class StorePurchaseReceiptRequest extends FormRequest
                 $micras = $line['micras'] ?? null;
                 $ancho = $line['ancho_mm'] ?? null;
 
-                $requiresDimensions = in_array($itemType, ['sustrato', 'consumible'], true);
+                $requiresDimensions = $itemType === 'sustrato';
                 $allowedUnits = match ($itemType) {
                     'tinta', 'quimico', 'miscelaneo' => ['kg', 'unidad'],
                     default => ['kg', 'unidad', 'm', 'rollo'],

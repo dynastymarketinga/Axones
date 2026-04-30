@@ -6,7 +6,8 @@ import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText } f
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
+import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord, SupplierRecord } from "@/types/api"
+import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -51,13 +52,20 @@ type NewMaterialDraft = {
   rowIndex: number | null
   name: string
   sku: string
+  receivedOn: string
   unit: string
+  productId: string
   inventory_area: "material" | "tintas" | "quimicos" | "miscelaneos"
 }
 
 type NewSupplierDraft = {
   name: string
   rif: string
+}
+
+type NewProductDraft = {
+  name: string
+  clientId: string
 }
 
 type DuplicateReceiptMatch = {
@@ -77,7 +85,6 @@ type DuplicateCheckResponse = {
 const RECEIPT_ITEM_TYPES = [
   "Sustrato",
   "Misceláneo",
-  "Consumible",
   "Tinta",
   "Químico",
 ] as const
@@ -102,21 +109,9 @@ function mapItemTypeToInventoryArea(itemType: string): NewMaterialDraft["invento
 function mapUiItemTypeToApi(itemType: string) {
   if (itemType === "Sustrato") return "sustrato"
   if (itemType === "Misceláneo") return "miscelaneo"
-  if (itemType === "Consumible") return "consumible"
   if (itemType === "Tinta") return "tinta"
   if (itemType === "Químico") return "quimico"
   return "sustrato"
-}
-
-function buildQuickSku(rawName: string) {
-  const normalized = rawName
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-  const seed = Date.now().toString().slice(-6)
-  return `${normalized || "MAT"}-${seed}`
 }
 
 function normalizeKey(value: string) {
@@ -136,10 +131,7 @@ function getTodayLocalDate() {
 }
 
 function allowedUnitsByItemType(itemType: string) {
-  if (itemType === "Tinta" || itemType === "Químico") {
-    return UNIT_OPTIONS.filter((option) => option.value === "kg" || option.value === "unidad")
-  }
-  if (itemType === "Misceláneo") {
+  if (itemType === "Tinta" || itemType === "Químico" || itemType === "Misceláneo") {
     return UNIT_OPTIONS.filter((option) => option.value === "kg" || option.value === "unidad")
   }
   return UNIT_OPTIONS
@@ -163,8 +155,15 @@ function sanitizeDecimalInput(raw: string) {
   const firstDot = onlyNumeric.indexOf(".")
   if (firstDot === -1) return onlyNumeric
   const integerPart = onlyNumeric.slice(0, firstDot + 1)
-  const decimalPart = onlyNumeric.slice(firstDot + 1).replace(/\./g, "")
+  const decimalPart = onlyNumeric.slice(firstDot + 1).replace(/\./g, "").slice(0, 2)
   return `${integerPart}${decimalPart}`
+}
+
+function inferPrintTypeByArea(area: NewMaterialDraft["inventory_area"]) {
+  if (area === "material") return "Sustrato"
+  if (area === "tintas") return "Tinta"
+  if (area === "quimicos") return "Químico"
+  return "Misceláneo"
 }
 
 function emptyLine(): FreeLine {
@@ -195,12 +194,18 @@ export default function PurchaseReceiptNewPage() {
 
   const [freeLines, setFreeLines] = useState<FreeLine[]>([emptyLine()])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
+  const [products, setProducts] = useState<ProductRecord[]>([])
+  const [clients, setClients] = useState<ClientRecord[]>([])
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
   const [saving, setSaving] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [creatingMaterial, setCreatingMaterial] = useState(false)
   const [creatingSupplier, setCreatingSupplier] = useState(false)
+  const [creatingProduct, setCreatingProduct] = useState(false)
   const [supplierComboOpen, setSupplierComboOpen] = useState(false)
+  const [productComboOpen, setProductComboOpen] = useState(false)
   const [supplierModalOpen, setSupplierModalOpen] = useState(false)
+  const [productModalOpen, setProductModalOpen] = useState(false)
   const [materialComboOpenRow, setMaterialComboOpenRow] = useState<number | null>(null)
   const [firstInvalidRowIndex, setFirstInvalidRowIndex] = useState<number | null>(null)
   const [supplierError, setSupplierError] = useState(false)
@@ -210,12 +215,18 @@ export default function PurchaseReceiptNewPage() {
     rowIndex: null,
     name: "",
     sku: "",
+    receivedOn: todayDate,
     unit: "kg",
+    productId: "",
     inventory_area: "material",
   })
   const [newSupplierDraft, setNewSupplierDraft] = useState<NewSupplierDraft>({
     name: "",
     rif: "",
+  })
+  const [newProductDraft, setNewProductDraft] = useState<NewProductDraft>({
+    name: "",
+    clientId: "",
   })
   const [estimatedNextReceiptId, setEstimatedNextReceiptId] = useState<number | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
@@ -226,22 +237,32 @@ export default function PurchaseReceiptNewPage() {
     let c = false
     void (async () => {
       try {
-        const [m, s] = await Promise.all([
+        const [m, s, p, cList] = await Promise.all([
           apiFetch<LaravelPaginated<MaterialRow>>("materials", {
             query: { per_page: 300, page: 1 },
           }),
           apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
             query: { per_page: 300, page: 1 },
           }).catch(() => null),
+          apiFetch<LaravelPaginated<ProductRecord>>("products", {
+            query: { per_page: 300, page: 1 },
+          }).catch(() => null),
+          apiFetch<LaravelPaginated<ClientRecord>>("clients", {
+            query: { per_page: 300, page: 1 },
+          }).catch(() => null),
         ])
         if (!c) {
           setMaterials(m.data)
           setSuppliers(s?.data ?? [])
+          setProducts(p?.data ?? [])
+          setClients(cList?.data ?? [])
         }
       } catch {
         if (!c) {
           setMaterials([])
           setSuppliers([])
+          setProducts([])
+          setClients([])
         }
       }
     })()
@@ -277,6 +298,10 @@ export default function PurchaseReceiptNewPage() {
     () => supplierOptions.find((supplier) => supplier.id === supplierId) ?? null,
     [supplierId, supplierOptions],
   )
+  const selectedProduct = useMemo(
+    () => products.find((product) => String(product.id) === newMaterialDraft.productId) ?? null,
+    [products, newMaterialDraft.productId],
+  )
   async function createSupplierQuickly() {
     const name = newSupplierDraft.name.trim()
     const rif = newSupplierDraft.rif.trim().toUpperCase()
@@ -307,6 +332,44 @@ export default function PurchaseReceiptNewPage() {
       else toast.error("No se pudo crear el proveedor.")
     } finally {
       setCreatingSupplier(false)
+    }
+  }
+
+  async function createProductQuickly() {
+    const name = newProductDraft.name.trim()
+    const clientId = Number(newProductDraft.clientId)
+    if (!name) {
+      toast.error("Indique el nombre del producto.")
+      return
+    }
+    if (!Number.isFinite(clientId) || clientId < 1) {
+      toast.error("Seleccione el cliente para crear el producto.")
+      return
+    }
+    setCreatingProduct(true)
+    try {
+      const created = await apiFetch<ProductRecord>("products", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          client_id: clientId,
+          cpe: null,
+          barcode: null,
+          mps: null,
+          print_type: inferPrintTypeByArea(newMaterialDraft.inventory_area),
+          structure: null,
+        }),
+      })
+      setProducts((prev) => [...prev, created].sort((a, b) => (a.name || "").localeCompare(b.name || "")))
+      setNewMaterialDraft((prev) => ({ ...prev, productId: String(created.id) }))
+      setProductModalOpen(false)
+      setNewProductDraft({ name: "", clientId: "" })
+      toast.success("Producto creado y vinculado.")
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo crear el producto.")
+    } finally {
+      setCreatingProduct(false)
     }
   }
 
@@ -373,7 +436,9 @@ export default function PurchaseReceiptNewPage() {
       rowIndex,
       name: suggestedName,
       sku: suggestedSku,
+      receivedOn: todayDate,
       unit: row?.unit || selected?.unit || "kg",
+      productId: "",
       inventory_area: mapItemTypeToInventoryArea(itemType),
     })
   }
@@ -383,9 +448,14 @@ export default function PurchaseReceiptNewPage() {
       rowIndex: null,
       name: "",
       sku: "",
+      receivedOn: todayDate,
       unit: "kg",
+      productId: "",
       inventory_area: "material",
     })
+    setProductModalOpen(false)
+    setProductComboOpen(false)
+    setNewProductDraft({ name: "" })
   }
 
   async function createMaterialQuickly() {
@@ -396,12 +466,18 @@ export default function PurchaseReceiptNewPage() {
     }
 
     const draftSku = newMaterialDraft.sku.trim()
-    const targetSku = draftSku || buildQuickSku(name)
+    if (!draftSku) {
+      toast.error("Indique el SKU/Código del material nuevo.")
+      return
+    }
+    if (!newMaterialDraft.receivedOn.trim()) {
+      toast.error("La fecha de ingreso es obligatoria.")
+      return
+    }
+    const targetSku = draftSku
 
     const duplicatedBySku = materials.find((material) =>
-      draftSku
-        ? normalizeKey(material.sku) === normalizeKey(draftSku)
-        : false,
+      normalizeKey(material.sku) === normalizeKey(draftSku),
     )
     const duplicatedByNameArea = materials.find((material) =>
       normalizeKey(material.name) === normalizeKey(name) &&
@@ -420,14 +496,29 @@ export default function PurchaseReceiptNewPage() {
       return
     }
 
+    const sourceRow = newMaterialDraft.rowIndex !== null ? freeLines[newMaterialDraft.rowIndex] : null
+    const rowMicras = sourceRow?.micras?.trim() ? Number(sourceRow.micras) : null
+    const rowAncho = sourceRow?.ancho_mm?.trim() ? Number(sourceRow.ancho_mm) : null
+    const requiresDimensions = newMaterialDraft.inventory_area === "material"
+    if (requiresDimensions && (!Number.isFinite(rowMicras) || !Number.isFinite(rowAncho) || (rowMicras ?? 0) <= 0 || (rowAncho ?? 0) <= 0)) {
+      toast.error("Para crear sustratos rápidos, complete Micras y Ancho en la fila primero.")
+      return
+    }
+
     const payload = {
       name,
       sku: targetSku,
       inventory_area: newMaterialDraft.inventory_area,
-      is_active: true,
+      tinta_subarea: newMaterialDraft.inventory_area === "tintas" ? "laminacion" : null,
       unit: (newMaterialDraft.unit || "kg").trim() || "kg",
+      micras: requiresDimensions ? rowMicras : null,
+      ancho: requiresDimensions ? rowAncho : null,
       min_stock: 0,
       quantity_on_hand: 0,
+      product_ids: newMaterialDraft.inventory_area === "material" && newMaterialDraft.productId
+        ? [Number(newMaterialDraft.productId)]
+        : [],
+      notes: `Fecha ingreso: ${newMaterialDraft.receivedOn}`,
     }
 
     setCreatingMaterial(true)
@@ -556,7 +647,7 @@ export default function PurchaseReceiptNewPage() {
         .getElementById(`receipt-row-${invalidRowIndex}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" })
       toast.error(
-        "Complete el Tipo, Material/Descripción y Cantidad. En Sustrato/Consumible también indique Micras y Ancho.",
+        "Complete el Tipo, Material/Descripción y Cantidad. En Sustrato también indique Micras y Ancho.",
       )
       return
     }
@@ -618,11 +709,13 @@ export default function PurchaseReceiptNewPage() {
             Ingreso de material
           </h1>
           <p className="text-muted-foreground text-sm">
-            Registre ingresos al inventario. Si tiene un número de orden de compra (referencia), puede anotarlo en el campo indicado; no se vincula al módulo de órdenes de compra.
-            Use Movimientos para ver el historial general.
+            Registre entradas físicas al inventario de materiales.
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={() => setHelpOpen(true)}>
+            Ayuda
+          </Button>
           <Button type="button" variant="outline" onClick={() => navigate(-1)}>
             Regresar
           </Button>
@@ -1018,7 +1111,7 @@ export default function PurchaseReceiptNewPage() {
         </div>
 
         <Button type="submit" disabled={saving}>
-          {saving ? "Guardando…" : "Registrar recepción"}
+          <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Registrar recepción" />
         </Button>
       </form>
 
@@ -1043,13 +1136,13 @@ export default function PurchaseReceiptNewPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label className="text-xs">SKU (opcional)</Label>
+              <Label className="text-xs">SKU / Código *</Label>
               <Input
                 value={newMaterialDraft.sku}
                 onChange={(ev) =>
-                  setNewMaterialDraft((prev) => ({ ...prev, sku: ev.target.value }))
+                  setNewMaterialDraft((prev) => ({ ...prev, sku: ev.target.value.toUpperCase() }))
                 }
-                placeholder="Se genera automático"
+                placeholder="Ingrese SKU manual"
               />
             </div>
             <div className="grid gap-2">
@@ -1070,6 +1163,17 @@ export default function PurchaseReceiptNewPage() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="grid gap-2 md:max-w-sm">
+            <Label className="text-xs">Fecha de ingreso *</Label>
+            <Input
+              type="date"
+              value={newMaterialDraft.receivedOn}
+              onChange={(ev) =>
+                setNewMaterialDraft((prev) => ({ ...prev, receivedOn: ev.target.value }))
+              }
+            />
           </div>
 
           <div className="grid gap-2 md:max-w-sm">
@@ -1095,6 +1199,67 @@ export default function PurchaseReceiptNewPage() {
             </Select>
           </div>
 
+          {newMaterialDraft.inventory_area === "material" ? (
+            <div className="grid gap-2">
+              <Label className="text-xs">Producto vinculado (opcional)</Label>
+              <div className="flex items-center gap-2">
+                <Popover open={productComboOpen} onOpenChange={setProductComboOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={productComboOpen}
+                      className="h-10 flex-1 justify-between font-normal"
+                    >
+                      <span className={cn("truncate text-left", !selectedProduct && "text-muted-foreground")}>
+                        {selectedProduct?.name || "Seleccione producto..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                    <Command shouldFilter>
+                      <CommandInput placeholder="Buscar producto..." />
+                      <CommandList className="max-h-60">
+                        <CommandEmpty>No hay productos disponibles.</CommandEmpty>
+                        <CommandGroup>
+                          {products.map((product) => (
+                            <CommandItem
+                              key={product.id}
+                              value={product.name}
+                              onSelect={() => {
+                                setNewMaterialDraft((prev) => ({ ...prev, productId: String(product.id) }))
+                                setProductComboOpen(false)
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  newMaterialDraft.productId === String(product.id) ? "opacity-100" : "opacity-0",
+                                )}
+                                aria-hidden
+                              />
+                              {product.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setProductModalOpen(true)}
+                  disabled={creatingMaterial}
+                >
+                  + Nuevo producto
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           <DialogFooter>
             <Button
               type="button"
@@ -1105,7 +1270,7 @@ export default function PurchaseReceiptNewPage() {
               Cancelar
             </Button>
             <Button type="button" onClick={() => void createMaterialQuickly()} disabled={creatingMaterial}>
-              {creatingMaterial ? "Creando material..." : "Crear y seleccionar"}
+              <LoadingButtonLabel loading={creatingMaterial} loadingText="Creando material..." idleText="Crear y seleccionar" />
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1155,7 +1320,73 @@ export default function PurchaseReceiptNewPage() {
               Cancelar
             </Button>
             <Button type="button" onClick={() => void createSupplierQuickly()} disabled={creatingSupplier}>
-              {creatingSupplier ? "Creando proveedor..." : "Crear y seleccionar"}
+              <LoadingButtonLabel loading={creatingSupplier} loadingText="Creando proveedor..." idleText="Crear y seleccionar" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={productModalOpen}
+        onOpenChange={(open) => {
+          setProductModalOpen(open)
+          if (!open && !creatingProduct) setNewProductDraft({ name: "", clientId: "" })
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Crear producto rápido</DialogTitle>
+            <DialogDescription>
+              Cree un producto básico sin salir de la recepción. El cliente es obligatorio.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label>Cliente *</Label>
+              <Select
+                value={newProductDraft.clientId}
+                onValueChange={(value) => setNewProductDraft((prev) => ({ ...prev, clientId: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccione cliente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clients.map((client) => (
+                    <SelectItem key={client.id} value={String(client.id)}>
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="new-product-name">Nombre *</Label>
+              <Input
+                id="new-product-name"
+                value={newProductDraft.name}
+                onChange={(ev) => setNewProductDraft((prev) => ({ ...prev, name: ev.target.value }))}
+                placeholder="Ej: BOLSA CPE"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Tipo de impresión (auto)</Label>
+              <Input
+                value={inferPrintTypeByArea(newMaterialDraft.inventory_area)}
+                readOnly
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setProductModalOpen(false)}
+              disabled={creatingProduct}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void createProductQuickly()} disabled={creatingProduct}>
+              <LoadingButtonLabel loading={creatingProduct} loadingText="Creando producto..." idleText="Crear y usar" />
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1205,6 +1436,28 @@ export default function PurchaseReceiptNewPage() {
               }}
             >
               Continuar y guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Guía rápida: Ingreso de material</DialogTitle>
+            <DialogDescription>
+              Esta pantalla registra recepciones físicas, no crea productos terminados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p><strong>Qué hace:</strong> suma existencias al inventario desde una recepción (proveedor, factura, fecha e ítems).</p>
+            <p><strong>Flujo por línea:</strong> seleccione tipo, material y cantidad; si no existe el material, use <strong>+ Nuevo material</strong> y continúe.</p>
+            <p><strong>Importante:</strong> esta pantalla no reemplaza el maestro de productos; solo gestiona entradas de materiales.</p>
+            <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo, 3) Ingreso de material cuando llegue físicamente.</p>
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setHelpOpen(false)}>
+              Entendido
             </Button>
           </DialogFooter>
         </DialogContent>

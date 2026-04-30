@@ -11,9 +11,11 @@ class EnsureAreaRole
     private const FULL_ACCESS_ROLES = ['boss', 'admin', 'jefe_supremo', 'superadmin'];
 
     private const ROLE_BY_AREA = [
+        'inventory' => ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario'],
         'printing' => ['printing', 'impresion'],
         'laminacion' => ['laminacion'],
         'corte' => ['corte'],
+        'tintas' => ['tintas'],
         // Montaje queda reservado a perfiles de planificación/jefatura por ahora.
         'montaje' => [],
         /** @deprecated Usar planilla_read / planilla_write; se mantiene por compatibilidad. */

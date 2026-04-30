@@ -5,18 +5,11 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { ClientRecord, LaravelPaginated, VendorRecord } from "@/types/api"
+import type { ClientRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 
 export default function ClientFormPage() {
   const location = useLocation()
@@ -33,11 +26,8 @@ export default function ClientFormPage() {
   const [state, setState] = useState("")
   const [city, setCity] = useState("")
   const [address, setAddress] = useState("")
-  const [vendorId, setVendorId] = useState<string>("none")
-  const [vendorName, setVendorName] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
-  const [vendors, setVendors] = useState<VendorRecord[]>([])
 
   const [errors, setErrors] = useState<{
     name?: string
@@ -117,8 +107,6 @@ export default function ClientFormPage() {
       setState(c.state ?? "")
       setCity(c.city ?? "")
       setAddress(c.address ?? "")
-      setVendorId(c.vendor_id ? String(c.vendor_id) : "none")
-      setVendorName(c.vendor_name ?? "")
       setEmail(c.email ?? "")
       setPhone(c.phone ?? "")
     } catch (e) {
@@ -133,23 +121,6 @@ export default function ClientFormPage() {
     void load()
   }, [load])
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const res = await apiFetch<LaravelPaginated<VendorRecord>>("vendors", {
-          query: { per_page: 200, page: 1, active: 1 },
-        })
-        if (!cancelled) setVendors(res.data)
-      } catch {
-        if (!cancelled) setVendors([])
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
     const v = validate()
@@ -160,17 +131,12 @@ export default function ClientFormPage() {
     setSaving(true)
     try {
       const normalizedRif = normalizeRif(rif)
-      const vid =
-        vendorId !== "none" && vendorId !== "" ? Number(vendorId) : null
       const body = {
         name: name.trim(),
         rif: normalizedRif.trim() || null,
         state: state.trim() || null,
         city: city.trim() || null,
-        vendor_id: vid,
         address: address.trim() || null,
-        // Compatibilidad: seguir guardando vendor_name (por si algún reporte antiguo lo usa)
-        vendor_name: vendorName.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
       }
@@ -296,34 +262,6 @@ export default function ClientFormPage() {
                 value={city}
                 onChange={(ev) => setCity(ev.target.value)}
               />
-            </div>
-
-            <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="c-vendor">Vendedor</Label>
-              <Select
-                value={vendorId}
-                onValueChange={(v) => {
-                  setVendorId(v)
-                  if (v === "none") {
-                    setVendorName("")
-                    return
-                  }
-                  const found = vendors.find((x) => String(x.id) === v)
-                  if (found) setVendorName(found.name)
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccione…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin vendedor</SelectItem>
-                  {vendors.map((v) => (
-                    <SelectItem key={v.id} value={String(v.id)}>
-                      {v.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
           </div>
 

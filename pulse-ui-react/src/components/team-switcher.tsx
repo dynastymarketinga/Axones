@@ -1,5 +1,4 @@
 import * as React from "react"
-import { GalleryVerticalEnd } from "lucide-react"
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -11,11 +10,14 @@ export function TeamSwitcher({
 }: {
   teams: {
     name: string
-    logo: React.ElementType
+    logo?: React.ElementType
     plan: string
   }[]
 }) {
-  const [activeTeam, setActiveTeam] = React.useState(teams[0])
+  const [activeTeam] = React.useState(teams[0])
+  const [logoSrc, setLogoSrc] = React.useState(
+    `${import.meta.env.BASE_URL}brand/logo-axones-1.png`,
+  )
 
   if (!activeTeam) {
     return null
@@ -27,13 +29,16 @@ export function TeamSwitcher({
     <SidebarMenu>
       <SidebarMenuItem>
         <SidebarMenuButton size="lg">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-            {/* Mantener logo del team si existe; fallback a icono Axones */}
-            {activeTeam.logo ? (
-              <activeTeam.logo className="size-4" />
-            ) : (
-              <GalleryVerticalEnd className="size-4" />
-            )}
+          <div className="flex aspect-square size-9 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary">
+            <img
+              src={logoSrc}
+              alt="Logo Axones"
+              className="h-full w-full object-cover object-top scale-110"
+              loading="eager"
+              onError={() =>
+                setLogoSrc(`${import.meta.env.BASE_URL}brand/logo-axones-main.svg`)
+              }
+            />
           </div>
           <div className="grid flex-1 text-left text-sm leading-tight">
             <span className="truncate font-semibold">{activeTeam.name}</span>

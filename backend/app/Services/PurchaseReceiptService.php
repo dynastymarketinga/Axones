@@ -12,6 +12,7 @@ use App\Models\PurchaseReceipt;
 use App\Models\PurchaseReceiptLine;
 use App\Models\Supplier;
 use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -48,6 +49,8 @@ class PurchaseReceiptService
      */
     public function store(array $data, User $user): PurchaseReceipt
     {
+        $this->assertCanStoreReceipt($user);
+
         $linesInput = Collection::make($data['lines'])->sortBy('material_id')->values()->all();
 
         return DB::transaction(function () use ($data, $user, $linesInput) {
@@ -305,5 +308,17 @@ class PurchaseReceiptService
             'miscelaneos' => 'miscelaneo',
             default => 'sustrato',
         };
+    }
+
+    /**
+     * @throws AuthorizationException
+     */
+    private function assertCanStoreReceipt(User $user): void
+    {
+        $role = mb_strtolower(trim((string) ($user->role ?? '')));
+        $allowed = ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario', 'boss', 'admin', 'jefe_supremo', 'superadmin'];
+        if (! in_array($role, $allowed, true)) {
+            throw new AuthorizationException('No autorizado para registrar recepciones de compra.');
+        }
     }
 }

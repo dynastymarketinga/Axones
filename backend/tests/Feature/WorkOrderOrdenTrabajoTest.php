@@ -37,7 +37,6 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'client_id' => $client->id,
             'name' => 'ARROZ MARY PREMIUM',
             'cpe' => '0421496219',
-            'barcode' => '7591473005249',
             'mps' => 'A-40.323',
             'print_type' => 'reverso',
             'structure' => 'PEBD 630 X 26 + PEBD 630 X 26',
@@ -78,7 +77,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->assertEquals('PEBD 630 X 26 + PEBD 630 X 26', $r->json('prefill.estructuraMaterial'));
         $this->assertEquals('0421496219', $r->json('prefill.cpe'));
         $this->assertEquals('A-40.323', $r->json('prefill.mpps'));
-        $this->assertEquals('7591473005249', $r->json('prefill.codigoBarra'));
+        $this->assertNull($r->json('prefill.codigoBarra'));
         $this->assertEquals('Reverso', $r->json('prefill.tipoImpresion'));
         $this->assertEquals('10000.000', $r->json('prefill.pedidoKg'));
         $this->assertEquals('065-MAR26', $r->json('prefill.numeroOrden'));
@@ -123,7 +122,6 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'client_id' => $c1->id,
             'name' => 'P1',
             'cpe' => 'C1',
-            'barcode' => 'B1',
             'mps' => 'M1',
             'print_type' => 'Flexografía',
             'structure' => 'S1',
@@ -132,7 +130,6 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'client_id' => $c2->id,
             'name' => 'P2',
             'cpe' => 'C2',
-            'barcode' => 'B2',
             'mps' => 'M2',
             'print_type' => 'Flexografía',
             'structure' => 'S2',

@@ -23,7 +23,7 @@ En esta version se consolidan cambios funcionales importantes en backend y front
 
 El sistema cubre los modulos principales:
 
-- Datos maestros: clientes, vendedores, productos, proveedores
+- Datos maestros: clientes, productos, proveedores
 - Inventario: materiales, recepciones, movimientos, devoluciones, bobinas, miscelaneos
 - Produccion: programacion, impresion, laminacion, corte, tintas, ordenes de trabajo
 - Calidad: certificados y control de calidad por OT
@@ -64,6 +64,10 @@ npm run dev
 cd backend
 php artisan test
 ```
+
+## Operacion de release
+
+- checklist de salida a produccion: `docs/production-release-checklist.md`
 
 ## Notas del repositorio
 

@@ -202,11 +202,6 @@ export function WorkOrderDocumentSheet({
                   {[c.state, c.city].filter(Boolean).join(" · ") || "—"}
                 </div>
               ) : null}
-              {c?.vendor?.name || c?.vendor_name ? (
-                <div>
-                  Vendedor: {c.vendor?.name ?? c.vendor_name}
-                </div>
-              ) : null}
               {c?.email ? <div>{c.email}</div> : null}
               {c?.phone ? <div>{c.phone}</div> : null}
             </div>

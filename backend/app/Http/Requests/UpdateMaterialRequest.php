@@ -28,13 +28,14 @@ class UpdateMaterialRequest extends FormRequest
             'name' => ['sometimes', 'string', 'max:255'],
             'barcode' => ['nullable', 'string', 'max:64'],
             'inventory_area' => ['sometimes', 'string', Rule::in(InventoryArea::values())],
-            'is_active' => ['sometimes', 'boolean'],
-            'tinta_presentacion' => ['nullable', 'string', Rule::in(['original', 'solventada'])],
+            'tinta_subarea' => ['nullable', 'string', Rule::in(['laminacion', 'superficie', 'prueba_laminacion', 'laminacion_nueva'])],
             'micras' => ['nullable', 'numeric', 'min:0'],
             'ancho' => ['nullable', 'numeric', 'min:0'],
             'unit' => ['nullable', 'string', 'max:16'],
             'min_stock' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
+            'product_ids' => ['nullable', 'array'],
+            'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
         ];
     }
 
@@ -52,26 +53,26 @@ class UpdateMaterialRequest extends FormRequest
             ], true);
 
             if ($requiresDimensions) {
-                $hasMicras = $this->exists('micras') ? $this->filled('micras') : !is_null($material?->micras);
-                $hasAncho = $this->exists('ancho') ? $this->filled('ancho') : !is_null($material?->ancho);
+                $hasMicras = $this->exists('micras') ? $this->filled('micras') : ! is_null($material?->micras);
+                $hasAncho = $this->exists('ancho') ? $this->filled('ancho') : ! is_null($material?->ancho);
 
-                if (!$hasMicras) {
+                if (! $hasMicras) {
                     $validator->errors()->add('micras', 'Micras es obligatorio para este tipo.');
                 }
-                if (!$hasAncho) {
+                if (! $hasAncho) {
                     $validator->errors()->add('ancho', 'Ancho es obligatorio para este tipo.');
                 }
             }
 
-            $hasPresentation = $this->exists('tinta_presentacion')
-                ? $this->filled('tinta_presentacion')
-                : !is_null($material?->tinta_presentacion);
-            if ($area === InventoryArea::Tintas->value && !$hasPresentation) {
-                $validator->errors()->add('tinta_presentacion', 'Presentación es obligatoria para tintas.');
+            $hasSubarea = $this->exists('tinta_subarea')
+                ? $this->filled('tinta_subarea')
+                : ($material?->tintaSubareas()->exists() ?? false);
+            if ($area === InventoryArea::Tintas->value && ! $hasSubarea) {
+                $validator->errors()->add('tinta_subarea', 'Subárea es obligatoria para tintas.');
             }
 
             $allowedUnits = $this->allowedUnitsByArea($area);
-            if (!in_array($unit, $allowedUnits, true)) {
+            if (! in_array($unit, $allowedUnits, true)) {
                 $validator->errors()->add('unit', 'Unidad inválida para el área seleccionada.');
             }
         });
@@ -84,9 +85,9 @@ class UpdateMaterialRequest extends FormRequest
     {
         return match ($area) {
             InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
-            InventoryArea::Tintas->value => ['kg', 'litro'],
-            InventoryArea::Miscelaneos->value => ['unidad', 'caja', 'pack', 'kg'],
-            default => ['kg', 'm', 'rollo', 'litro', 'unidad', 'caja', 'pack'],
+            InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo'],
+            InventoryArea::Tintas->value, InventoryArea::Quimicos->value => ['kg', 'unidad'],
+            default => ['kg', 'unidad'],
         };
     }
 }

@@ -13,13 +13,12 @@ class TintaMixtureApiTest extends TestCase
 
     public function test_creates_mixture_and_moves_stock(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'tintas']);
 
         $dorado = Material::query()->create([
             'sku' => 'BASE-DORADO',
             'name' => 'Dorado base',
             'inventory_area' => 'tintas',
-            'tinta_presentacion' => 'original',
             'unit' => 'kg',
             'min_stock' => 0,
         ]);
@@ -29,7 +28,6 @@ class TintaMixtureApiTest extends TestCase
             'sku' => 'BASE-NEGRO',
             'name' => 'Negro base',
             'inventory_area' => 'tintas',
-            'tinta_presentacion' => 'original',
             'unit' => 'kg',
             'min_stock' => 0,
         ]);
@@ -41,6 +39,7 @@ class TintaMixtureApiTest extends TestCase
             'output_sku' => 'MIX-DOR-PREP-001',
             'output_name' => 'Dorado preparado P-0001',
             'output_inventory_area' => 'tintas',
+            'output_tinta_subarea' => 'laminacion',
             'notes' => 'Prueba mezcla',
             'components' => [
                 ['material_id' => $dorado->id, 'quantity' => 16.88],

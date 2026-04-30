@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
+import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Calendar as UiCalendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
@@ -246,6 +247,8 @@ export default function PurchaseReceiptsPage() {
     void load()
   }, [load])
 
+  const showInitialSkeleton = loading && rows === null
+
   useEffect(() => {
     if (!selectedReceipt?.id) {
       setSelectedReceiptDetail(null)
@@ -290,7 +293,14 @@ export default function PurchaseReceiptsPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12">
+      {showInitialSkeleton ? (
+        <div className="space-y-4">
+          <PageLoadingBlock />
+          <PageLoadingBlock />
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12">
         <div className="grid gap-2 xl:col-span-2">
           <Label htmlFor="receipt-from" className="inline-flex items-center gap-2 font-semibold text-foreground">
             <CalendarDays className="h-4 w-4 text-primary" />
@@ -429,9 +439,9 @@ export default function PurchaseReceiptsPage() {
             </Tooltip>
           </TooltipProvider>
         </div>
-      </div>
+          </div>
 
-      <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
+          <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -448,11 +458,7 @@ export default function PurchaseReceiptsPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
-                  Cargando…
-                </TableCell>
-              </TableRow>
+              <LoadingTableRow colSpan={7} />
             ) : !rows?.data.length ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-muted-foreground">
@@ -510,33 +516,35 @@ export default function PurchaseReceiptsPage() {
             )}
           </TableBody>
         </Table>
-      </div>
-
-      {rows && rows.last_page > 1 ? (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            Página {rows.current_page} de {rows.last_page} · {rows.total}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page <= 1 || loading}
-              onClick={() => setPageAndQuery(Math.max(1, page - 1))}
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page >= rows.last_page || loading}
-              onClick={() => setPageAndQuery(Math.min(rows.last_page, page + 1))}
-            >
-              Siguiente
-            </Button>
           </div>
-        </div>
-      ) : null}
+
+          {rows && rows.last_page > 1 ? (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Página {rows.current_page} de {rows.last_page} · {rows.total}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.current_page <= 1 || loading}
+                  onClick={() => setPageAndQuery(Math.max(1, page - 1))}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.current_page >= rows.last_page || loading}
+                  onClick={() => setPageAndQuery(Math.min(rows.last_page, page + 1))}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
 
       <Dialog
         open={selectedReceipt !== null}
@@ -609,7 +617,12 @@ export default function PurchaseReceiptsPage() {
               <TableBody>
                 {loadingDetail ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">Cargando detalle…</TableCell>
+                    <TableCell colSpan={7} className="text-muted-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <InlineSpinner />
+                        Cargando detalle...
+                      </span>
+                    </TableCell>
                   </TableRow>
                 ) : selectedReceiptDetail?.lines?.length ? (
                   selectedReceiptDetail.lines.map((line, index) => (

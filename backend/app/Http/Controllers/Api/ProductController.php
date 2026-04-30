@@ -22,7 +22,7 @@ class ProductController extends Controller
         if ($q = $request->query('q')) {
             $query->where(function ($w) use ($q) {
                 $w->where('name', 'like', '%'.$q.'%')
-                    ->orWhere('barcode', 'like', '%'.$q.'%')
+                    ->orWhere('mps', 'like', '%'.$q.'%')
                     ->orWhere('cpe', 'like', '%'.$q.'%');
             });
         }

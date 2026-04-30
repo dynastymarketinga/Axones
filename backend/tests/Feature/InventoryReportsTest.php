@@ -11,6 +11,7 @@ use App\Models\Material;
 use App\Models\MaterialRequest;
 use App\Models\PrintingBobinaUsage;
 use App\Models\Product;
+use App\Models\TintaSubarea;
 use App\Models\User;
 use App\Models\WorkOrder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -537,5 +538,142 @@ class InventoryReportsTest extends TestCase
 
         $response->assertOk();
         $this->assertStringContainsString('no_data', $response->getContent());
+    }
+
+    public function test_materials_index_supports_stock_as_of_date_mode(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $material = Material::query()->create([
+            'sku' => 'MAT-ASOF-1',
+            'name' => 'Material as-of',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $material->forceFill(['quantity_on_hand' => 90])->save();
+
+        InventoryMovement::query()->create([
+            'material_id' => $material->id,
+            'movement_type' => 'in',
+            'quantity' => 10,
+            'occurred_at' => '2026-04-16 10:00:00',
+        ]);
+
+        $asOfResponse = $this->getJson(
+            '/api/materials?inventory_area=material&stock_mode=as_of_date&as_of_date=2026-04-15',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $asOfResponse->assertOk();
+        $this->assertEquals('80.000', $asOfResponse->json('data.0.quantity_on_hand'));
+
+        $currentResponse = $this->getJson(
+            '/api/materials?inventory_area=material',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $currentResponse->assertOk();
+        $this->assertEquals('90.000', $currentResponse->json('data.0.quantity_on_hand'));
+    }
+
+    public function test_materials_index_rejects_invalid_stock_mode_query_value(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->getJson(
+            '/api/materials?stock_mode=broken_mode',
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors(['stock_mode']);
+    }
+
+    public function test_materials_index_supports_new_filters_and_sorting(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $tintaOne = Material::query()->create([
+            'sku' => 'TIN-Z',
+            'name' => 'Tinta Z',
+            'inventory_area' => 'tintas',
+            'unit' => 'unidad',
+            'min_stock' => 10,
+        ]);
+        $tintaOne->forceFill(['quantity_on_hand' => 5])->save();
+        TintaSubarea::query()->create([
+            'material_id' => $tintaOne->id,
+            'subarea' => 'superficie',
+        ]);
+
+        $tintaTwo = Material::query()->create([
+            'sku' => 'TIN-A',
+            'name' => 'Tinta A',
+            'inventory_area' => 'tintas',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $tintaTwo->forceFill(['quantity_on_hand' => 0])->save();
+        TintaSubarea::query()->create([
+            'material_id' => $tintaTwo->id,
+            'subarea' => 'laminacion',
+        ]);
+
+        $sustrato = Material::query()->create([
+            'sku' => 'MAT-01',
+            'name' => 'Sustrato 1',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 2,
+        ]);
+        $sustrato->forceFill(['quantity_on_hand' => 20])->save();
+
+        $filteredBySubarea = $this->getJson(
+            '/api/materials?inventory_area=tintas&tinta_subarea=superficie',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $filteredBySubarea->assertOk();
+        $this->assertCount(1, $filteredBySubarea->json('data'));
+        $this->assertEquals('TIN-Z', $filteredBySubarea->json('data.0.sku'));
+
+        $filteredByStockState = $this->getJson(
+            '/api/materials?inventory_area=tintas&stock_state=bajo_minimo',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $filteredByStockState->assertOk();
+        $this->assertCount(1, $filteredByStockState->json('data'));
+        $this->assertEquals('TIN-Z', $filteredByStockState->json('data.0.sku'));
+
+        $filteredByUnit = $this->getJson(
+            '/api/materials?inventory_area=tintas&unit=unidad',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $filteredByUnit->assertOk();
+        $this->assertCount(1, $filteredByUnit->json('data'));
+        $this->assertEquals('TIN-Z', $filteredByUnit->json('data.0.sku'));
+
+        $filteredByRange = $this->getJson(
+            '/api/materials?inventory_area=tintas&stock_min=1&stock_max=6',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $filteredByRange->assertOk();
+        $this->assertCount(1, $filteredByRange->json('data'));
+        $this->assertEquals('TIN-Z', $filteredByRange->json('data.0.sku'));
+
+        $orderedBySkuAsc = $this->getJson(
+            '/api/materials?inventory_area=tintas&sort_by=sku&sort_dir=asc',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $orderedBySkuAsc->assertOk();
+        $this->assertEquals('TIN-A', $orderedBySkuAsc->json('data.0.sku'));
+
+        $orderedBySkuDesc = $this->getJson(
+            '/api/materials?inventory_area=tintas&sort_by=sku&sort_dir=desc',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $orderedBySkuDesc->assertOk();
+        $this->assertEquals('TIN-Z', $orderedBySkuDesc->json('data.0.sku'));
     }
 }

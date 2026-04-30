@@ -37,6 +37,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import WorkOrderPrintingInkTable from "./WorkOrderPrintingInkTable"
+import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
 import "./work-order-planilla.css"
 
 type MachineValue =
@@ -107,7 +108,7 @@ function prefillFromProduct(p: ProductRecord): Record<string, unknown> {
     producto: p.name,
     cpe: p.cpe ?? null,
     mpps: p.mps ?? null,
-    codigoBarra: p.barcode ?? null,
+    codigoBarra: null,
     estructuraMaterial: p.structure ?? null,
   }
   const raw = p.print_type
@@ -869,6 +870,20 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("maquina")}
                     </div>
                     <div className="ot-field">
+                      <label className="ot-label">Ref. planchas (opcional)</label>
+                      <input
+                        className="ot-input"
+                        data-field="planchasReferencia"
+                        value={readString(form.planchasReferencia)}
+                        onChange={(ev) => setKey(setForm, "planchasReferencia", ev.target.value)}
+                        placeholder="Ej: 067"
+                        disabled={!canEditShared}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="ot-grid ot-cols-2">
+                    <div className="ot-field md:col-span-2">
                       <label className="ot-label required">Metros Est.</label>
                       <input
                         data-field="metrosEstimados"
@@ -974,7 +989,7 @@ export default function WorkOrderPlanillaPage() {
                             side="bottom"
                           >
                             <Command shouldFilter>
-                              <CommandInput placeholder="Buscar por nombre, C.P.E. o barra…" />
+                              <CommandInput placeholder="Buscar por nombre, C.P.E. o M.P.P.S…" />
                               <CommandList>
                                 <CommandEmpty>
                                   {clientProducts.length === 0
@@ -983,7 +998,7 @@ export default function WorkOrderPlanillaPage() {
                                 </CommandEmpty>
                                 <CommandGroup>
                                   {clientProducts.map((p) => {
-                                    const v = [p.name, p.cpe ?? "", p.mps ?? "", p.barcode ?? ""].filter(Boolean).join(" ")
+                                    const v = [p.name, p.cpe ?? "", p.mps ?? ""].filter(Boolean).join(" ")
                                     return (
                                       <CommandItem
                                         key={p.id}
@@ -1001,9 +1016,9 @@ export default function WorkOrderPlanillaPage() {
                                         />
                                         <div className="min-w-0 flex-1">
                                           <div className="truncate font-medium">{p.name}</div>
-                                          {p.cpe || p.mps || p.barcode ? (
+                                          {p.cpe || p.mps ? (
                                             <div className="text-muted-foreground truncate text-xs">
-                                              {[p.cpe, p.mps, p.barcode].filter(Boolean).join(" · ")}
+                                              {[p.cpe, p.mps].filter(Boolean).join(" · ")}
                                             </div>
                                           ) : null}
                                         </div>
@@ -1788,6 +1803,15 @@ export default function WorkOrderPlanillaPage() {
             </Button>
           </div>
         </form>
+        {activeScope === "corte" ? (
+          <div className="no-print mt-6 space-y-3">
+            <WorkOrderCorteOpsSection
+              form={form}
+              setForm={setForm}
+              pedidoTotalKg={Number(readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg) || "0")}
+            />
+          </div>
+        ) : null}
         </>
       )}
     </div>

@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Enums\InventoryArea;
 use App\Models\Material;
+use App\Models\TintaSubarea;
 use Illuminate\Database\Seeder;
 
 class InventoryAreaSampleSeeder extends Seeder
@@ -36,7 +37,6 @@ class InventoryAreaSampleSeeder extends Seeder
                         'name' => sprintf('Muestra %s %d', str_replace('_', ' ', $area), $i),
                         'barcode' => null,
                         'inventory_area' => $area,
-                        'tinta_presentacion' => $area === InventoryArea::Tintas->value ? 'Superficie' : null,
                         'micras' => $micras,
                         'ancho' => $ancho,
                         'unit' => $meta['unit'],
@@ -45,6 +45,13 @@ class InventoryAreaSampleSeeder extends Seeder
                     ],
                 );
                 $material->forceFill(['quantity_on_hand' => $qty])->save();
+
+                if ($area === InventoryArea::Tintas->value) {
+                    TintaSubarea::query()->updateOrCreate(
+                        ['material_id' => $material->getKey()],
+                        ['subarea' => 'superficie']
+                    );
+                }
             }
         }
 

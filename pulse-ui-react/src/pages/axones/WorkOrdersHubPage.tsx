@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { ArrowRightCircle, CircleHelp, Search } from "lucide-react"
+import { ArrowRightCircle, CircleHelp, FileText, Search } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -12,6 +12,7 @@ import type {
   LaravelPaginated,
   WorkOrderListRow,
 } from "@/types/api"
+import { InlineSpinner, LoadingButtonLabel, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -133,6 +134,11 @@ function supervisorBucket(row: WorkOrderListRow): Exclude<SupervisorFilter, "all
   return "in_progress"
 }
 
+function canPreviewPlanillaReport(row: WorkOrderListRow): boolean {
+  const s = (row.status ?? "").toLowerCase().trim()
+  return s !== "completed" && s !== "cancelled"
+}
+
 export default function WorkOrdersHubPage() {
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
@@ -233,6 +239,8 @@ export default function WorkOrdersHubPage() {
     void loadList()
   }, [loadList])
 
+  const showInitialSkeleton = loading && rows === null
+
   const visibleRows = useMemo(() => {
     const all = rows?.data ?? []
     if (supervisorFilter === "all") return all
@@ -322,7 +330,15 @@ export default function WorkOrdersHubPage() {
         </TabsList>
 
         <TabsContent value="lista" className="mt-4 space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          {showInitialSkeleton ? (
+            <div className="space-y-4">
+              <PageLoadingBlock />
+              <PageLoadingBlock />
+              <PageLoadingBlock />
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="grid flex-1 gap-2">
               <Label htmlFor="wo-ref">Buscar orden (número / referencia / cliente)</Label>
               <Input
@@ -351,9 +367,9 @@ export default function WorkOrdersHubPage() {
             <Button type="button" variant="secondary" onClick={() => void loadList()}>
               Actualizar
             </Button>
-          </div>
+              </div>
 
-          <Card>
+              <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base text-center text-black">Crear orden de trabajo</CardTitle>
             </CardHeader>
@@ -386,7 +402,12 @@ export default function WorkOrdersHubPage() {
               </div>
 
               {clientOrderId && coDetailLoading ? (
-                <p className="md:col-span-3 text-sm text-muted-foreground">Cargando…</p>
+                <p className="md:col-span-3 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-2">
+                    <InlineSpinner />
+                    Cargando...
+                  </span>
+                </p>
               ) : null}
               {clientOrderId && !coDetailLoading && !coDetail ? (
                 <p className="md:col-span-3 text-sm text-destructive">
@@ -416,13 +437,13 @@ export default function WorkOrdersHubPage() {
 
               <div className="md:col-span-3">
                 <Button type="button" onClick={() => void createOt()} disabled={creating}>
-                  {creating ? "Creando…" : "Crear orden"}
+                  <LoadingButtonLabel loading={creating} loadingText="Creando..." idleText="Crear orden" />
                 </Button>
               </div>
             </CardContent>
-          </Card>
+              </Card>
 
-          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-slate-700 shadow-sm">
+              <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-slate-700 shadow-sm">
             <p className="flex items-start gap-2">
               <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
               <span>
@@ -430,9 +451,9 @@ export default function WorkOrdersHubPage() {
                 <span className="font-semibold text-slate-900">Abrir planilla existente</span>.
               </span>
             </p>
-          </div>
+              </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant={supervisorFilter === "all" ? "default" : "outline"} onClick={() => setSupervisorFilter("all")}>
               Todas ({supervisorCounts.all})
             </Button>
@@ -445,9 +466,9 @@ export default function WorkOrdersHubPage() {
             <Button type="button" size="sm" variant={supervisorFilter === "completed" ? "default" : "outline"} onClick={() => setSupervisorFilter("completed")}>
               Completadas ({supervisorCounts.completed})
             </Button>
-          </div>
+              </div>
 
-          <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
+              <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -465,11 +486,7 @@ export default function WorkOrdersHubPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-muted-foreground">
-                      Cargando…
-                    </TableCell>
-                  </TableRow>
+                  <LoadingTableRow colSpan={10} />
                 ) : !visibleRows.length ? (
                   <TableRow>
                     <TableCell colSpan={10} className="text-muted-foreground">
@@ -489,50 +506,69 @@ export default function WorkOrdersHubPage() {
                       <TableCell className="py-3.5">{o.creator?.name ?? "—"}</TableCell>
                       <TableCell className="py-3.5">{formPedidoKg(o)}</TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <Button
-                          asChild
-                          size="sm"
-                          variant="secondary"
-                          className="gap-1.5"
-                        >
-                          <Link to={`/ordenes-trabajo/${o.id}`}>
-                            <ArrowRightCircle className="h-4 w-4" />
-                            Abrir planilla existente
-                          </Link>
-                        </Button>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {canPreviewPlanillaReport(o) ? (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 shrink-0 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
+                              title="Vista previa del reporte"
+                              aria-label="Vista previa del reporte"
+                              asChild
+                            >
+                              <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
+                                <FileText className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          ) : null}
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="secondary"
+                            className="gap-1.5"
+                          >
+                            <Link to={`/ordenes-trabajo/${o.id}`}>
+                              <ArrowRightCircle className="h-4 w-4" />
+                              Abrir planilla existente
+                            </Link>
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
-          </div>
-
-          {rows && rows.last_page > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Página {rows.current_page} de {rows.last_page} · {rows.total}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                >
-                  Siguiente
-                </Button>
               </div>
-            </div>
-          ) : null}
+
+              {rows && rows.last_page > 1 ? (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    Página {rows.current_page} de {rows.last_page} · {rows.total}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={rows.current_page <= 1 || loading}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={rows.current_page >= rows.last_page || loading}
+                      onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>

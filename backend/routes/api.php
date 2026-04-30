@@ -24,7 +24,6 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\TintaMixtureController;
 use App\Http\Controllers\Api\UserPasswordController;
-use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\WorkOrderController;
 use App\Http\Controllers\Api\WorkOrderCorteController;
 use App\Http\Controllers\Api\WorkOrderLaminacionController;
@@ -96,11 +95,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/{client}', [ClientController::class, 'show']);
     Route::patch('/clients/{client}', [ClientController::class, 'update']);
 
-    Route::get('/vendors', [VendorController::class, 'index']);
-    Route::post('/vendors', [VendorController::class, 'store']);
-    Route::get('/vendors/{vendor}', [VendorController::class, 'show']);
-    Route::patch('/vendors/{vendor}', [VendorController::class, 'update']);
-
     Route::get('/client-orders', [ClientOrderController::class, 'index']);
     Route::post('/client-orders', [ClientOrderController::class, 'store']);
     Route::get('/client-orders/{client_order}', [ClientOrderController::class, 'show']);
@@ -122,7 +116,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'update']);
 
     Route::get('/purchase-receipts', [PurchaseReceiptController::class, 'index']);
-    Route::post('/purchase-receipts', [PurchaseReceiptController::class, 'store']);
+    Route::post('/purchase-receipts', [PurchaseReceiptController::class, 'store'])
+        ->middleware('area.role:inventory');
     Route::get('/purchase-receipts/check-duplicates', [PurchaseReceiptController::class, 'checkDuplicates']);
     Route::get('/purchase-receipts/{purchase_receipt}', [PurchaseReceiptController::class, 'show']);
     Route::get('/purchase-receipts/{purchase_receipt}/report/preview', [PurchaseReceiptController::class, 'previewReport']);
@@ -134,6 +129,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/work-orders', [WorkOrderController::class, 'store']);
     Route::get('/work-orders/{work_order}', [WorkOrderController::class, 'show']);
     Route::get('/work-orders/{work_order}/orden-produccion.pdf', [WorkOrderController::class, 'ordenProduccionPdf']);
+    Route::get('/work-orders/{work_order}/orden-produccion-planilla/preview', [WorkOrderController::class, 'previewPlanillaReport'])
+        ->middleware('area.role:planilla_read');
+    Route::get('/work-orders/{work_order}/orden-produccion-planilla.pdf', [WorkOrderController::class, 'downloadPlanillaReportPdf'])
+        ->middleware('area.role:planilla_read');
     Route::get('/work-orders/{work_order}/orden-trabajo', [WorkOrderOrdenTrabajoController::class, 'show'])
         ->middleware('area.role:planilla_read');
     Route::put('/work-orders/{work_order}/orden-trabajo', [WorkOrderOrdenTrabajoController::class, 'update'])
@@ -223,9 +222,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/materials', [MaterialController::class, 'index']);
     Route::get('/materials/check-duplicates', [MaterialController::class, 'checkDuplicates']);
-    Route::post('/materials', [MaterialController::class, 'store']);
+    Route::post('/materials', [MaterialController::class, 'store'])
+        ->middleware('area.role:inventory');
     Route::get('/materials/{material}', [MaterialController::class, 'show']);
-    Route::patch('/materials/{material}', [MaterialController::class, 'update']);
+    Route::patch('/materials/{material}', [MaterialController::class, 'update'])
+        ->middleware('area.role:inventory');
 
     Route::get('/materials/{material}/movements', [InventoryMovementController::class, 'index']);
     Route::post('/materials/{material}/movements', [InventoryMovementController::class, 'store']);
@@ -239,6 +240,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/bobinas', [BobinaController::class, 'store']);
 
     Route::get('/tinta-mixtures', [TintaMixtureController::class, 'index']);
-    Route::post('/tinta-mixtures', [TintaMixtureController::class, 'store']);
+    Route::post('/tinta-mixtures', [TintaMixtureController::class, 'store'])
+        ->middleware('area.role:tintas');
     Route::get('/tinta-mixtures/{tinta_mixture}', [TintaMixtureController::class, 'show']);
 });

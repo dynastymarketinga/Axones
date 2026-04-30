@@ -41,8 +41,8 @@ use App\Models\PurchaseReceiptLine;
 use App\Models\Supplier;
 use App\Models\TintaMixture;
 use App\Models\TintaMixtureComponent;
+use App\Models\TintaSubarea;
 use App\Models\User;
-use App\Models\Vendor;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderCorteSummary;
 use App\Models\WorkOrderLaminacionSummary;
@@ -86,8 +86,7 @@ class AxonesDemoDataService
             $inventoryUser = $users['inventory'];
             $printingUser = $users['printing'];
 
-            $vendors = $this->seedVendors();
-            $clients = $this->seedClients($vendors);
+            $clients = $this->seedClients();
             $suppliers = $this->seedSuppliers();
 
             $materials = $this->seedMaterials($inventoryUser);
@@ -182,12 +181,10 @@ class AxonesDemoDataService
     }
 
     /**
-     * @param  array<int, Vendor>  $vendors
      * @return array<int, Client>
      */
-    private function seedClients(array $vendors): array
+    private function seedClients(): array
     {
-        $nv = count($vendors);
         $out = [];
         for ($i = 1; $i <= $this->demoVolume; $i++) {
             $out[] = Client::query()->create([
@@ -195,27 +192,9 @@ class AxonesDemoDataService
                 'rif' => 'J-4'.str_pad((string) (100000 + $i), 7, '0', STR_PAD_LEFT).'-'.($i % 10),
                 'state' => 'Portuguesa',
                 'city' => 'Acarigua',
-                'vendor_id' => $vendors[($i - 1) % $nv]->getKey(),
                 'address' => 'Zona demo '.$i.', Portuguesa',
-                'vendor_name' => 'Vendedor asignado',
                 'email' => 'cliente.demo'.$i.'@axones.demo',
                 'phone' => '+58 412-'.str_pad((string) (1000000 + $i), 7, '0', STR_PAD_LEFT),
-            ]);
-        }
-
-        return $out;
-    }
-
-    /**
-     * @return array<int, Vendor>
-     */
-    private function seedVendors(): array
-    {
-        $out = [];
-        for ($i = 1; $i <= $this->demoVolume; $i++) {
-            $out[] = Vendor::query()->create([
-                'name' => 'Vendedor demo n°'.$i,
-                'active' => true,
             ]);
         }
 
@@ -315,7 +294,6 @@ class AxonesDemoDataService
                 'client_id' => $clients[($i - 1) % $nc]->getKey(),
                 'name' => 'Producto demo '.$i,
                 'cpe' => 'CPE-DEMO-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
-                'barcode' => '770'.str_pad((string) (100000000 + $i), 10, '0', STR_PAD_LEFT),
                 'mps' => 'MPS-DEMO-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
                 'print_type' => 'Flexografía',
                 'structure' => 'Estructura demo '.$i,
@@ -336,10 +314,10 @@ class AxonesDemoDataService
         // Mismo `client_id` que «Cliente demo volumen 1» (primer cliente) para probar el desplegable:
         // ya existe «Producto demo 1» (seedProducts); aquí: Arroz / Salsa / Maripán y un extra.
         $rows = [
-            ['name' => 'Polar Tuca — Arroz 1kg', 'cpe' => 'CPE-PT-AR-001', 'mps' => 'MPS-PT-AR-001', 'barcode' => '7700900100001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 25 + PEBD (arroz)'],
-            ['name' => 'Polar Tuca — Salsa 400g', 'cpe' => 'CPE-PT-SA-001', 'mps' => 'MPS-PT-SA-001', 'barcode' => '7700900100002', 'print_type' => 'Flexografía', 'structure' => 'BOPP 20 (salsa)'],
-            ['name' => 'Polar Tuca — Maripán 6u', 'cpe' => 'CPE-PT-MA-001', 'mps' => 'MPS-PT-MA-001', 'barcode' => '7700900100003', 'print_type' => 'Flexografía', 'structure' => 'BOPP 18 (maripán)'],
-            ['name' => 'Polar Tuca — Salchichas 500g', 'cpe' => 'CPE-PT-SS-001', 'mps' => 'MPS-PT-SS-001', 'barcode' => '7700900100004', 'print_type' => 'Flexografía', 'structure' => 'PE/PE 90 + impresión carnes'],
+            ['name' => 'Polar Tuca — Arroz 1kg', 'cpe' => 'CPE-PT-AR-001', 'mps' => 'MPS-PT-AR-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 25 + PEBD (arroz)'],
+            ['name' => 'Polar Tuca — Salsa 400g', 'cpe' => 'CPE-PT-SA-001', 'mps' => 'MPS-PT-SA-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 20 (salsa)'],
+            ['name' => 'Polar Tuca — Maripán 6u', 'cpe' => 'CPE-PT-MA-001', 'mps' => 'MPS-PT-MA-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 18 (maripán)'],
+            ['name' => 'Polar Tuca — Salchichas 500g', 'cpe' => 'CPE-PT-SS-001', 'mps' => 'MPS-PT-SS-001', 'print_type' => 'Flexografía', 'structure' => 'PE/PE 90 + impresión carnes'],
         ];
         $out = [];
         foreach ($rows as $r) {
@@ -347,7 +325,6 @@ class AxonesDemoDataService
                 'client_id' => $firstClient->getKey(),
                 'name' => $r['name'],
                 'cpe' => $r['cpe'],
-                'barcode' => $r['barcode'],
                 'mps' => $r['mps'],
                 'print_type' => $r['print_type'],
                 'structure' => $r['structure'],
@@ -377,15 +354,27 @@ class AxonesDemoDataService
                 $n++;
                 $uniqueSku = $sku.'-'.$n;
             }
-            $out[] = Material::query()->create([
+            $material = Material::query()->create([
                 'sku' => $uniqueSku,
                 'name' => $name,
                 'inventory_area' => InventoryArea::Tintas->value,
-                'tinta_presentacion' => $r['presentacion'],
                 'unit' => 'kg',
                 'min_stock' => 0,
                 'notes' => 'Catálogo planilla (demo/real Axones)',
             ]);
+
+            $legacy = mb_strtolower(trim((string) ($r['presentacion'] ?? '')));
+            $subarea = match ($legacy) {
+                'superficie' => 'superficie',
+                'laminada', 'laminacion' => 'laminacion',
+                'prueba lam.', 'prueba laminacion' => 'prueba_laminacion',
+                default => 'superficie',
+            };
+            TintaSubarea::query()->updateOrCreate(
+                ['material_id' => $material->getKey()],
+                ['subarea' => $subarea]
+            );
+            $out[] = $material;
         }
 
         return $out;
@@ -453,6 +442,7 @@ class AxonesDemoDataService
 
         $receipt = $this->purchaseReceipts->store([
             'purchase_order_id' => $po1->getKey(),
+            'supplier_id' => (int) $po1->supplier_id,
             'without_purchase_order' => false,
             'notes' => 'Recepción demo',
             'received_at' => now()->subDays(3)->toDateTimeString(),
@@ -473,6 +463,7 @@ class AxonesDemoDataService
         ], $inventoryUser);
 
         $receipt2 = $this->purchaseReceipts->store([
+            'supplier_id' => $suppliers[0]->getKey(),
             'without_purchase_order' => true,
             'exception_reason' => 'Stock de seguridad demo',
             'notes' => 'Recepción sin OC demo',
@@ -724,6 +715,7 @@ class AxonesDemoDataService
                         'numeroOrden' => $wo->document_number ?: $wo->code,
                         'pedidoKg' => number_format((float) (100 + $i), 3, '.', ''),
                         'maquina' => $i % 2 === 0 ? 'COMEXI 2' : 'COMEXI 1',
+                        'planchasReferencia' => str_pad((string) (($i % 90) + 10), 3, '0', STR_PAD_LEFT),
                         'frecuencia' => '250±2',
                         'anchoCorteMontaje' => '330±2',
                         'numBandas' => (string) max(1, ($i % 4) + 1),
@@ -1176,7 +1168,6 @@ class AxonesDemoDataService
             'products',
             'suppliers',
             'clients',
-            'vendors',
         ];
 
         $driver = DB::connection()->getDriverName();

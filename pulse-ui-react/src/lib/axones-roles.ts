@@ -20,8 +20,6 @@ const INVENTORY_CHIEF_URLS = new Set([
   "resumen",
   "alertas",
   "clientes",
-  "vendedores",
-  "vendedores/form",
   "productos",
   "productos/form",
   "proveedores",
@@ -116,7 +114,7 @@ export function isAxonesUrlAllowed(
   role?: string | null,
   userId?: number | null,
 ): boolean {
-  if (url === "asistente") return true
+  if (url === "asistente") return false
   if (isAxonesFullAccess(role, userId)) return true
   if (url === "account/password-reset-requests") {
     return isAxonesFullAccess(role, userId)

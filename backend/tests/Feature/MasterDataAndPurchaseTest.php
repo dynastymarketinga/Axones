@@ -16,7 +16,7 @@ class MasterDataAndPurchaseTest extends TestCase
 
     public function test_purchase_receipt_updates_stock_and_po_status(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'inventory_chief']);
         $token = $user->createToken('t')->plainTextToken;
 
         $supplier = Supplier::query()->create([
@@ -77,7 +77,7 @@ class MasterDataAndPurchaseTest extends TestCase
 
     public function test_receipt_without_purchase_order_requires_supplier_id(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'inventory_chief']);
         $token = $user->createToken('t')->plainTextToken;
         $supplier = Supplier::query()->create([
             'name' => 'Proveedor libre',

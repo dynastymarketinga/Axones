@@ -12,7 +12,6 @@ class Product extends Model
         'client_id',
         'name',
         'cpe',
-        'barcode',
         'mps',
         'print_type',
         'structure',
@@ -27,6 +26,13 @@ class Product extends Model
     public function inkMaterials(): BelongsToMany
     {
         return $this->belongsToMany(Material::class, 'product_ink_material')
+            ->withTimestamps();
+    }
+
+    /** Sustratos vinculados explícitamente para maestro de materiales. */
+    public function substrateMaterials(): BelongsToMany
+    {
+        return $this->belongsToMany(Material::class, 'material_product')
             ->withTimestamps();
     }
 }

@@ -38,7 +38,8 @@ type Props = {
   producidoAcumuladoKg: number
   faltanteKg: number
   turnosRegistrados: number
-  totalEntrada: number
+  totalEntradaAcumulada: number
+  totalEntradaTurno: number
   totalScrap: number
   ultimoTurnoLabel: string
   timerState: string
@@ -65,6 +66,7 @@ type Props = {
   salidaBobinas: string[]
   salidaMeta: BobinaLabelMeta[]
   mermaCalc: number
+  mermaRaw: string
   metrajeRaw: string
   scrapTransparenteRaw: string
   scrapImpresoRaw: string
@@ -92,6 +94,7 @@ type Props = {
   onOpenReturnModal: () => void
   onSalidaChange: (idx: number, v: string) => void
   onOpenSalidaLabel: (idx: number) => void
+  onSetMerma: (v: string) => void
   onSetMetraje: (v: string) => void
   onSetScrapTransparente: (v: string) => void
   onSetScrapImpreso: (v: string) => void
@@ -145,7 +148,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         </div>
         <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
           <div className="rounded border bg-background px-2 py-1.5">
-            Total entrada acumulada: <span className="font-semibold text-foreground">{props.totalEntrada.toFixed(2)} Kg</span>
+            Total entrada acumulada: <span className="font-semibold text-foreground">{props.totalEntradaAcumulada.toFixed(2)} Kg</span>
           </div>
           <div className="rounded border bg-background px-2 py-1.5">
             Total scrap acumulado: <span className="font-semibold text-foreground">{props.totalScrap.toFixed(2)} Kg</span>
@@ -283,7 +286,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       </div>
 
       <div className="mt-3 rounded-lg border border-emerald-200/70 bg-emerald-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900">Ingreso de material por bobina (Kg)</div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900">Ingreso de material virgen</div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
           {props.entradaBobinas.map((val, idx) => (
             <div key={`ent-${idx}`} className="space-y-1">
@@ -316,7 +319,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           <div className="rounded border bg-background p-2 text-sm">
             <span className="text-muted-foreground">Total entrada</span>
-            <p className="font-semibold">{props.totalEntrada.toFixed(2)} Kg</p>
+            <p className="font-semibold">{props.totalEntradaTurno.toFixed(2)} Kg</p>
           </div>
           <div className="rounded border bg-background p-2 text-sm">
             <span className="text-muted-foreground">Dev. buena</span>
@@ -335,7 +338,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       </div>
 
       <div className="mt-3 rounded-lg border border-violet-200/70 bg-violet-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-900">Proceso - pesos netos por bobina (Kg)</div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-900">Proceso - SALIDA BOBINA IMPRESA</div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
           {props.salidaBobinas.map((val, idx) => (
             <div key={`sal-${idx}`} className="space-y-1">
@@ -376,7 +379,13 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           </div>
           <div className="rounded border bg-background p-2 text-sm">
             <span className="text-muted-foreground">Merma</span>
-            <p className="font-semibold">{props.mermaCalc.toFixed(2)} Kg</p>
+            <Input
+              className="ot-input-unified mt-1 h-8"
+              inputMode="decimal"
+              value={props.mermaRaw}
+              onChange={(e) => props.onSetMerma(e.target.value)}
+              placeholder="0"
+            />
           </div>
           <div className="rounded border bg-background p-2 text-sm">
             <span className="text-muted-foreground">Metraje</span>
@@ -406,7 +415,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       <div className="mt-3 rounded-lg border bg-muted/20 p-3">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide">Resumen de producción</div>
         <div className="grid gap-2 text-sm sm:grid-cols-2">
-          <div className="rounded border bg-background p-2">Total material entrada: <span className="font-semibold">{props.totalEntrada.toFixed(2)} Kg</span></div>
+          <div className="rounded border bg-background p-2">Total material entrada: <span className="font-semibold">{props.totalEntradaTurno.toFixed(2)} Kg</span></div>
           <div className="rounded border bg-background p-2">Devolución buena: <span className="font-semibold">{props.devolucionBuena.toFixed(2)} Kg</span></div>
           <div className="rounded border bg-background p-2">Devolución rechazada: <span className="font-semibold">{props.devolucionRechazada.toFixed(2)} Kg</span></div>
           <div className="rounded border bg-background p-2">Material consumido: <span className="font-semibold">{props.materialConsumido.toFixed(2)} Kg</span></div>

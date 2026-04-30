@@ -10,6 +10,7 @@ import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import WorkOrderPrintingControlPanel from "@/pages/axones/WorkOrderPrintingControlPanel"
 import WorkOrderLaminacionControlPanel from "@/pages/axones/WorkOrderLaminacionControlPanel"
+import WorkOrderCorteControlPanel from "@/pages/axones/WorkOrderCorteControlPanel"
 import type { WorkOrderDetailRecord } from "@/types/api"
 import {
   Collapsible,
@@ -107,8 +108,9 @@ export default function WorkOrderDetailPage() {
       observaciones: readString(form[`tintaObs${n}`]) || "—",
     }
   })
-  const showPrintingPrefill = tabParam === "printing" || canUsePrintingOps
   const isPrintingFocusedView = tabParam === "printing" && canUsePrintingOps
+  const isCorteFocusedView = tabParam === "corte"
+  const showPrintingPrefill = isPrintingFocusedView
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -225,18 +227,22 @@ export default function WorkOrderDetailPage() {
 
           {isPrintingFocusedView ? (
             <WorkOrderPrintingControlPanel workOrderId={id} />
+          ) : isCorteFocusedView ? (
+            <WorkOrderCorteControlPanel workOrderId={id} />
           ) : (
             <Tabs defaultValue={initialTab} className="w-full">
-              <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1">
-                <TabsTrigger value="montaje">Montaje</TabsTrigger>
-                {canUsePrintingOps ? (
-                  <TabsTrigger value="printing">Impresión</TabsTrigger>
-                ) : null}
-                {canUseLaminacionOps ? (
-                  <TabsTrigger value="laminacion">Laminación</TabsTrigger>
-                ) : null}
-                <TabsTrigger value="corte">Corte</TabsTrigger>
-              </TabsList>
+              {initialTab !== "laminacion" && initialTab !== "corte" ? (
+                <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1">
+                  <TabsTrigger value="montaje">Montaje</TabsTrigger>
+                  {canUsePrintingOps ? (
+                    <TabsTrigger value="printing">Impresión</TabsTrigger>
+                  ) : null}
+                  {canUseLaminacionOps ? (
+                    <TabsTrigger value="laminacion">Laminación</TabsTrigger>
+                  ) : null}
+                  <TabsTrigger value="corte">Corte</TabsTrigger>
+                </TabsList>
+              ) : null}
               <TabsContent value="montaje" className="mt-4">
                 <ProductionAreaPanel
                   workOrderId={id}
@@ -256,12 +262,7 @@ export default function WorkOrderDetailPage() {
                 </TabsContent>
               ) : null}
               <TabsContent value="corte" className="mt-4">
-                <ProductionAreaPanel
-                  workOrderId={id}
-                  title="Corte"
-                  areaPath="corte"
-                  usageMode="bobina"
-                />
+                <WorkOrderCorteControlPanel workOrderId={id} />
               </TabsContent>
             </Tabs>
           )}

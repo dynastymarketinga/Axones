@@ -19,11 +19,13 @@ use App\Models\WorkOrderProductionItem;
 use App\Services\MaterialRequestService;
 use App\Services\OperationalAlertService;
 use App\Services\ProductionNotificationService;
+use App\Services\WorkOrderPlanillaReportService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\View;
 use Illuminate\Validation\ValidationException;
 
 class WorkOrderController extends Controller
@@ -32,6 +34,7 @@ class WorkOrderController extends Controller
         private readonly MaterialRequestService $materialRequests,
         private readonly OperationalAlertService $alerts,
         private readonly ProductionNotificationService $productionNotifications,
+        private readonly WorkOrderPlanillaReportService $planillaReport,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -198,7 +201,7 @@ class WorkOrderController extends Controller
             }
 
             return $order->fresh()->load([
-                'client.vendor',
+                'client',
                 'product',
                 'clientOrder.lines.product',
                 'clientOrder.lines.material',
@@ -224,7 +227,7 @@ class WorkOrderController extends Controller
     public function show(WorkOrder $work_order): JsonResponse
     {
         $work_order->load([
-            'client.vendor',
+            'client',
             'product',
             'clientOrder.lines.product',
             'clientOrder.lines.material',
@@ -249,6 +252,51 @@ class WorkOrderController extends Controller
             ->setPaper('a4', 'portrait');
 
         return $pdf->download('orden-produccion-'.$fileBase.'.pdf');
+    }
+
+    /**
+     * HTML para vista previa del reporte tipo planilla (merge maestro + formulario técnico).
+     */
+    public function previewPlanillaReport(Request $request, WorkOrder $work_order): Response
+    {
+        $this->assertPlanillaReportAllowed($work_order);
+
+        $data = $this->planillaReport->buildViewDataForBlade($work_order);
+        $data['generatedBy'] = (string) ($request->user()?->name ?? 'Usuario');
+        $data['generatedAt'] = now();
+
+        $html = View::make('pdf.orden_trabajo_planilla', $data)->render();
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="vista-previa-ot-'.$work_order->id.'.html"',
+        ]);
+    }
+
+    /**
+     * PDF planilla larga (orden de trabajo / producción).
+     */
+    public function downloadPlanillaReportPdf(Request $request, WorkOrder $work_order): Response
+    {
+        $this->assertPlanillaReportAllowed($work_order);
+
+        $data = $this->planillaReport->buildViewDataForBlade($work_order);
+        $data['generatedBy'] = (string) ($request->user()?->name ?? 'Usuario');
+        $data['generatedAt'] = now();
+
+        $fileBase = $work_order->document_number ?: str_replace(['/', '\\'], '-', $work_order->code);
+        $pdf = Pdf::loadView('pdf.orden_trabajo_planilla', $data)
+            ->setPaper('a4', 'portrait');
+
+        return $pdf->download('orden-trabajo-planilla-'.$fileBase.'.pdf');
+    }
+
+    private function assertPlanillaReportAllowed(WorkOrder $work_order): void
+    {
+        $st = WorkOrderStatus::tryFrom((string) $work_order->status);
+        if ($st === WorkOrderStatus::Completed || $st === WorkOrderStatus::Cancelled) {
+            abort(403, 'La vista previa y el PDF de planilla no están disponibles para órdenes completadas o canceladas.');
+        }
     }
 
     public function update(WorkOrderUpdateRequest $request, WorkOrder $work_order): JsonResponse
@@ -305,7 +353,7 @@ class WorkOrderController extends Controller
         });
 
         $freshOrder = $work_order->fresh()->load([
-            'client.vendor',
+            'client',
             'product',
             'clientOrder.lines.product',
             'clientOrder.lines.material',

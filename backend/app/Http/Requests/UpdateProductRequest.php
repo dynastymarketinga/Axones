@@ -17,10 +17,9 @@ class UpdateProductRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'client_id' => ['nullable', 'integer', 'exists:clients,id'],
+            'client_id' => ['required', 'integer', 'exists:clients,id'],
             'name' => ['sometimes', 'string', 'max:255'],
             'cpe' => ['nullable', 'string', 'max:255'],
-            'barcode' => ['nullable', 'string', 'max:255'],
             'mps' => ['nullable', 'string', 'max:255'],
             'print_type' => ['nullable', 'string', 'max:128'],
             'structure' => ['nullable', 'string'],

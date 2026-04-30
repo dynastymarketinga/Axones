@@ -4,13 +4,12 @@
 --                         php artisan db:seed --class=BackfillClientOrderLinesWithDefaultMaterialSeeder
 
 -- 1) Material de inventario (área "material") — idempotente por SKU
-INSERT INTO materials (sku, name, barcode, inventory_area, tinta_presentacion, unit, min_stock, quantity_on_hand, notes, created_at, updated_at)
+INSERT INTO materials (sku, name, barcode, inventory_area, unit, min_stock, quantity_on_hand, notes, created_at, updated_at)
 SELECT
   'AX-BOPP-25-560',
   'BOPP 25μ ancho 560 mm (genérico)',
   NULL,
   'material',
-  NULL,
   'kg',
   0,
   1000,

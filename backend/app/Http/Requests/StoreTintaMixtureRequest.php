@@ -6,6 +6,7 @@ use App\Enums\InventoryArea;
 use App\Models\Material;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreTintaMixtureRequest extends FormRequest
 {
@@ -24,7 +25,7 @@ class StoreTintaMixtureRequest extends FormRequest
             'output_name' => ['required', 'string', 'max:255'],
             'output_barcode' => ['nullable', 'string', 'max:64'],
             'output_inventory_area' => ['nullable', 'string', Rule::in([InventoryArea::Tintas->value, InventoryArea::CementerioTintas->value])],
-            'tinta_presentacion' => ['nullable', 'string', Rule::in(['original', 'solventada'])],
+            'output_tinta_subarea' => ['nullable', 'string', Rule::in(['laminacion', 'superficie', 'prueba_laminacion', 'laminacion_nueva'])],
             'unit' => ['nullable', 'string', 'max:16'],
             'notes' => ['nullable', 'string'],
             'components' => ['required', 'array', 'min:1'],
@@ -35,7 +36,12 @@ class StoreTintaMixtureRequest extends FormRequest
 
     public function withValidator($validator): void
     {
-        $validator->after(function (\Illuminate\Validation\Validator $validator): void {
+        $validator->after(function (Validator $validator): void {
+            $area = (string) ($this->input('output_inventory_area') ?? InventoryArea::Tintas->value);
+            if ($area === InventoryArea::Tintas->value && ! $this->filled('output_tinta_subarea')) {
+                $validator->errors()->add('output_tinta_subarea', 'Subárea es obligatoria para mezclas con salida en tintas.');
+            }
+
             $components = $this->input('components', []);
             if (! is_array($components) || $components === []) {
                 return;

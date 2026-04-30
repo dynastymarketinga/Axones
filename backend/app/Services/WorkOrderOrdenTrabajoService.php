@@ -55,7 +55,7 @@ class WorkOrderOrdenTrabajoService
             'estructuraMaterial' => $workOrder->product?->structure,
             'cpe' => $workOrder->product?->cpe,
             'mpps' => $workOrder->product?->mps,
-            'codigoBarra' => $workOrder->product?->barcode,
+            'codigoBarra' => null,
             'tipoImpresion' => $tipoImpresion,
             'client_order_code' => $workOrder->clientOrder?->code,
             'client_order_reference' => $workOrder->client_order_reference,

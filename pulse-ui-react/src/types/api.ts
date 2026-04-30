@@ -16,19 +16,8 @@ export type ClientRecord = {
   state: string | null
   city: string | null
   address: string | null
-  vendor_id?: number | null
-  vendor_name: string | null
-  vendor?: Pick<VendorRecord, "id" | "name"> | null
   email: string | null
   phone: string | null
-  created_at?: string
-  updated_at?: string
-}
-
-export type VendorRecord = {
-  id: number
-  name: string
-  active: boolean
   created_at?: string
   updated_at?: string
 }
@@ -38,7 +27,6 @@ export type ProductRecord = {
   client_id: number | null
   name: string
   cpe: string | null
-  barcode: string | null
   mps: string | null
   print_type: string | null
   structure: string | null
@@ -80,7 +68,7 @@ export type ClientOrderRow = {
   first_line_with_product?: {
     id: number
     product_id: number
-    product?: Pick<ProductRecord, "id" | "name" | "cpe" | "mps" | "barcode"> | null
+    product?: Pick<ProductRecord, "id" | "name" | "cpe" | "mps"> | null
   } | null
 }
 
@@ -90,14 +78,13 @@ export type MaterialRow = {
   name: string
   barcode?: string | null
   inventory_area: string
-  is_active?: boolean
   micras?: string | null
   ancho?: string | null
   unit: string
   quantity_on_hand: string
   min_stock: string
-  /** Superficie / Laminada / etc. (solo catálogo de tintas). */
-  tinta_presentacion?: string | null
+  tinta_subareas?: Array<{ id: number; subarea: string }>
+  substrate_products?: Array<Pick<ProductRecord, "id" | "name">>
   notes?: string | null
   created_at?: string
   updated_at?: string
@@ -160,9 +147,7 @@ export type WorkOrderDetailRecord = {
   client_order_id?: number | null
   board_stage?: string
   status?: string
-  client?: (ClientRecord & {
-    vendor?: Pick<VendorRecord, "id" | "name"> | null
-  }) | null
+  client?: ClientRecord | null
   product?: ProductRecord | null
   client_order?: {
     id: number

@@ -24,14 +24,15 @@ class StoreMaterialRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'barcode' => ['nullable', 'string', 'max:64'],
             'inventory_area' => ['required', 'string', Rule::in(InventoryArea::values())],
-            'is_active' => ['sometimes', 'boolean'],
-            'tinta_presentacion' => ['nullable', 'string', Rule::in(['original', 'solventada'])],
+            'tinta_subarea' => ['nullable', 'string', Rule::in(['laminacion', 'superficie', 'prueba_laminacion', 'laminacion_nueva'])],
             'micras' => ['nullable', 'numeric', 'min:0'],
             'ancho' => ['nullable', 'numeric', 'min:0'],
             'unit' => ['nullable', 'string', 'max:16'],
             'min_stock' => ['nullable', 'numeric', 'min:0'],
             'quantity_on_hand' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
+            'product_ids' => ['nullable', 'array'],
+            'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
         ];
     }
 
@@ -47,20 +48,20 @@ class StoreMaterialRequest extends FormRequest
             ], true);
 
             if ($requiresDimensions) {
-                if (!$this->filled('micras')) {
+                if (! $this->filled('micras')) {
                     $validator->errors()->add('micras', 'Micras es obligatorio para este tipo.');
                 }
-                if (!$this->filled('ancho')) {
+                if (! $this->filled('ancho')) {
                     $validator->errors()->add('ancho', 'Ancho es obligatorio para este tipo.');
                 }
             }
 
-            if ($area === InventoryArea::Tintas->value && !$this->filled('tinta_presentacion')) {
-                $validator->errors()->add('tinta_presentacion', 'Presentación es obligatoria para tintas.');
+            if ($area === InventoryArea::Tintas->value && ! $this->filled('tinta_subarea')) {
+                $validator->errors()->add('tinta_subarea', 'Subárea es obligatoria para tintas.');
             }
 
             $allowedUnits = $this->allowedUnitsByArea($area);
-            if (!in_array($unit, $allowedUnits, true)) {
+            if (! in_array($unit, $allowedUnits, true)) {
                 $validator->errors()->add('unit', 'Unidad inválida para el área seleccionada.');
             }
         });
@@ -73,9 +74,9 @@ class StoreMaterialRequest extends FormRequest
     {
         return match ($area) {
             InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
-            InventoryArea::Tintas->value => ['kg', 'litro'],
-            InventoryArea::Miscelaneos->value => ['unidad', 'caja', 'pack', 'kg'],
-            default => ['kg', 'm', 'rollo', 'litro', 'unidad', 'caja', 'pack'],
+            InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo'],
+            InventoryArea::Tintas->value, InventoryArea::Quimicos->value => ['kg', 'unidad'],
+            default => ['kg', 'unidad'],
         };
     }
 }

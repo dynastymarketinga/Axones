@@ -11,6 +11,7 @@ import type {
   PurchaseOrderRow,
   SupplierRecord,
 } from "@/types/api"
+import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -99,6 +100,8 @@ export default function PurchaseOrdersPage() {
     void load()
   }, [load])
 
+  const showInitialSkeleton = loading && rows === null
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -117,7 +120,14 @@ export default function PurchaseOrdersPage() {
         </Button>
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+      {showInitialSkeleton ? (
+        <div className="space-y-4">
+          <PageLoadingBlock />
+          <PageLoadingBlock />
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
         <div className="grid w-full gap-2 lg:w-56">
           <Label>Proveedor</Label>
           <Select
@@ -165,9 +175,9 @@ export default function PurchaseOrdersPage() {
           <Search className="mr-2 h-4 w-4" />
           Actualizar
         </Button>
-      </div>
+          </div>
 
-      <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
+          <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -180,11 +190,7 @@ export default function PurchaseOrdersPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
-                  Cargando…
-                </TableCell>
-              </TableRow>
+              <LoadingTableRow colSpan={5} />
             ) : !rows?.data.length ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground">
@@ -208,33 +214,35 @@ export default function PurchaseOrdersPage() {
             )}
           </TableBody>
         </Table>
-      </div>
-
-      {rows && rows.last_page > 1 ? (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            Página {rows.current_page} de {rows.last_page} · {rows.total}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page >= rows.last_page || loading}
-              onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-            >
-              Siguiente
-            </Button>
           </div>
-        </div>
-      ) : null}
+
+          {rows && rows.last_page > 1 ? (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Página {rows.current_page} de {rows.last_page} · {rows.total}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.current_page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.current_page >= rows.last_page || loading}
+                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   )
 }

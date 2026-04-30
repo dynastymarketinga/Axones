@@ -7,6 +7,7 @@ import { Check, ChevronsUpDown, Plus, Trash2, UserPlus } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
+import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -70,7 +71,6 @@ export default function ClientOrderNewPage() {
   const [newProductName, setNewProductName] = useState("")
   const [newProductCpe, setNewProductCpe] = useState("")
   const [newProductMps, setNewProductMps] = useState("")
-  const [newProductBarcode, setNewProductBarcode] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -107,8 +107,8 @@ export default function ClientOrderNewPage() {
 
   const productsForClient = useMemo(() => {
     const cid = clientId ? Number(clientId) : null
-    if (!cid) return products
-    return products.filter((p) => p.client_id == null || p.client_id === cid)
+    if (!cid) return []
+    return products.filter((p) => p.client_id === cid)
   }, [clientId, products])
 
   const selectedClient = useMemo(
@@ -139,11 +139,15 @@ export default function ClientOrderNewPage() {
   }
 
   function openCreateProductModal(lineKey: string | null = null) {
+    const cid = Number(clientId)
+    if (!Number.isFinite(cid) || cid < 1) {
+      toast.error("Seleccione primero el cliente para crear el producto.")
+      return
+    }
     setCreateProductLineKey(lineKey)
     setNewProductName("")
     setNewProductCpe("")
     setNewProductMps("")
-    setNewProductBarcode("")
     setCreateProductOpen(true)
   }
 
@@ -157,14 +161,17 @@ export default function ClientOrderNewPage() {
     setCreateProductSaving(true)
     try {
       const cid = clientId ? Number(clientId) : null
+      if (!Number.isFinite(cid) || (cid ?? 0) < 1) {
+        toast.error("Seleccione primero el cliente para crear el producto.")
+        return
+      }
       const created = await apiFetch<ProductRecord>("products", {
         method: "POST",
         body: JSON.stringify({
           name,
-          client_id: Number.isFinite(cid) && (cid ?? 0) > 0 ? cid : null,
+          client_id: cid,
           cpe: newProductCpe.trim() || null,
           mps: newProductMps.trim() || null,
-          barcode: newProductBarcode.trim() || null,
         }),
       })
       setProducts((prev) => [created, ...prev])
@@ -380,7 +387,7 @@ export default function ClientOrderNewPage() {
                   </PopoverTrigger>
                   <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]" align="start">
                     <Command shouldFilter>
-                      <CommandInput placeholder="Buscar por nombre, C.P.E. o barra…" />
+                      <CommandInput placeholder="Buscar por nombre, C.P.E. o M.P.P.S…" />
                       <CommandList>
                         <CommandEmpty>
                           <div className="space-y-2 p-2 text-sm">
@@ -413,7 +420,7 @@ export default function ClientOrderNewPage() {
                           {productsForClient.map((p) => (
                             <CommandItem
                               key={p.id}
-                              value={`${p.name} ${p.cpe ?? ""} ${p.barcode ?? ""}`}
+                              value={`${p.name} ${p.cpe ?? ""} ${p.mps ?? ""}`}
                               onSelect={() => {
                                 updateLine(i, { product_id: String(p.id) })
                                 setProductComboOpenKey(null)
@@ -430,7 +437,7 @@ export default function ClientOrderNewPage() {
                 </Popover>
               </div>
 
-              <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
+              <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>C.P.E.</Label>
                   <Input value={selectedProductByLineKey.get(row.key)?.cpe ?? ""} readOnly className="h-11 bg-background" placeholder="Dato maestro" />
@@ -438,10 +445,6 @@ export default function ClientOrderNewPage() {
                 <div className="grid gap-2">
                   <Label>M.P.P.S.</Label>
                   <Input value={selectedProductByLineKey.get(row.key)?.mps ?? ""} readOnly className="h-11 bg-background" placeholder="Dato maestro" />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Cod. barra</Label>
-                  <Input value={selectedProductByLineKey.get(row.key)?.barcode ?? ""} readOnly className="h-11 bg-background" placeholder="Dato maestro" />
                 </div>
               </div>
 
@@ -477,7 +480,7 @@ export default function ClientOrderNewPage() {
 
         <div className="flex flex-wrap gap-2 border-t pt-2">
           <Button type="submit" size="lg" disabled={saving} className="min-w-40">
-            {saving ? "Guardando…" : "Guardar pedido del cliente"}
+            <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Guardar pedido del cliente" />
           </Button>
           <Button type="button" variant="outline" asChild>
             <Link to="/ordenes-cliente">Cancelar</Link>
@@ -489,7 +492,7 @@ export default function ClientOrderNewPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Nuevo producto</DialogTitle>
-            <DialogDescription>Creación rápida desde pedido del cliente.</DialogDescription>
+            <DialogDescription>Creación rápida desde pedido del cliente. El producto queda asociado al cliente seleccionado.</DialogDescription>
           </DialogHeader>
           <form onSubmit={(ev) => void submitQuickProduct(ev)} className="space-y-4">
             <div className="grid gap-2">
@@ -497,14 +500,15 @@ export default function ClientOrderNewPage() {
               <Input id="quick-product-name" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} required />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="quick-product-client">Cliente</Label>
+              <Label htmlFor="quick-product-client">Cliente *</Label>
               <Input
                 id="quick-product-client"
-                value={selectedClient ? `${selectedClient.name}${selectedClient.rif ? ` · ${selectedClient.rif}` : ""}` : "Sin cliente"}
+                value={selectedClient ? `${selectedClient.name}${selectedClient.rif ? ` · ${selectedClient.rif}` : ""}` : ""}
+                placeholder="Seleccione cliente primero"
                 readOnly
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="quick-product-cpe">C.P.E.</Label>
                 <Input id="quick-product-cpe" value={newProductCpe} onChange={(e) => setNewProductCpe(e.target.value)} />
@@ -513,17 +517,13 @@ export default function ClientOrderNewPage() {
                 <Label htmlFor="quick-product-mps">M.P.P.S.</Label>
                 <Input id="quick-product-mps" value={newProductMps} onChange={(e) => setNewProductMps(e.target.value)} />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="quick-product-barcode">Cod. barra</Label>
-                <Input id="quick-product-barcode" value={newProductBarcode} onChange={(e) => setNewProductBarcode(e.target.value)} />
-              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCreateProductOpen(false)}>
                 Cancelar
               </Button>
               <Button type="submit" disabled={createProductSaving}>
-                {createProductSaving ? "Creando…" : "Crear producto"}
+                <LoadingButtonLabel loading={createProductSaving} loadingText="Creando..." idleText="Crear producto" />
               </Button>
             </DialogFooter>
           </form>

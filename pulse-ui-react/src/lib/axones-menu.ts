@@ -22,6 +22,7 @@ const MENU_HIDDEN_URLS = new Set([
   "miscelaneos/nuevo",
   "bobinas",
   "devoluciones",
+  "asistente",
 ])
 
 function hideMenuNodes(nodes: AxonesMenuNode[]): AxonesMenuNode[] {
@@ -56,7 +57,6 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     icon: Tags,
     items: [
       { title: "Clientes", url: "clientes", icon: ClipboardList },
-      { title: "Vendedores", url: "vendedores", icon: BadgeCheck },
       { title: "Productos", url: "productos", icon: Package },
       { title: "Proveedores", url: "proveedores", icon: Truck },
       { title: "Órdenes de compra", url: "ordenes-compra", icon: ShoppingCart },
@@ -73,7 +73,6 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
         url: "recepciones-oc",
         icon: PackageOpen,
       },
-      { title: "Stock por área", url: "inventario-areas", icon: Warehouse },
       {
         title: "Misceláneos",
         url: "#",

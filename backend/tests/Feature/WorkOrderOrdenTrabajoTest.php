@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AreaRequestStatus;
 use App\Enums\ClientOrderStatus;
 use App\Enums\WorkOrderBoardStage;
+use App\Models\AreaRequest;
 use App\Models\Client;
 use App\Models\ClientOrder;
 use App\Models\ClientOrderLine;
@@ -254,7 +256,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
     }
 
-    public function test_put_orden_trabajo_with_notify_on_production_save_creates_handoff_and_moves_stage(): void
+    public function test_put_orden_trabajo_with_notify_on_production_save_creates_handoff_without_forcing_board_stage(): void
     {
         User::factory()->create();
         $user = User::factory()->create(['role' => 'impresion']);
@@ -285,6 +287,10 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'work_order_id' => $wo->id,
             'area' => 'corte',
         ]);
+        $this->assertDatabaseHas('area_requests', [
+            'work_order_id' => $wo->id,
+            'area' => 'tintas',
+        ]);
 
         $this->assertDatabaseHas('operational_alerts', [
             'work_order_id' => $wo->id,
@@ -304,7 +310,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->assertSame('impresion', data_get($savedAlert?->metadata, 'target_area'));
 
         $this->assertSame(
-            WorkOrderBoardStage::Laminacion->value,
+            WorkOrderBoardStage::Impresion->value,
             $wo->fresh()->board_stage?->value ?? (string) $wo->fresh()->board_stage
         );
     }
@@ -371,5 +377,55 @@ class WorkOrderOrdenTrabajoTest extends TestCase
                 'pedidoKg' => '50',
             ],
         ], $h)->assertUnprocessable();
+    }
+
+    public function test_put_orden_trabajo_broadcasts_saved_to_all_areas(): void
+    {
+        $user = User::factory()->create(['role' => 'calidad']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-BROADCAST-SAVE',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $payload = ['form' => [
+            'cliente' => 'X',
+            'pedidoKg' => '100',
+            'maquina' => 'COMEXI 1',
+            'tipoImpresionEstructura' => 'reverso',
+        ]];
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
+
+        $this->assertSame(4, OperationalAlert::query()
+            ->where('work_order_id', $wo->id)
+            ->where('alert_type', 'work_order_saved_broadcast')
+            ->count());
+        $this->assertDatabaseHas('area_requests', ['work_order_id' => $wo->id, 'area' => 'tintas']);
+    }
+
+    public function test_work_orders_mi_area_filters_by_pending_area_request(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-MIAREA-1',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Nueva->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'tintas',
+            'title' => 'Test tintas',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=tintas&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertContains($wo->id, $ids);
     }
 }

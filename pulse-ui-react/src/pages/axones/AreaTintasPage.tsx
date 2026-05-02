@@ -96,7 +96,7 @@ export default function AreaTintasPage() {
     try {
       const [woRes, mats, invT, invC, mixes] = await Promise.all([
         apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", {
-          query: { board_stage: "impresion", per_page: 50, page: 1 },
+          query: { mi_area: "tintas", per_page: 50, page: 1 },
         }),
         apiFetch<LaravelPaginated<MaterialRow>>("materials", {
           query: { per_page: 400, page: 1 },

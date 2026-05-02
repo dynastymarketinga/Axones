@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import { markAlertToastOnce } from "@/lib/alert-toast-once"
 import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
+import { shouldPlayOperationalToast } from "@/lib/operational-alert-toast-policy"
+import type { StreamAlertPayload } from "@/lib/operational-alerts-stream"
+import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
 import type { LaravelPaginated } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,6 +30,36 @@ type AlertRow = {
   acknowledged_at: string | null
   work_order?: { code: string }
   material?: { sku: string; name: string }
+  metadata?: Record<string, unknown>
+}
+
+const ALERT_TYPE_LABEL: Record<string, string> = {
+  work_order_saved_broadcast: "Orden de trabajo guardada",
+  work_order_created: "Orden de trabajo creada",
+  production_handoff: "Producción actualizada entre áreas",
+  production_saved: "Producción guardada",
+  ot_material_shortage: "Falta de material",
+  scrap_threshold_exceeded: "Merma por encima del umbral",
+  mount_time_exceeded: "Tiempo de montaje excedido",
+  downtime_exceeded: "Parada prolongada",
+  low_stock: "Stock bajo",
+  dispatch_delay: "Retraso en despacho",
+  quality_hold: "Retención de calidad",
+  machine_idle: "Máquina inactiva",
+  password_reset_requested: "Solicitud de restablecimiento de clave",
+}
+
+function alertTypeLabel(alertType?: string | null): string {
+  const key = (alertType ?? "").toLowerCase().trim()
+  return ALERT_TYPE_LABEL[key] ?? (key.replaceAll("_", " ") || "—")
+}
+
+function severityLabel(severity?: string | null): string {
+  const s = (severity ?? "").toLowerCase().trim()
+  if (s === "info") return "Información"
+  if (s === "warning") return "Advertencia"
+  if (s === "critical") return "Crítica"
+  return severity || "—"
 }
 
 function areaLabelFromRole(role?: string | null, userId?: number | null): string {
@@ -66,6 +100,50 @@ export default function AxonesOperationalAlertsPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    const onRefresh = () => {
+      setPage(1)
+      void load()
+    }
+    window.addEventListener("alerts:refresh", onRefresh)
+    return () => window.removeEventListener("alerts:refresh", onRefresh)
+  }, [load])
+
+  const onStreamRow = useCallback((row: StreamAlertPayload) => {
+    setRows((prev) => {
+      if (!prev) return prev
+      if (prev.data.some((x) => x.id === row.id)) return prev
+      if (prev.current_page !== 1) return prev
+      const mapped: AlertRow = {
+        id: row.id,
+        alert_type: row.alert_type,
+        severity: row.severity,
+        message: row.message,
+        created_at: row.created_at,
+        acknowledged_at: row.acknowledged_at,
+        work_order: row.work_order?.code
+          ? { code: row.work_order.code }
+          : undefined,
+        material: undefined,
+        metadata: row.metadata,
+      }
+      return {
+        ...prev,
+        data: [mapped, ...prev.data],
+        total: prev.total + 1,
+      }
+    })
+    const session = getStoredUser()
+    if (
+      shouldPlayOperationalToast(session?.role, row.metadata) &&
+      markAlertToastOnce(row.id)
+    ) {
+      toast.info(row.message)
+    }
+  }, [])
+
+  useOperationalAlertStreamSubscription(onStreamRow)
 
   async function acknowledge(id: number) {
     try {
@@ -127,8 +205,8 @@ export default function AxonesOperationalAlertsPage() {
               rows.data.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell>{a.id}</TableCell>
-                  <TableCell>{a.alert_type}</TableCell>
-                  <TableCell>{a.severity}</TableCell>
+                  <TableCell>{alertTypeLabel(a.alert_type)}</TableCell>
+                  <TableCell>{severityLabel(a.severity)}</TableCell>
                   <TableCell className="max-w-[280px] text-sm">
                     {a.message}
                   </TableCell>

@@ -69,6 +69,31 @@ class OperationalAlertsTest extends TestCase
         $this->assertNotNull($alert->fresh()->acknowledged_at);
     }
 
+    public function test_acknowledge_all_marks_only_visible_alerts_for_area_user(): void
+    {
+        $printingUser = User::factory()->create(['role' => 'impresion']);
+
+        $aPrinting = OperationalAlert::query()->create([
+            'alert_type' => 'work_order_saved_broadcast',
+            'severity' => 'info',
+            'message' => 'Impresión',
+            'metadata' => ['target_area' => 'impresion'],
+        ]);
+        $aLaminacion = OperationalAlert::query()->create([
+            'alert_type' => 'work_order_saved_broadcast',
+            'severity' => 'info',
+            'message' => 'Laminación',
+            'metadata' => ['target_area' => 'laminacion'],
+        ]);
+
+        $this->postJson('/api/alerts/acknowledge-all', [], $this->auth($printingUser))
+            ->assertOk()
+            ->assertJsonPath('updated_count', 1);
+
+        $this->assertNotNull($aPrinting->fresh()->acknowledged_at);
+        $this->assertNull($aLaminacion->fresh()->acknowledged_at);
+    }
+
     public function test_scrap_percent_triggers_alert_above_threshold(): void
     {
         config(['axones.alerts.scrap_percent_threshold' => 5]);

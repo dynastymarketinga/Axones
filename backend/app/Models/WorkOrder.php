@@ -121,6 +121,11 @@ class WorkOrder extends Model
         return $this->hasOne(WorkOrderTechnicalDocument::class);
     }
 
+    public function areaRequests(): HasMany
+    {
+        return $this->hasMany(AreaRequest::class);
+    }
+
     protected function casts(): array
     {
         return [

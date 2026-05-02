@@ -1,5 +1,5 @@
 import { Bell } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -12,17 +12,24 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { markAlertToastOnce } from "@/lib/alert-toast-once"
 import { apiFetch, ApiError } from "@/lib/api"
+import { shouldPlayOperationalToast } from "@/lib/operational-alert-toast-policy"
+import type { StreamAlertPayload } from "@/lib/operational-alerts-stream"
+import { getStoredUser } from "@/lib/auth-storage"
+import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
 import { cn } from "@/lib/utils"
 
 type Notification = {
   id: number
+  alertType: string
   title: string
   description: string
   time: string
   unread?: boolean
   avatar?: string
   color?: string
+  workOrderId?: number
 }
 
 type AlertApiRow = {
@@ -32,10 +39,64 @@ type AlertApiRow = {
   message: string
   created_at: string
   acknowledged_at: string | null
+  metadata?: Record<string, unknown>
+  work_order?: { id?: number; code?: string }
 }
 
 type AlertPage = {
   data: AlertApiRow[]
+}
+
+function streamPayloadToRow(row: StreamAlertPayload): AlertApiRow {
+  return {
+    id: row.id,
+    alert_type: row.alert_type,
+    severity: row.severity,
+    message: row.message,
+    created_at: row.created_at,
+    acknowledged_at: row.acknowledged_at,
+    metadata: row.metadata,
+    work_order: row.work_order,
+  }
+}
+
+const ALERT_TITLE_ES: Record<string, string> = {
+  work_order_saved_broadcast: "Orden de trabajo guardada",
+  work_order_created: "Orden de trabajo creada",
+  production_handoff: "Producción actualizada entre áreas",
+  production_saved: "Producción guardada",
+  ot_material_shortage: "Falta de material",
+  scrap_threshold_exceeded: "Merma por encima del umbral",
+  mount_time_exceeded: "Tiempo de montaje excedido",
+  password_reset_requested: "Solicitud de restablecimiento de clave",
+}
+
+function alertTitleInSpanish(alertType: string): string {
+  const key = alertType.toLowerCase().trim()
+  return ALERT_TITLE_ES[key] ?? key.replaceAll("_", " ")
+}
+
+function routeForAlertType(alertType: string, workOrderId?: number): string {
+  const key = alertType.toLowerCase().trim()
+  if (
+    [
+      "work_order_saved_broadcast",
+      "work_order_created",
+      "production_handoff",
+      "production_saved",
+      "ot_material_shortage",
+      "scrap_threshold_exceeded",
+      "mount_time_exceeded",
+    ].includes(key)
+  ) {
+    return Number.isFinite(workOrderId) && Number(workOrderId) > 0
+      ? `/ordenes-trabajo/${workOrderId}`
+      : "/ordenes-trabajo?tab=lista"
+  }
+  if (key === "password_reset_requested") {
+    return "/account/password-reset-requests"
+  }
+  return "/alertas"
 }
 
 function severityColor(severity?: string): string {
@@ -62,28 +123,106 @@ export function NotificationDropdown() {
   }
 
   useEffect(() => {
-    void load()
+    const timer = window.setTimeout(() => {
+      void load()
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
     if (!open) return
-    void load()
+    const timer = window.setTimeout(() => {
+      void load()
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [open])
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void load()
+    }
+    window.addEventListener("alerts:refresh", onRefresh)
+    return () => window.removeEventListener("alerts:refresh", onRefresh)
+  }, [])
+
+  const onStreamRow = useCallback((row: StreamAlertPayload) => {
+    setRows((prev) => {
+      if (prev.some((x) => x.id === row.id)) return prev
+      return [streamPayloadToRow(row), ...prev].slice(0, 24)
+    })
+    const session = getStoredUser()
+    if (
+      shouldPlayOperationalToast(session?.role, row.metadata) &&
+      markAlertToastOnce(row.id)
+    ) {
+      toast.info(row.message)
+    }
+  }, [])
+
+  useOperationalAlertStreamSubscription(onStreamRow)
+
+  async function acknowledgeOne(id: number) {
+    try {
+      await apiFetch(`alerts/${id}/acknowledge`, { method: "PATCH" })
+      // En campana solo queremos pendientes; al reconocer, desaparece.
+      setRows((prev) => prev.filter((r) => r.id !== id))
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo reconocer la alerta.")
+      throw e
+    }
+  }
+
+  async function acknowledgeAllAndOpenAlerts() {
+    try {
+      const res = await apiFetch<{ updated_count: number }>("alerts/acknowledge-all", {
+        method: "POST",
+      })
+      // Campana queda vacía tras marcar todas como leídas.
+      setRows([])
+      if ((res.updated_count ?? 0) > 0) {
+        toast.success(`Se marcaron ${res.updated_count} alerta(s) como leídas.`)
+      }
+      setOpen(false)
+      navigate("/alertas")
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudieron marcar todas las alertas.")
+    }
+  }
+
+  async function handleNotificationClick(item: Notification) {
+    try {
+      if (item.unread) {
+        await acknowledgeOne(item.id)
+      }
+      setOpen(false)
+      navigate(routeForAlertType(item.alertType, item.workOrderId))
+    } catch {
+      // errores manejados en acknowledgeOne
+    }
+  }
 
   const notifications = useMemo<Notification[]>(
     () =>
       rows.map((r) => ({
         id: r.id,
-        title: r.alert_type.replaceAll("_", " "),
+        alertType: r.alert_type,
+        title: alertTitleInSpanish(r.alert_type),
         description: r.message,
         time: new Date(r.created_at).toLocaleString("es-VE"),
         unread: !r.acknowledged_at,
         color: severityColor(r.severity),
+        workOrderId: Number(r.work_order?.id ?? 0) || undefined,
       })),
     [rows],
   )
 
-  const unreadCount = notifications.filter((n) => n.unread).length
+  const unreadNotifications = useMemo(
+    () => notifications.filter((n) => n.unread),
+    [notifications],
+  )
+  const unreadCount = unreadNotifications.length
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -92,13 +231,13 @@ export function NotificationDropdown() {
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full [&_svg]:size-5"
+            className="relative rounded-full [&_svg]:size-5"
           >
             <Bell />
           </Button>
 
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full
+            <span className="absolute -right-0.5 -top-0.5 h-5 min-w-5 rounded-full
               bg-destructive px-1 text-[10px] font-medium
               text-destructive-foreground flex items-center justify-center">
               {unreadCount}
@@ -122,15 +261,20 @@ export function NotificationDropdown() {
 
         <div className="h-80 overflow-y-auto">
           <div className="flex flex-col">
-            {notifications.map((item) => (
+            {unreadNotifications.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                No tienes alertas pendientes.
+              </div>
+            ) : unreadNotifications.map((item) => (
               <div
                 key={item.id}
                 className={cn(
-                  "flex gap-3 px-4 py-3 cursor-pointer transition-colors",
+                  "flex w-full gap-3 px-4 py-3 text-left cursor-pointer transition-colors",
                   item.unread
                     ? "bg-muted/50 hover:bg-muted"
                     : "hover:bg-muted/50"
                 )}
+                onClick={() => void handleNotificationClick(item)}
               >
                 <Avatar className="h-10 w-10">
                   <AvatarImage src={item.avatar} />
@@ -161,7 +305,11 @@ export function NotificationDropdown() {
         </div>
 
         <div className="p-2 border-t">
-          <Button variant="ghost" className="w-full text-sm" onClick={() => navigate("/alertas")}>
+          <Button
+            variant="ghost"
+            className="w-full text-sm"
+            onClick={() => void acknowledgeAllAndOpenAlerts()}
+          >
             Ver todas las alertas
           </Button>
         </div>

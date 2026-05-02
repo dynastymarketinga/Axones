@@ -177,10 +177,6 @@ export const router = createBrowserRouter(
         { path: "tintas", element: guardAxonesRoute({ routeKey: "tintas", element: <AreaTintasPage /> }) },
         { path: "ordenes-trabajo", element: guardAxonesRoute({ routeKey: "ordenes-trabajo", element: <WorkOrdersHubPage /> }) },
         {
-          path: "ordenes-trabajo/nueva",
-          element: guardAxonesRoute({ routeKey: "ordenes-trabajo", element: <Navigate to="/ordenes-trabajo" replace /> }),
-        },
-        {
           path: "ordenes-trabajo/:woId/vista-previa",
           element: guardAxonesRoute({
             routeKey: "ordenes-trabajo",

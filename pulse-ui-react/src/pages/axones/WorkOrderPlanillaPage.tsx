@@ -11,7 +11,6 @@ import {
   Layers,
   NotebookPen,
   Package,
-  Printer,
   ReceiptText,
   Scissors,
   Wrench,
@@ -20,9 +19,9 @@ import {
 import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import { cn } from "@/lib/utils"
-import type { LaravelPaginated, MaterialRow, ProductRecord } from "@/types/api"
+import type { ClientOrderDetailRecord, LaravelPaginated, MaterialRow, ProductRecord } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Command,
   CommandEmpty,
@@ -35,6 +34,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import WorkOrderPrintingInkTable from "./WorkOrderPrintingInkTable"
 import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
@@ -75,6 +83,34 @@ type OrdenTrabajoPayload = {
   product_id?: number | null
   prefill: Record<string, unknown>
   form: Record<string, unknown> | null
+}
+
+type NotificationAreaResult = {
+  area: string
+  status: string
+  area_request?: string
+  alert?: string
+  note?: string
+}
+
+type NotificationSummary = {
+  event: string
+  work_order_id: number
+  origin_area: string
+  save_fingerprint?: string
+  sent_to: string[]
+  skipped: string[]
+  errors: string[]
+  areas: NotificationAreaResult[]
+}
+
+type SaveOrdenTrabajoResponse = {
+  work_order_id: number
+  updated_at: string
+  notification_summary?: {
+    broadcast: NotificationSummary | null
+    production: NotificationSummary | null
+  } | null
 }
 
 type SustratoRow = { material_id: string; kg: string }
@@ -124,6 +160,34 @@ function normalizeTipoImpresion(v: unknown): "" | "superficie" | "reverso" {
   if (s === "superficie" || s === "superf") return "superficie"
   if (s === "reverso") return "reverso"
   return ""
+}
+
+function normalizeTipoImpresionEstructura(value: unknown): "superficie" | "reverso" {
+  const raw = readString(value).toLowerCase().trim()
+  if (raw.includes("superf")) return "superficie"
+  if (raw.includes("revers")) return "reverso"
+  return "reverso"
+}
+
+function toDateInputValue(iso: string | null | undefined): string {
+  const s = readString(iso).trim()
+  if (!s) return ""
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  return s
+}
+
+function sumClientOrderLineQuantities(lines: ClientOrderDetailRecord["lines"]): string | null {
+  if (!lines?.length) return null
+  let sum = 0
+  for (const l of lines) {
+    const q = readNumberString(l.quantity).trim().replace(",", ".")
+    if (!q) continue
+    const n = Number(q)
+    if (!Number.isFinite(n)) continue
+    sum += n
+  }
+  if (!(sum > 0)) return null
+  return sum.toFixed(3)
 }
 
 function isDecimalLike(v: unknown): boolean {
@@ -218,6 +282,17 @@ function setKey(
   setForm((prev) => ({ ...prev, [key]: value }))
 }
 
+function toTitleArea(area: string): string {
+  const raw = String(area || "").trim().toLowerCase()
+  if (raw === "impresion") return "Impresión"
+  if (raw === "laminacion") return "Laminación"
+  if (raw === "corte") return "Corte"
+  if (raw === "tintas") return "Tintas"
+  if (raw === "montaje") return "Montaje"
+  if (raw === "planificacion") return "Planificación"
+  return area || "desconocida"
+}
+
 function getSustratosLam(form: Record<string, unknown>): SustratoRow[] {
   const raw = form.sustratosVirgenLam
   if (!Array.isArray(raw)) return ensureMinSustratoRows([])
@@ -260,11 +335,228 @@ function setSustratosImp(
   setForm((prev) => ({ ...prev, sustratosVirgenImp: rows.slice(0, MAX_SUSTRATO_ROWS) }))
 }
 
+function randomInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+/**
+ * Cabecera (orden de cliente) + datos del producto: solo criterio del usuario;
+ * el relleno al azar no modifica estas claves aunque estén vacías.
+ */
+const USER_ONLY_RANDOM_SKIP = new Set<string>([
+  "fechaOrden",
+  "numeroOrden",
+  "document_number",
+  "pedidoKg",
+  "maquina",
+  "planchasReferencia",
+  "metrosEstimados",
+  "cliente",
+  "clienteRif",
+  "producto",
+  "tipoImpresion",
+  "tipoImpresionEstructura",
+  "cpe",
+  "mpps",
+  "codigoBarra",
+  "estructuraMaterial",
+  "estructuraCapa1",
+  "estructuraCapa1Rev",
+  "estructuraCapa2Rev",
+  "estructuraCapa3Rev",
+  "client_order_code",
+  "client_order_reference",
+  "estadoOt",
+  "etapaOt",
+])
+
+/** Datos del pedido / maestro (`prefill`): no los pisa el relleno al azar. */
+const PREFILL_RANDOM_BLOCKLIST = new Set<string>([
+  "cliente",
+  "clienteRif",
+  "producto",
+  "cpe",
+  "mpps",
+  "pedidoKg",
+  "fechaOrden",
+  "numeroOrden",
+  "client_order_code",
+  "client_order_reference",
+  "estadoOt",
+  "etapaOt",
+  "tipoImpresion",
+  "estructuraMaterial",
+])
+
+function isEmptyForRandomFill(key: string, value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  if (Array.isArray(value)) {
+    if (value.length === 0) return true
+    if (key === "sustratosVirgenImp" || key === "sustratosVirgenLam") {
+      return (value as Array<Record<string, unknown>>).every(
+        (row) => !readString(row.material_id).trim() && !readNumberString(row.kg).trim(),
+      )
+    }
+    return false
+  }
+  const s = readString(value).trim() || readNumberString(value).trim()
+  return s === "" || s === "-"
+}
+
+function isBlockedFromRandomByPrefill(key: string, prefill: Record<string, unknown>): boolean {
+  if (!PREFILL_RANDOM_BLOCKLIST.has(key)) return false
+  return !isEmptyForRandomFill(key, prefill[key])
+}
+
+function buildRandomPlanillaPatch(prev: Record<string, unknown>): Record<string, unknown> {
+  const sImp = getSustratosImp(prev)
+  const sLam = getSustratosLam(prev)
+  const tipM = randomInt(0, 1) === 0 ? "Reverso" : "Superficie"
+  const sustratosVirgenImp = [
+    { material_id: readString(sImp[0]?.material_id), kg: String(randomInt(15, 120)) },
+  ]
+  const sustratosVirgenLam = [
+    { material_id: readString(sLam[0]?.material_id), kg: String(randomInt(200, 520)) },
+  ]
+
+  const tintas: Record<string, unknown> = {}
+  const demoColors = [
+    "AMARILLO PROCESO — Superficie · TINSUP-0002",
+    "CYAN PROCESO — Laminada · BL-1132",
+    "MAGENTA PROCESO — Laminada · TINLAM-0002",
+    "NEGRO PROCESO — Laminada · TINLAM-0003",
+    "BLANCO — TINW-0001",
+    "ROJO — TINR-0004",
+    "VERDE — TING-0002",
+    "AZUL — TINB-0006",
+  ]
+  for (let n = 1; n <= 8; n += 1) {
+    tintas[`tintaColor${n}`] = demoColors[(n - 1) % demoColors.length] ?? demoColors[0]
+    tintas[`tintaAnilox${n}`] = `${randomInt(2, 6)}.${randomInt(0, 9)}${randomInt(0, 9)}`
+    tintas[`tintaVisc${n}`] = String(randomInt(12, 28))
+    tintas[`tintaObs${n}`] = `Obs. tinta ${n} (al azar)`
+  }
+
+  return {
+    tipoImpresionMontaje: tipM,
+    frecuencia: `${randomInt(200, 360)}±${randomInt(1, 5)}`,
+    numBandas: String(randomInt(1, 6)),
+    anchoCorteMontaje: `${randomInt(300, 450)}±${randomInt(1, 4)}`,
+    numRepeticion: String(randomInt(1, 8)),
+    desarrollo: String(randomInt(380, 520)),
+    anchoMontaje: String(randomInt(280, 440)),
+    figuraEmbobinadoMontaje: String(randomInt(1, 8)),
+    numColores: String(randomInt(1, 8)),
+    obsMontaje: "Obs. montaje (relleno al azar)",
+    pinonImp: String(randomInt(7000, 9200)),
+    lineaCorte: randomInt(0, 1) === 0 ? "si" : "no",
+    figEmbImpDisplay: String(randomInt(1, 8)),
+    sustratosVirgenImp,
+    kgIngresadoImp: String(randomInt(1, 50)),
+    kgSalidaImp: String(randomInt(10, 120)),
+    mermaImp: String(randomInt(1, 20)),
+    metrosImp: String(randomInt(200, 5000)),
+    figuraEmbobinadoLam: String(randomInt(1, 8)),
+    gramajeAdhesivo: `${randomInt(1, 3)},${randomInt(0, 9)}`,
+    relacionMezcla: `${randomInt(80, 120)}/${randomInt(50, 90)}`,
+    obsLaminacion: "Obs. laminación (relleno al azar)",
+    sustratosVirgenLam,
+    kgEntradaLam: String(randomInt(5, 40)),
+    kgSalidaLam: String(randomInt(5, 40)),
+    metrajeLam: String(randomInt(100, 5000)),
+    mermaLam: String(randomInt(1, 15)),
+    kgEntradaLam2: String(randomInt(0, 30)),
+    kgSalidaLam2: String(randomInt(0, 30)),
+    metrajeLam2: String(randomInt(0, 3000)),
+    mermaLam2: String(randomInt(0, 12)),
+    anchoCorteFinal: `${randomInt(310, 360)}±${randomInt(0, 2)}`,
+    pesoBobina: `${randomInt(15, 22)}-${randomInt(23, 28)}`,
+    metrosBobina: `${randomInt(800, 1200)} ± ${randomInt(10, 40)}`,
+    orientacionEmbalaje: String(randomInt(1, 4)),
+    ubicFotoceldaCorte: randomInt(0, 1) === 0 ? "Borde líder" : "Borde arrastre",
+    distFotoceldaBorde: `${randomInt(1, 3)}±${randomInt(1, 2)}`,
+    distFiguraLadoContrario: `${randomInt(15, 35)}±${randomInt(1, 3)}`,
+    distFiguraLadoFotocelda: `${randomInt(20, 45)}±${randomInt(1, 3)}`,
+    maxEmpates: String(randomInt(1, 3)),
+    diamBobina: `${randomInt(380, 450)} ± ${randomInt(3, 8)}`,
+    anchoCore: `${randomInt(400, 480)}±${randomInt(2, 6)}`,
+    diamCorePlg: String(randomInt(3, 10)),
+    cantCores: String(randomInt(1, 4)),
+    kgIngresadosCorte: String(randomInt(50, 400)),
+    kgSalidaCorte: String(randomInt(40, 380)),
+    kgMermaCorte: String(randomInt(1, 35)),
+    metrajeCorte: String(randomInt(500, 9000)),
+    observacionesGenerales: "Observaciones generales (relleno al azar para pruebas).",
+    fechaInicio: `2026-${String(randomInt(6, 11)).padStart(2, "0")}-10`,
+    fechaEntrega: `2026-${String(randomInt(7, 12)).padStart(2, "0")}-20`,
+    ...tintas,
+  }
+}
+
+function computeRandomFill(
+  prevForm: Record<string, unknown>,
+  prefill: Record<string, unknown>,
+): { next: Record<string, unknown>; filled: number } {
+  const merged: Record<string, unknown> = mergePrefill(prefill, prevForm)
+  const patch = buildRandomPlanillaPatch(prevForm)
+  const next: Record<string, unknown> = { ...prevForm }
+  let filled = 0
+
+  const tryScalar = (key: string, val: unknown) => {
+    if (USER_ONLY_RANDOM_SKIP.has(key)) return
+    if (isBlockedFromRandomByPrefill(key, prefill)) return
+    if (!isEmptyForRandomFill(key, merged[key])) return
+    next[key] = val
+    merged[key] = val
+    filled += 1
+  }
+
+  for (const [key, val] of Object.entries(patch)) {
+    if (key === "sustratosVirgenImp" || key === "sustratosVirgenLam") continue
+    tryScalar(key, val)
+  }
+
+  if (!isBlockedFromRandomByPrefill("sustratosVirgenImp", prefill) && isEmptyForRandomFill("sustratosVirgenImp", merged.sustratosVirgenImp)) {
+    next.sustratosVirgenImp = patch.sustratosVirgenImp
+    merged.sustratosVirgenImp = patch.sustratosVirgenImp
+    filled += 1
+  }
+
+  if (!isBlockedFromRandomByPrefill("sustratosVirgenLam", prefill) && isEmptyForRandomFill("sustratosVirgenLam", merged.sustratosVirgenLam)) {
+    next.sustratosVirgenLam = patch.sustratosVirgenLam
+    merged.sustratosVirgenLam = patch.sustratosVirgenLam
+    filled += 1
+  }
+
+  const impAfter = getSustratosImp(next)
+  next.sustratoVirgenImp1 = readString(impAfter[0]?.material_id)
+  next.kgUtilizarImp1 = readString(impAfter[0]?.kg)
+
+  return { next, filled }
+}
+
 export default function WorkOrderPlanillaPage() {
   const nav = useNavigate()
   const { woId } = useParams<{ woId: string }>()
   const [searchParams] = useSearchParams()
-  const id = Number(woId)
+  const woIdRaw = readString(woId)
+  const id = Number(woIdRaw)
+  const isDraftRoute = woIdRaw === "nueva"
+  const draftCoId = useMemo(() => {
+    if (!isDraftRoute) return null
+    const raw = readString(searchParams.get("client_order_id")).trim()
+    const n = Number(raw)
+    if (!raw || !Number.isFinite(n) || n < 1) return null
+    return n
+  }, [isDraftRoute, searchParams])
+  const draftImportMaterialFromCo = useMemo(() => {
+    if (!isDraftRoute) return false
+    return readString(searchParams.get("import_material")).trim() === "1"
+  }, [isDraftRoute, searchParams])
+  const draftMaquinaQuery = useMemo(() => {
+    if (!isDraftRoute) return ""
+    return readString(searchParams.get("maquina")).trim()
+  }, [isDraftRoute, searchParams])
   const session = getStoredUser()
   const role = readString(session?.role).toLowerCase().trim()
   const isFullAccess = ["boss", "admin", "jefe_supremo", "superadmin"].includes(role)
@@ -299,6 +591,8 @@ export default function WorkOrderPlanillaPage() {
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [rellenoAzarDialogOpen, setRellenoAzarDialogOpen] = useState(false)
+  const [rellenoAzarCount, setRellenoAzarCount] = useState(0)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -319,6 +613,9 @@ export default function WorkOrderPlanillaPage() {
   formRef.current = form
   woProductIdRef.current = woProductId
 
+  const draftImportMaterialRef = useRef(draftImportMaterialFromCo)
+  draftImportMaterialRef.current = draftImportMaterialFromCo
+
   const [materials, setMaterials] = useState<MaterialRow[]>([])
 
   const loadMaterials = useCallback(async () => {
@@ -333,9 +630,17 @@ export default function WorkOrderPlanillaPage() {
   }, [])
 
   const load = useCallback(async () => {
-    if (!Number.isFinite(id) || id < 1) return
+    if (isDraftRoute) return
+    if (!Number.isFinite(id) || id < 1) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
+      // Aquí se hace una petición a la API para obtener los datos de la orden de trabajo con el id dado.
+      // La función apiFetch hace una solicitud HTTP (probablemente por GET) al endpoint 'work-orders/{id}/orden-trabajo'
+      // y espera recibir como respuesta un objeto que cumple con el tipo OrdenTrabajoPayload.
+      // El resultado de la petición se guarda en la variable 'payload', que luego se usa para poblar el estado del formulario, cliente, producto, etc.
       const payload = await apiFetch<OrdenTrabajoPayload>(
         `work-orders/${id}/orden-trabajo`,
       )
@@ -371,20 +676,107 @@ export default function WorkOrderPlanillaPage() {
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, isDraftRoute])
+
+  const loadDraft = useCallback(async () => {
+    if (!isDraftRoute || !draftCoId) return
+    setLoading(true)
+    try {
+      const co = await apiFetch<ClientOrderDetailRecord>(`client-orders/${draftCoId}`)
+      const lineWithProduct = co.lines?.find((l) => {
+        const pid = l.product_id
+        return pid != null && Number.isFinite(Number(pid)) && Number(pid) > 0
+      })
+      const productId =
+        lineWithProduct?.product_id != null && Number.isFinite(Number(lineWithProduct.product_id))
+          ? Number(lineWithProduct.product_id)
+          : null
+
+      let product: ProductRecord | null = null
+      if (productId) {
+        try {
+          product = await apiFetch<ProductRecord>(`products/${productId}`)
+        } catch {
+          product = null
+        }
+      }
+
+      const pedidoKg = sumClientOrderLineQuantities(co.lines ?? [])
+
+      const p: Record<string, unknown> = {
+        fechaOrden: toDateInputValue(co.ordered_at) || new Date().toISOString().slice(0, 10),
+        numeroOrden: `Borrador — ${readString(co.code) || "OC"}`,
+        pedidoKg,
+        cliente: co.client?.name ?? null,
+        clienteRif: co.client?.rif ?? null,
+        producto: product?.name ?? lineWithProduct?.product?.name ?? null,
+        estructuraMaterial: product?.structure ?? null,
+        cpe: product?.cpe ?? null,
+        mpps: product?.mps ?? null,
+        codigoBarra: null,
+        client_order_code: co.code,
+        client_order_reference: null,
+        estadoOt: "open",
+        etapaOt: "nueva",
+      }
+      if (product) {
+        Object.assign(p, prefillFromProduct(product))
+      }
+
+      const merged = mergePrefill(p, {})
+      if (readString(merged.cliente)) merged.cliente = readString(merged.cliente)
+      if (Object.prototype.hasOwnProperty.call(p, "clienteRif")) merged.clienteRif = p.clienteRif
+      if (readString(merged.producto)) merged.producto = readString(merged.producto)
+      merged.estadoOt = statusOtLabel(p.estadoOt)
+      merged.etapaOt = stageOtLabel(p.etapaOt)
+      {
+        const rawTipo = readString(merged.tipoImpresionEstructura) || readString(merged.tipoImpresion)
+        if (rawTipo) merged.tipoImpresionEstructura = normalizeTipoImpresionEstructura(rawTipo)
+      }
+
+      if (draftMaquinaQuery) {
+        merged.maquina = draftMaquinaQuery
+        merged.tipoImpresionEstructura = normalizeTipoImpresionEstructura(
+          readString(merged.tipoImpresionEstructura) || readString(merged.tipoImpresion),
+        )
+      }
+
+      if (!Array.isArray(merged.sustratosVirgenImp)) {
+        const mid = readString(merged.sustratoVirgenImp1)
+        const kg = readNumberString(merged.kgUtilizarImp1)
+        if (mid || kg) merged.sustratosVirgenImp = [{ material_id: mid, kg }]
+      }
+
+      setPrefill(p)
+      setWoClientId(Number.isFinite(Number(co.client_id)) ? Number(co.client_id) : null)
+      setWoProductId(productId)
+      setForm(merged)
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo cargar el pedido del cliente para el borrador.")
+      setPrefill({})
+      setForm({})
+      setWoClientId(null)
+      setWoProductId(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [draftCoId, draftMaquinaQuery, isDraftRoute])
 
   useEffect(() => {
-    void load()
+    if (isDraftRoute) void loadDraft()
+    else void load()
     void loadMaterials()
-  }, [load, loadMaterials])
+  }, [isDraftRoute, load, loadDraft, loadMaterials])
 
   useEffect(() => {
+    if (isDraftRoute) return
     if (!Number.isFinite(id) || id < 1) return
     if (isFullAccess) return
     if (role === "impresion" || role === "printing") {
       nav(`/ordenes-trabajo/${id}/produccion?tab=printing`, { replace: true })
     }
-  }, [id, role, isFullAccess, nav])
+  }, [id, isDraftRoute, isFullAccess, nav, role])
 
   useEffect(() => {
     if (!woClientId) {
@@ -447,7 +839,7 @@ export default function WorkOrderPlanillaPage() {
         setProductPickerOpen(false)
         return
       }
-      if (!Number.isFinite(id) || id < 1) return
+      if (!isDraftRoute && (!Number.isFinite(id) || id < 1)) return
       const snapshot = {
         prefill: { ...prefillRef.current },
         form: { ...formRef.current } as Record<string, unknown>,
@@ -468,6 +860,11 @@ export default function WorkOrderPlanillaPage() {
       setWoProductId(p.id)
       setProductPickerOpen(false)
 
+      if (isDraftRoute) {
+        toast.message("Producto actualizado en el borrador. Se guardará al pulsar Guardar orden.")
+        return
+      }
+
       setUpdatingProduct(true)
       try {
         await apiFetch(`work-orders/${id}`, {
@@ -485,7 +882,7 @@ export default function WorkOrderPlanillaPage() {
         setUpdatingProduct(false)
       }
     },
-    [id],
+    [id, isDraftRoute],
   )
 
   const maquina = readString(form.maquina) as MachineValue
@@ -517,7 +914,14 @@ export default function WorkOrderPlanillaPage() {
   }, [])
 
   async function guardar() {
-    if (!Number.isFinite(id) || id < 1) return
+    if (isDraftRoute) {
+      if (!draftCoId) {
+        toast.error("Falta el pedido del cliente (OC) en la URL. Vuelva a la lista e inténtelo otra vez.")
+        return
+      }
+    } else if (!Number.isFinite(id) || id < 1) {
+      return
+    }
     if (saving) return
     const errors: Record<string, string> = {}
     const addError = (key: string, message: string) => {
@@ -669,25 +1073,74 @@ export default function WorkOrderPlanillaPage() {
     setFieldErrors({})
     setSaving(true)
     try {
+      let workOrderId = id
+      if (isDraftRoute) {
+        const importMaterial = draftImportMaterialRef.current
+        const created = await apiFetch<{ id: number }>("work-orders", {
+          method: "POST",
+          body: JSON.stringify({
+            client_order_id: draftCoId,
+            ...(woProductId ? { product_id: woProductId } : {}),
+            import_client_order_lines: importMaterial,
+            auto_create_material_request: importMaterial,
+            originating_area: "printing",
+            board_stage: "nueva",
+          }),
+        })
+        workOrderId = created.id
+      }
+
       const rowsImp = getSustratosImp(form)
       const formOut: Record<string, unknown> = {
         ...form,
         sustratosVirgenImp: rowsImp,
         sustratoVirgenImp1: rowsImp[0]?.material_id ?? "",
         kgUtilizarImp1: rowsImp[0]?.kg ?? "",
+        // Esta parte del código asegura que los campos "cliente", "clienteRif" y "producto" que se guardarán en el servidor
+        // siempre tengan el valor más actualizado y consistente. 
+        // Toma el valor que viene como "prefill.*" (es decir, el proporcionado desde el backend, usualmente válido y correcto),
+        // y si no existe, toma el valor actual que el usuario ha editado en el formulario ("form.*").
         cliente: readString(prefill.cliente) || readString(form.cliente),
         clienteRif: readString(prefill.clienteRif) || readString(form.clienteRif),
         producto: readString(prefill.producto) || readString(form.producto),
+
+        // Luego, realiza una petición HTTP (PUT) al backend para guardar el formulario actualizado.
+        // La información enviada será el objeto "formOut", que contiene todos los datos del formulario incluyendo los campos anteriores.
+        // apiFetch hace la llamada HTTP al endpoint de la orden de trabajo con su id, enviando el formulario serializado como JSON.
       }
-      await apiFetch(`work-orders/${id}/orden-trabajo`, {
+      const saveRes = await apiFetch<SaveOrdenTrabajoResponse>(`work-orders/${workOrderId}/orden-trabajo`, {
         method: "PUT",
         body: JSON.stringify({ form: formOut }),
       })
-      await apiFetch(`work-orders/${id}`, {
+      await apiFetch(`work-orders/${workOrderId}`, {
         method: "PATCH",
         body: JSON.stringify({ board_stage: "impresion" }),
       })
-      toast.success("Orden guardada.")
+      const summary = saveRes.notification_summary?.broadcast
+      const sentTo = summary?.sent_to ?? []
+      const skipped = summary?.skipped ?? []
+      const sentLabel = sentTo.length
+        ? sentTo.map((a) => toTitleArea(a)).join(", ")
+        : "ninguna"
+      toast.success(
+        `Orden guardada. Notificaciones enviadas a ${sentTo.length} área(s): ${sentLabel}.`,
+      )
+      console.groupCollapsed("[OT] Resumen de notificaciones")
+      console.info("work_order_id:", saveRes.work_order_id)
+      console.info("updated_at:", saveRes.updated_at)
+      console.info("broadcast_event:", summary?.event ?? "N/A")
+      console.info("sent_to:", sentTo)
+      console.info("skipped:", skipped)
+      console.table(summary?.areas ?? [])
+      console.groupEnd()
+      window.dispatchEvent(
+        new CustomEvent("alerts:refresh", {
+          detail: {
+            source: "work-order-planilla-save",
+            work_order_id: saveRes.work_order_id,
+          },
+        }),
+      )
       nav("/ordenes-trabajo?tab=lista")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -705,7 +1158,26 @@ export default function WorkOrderPlanillaPage() {
     toast.message("Formulario limpiado.")
   }
 
-  if (!Number.isFinite(id) || id < 1) {
+  const rellenarDatosAlAzar = useCallback(() => {
+    const { next, filled } = computeRandomFill(formRef.current, prefillRef.current)
+    setForm(next)
+    setFieldErrors({})
+    setRellenoAzarCount(filled)
+    setRellenoAzarDialogOpen(true)
+  }, [])
+
+  if (isDraftRoute && !draftCoId) {
+    return (
+      <div className="p-6">
+        <p className="text-destructive">No se indicó un pedido del cliente (OC) para esta nueva orden.</p>
+        <Link to="/ordenes-trabajo" className="underline">
+          Volver a la lista
+        </Link>
+      </div>
+    )
+  }
+
+  if (!isDraftRoute && (!Number.isFinite(id) || id < 1)) {
     return (
       <div className="p-6">
         <p className="text-destructive">ID inválido.</p>
@@ -718,8 +1190,7 @@ export default function WorkOrderPlanillaPage() {
 
   return (
     <div className="ax-ot p-2 sm:p-4 md:p-6">
-
-      {/* Header (igual estilo “Ver órdenes / Imprimir / Limpiar / Guardar”) */}
+      {/* Header (Ver órdenes / Rellenar al azar / Limpiar / Guardar) */}
       <div className="no-print mb-4 ax-card flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -727,9 +1198,19 @@ export default function WorkOrderPlanillaPage() {
             <h2 className="text-lg font-semibold">Orden de trabajo</h2>
           </div>
           <p className="text-muted-foreground mt-1 text-sm">
-            Esta pantalla es la planilla digital de <span className="font-medium text-foreground">esta</span> orden. Edita los campos que
-            correspondan y, cuando quieras guardar los cambios en el servidor, pulsa{" "}
-            <span className="font-medium text-foreground">Guardar orden</span>.
+            {isDraftRoute ? (
+              <>
+                Esta pantalla prepara una <span className="font-medium text-foreground">nueva</span> orden a partir del pedido del cliente; aún no hay
+                fila en base de datos. Al pulsar <span className="font-medium text-foreground">Guardar orden</span> se crea la OT, se revisan los
+                obligatorios y la verá en la lista de órdenes de trabajo.
+              </>
+            ) : (
+              <>
+                Esta pantalla es la planilla digital de <span className="font-medium text-foreground">esta</span> orden. Edita los campos que
+                correspondan y, cuando quieras guardar los cambios en el servidor, pulsa{" "}
+                <span className="font-medium text-foreground">Guardar orden</span>.
+              </>
+            )}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -741,9 +1222,14 @@ export default function WorkOrderPlanillaPage() {
             <ClipboardList className="mr-2 h-4 w-4" />
             Ver órdenes
           </Button>
-          <Button type="button" variant="outline" onClick={() => window.print()}>
-            <Printer className="mr-2 h-4 w-4" />
-            Imprimir
+          <Button
+            type="button"
+            variant="outline"
+            className="max-w-[18rem] whitespace-normal text-center text-xs leading-snug sm:max-w-none sm:text-sm"
+            onClick={() => rellenarDatosAlAzar()}
+            disabled={loading || isRestrictedAreaView}
+          >
+            Rellenar datos con datos al azar
           </Button>
           <Button type="button" variant="outline" onClick={() => limpiar()} disabled={loading || isRestrictedAreaView}>
             Limpiar
@@ -1797,11 +2283,13 @@ export default function WorkOrderPlanillaPage() {
           </div>
           ) : null}
 
-          <div className="no-print mt-4 flex justify-center">
-            <Button type="button" onClick={() => void guardar()} disabled={saving || loading}>
-              {saving ? "Guardando…" : "Guardar orden"}
-            </Button>
-          </div>
+          {activeScope !== "corte" ? (
+            <div className="no-print mt-4 flex justify-center">
+              <Button type="button" onClick={() => void guardar()} disabled={saving || loading}>
+                {saving ? "Guardando…" : "Guardar orden"}
+              </Button>
+            </div>
+          ) : null}
         </form>
         {activeScope === "corte" ? (
           <div className="no-print mt-6 space-y-3">
@@ -1810,10 +2298,36 @@ export default function WorkOrderPlanillaPage() {
               setForm={setForm}
               pedidoTotalKg={Number(readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg) || "0")}
             />
+            <div className="mt-4 flex justify-center">
+              <Button type="button" onClick={() => void guardar()} disabled={saving || loading}>
+                {saving ? "Guardando…" : "Guardar orden"}
+              </Button>
+            </div>
           </div>
         ) : null}
         </>
       )}
+
+      <AlertDialog open={rellenoAzarDialogOpen} onOpenChange={setRellenoAzarDialogOpen}>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Relleno al azar</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription>
+            {rellenoAzarCount > 0
+              ? `Se rellenaron ${rellenoAzarCount} campo(s) vacío(s) con valores al azar en montaje, impresión, laminación, corte, tintas y programación. La cabecera (orden de cliente) y los datos del producto no se tocan: complete esos campos según su criterio.`
+              : "No había campos vacíos que rellenar en las áreas técnicas (montaje en adelante), o todo ya estaba completo. Cabecera y datos del producto nunca se rellenan al azar."}
+          </AlertDialogDescription>
+          <AlertDialogFooter className="sm:justify-center">
+            <AlertDialogCancel
+              type="button"
+              className={cn(buttonVariants({ variant: "default" }), "border-primary/25 hover:bg-primary/90")}
+            >
+              Aceptar
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

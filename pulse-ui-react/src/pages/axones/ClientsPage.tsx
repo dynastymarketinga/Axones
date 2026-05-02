@@ -173,7 +173,12 @@ export default function ClientsPage() {
                         {[c.state, c.city].filter(Boolean).join(", ") || "—"}
                       </TableCell>
                       <TableCell className="transition-colors group-hover:bg-muted/60">{c.email ?? "—"}</TableCell>
-                      <TableCell className="transition-colors group-hover:bg-muted/60">{c.phone ?? "—"}</TableCell>
+                      <TableCell
+                        className="max-w-[11rem] transition-colors group-hover:bg-muted/60"
+                        title={c.phone ?? undefined}
+                      >
+                        <span className="block truncate">{c.phone ?? "—"}</span>
+                      </TableCell>
                       <TableCell className="text-right transition-colors group-hover:bg-muted/60">
                         <Button variant="link" className="h-auto p-0" asChild>
                           <Link to={`/clientes/form?id=${c.id}`} state={{ from }}>

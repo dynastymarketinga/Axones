@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\MaterialRequestController;
 use App\Http\Controllers\Api\MiscellaneousReceiptController;
 use App\Http\Controllers\Api\OperationalAlertController;
+use App\Http\Controllers\Api\OperationalAlertStreamController;
 use App\Http\Controllers\Api\PasswordResetRequestController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\PurchaseOrderController;
@@ -67,7 +68,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
 
     Route::get('/alerts', [OperationalAlertController::class, 'index']);
+    Route::get('/alerts/stream', [OperationalAlertStreamController::class, 'stream']);
     Route::patch('/alerts/{operational_alert}/acknowledge', [OperationalAlertController::class, 'acknowledge']);
+    Route::post('/alerts/acknowledge-all', [OperationalAlertController::class, 'acknowledgeAll']);
 
     Route::get('/reports/inventory-daily', [ReportController::class, 'inventoryDaily']);
     Route::get('/reports/inventory-movements-general', [ReportController::class, 'inventoryMovementsGeneral']);

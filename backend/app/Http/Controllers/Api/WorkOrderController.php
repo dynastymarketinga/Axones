@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\AreaRequestStatus;
 use App\Enums\ClientOrderStatus;
 use App\Enums\MaterialRequestStatus;
 use App\Enums\WorkOrderBoardStage;
@@ -56,7 +57,20 @@ class WorkOrderController extends Controller
             $query->where('scheduling_status', $request->query('scheduling_status'));
         }
 
-        if ($request->query('board_stage')) {
+        $allowedAreaKeys = ['impresion', 'laminacion', 'corte', 'tintas'];
+        $miArea = strtolower(trim((string) $request->query('mi_area', '')));
+        $historialArea = strtolower(trim((string) $request->query('historial_area', '')));
+
+        if ($miArea !== '' && in_array($miArea, $allowedAreaKeys, true)) {
+            $query->whereHas('areaRequests', function ($q) use ($miArea) {
+                $q->where('area', $miArea)
+                    ->where('status', AreaRequestStatus::Pending->value);
+            });
+        } elseif ($historialArea !== '' && in_array($historialArea, $allowedAreaKeys, true)) {
+            $query->whereHas('areaRequests', function ($q) use ($historialArea) {
+                $q->where('area', $historialArea);
+            });
+        } elseif ($request->query('board_stage')) {
             $query->where('board_stage', $request->query('board_stage'));
         } elseif ($areaHistory = $request->query('area_history')) {
             $stages = match (strtolower(trim((string) $areaHistory))) {

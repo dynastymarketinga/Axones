@@ -9,23 +9,13 @@ use Illuminate\Http\Request;
 
 class OperationalAlertController extends Controller
 {
-    private const FULL_ACCESS_ROLES = ['boss', 'admin', 'jefe_supremo', 'superadmin'];
-
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
         $query = OperationalAlert::query()
             ->with(['workOrder:id,code', 'material:id,sku,name', 'acknowledgedByUser:id,name'])
-            ->orderByDesc('created_at');
-
-        $targetArea = $this->resolveTargetAreaFromRole((string) ($user->role ?? ''));
-        if (! $this->hasFullAlertAccess($user?->id, (string) ($user->role ?? '')) && $targetArea !== null) {
-            $query->where('metadata->target_area', $targetArea);
-        }
-
-        if (! $this->hasFullAlertAccess($user?->id, (string) ($user->role ?? ''))) {
-            $query->where('alert_type', '!=', 'password_reset_requested');
-        }
+            ->orderByDesc('created_at')
+            ->visibleTo($user);
 
         if (filter_var($request->query('unread'), FILTER_VALIDATE_BOOLEAN)) {
             $query->unread();
@@ -50,14 +40,14 @@ class OperationalAlertController extends Controller
     {
         $user = $request->user();
         if ($operational_alert->alert_type === 'password_reset_requested'
-            && ! $this->hasFullAlertAccess($user?->id, (string) ($user->role ?? ''))) {
+            && ! $this->hasFullAlertAccess((string) ($user->role ?? ''))) {
             return response()->json([
                 'message' => 'No autorizado para esta alerta.',
             ], 403);
         }
 
         $targetArea = $this->resolveTargetAreaFromRole((string) ($user->role ?? ''));
-        if (! $this->hasFullAlertAccess($user?->id, (string) ($user->role ?? '')) && $targetArea !== null) {
+        if (! $this->hasFullAlertAccess((string) ($user->role ?? '')) && $targetArea !== null) {
             $alertTargetArea = (string) data_get($operational_alert->metadata, 'target_area', '');
             if ($alertTargetArea !== $targetArea) {
                 return response()->json([
@@ -78,9 +68,25 @@ class OperationalAlertController extends Controller
         return response()->json($operational_alert->fresh()->load(['workOrder:id,code', 'material:id,sku,name']));
     }
 
-    private function hasFullAlertAccess(?int $userId, string $role): bool
+    public function acknowledgeAll(Request $request): JsonResponse
     {
-        return in_array(strtolower(trim($role)), self::FULL_ACCESS_ROLES, true);
+        $user = $request->user();
+        $updated = OperationalAlert::query()
+            ->visibleTo($user)
+            ->unread()
+            ->update([
+                'acknowledged_at' => now(),
+                'acknowledged_by' => $user->getKey(),
+            ]);
+
+        return response()->json([
+            'updated_count' => $updated,
+        ]);
+    }
+
+    private function hasFullAlertAccess(string $role): bool
+    {
+        return in_array(strtolower(trim($role)), ['boss', 'admin', 'jefe_supremo', 'superadmin'], true);
     }
 
     private function resolveTargetAreaFromRole(string $role): ?string

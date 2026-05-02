@@ -75,39 +75,39 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [boardStage, setBoardStage] = useState<string>("all")
   const [processFilter, setProcessFilter] = useState<ProcessFilter>("all")
 
-  const defaultBoardStage = BOARD_STAGE_BY_AREA[area]
-
   const queryBoardStage = useMemo(() => {
-    if (activeTab === "mias") return defaultBoardStage
+    if (activeTab !== "historial") return undefined
     return boardStage !== "all" ? boardStage : undefined
-  }, [activeTab, boardStage, defaultBoardStage])
+  }, [activeTab, boardStage])
 
   const queryStatus = status !== "all" ? status : undefined
-  const areaHistoryKeyByArea: Record<AreaKey, string | undefined> = {
-    printing: "impresion",
-    laminacion: "laminacion",
-    corte: "corte",
-    tintas: undefined,
-  }
+
+  const miAreaApi = useMemo(() => {
+    if (area === "printing") return "impresion"
+    if (area === "laminacion") return "laminacion"
+    if (area === "corte") return "corte"
+    return "tintas"
+  }, [area])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      const query: Record<string, string | number | undefined> = {
+        page,
+        per_page: 20,
+        status: queryStatus,
+        client_order_reference: search || undefined,
+      }
+      if (activeTab === "mias") {
+        query.mi_area = miAreaApi
+      } else {
+        query.historial_area = miAreaApi
+        if (queryBoardStage) query.board_stage = queryBoardStage
+      }
+
       const data = await apiFetch<LaravelPaginated<WorkOrderListRow>>(
         "work-orders",
-        {
-          query: {
-            page,
-            per_page: 20,
-            board_stage: queryBoardStage,
-            status: queryStatus,
-            area_history:
-              activeTab === "historial"
-                ? areaHistoryKeyByArea[area]
-                : undefined,
-            client_order_reference: search || undefined,
-          },
-        },
+        { query },
       )
       setRows(data)
     } catch (e) {
@@ -117,7 +117,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     } finally {
       setLoading(false)
     }
-  }, [activeTab, area, page, queryBoardStage, queryStatus, search])
+  }, [activeTab, miAreaApi, page, queryBoardStage, queryStatus, search])
 
   useEffect(() => {
     void load()
@@ -255,18 +255,14 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             {areaTitle(area)}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Listado enfocado a tu fase + historial filtrable.
+            Órdenes con solicitud pendiente para tu área (sin depender del tablero).
+            Historial: todas las OT que tuvieron solicitud hacia esta área.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onClick={() => void load()}>
             Actualizar
           </Button>
-          {area !== "printing" ? (
-            <Button type="button" asChild>
-              <Link to="/ordenes-trabajo?tab=lista">Órdenes de trabajo</Link>
-            </Button>
-          ) : null}
         </div>
       </div>
 

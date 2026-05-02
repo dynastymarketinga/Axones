@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
@@ -95,6 +96,9 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
   const kgSalida = salidaTotalKg
   const kgMerma = readNumber(form.kgMermaCorte)
   const metraje = readNumber(form.metrajeCorte)
+  const scrapRefile = readNumber(form.corScrapRefileKg)
+  const scrapImpreso = readNumber(form.corScrapImpresoKg)
+  const scrapTotal = scrapRefile + scrapImpreso
   const producidoAcumuladoKg = readNumber(form.corAcumuladoProducidoKg) || kgSalida
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
   const turnosRegistrados = Math.max(0, Math.floor(readNumber(form.corRegistrosTurnos)))
@@ -113,6 +117,7 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
   const totalSec = effectiveSec + deadSec
   const kgHora = effectiveSec > 0 ? (kgSalida / (effectiveSec / 3600)).toFixed(2) : "0.00"
   const mermaPct = kgIngresados > 0 ? ((kgMerma / kgIngresados) * 100).toFixed(2) : "0.00"
+  const refilPct = kgIngresados > 0 ? ((scrapTotal / kgIngresados) * 100).toFixed(2) : "0.00"
 
   const pauseReasons = [
     "Cambio de cuchillas",
@@ -468,6 +473,111 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Paletas</span><p className="font-semibold">{salidaPaletas.length}</p></div>
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Bobinas</span><p className="font-semibold">{bobinasSalidaCount}</p></div>
         </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-amber-200/70 bg-amber-50/40 p-3">
+        <div className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-900">
+          Scrap / Refil
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <div className="rounded border bg-background p-2 text-sm">
+            <span className="text-muted-foreground">Refile (Kg)</span>
+            <Input
+              className="ot-input-unified mt-1 h-8"
+              inputMode="decimal"
+              value={readString(form.corScrapRefileKg)}
+              onChange={(e) => setKey("corScrapRefileKg", e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div className="rounded border bg-background p-2 text-sm">
+            <span className="text-muted-foreground">Impreso (Kg)</span>
+            <Input
+              className="ot-input-unified mt-1 h-8"
+              inputMode="decimal"
+              value={readString(form.corScrapImpresoKg)}
+              onChange={(e) => setKey("corScrapImpresoKg", e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div className="rounded border bg-background p-2 text-sm">
+            <span className="text-muted-foreground">Total Scrap</span>
+            <p className="font-semibold">{scrapTotal.toFixed(2)}</p>
+          </div>
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="rounded border bg-background p-2 text-sm">
+            <span className="text-muted-foreground">% Refil</span>
+            <p className="font-semibold">{refilPct}%</p>
+          </div>
+          <div className="rounded border bg-background p-2 text-sm">
+            <span className="text-muted-foreground">Estado</span>
+            <p className="font-semibold">{kgIngresados > 0 ? "Calculado" : "Sin datos"}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-cyan-200/70 bg-cyan-50/40 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-900">Resumen del turno</div>
+          <div className="grid gap-2 sm:grid-cols-4">
+            <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° Bobinas Usadas</span><p className="font-semibold">{entradaBobinasCount}</p></div>
+            <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° Rollos</span><p className="font-semibold">{bobinasSalidaCount}</p></div>
+            <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Peso Total (Kg)</span><p className="font-semibold">{salidaTotalKg.toFixed(2)}</p></div>
+            <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° Paletas</span><p className="font-semibold">{salidaPaletas.length}</p></div>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Merma (Kg)</span><p className="font-semibold">{kgMerma.toFixed(2)}</p></div>
+            <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">% Merma</span><p className="font-semibold">{mermaPct}%</p></div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-cyan-200/70 bg-cyan-50/40 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-900">Resumen de paletas</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="py-1 pr-2">Paleta</th>
+                  <th className="py-1 pr-2 text-center">Bobinas</th>
+                  <th className="py-1 pr-2 text-center">Rollos</th>
+                  <th className="py-1 pr-2 text-right">Peso (Kg)</th>
+                  <th className="py-1 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {salidaPaletas.map((_, idx) => (
+                  <tr key={`res-paleta-${idx}`} className="border-b">
+                    <td className="py-1 pr-2">{`Paleta #${String(idx + 1).padStart(2, "0")}`}</td>
+                    <td className="py-1 pr-2 text-center">{salidaPaletasRollos[idx] ?? 0}</td>
+                    <td className="py-1 pr-2 text-center">{salidaPaletasRollos[idx] ?? 0}</td>
+                    <td className="py-1 pr-2 text-right">{(salidaPaletasTotales[idx] ?? 0).toFixed(2)}</td>
+                    <td className="py-1 text-center">—</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="font-semibold">
+                  <td className="pt-1 pr-2">TOTAL</td>
+                  <td className="pt-1 pr-2 text-center">{bobinasSalidaCount}</td>
+                  <td className="pt-1 pr-2 text-center">{bobinasSalidaCount}</td>
+                  <td className="pt-1 pr-2 text-right">{salidaTotalKg.toFixed(2)}</td>
+                  <td className="pt-1" />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-slate-200/70 bg-slate-50/40 p-3">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-900">Observaciones</div>
+        <Textarea
+          className="min-h-24"
+          value={readString(form.corObservaciones)}
+          onChange={(e) => setKey("corObservaciones", e.target.value)}
+          placeholder="Observaciones adicionales..."
+        />
       </div>
     </>
   )

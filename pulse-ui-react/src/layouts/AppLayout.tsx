@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom"
 import { AppSidebar } from "@/components/app-sidebar"
 import { NotificationDropdown } from "@/components/notification-dropdown"
+import { OperationalAlertsStreamProvider } from "@/providers/operational-alerts-stream-provider"
 
 import {
   Breadcrumb,
@@ -48,6 +49,7 @@ export default function AppLayout() {
 
 
   return (
+    <OperationalAlertsStreamProvider>
     <SidebarProvider open={open} onOpenChange={setOpen}>
       <AppSidebar />
 
@@ -100,5 +102,6 @@ export default function AppLayout() {
         <Footer />
       </SidebarInset>
     </SidebarProvider>
+    </OperationalAlertsStreamProvider>
   )
 }

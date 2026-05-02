@@ -1,11 +1,42 @@
-import { Flag, Pause, Play, ReceiptText, Square } from "lucide-react"
+import { ArrowUpRight, Flag, Pause, Play, ReceiptText, Square } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+
+import type { BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
+
+export type LamLabelEditorMode = "impresa" | "virgen" | "salida"
 
 type LaminacionPauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
+
+function hasMeta(meta: BobinaLabelMeta | undefined): boolean {
+  if (!meta) return false
+  return Object.values(meta).some((v) => v.trim() !== "")
+}
+
+function labelTooltipText(meta: BobinaLabelMeta | undefined): string {
+  if (!meta || !hasMeta(meta)) return "Sin etiqueta registrada"
+  const fecha = meta.fecha.trim() || "Sin fecha"
+  const referencia = meta.referencia.trim() || "Sin referencia"
+  return `Fecha: ${fecha} · Ref: ${referencia}`
+}
+
+function lamLabelEditorTitle(mode: LamLabelEditorMode, idx: number): string {
+  const n = idx + 1
+  if (mode === "impresa") return `Etiqueta bobina impresa (entrada laminación) #${n}`
+  if (mode === "virgen") return `Etiqueta bobina virgen (laminación) #${n}`
+  return `Etiqueta bobina salida laminada #${n}`
+}
 
 type Props = {
   pedidoTotalKg: number
@@ -35,8 +66,11 @@ type Props = {
   ayudante: string
   supervisor: string
   entradaImpresaBobinas: string[]
+  entradaImpresaMeta: BobinaLabelMeta[]
   entradaVirgenBobinas: string[]
+  entradaVirgenMeta: BobinaLabelMeta[]
   salidaBobinas: string[]
+  salidaMeta: BobinaLabelMeta[]
   metrajeRaw: string
   adhesivoEntradaRaw: string
   adhesivoSobroRaw: string
@@ -62,8 +96,11 @@ type Props = {
   onSetAyudante: (v: string) => void
   onSetSupervisor: (v: string) => void
   onEntradaImpresaChange: (idx: number, v: string) => void
+  onOpenImpresaLabel: (idx: number) => void
   onEntradaVirgenChange: (idx: number, v: string) => void
+  onOpenVirgenLabel: (idx: number) => void
   onSalidaChange: (idx: number, v: string) => void
+  onOpenSalidaLabel: (idx: number) => void
   onSetMetraje: (v: string) => void
   onSetAdhesivoEntrada: (v: string) => void
   onSetAdhesivoSobro: (v: string) => void
@@ -74,6 +111,15 @@ type Props = {
   onSetScrapTransparente: (v: string) => void
   onSetScrapImpreso: (v: string) => void
   onSetScrapLaminado: (v: string) => void
+  labelEditorOpen: boolean
+  labelEditorMode: LamLabelEditorMode
+  labelEditorIndex: number
+  labelEditorDraft: BobinaLabelMeta
+  labelEditorError: string
+  onLabelOpenChange: (open: boolean) => void
+  onLabelDraftChange: (key: keyof BobinaLabelMeta, value: string) => void
+  onLabelClear: () => void
+  onLabelSave: () => void
 }
 
 export default function WorkOrderLaminacionOpsSection(props: Props) {
@@ -165,9 +211,41 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       </div>
 
       <div className="mt-3 rounded-lg border border-emerald-200/70 bg-emerald-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900">Ingreso de bobinas impresas (Kg)</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
-          {props.entradaImpresaBobinas.map((val, idx) => <div key={`ent-imp-${idx}`} className="space-y-1"><Label className="ot-label">{idx + 1}</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={val} onChange={(e) => props.onEntradaImpresaChange(idx, e.target.value)} placeholder="0" /></div>)}
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900">
+          Entrada — bobinas impresas (laminación)
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
+          {props.entradaImpresaBobinas.map((val, idx) => (
+            <div key={`ent-imp-${idx}`} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="ot-label">{idx + 1}</Label>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant={hasMeta(props.entradaImpresaMeta[idx]) ? "default" : "outline"}
+                        className="h-5 w-5"
+                        onClick={() => props.onOpenImpresaLabel(idx)}
+                        title={`Etiqueta bobina impresa #${idx + 1} (laminación)`}
+                      >
+                        <ArrowUpRight className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{labelTooltipText(props.entradaImpresaMeta[idx])}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                className="ot-input-unified h-9"
+                inputMode="decimal"
+                value={val}
+                onChange={(e) => props.onEntradaImpresaChange(idx, e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          ))}
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaImpresaCount}</p></div>
@@ -176,9 +254,41 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       </div>
 
       <div className="mt-3 rounded-lg border border-rose-200/70 bg-rose-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900">Ingreso de bobinas virgen (Kg)</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
-          {props.entradaVirgenBobinas.map((val, idx) => <div key={`ent-virg-${idx}`} className="space-y-1"><Label className="ot-label">{idx + 1}</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={val} onChange={(e) => props.onEntradaVirgenChange(idx, e.target.value)} placeholder="0" /></div>)}
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900">
+          Ingreso de material virgen (laminación)
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
+          {props.entradaVirgenBobinas.map((val, idx) => (
+            <div key={`ent-virg-${idx}`} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="ot-label">{idx + 1}</Label>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant={hasMeta(props.entradaVirgenMeta[idx]) ? "default" : "outline"}
+                        className="h-5 w-5"
+                        onClick={() => props.onOpenVirgenLabel(idx)}
+                        title={`Etiqueta bobina virgen #${idx + 1} (laminación)`}
+                      >
+                        <ArrowUpRight className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{labelTooltipText(props.entradaVirgenMeta[idx])}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                className="ot-input-unified h-9"
+                inputMode="decimal"
+                value={val}
+                onChange={(e) => props.onEntradaVirgenChange(idx, e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          ))}
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaVirgenCount}</p></div>
@@ -187,9 +297,41 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       </div>
 
       <div className="mt-3 rounded-lg border border-violet-200/70 bg-violet-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-900">Bobinas de salida laminadas (Kg)</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6">
-          {props.salidaBobinas.map((val, idx) => <div key={`sal-${idx}`} className="space-y-1"><Label className="ot-label">{idx + 1}</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={val} onChange={(e) => props.onSalidaChange(idx, e.target.value)} placeholder="0" /></div>)}
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-900">
+          Proceso — salida bobina laminada
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
+          {props.salidaBobinas.map((val, idx) => (
+            <div key={`sal-${idx}`} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="ot-label">{idx + 1}</Label>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant={hasMeta(props.salidaMeta[idx]) ? "default" : "outline"}
+                        className="h-5 w-5"
+                        onClick={() => props.onOpenSalidaLabel(idx)}
+                        title={`Etiqueta bobina salida laminada #${idx + 1}`}
+                      >
+                        <ArrowUpRight className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{labelTooltipText(props.salidaMeta[idx])}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                className="ot-input-unified h-9"
+                inputMode="decimal"
+                value={val}
+                onChange={(e) => props.onSalidaChange(idx, e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          ))}
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-4">
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{props.salidaBobinas.filter((v) => Number(v) > 0).length}</p></div>
@@ -229,6 +371,84 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
           <div className="rounded border bg-background p-2">% Refil: <span className="font-semibold">{props.refilPct.toFixed(2)}%</span></div>
         </div>
       </div>
+
+      <Dialog open={props.labelEditorOpen} onOpenChange={props.onLabelOpenChange}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{lamLabelEditorTitle(props.labelEditorMode, props.labelEditorIndex)}</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Fecha bobina</Label>
+              <Input
+                value={props.labelEditorDraft.fecha}
+                onChange={(e) => props.onLabelDraftChange("fecha", e.target.value)}
+                placeholder="dd/mm/aaaa"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Hora</Label>
+              <Input value={props.labelEditorDraft.hora} onChange={(e) => props.onLabelDraftChange("hora", e.target.value)} placeholder="--:--" />
+            </div>
+            <div className="space-y-2">
+              <Label>Referencia Bobina</Label>
+              <Input value={props.labelEditorDraft.referencia} onChange={(e) => props.onLabelDraftChange("referencia", e.target.value)} placeholder="Ref. o lote" />
+            </div>
+            <div className="space-y-2">
+              <Label>Pedido / Lote</Label>
+              <Input value={props.labelEditorDraft.pedido_lote} onChange={(e) => props.onLabelDraftChange("pedido_lote", e.target.value)} placeholder="N° pedido o lote" />
+            </div>
+            <div className="space-y-2">
+              <Label>Proveedor</Label>
+              <Input value={props.labelEditorDraft.proveedor} onChange={(e) => props.onLabelDraftChange("proveedor", e.target.value)} placeholder="Nombre proveedor" />
+            </div>
+            <div className="space-y-2">
+              <Label>Operador</Label>
+              <Input value={props.labelEditorDraft.operador} onChange={(e) => props.onLabelDraftChange("operador", e.target.value)} placeholder="Nombre operador" />
+            </div>
+            <div className="space-y-2">
+              <Label>Peso (Kg)</Label>
+              <Input value={props.labelEditorDraft.peso} onChange={(e) => props.onLabelDraftChange("peso", e.target.value)} placeholder="Ej: 120" />
+            </div>
+            <div className="space-y-2">
+              <Label>Metraje</Label>
+              <Input value={props.labelEditorDraft.metraje} onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)} placeholder="Metros" />
+            </div>
+            <div className="space-y-2">
+              <Label>Medida / Ancho (mm)</Label>
+              <Input value={props.labelEditorDraft.medida_ancho} onChange={(e) => props.onLabelDraftChange("medida_ancho", e.target.value)} placeholder="Ej: 610" />
+            </div>
+            <div className="space-y-2">
+              <Label>Máquina origen</Label>
+              <Input value={props.labelEditorDraft.maquina_origen} onChange={(e) => props.onLabelDraftChange("maquina_origen", e.target.value)} placeholder="Máquina" />
+            </div>
+            <div className="space-y-2">
+              <Label>Tratamiento interno</Label>
+              <Input value={props.labelEditorDraft.tratamiento_interno} onChange={(e) => props.onLabelDraftChange("tratamiento_interno", e.target.value)} placeholder="Dinas" />
+            </div>
+            <div className="space-y-2">
+              <Label>Tratamiento externo</Label>
+              <Input value={props.labelEditorDraft.tratamiento_externo} onChange={(e) => props.onLabelDraftChange("tratamiento_externo", e.target.value)} placeholder="Dinas" />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Lote</Label>
+              <Input value={props.labelEditorDraft.lote} onChange={(e) => props.onLabelDraftChange("lote", e.target.value)} placeholder="Lote" />
+            </div>
+          </div>
+
+          {props.labelEditorError ? <p className="text-sm text-destructive">{props.labelEditorError}</p> : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={props.onLabelClear}>
+              Limpiar
+            </Button>
+            <Button type="button" onClick={props.onLabelSave}>
+              Guardar etiqueta
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

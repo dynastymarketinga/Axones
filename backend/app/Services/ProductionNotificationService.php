@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\AlertSeverity;
 use App\Enums\AreaRequestStatus;
-use App\Enums\WorkOrderBoardStage;
 use App\Models\AreaRequest;
 use App\Models\OperationalAlert;
 use App\Models\User;
@@ -12,14 +11,25 @@ use App\Models\WorkOrder;
 
 class ProductionNotificationService
 {
+    /** Áreas que reciben despacho simultáneo de OT (sin secuencia obligatoria). */
+    public const PRODUCTIVE_AREAS = ['impresion', 'laminacion', 'corte', 'tintas'];
+
     /**
      * Al crear una OT, la distribuye de inmediato a las áreas productivas para visibilidad por rol.
      */
-    public function notifyOnWorkOrderCreated(WorkOrder $workOrder, ?User $user): void
+    public function notifyOnWorkOrderCreated(WorkOrder $workOrder, ?User $user): array
     {
-        $targetAreas = ['impresion', 'laminacion', 'corte'];
+        $summary = [
+            'event' => 'work_order_created',
+            'work_order_id' => $workOrder->getKey(),
+            'origin_area' => 'planificacion',
+            'sent_to' => [],
+            'skipped' => [],
+            'errors' => [],
+            'areas' => [],
+        ];
 
-        foreach ($targetAreas as $targetArea) {
+        foreach (self::PRODUCTIVE_AREAS as $targetArea) {
             $title = sprintf('OT %s creada', $workOrder->code);
             $body = sprintf(
                 'Nueva OT %s creada en planificación. Revise y programe en %s.',
@@ -34,6 +44,7 @@ class ProductionNotificationService
                 ->where('title', $title)
                 ->exists();
 
+            $areaRequestStatus = 'existing';
             if (! $alreadyPending) {
                 AreaRequest::query()->create([
                     'area' => $targetArea,
@@ -43,43 +54,195 @@ class ProductionNotificationService
                     'work_order_id' => $workOrder->getKey(),
                     'requested_by' => $user?->getKey(),
                 ]);
+                $areaRequestStatus = 'created';
+            }
+
+            $alertExists = OperationalAlert::query()
+                ->where('work_order_id', $workOrder->getKey())
+                ->where('alert_type', 'work_order_created')
+                ->where('metadata->target_area', $targetArea)
+                ->exists();
+
+            $alertStatus = 'duplicate';
+            if (! $alertExists) {
+                OperationalAlert::query()->create([
+                    'alert_type' => 'work_order_created',
+                    'severity' => AlertSeverity::Info->value,
+                    'message' => sprintf(
+                        'OT %s creada y asignada a %s.',
+                        $workOrder->code,
+                        ucfirst($targetArea),
+                    ),
+                    'work_order_id' => $workOrder->getKey(),
+                    'material_id' => null,
+                    'metadata' => [
+                        'origin_area' => 'planificacion',
+                        'target_area' => $targetArea,
+                        'channel' => 'bell',
+                    ],
+                    'created_by' => $user?->getKey(),
+                ]);
+                $alertStatus = 'created';
+            }
+
+            $status = $alertStatus === 'created' || $areaRequestStatus === 'created'
+                ? 'sent'
+                : 'skipped';
+            if ($status === 'sent') {
+                $summary['sent_to'][] = $targetArea;
+            } else {
+                $summary['skipped'][] = $targetArea;
+            }
+            $summary['areas'][] = [
+                'area' => $targetArea,
+                'status' => $status,
+                'area_request' => $areaRequestStatus,
+                'alert' => $alertStatus,
+            ];
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Tras guardar la planilla OT (orden de trabajo): avisa a todas las áreas en paralelo.
+     * Idempotente por huella de guardado (p. ej. updated_at del documento técnico).
+     */
+    public function notifyOnWorkOrderSavedBroadcast(WorkOrder $workOrder, ?User $user, string $saveFingerprint): array
+    {
+        $summary = [
+            'event' => 'work_order_saved_broadcast',
+            'work_order_id' => $workOrder->getKey(),
+            'origin_area' => 'orden_trabajo',
+            'save_fingerprint' => $saveFingerprint,
+            'sent_to' => [],
+            'skipped' => [],
+            'errors' => [],
+            'areas' => [],
+        ];
+
+        foreach (self::PRODUCTIVE_AREAS as $targetArea) {
+            $dupAlert = OperationalAlert::query()
+                ->where('work_order_id', $workOrder->getKey())
+                ->where('alert_type', 'work_order_saved_broadcast')
+                ->where('metadata->save_fingerprint', $saveFingerprint)
+                ->where('metadata->target_area', $targetArea)
+                ->exists();
+
+            if ($dupAlert) {
+                $summary['skipped'][] = $targetArea;
+                $summary['areas'][] = [
+                    'area' => $targetArea,
+                    'status' => 'skipped',
+                    'area_request' => 'not_evaluated',
+                    'alert' => 'duplicate',
+                ];
+
+                continue;
+            }
+
+            $title = sprintf('OT %s — orden guardada', $workOrder->code);
+            $body = sprintf(
+                'Se guardó la orden de trabajo de la OT %s. Revise en %s.',
+                $workOrder->code,
+                ucfirst($targetArea),
+            );
+
+            // Este bloque verifica si ya existe una solicitud pendiente (AreaRequest) para este área y esta OT con el mismo título.
+            // AreaRequest es una tabla que gestiona solicitudes inter-área sobre una orden de trabajo.
+            // La consulta chequea:
+            // - La orden de trabajo específica ($workOrder->getKey())
+            // - El área destino ($targetArea)
+            // - El estado 'Pending' (pendiente)
+            // - El título que corresponde a este evento/tipo de notificación
+            // Si ya existe (exists() devuelve true), se omite la creación para evitar duplicados.
+            $alreadyPending = AreaRequest::query()
+                ->where('work_order_id', $workOrder->getKey())
+                ->where('area', $targetArea)
+                ->where('status', AreaRequestStatus::Pending->value)
+                ->where('title', $title)
+                ->exists();
+
+            // Si NO existe ya una solicitud pendiente para este área y título, crea un nuevo registro AreaRequest como pendiente
+            $areaRequestStatus = 'existing';
+            if (! $alreadyPending) {
+                AreaRequest::query()->create([
+                    // Este bloque crea un nuevo registro en la tabla AreaRequest
+                    // para solicitar la revisión de la orden de trabajo en un área específica ($targetArea).
+                    // Los campos principales son:
+                    // - area: el área de destino que debe revisar la solicitud (por ejemplo, corte, laminación, etc.)
+                    // - title: el título descriptivo con el formato "OT XXX — orden guardada"
+                    // - body: el cuerpo/mensaje indicando que se guardó la orden y que debe revisarse en el área correspondiente
+                    // - status: el estado de la solicitud, en este caso siempre "Pending" (pendiente)
+                    // - work_order_id: la referencia a la orden de trabajo que fue guardada
+                    // - requested_by: el usuario que realizó la acción (puede ser null si fue automático)
+                    'area' => $targetArea,
+                    'title' => $title,
+                    'body' => $body,
+                    'status' => AreaRequestStatus::Pending->value,
+                    'work_order_id' => $workOrder->getKey(),
+                    'requested_by' => $user?->getKey(),
+                ]);
+                $areaRequestStatus = 'created';
             }
 
             OperationalAlert::query()->create([
-                'alert_type' => 'work_order_created',
+                'alert_type' => 'work_order_saved_broadcast',
                 'severity' => AlertSeverity::Info->value,
                 'message' => sprintf(
-                    'OT %s creada y asignada a %s.',
+                    'OT %s: orden de trabajo guardada (aviso para %s).',
                     $workOrder->code,
                     ucfirst($targetArea),
                 ),
                 'work_order_id' => $workOrder->getKey(),
                 'material_id' => null,
                 'metadata' => [
-                    'origin_area' => 'planificacion',
+                    'origin_area' => 'orden_trabajo',
                     'target_area' => $targetArea,
                     'channel' => 'bell',
+                    'save_fingerprint' => $saveFingerprint,
                 ],
                 'created_by' => $user?->getKey(),
             ]);
+
+            $summary['sent_to'][] = $targetArea;
+            $summary['areas'][] = [
+                'area' => $targetArea,
+                'status' => 'sent',
+                'area_request' => $areaRequestStatus,
+                'alert' => 'created',
+            ];
         }
+
+        return $summary;
     }
 
     /**
      * Dispara avisos inter-área al guardar producción.
      * - Tabla: crea solicitudes por área (area_requests)
      * - Campana: crea alertas operativas (operational_alerts)
-     * - Bandera: mueve tablero al siguiente stage según origen
+     * El avance de tablero (board_stage) no se fuerza aquí; queda manual/editable.
      */
-    public function notifyOnProductionSave(WorkOrder $workOrder, ?User $user, string $originArea): void
+    public function notifyOnProductionSave(WorkOrder $workOrder, ?User $user, string $originArea): array
     {
         $origin = strtolower(trim($originArea));
-        if (! in_array($origin, ['impresion', 'laminacion', 'corte'], true)) {
-            return;
+        $summary = [
+            'event' => 'production_saved',
+            'work_order_id' => $workOrder->getKey(),
+            'origin_area' => $origin,
+            'sent_to' => [],
+            'skipped' => [],
+            'errors' => [],
+            'areas' => [],
+        ];
+
+        if (! in_array($origin, self::PRODUCTIVE_AREAS, true)) {
+            $summary['errors'][] = sprintf('origin_area_invalid:%s', $originArea);
+
+            return $summary;
         }
 
-        $targetAreas = ['impresion', 'laminacion', 'corte'];
-        foreach ($targetAreas as $targetArea) {
+        foreach (self::PRODUCTIVE_AREAS as $targetArea) {
             if ($targetArea === $origin) {
                 continue;
             }
@@ -91,7 +254,6 @@ class ProductionNotificationService
                 ucfirst($targetArea),
             );
 
-            // 1) Tabla de solicitudes por área
             $alreadyPending = AreaRequest::query()
                 ->where('work_order_id', $workOrder->getKey())
                 ->where('area', $targetArea)
@@ -99,6 +261,7 @@ class ProductionNotificationService
                 ->where('title', $title)
                 ->exists();
 
+            $areaRequestStatus = 'existing';
             if (! $alreadyPending) {
                 AreaRequest::query()->create([
                     'area' => $targetArea,
@@ -108,9 +271,9 @@ class ProductionNotificationService
                     'work_order_id' => $workOrder->getKey(),
                     'requested_by' => $user?->getKey(),
                 ]);
+                $areaRequestStatus = 'created';
             }
 
-            // 2) Campana / alerta operativa
             OperationalAlert::query()->create([
                 'alert_type' => 'production_handoff',
                 'severity' => AlertSeverity::Info->value,
@@ -129,9 +292,16 @@ class ProductionNotificationService
                 ],
                 'created_by' => $user?->getKey(),
             ]);
+
+            $summary['sent_to'][] = $targetArea;
+            $summary['areas'][] = [
+                'area' => $targetArea,
+                'status' => 'sent',
+                'area_request' => $areaRequestStatus,
+                'alert' => 'created',
+            ];
         }
 
-        // Confirmación en el mismo área (campana visible para quien guardó / su rol)
         OperationalAlert::query()->create([
             'alert_type' => 'production_saved',
             'severity' => AlertSeverity::Info->value,
@@ -150,18 +320,15 @@ class ProductionNotificationService
             'created_by' => $user?->getKey(),
         ]);
 
-        // 3) Bandera de entrada por tablero
-        $nextStage = match ($origin) {
-            'impresion' => WorkOrderBoardStage::Laminacion,
-            'laminacion' => WorkOrderBoardStage::Corte,
-            'corte' => WorkOrderBoardStage::Completada,
-            default => null,
-        };
+        $summary['sent_to'][] = $origin;
+        $summary['areas'][] = [
+            'area' => $origin,
+            'status' => 'sent',
+            'area_request' => 'not_applicable',
+            'alert' => 'created',
+            'note' => 'production_saved_self',
+        ];
 
-        if ($nextStage !== null && $workOrder->board_stage !== $nextStage) {
-            $workOrder->forceFill([
-                'board_stage' => $nextStage->value,
-            ])->save();
-        }
+        return $summary;
     }
 }

@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { WindingFigurePicker } from "./WindingFigurePicker"
-import WorkOrderLaminacionOpsSection from "./WorkOrderLaminacionOpsSection"
+import WorkOrderLaminacionOpsSection, { type LamLabelEditorMode } from "./WorkOrderLaminacionOpsSection"
+import type { BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
 import "./work-order-planilla.css"
 
 type OrdenTrabajoPayload = {
@@ -23,6 +24,8 @@ type OrdenTrabajoPayload = {
 type LaminacionPauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
 type SustratoRow = { material_id: string; kg: string }
 const MIN_SUSTRATO_ROWS = 1
+/** Casillas por rejilla (entrada impresa, virgen y salida laminada). */
+const LAM_BOBINAS_SLOTS = 30
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
@@ -41,6 +44,76 @@ function readNumber(v: unknown): number {
     return Number.isFinite(n) ? n : 0
   }
   return 0
+}
+
+function toFiniteOrNull(v: unknown): number | null {
+  const raw = readNumberString(v).trim().replace(",", ".")
+  if (!raw) return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
+function normalizeNumericString(v: unknown): string {
+  const n = toFiniteOrNull(v)
+  if (n === null) return ""
+  return String(n)
+}
+
+function emptyBobinaLabelMeta(): BobinaLabelMeta {
+  return {
+    fecha: "",
+    hora: "",
+    referencia: "",
+    lote: "",
+    proveedor: "",
+    operador: "",
+    metraje: "",
+    peso: "",
+    medida_ancho: "",
+    tratamiento_interno: "",
+    tratamiento_externo: "",
+    maquina_origen: "",
+    pedido_lote: "",
+  }
+}
+
+function normalizeBobinaLabelMeta(meta: BobinaLabelMeta): BobinaLabelMeta {
+  return {
+    fecha: readString(meta.fecha).trim(),
+    hora: readString(meta.hora).trim(),
+    referencia: readString(meta.referencia).trim(),
+    lote: readString(meta.lote).trim(),
+    proveedor: readString(meta.proveedor).trim(),
+    operador: readString(meta.operador).trim(),
+    metraje: readString(meta.metraje).trim(),
+    peso: readString(meta.peso).trim(),
+    medida_ancho: readString(meta.medida_ancho).trim(),
+    tratamiento_interno: readString(meta.tratamiento_interno).trim(),
+    tratamiento_externo: readString(meta.tratamiento_externo).trim(),
+    maquina_origen: readString(meta.maquina_origen).trim(),
+    pedido_lote: readString(meta.pedido_lote).trim(),
+  }
+}
+
+function getMetaSeries(form: Record<string, unknown>, key: string, size: number): BobinaLabelMeta[] {
+  const raw = form[key]
+  const out: BobinaLabelMeta[] = []
+  if (Array.isArray(raw)) {
+    for (const item of raw.slice(0, size)) {
+      if (item && typeof item === "object") {
+        out.push(
+          normalizeBobinaLabelMeta({
+            ...emptyBobinaLabelMeta(),
+            ...(item as Record<string, unknown>),
+          } as BobinaLabelMeta),
+        )
+      } else {
+        out.push(emptyBobinaLabelMeta())
+      }
+    }
+  }
+  while (out.length < size) out.push(emptyBobinaLabelMeta())
+  return out
 }
 
 function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, unknown> | null) {
@@ -168,6 +241,11 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
   const [pauseReason, setPauseReason] = useState("")
   const [pauseObs, setPauseObs] = useState("")
   const [isDemoPrefill, setIsDemoPrefill] = useState(false)
+  const [labelEditorOpen, setLabelEditorOpen] = useState(false)
+  const [labelEditorMode, setLabelEditorMode] = useState<LamLabelEditorMode>("virgen")
+  const [labelEditorIndex, setLabelEditorIndex] = useState(0)
+  const [labelEditorDraft, setLabelEditorDraft] = useState<BobinaLabelMeta>(emptyBobinaLabelMeta())
+  const [labelEditorError, setLabelEditorError] = useState("")
 
   const markAsUserEdited = useCallback(() => {
     setIsDemoPrefill(false)
@@ -219,9 +297,24 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
     }
   }, [])
 
-  const entradaImpresaBobinas = useMemo(() => getNumericSeries(form, "lamEntradaImpresaBobinasKg", 14), [form])
-  const entradaVirgenBobinas = useMemo(() => getNumericSeries(form, "lamEntradaVirgenBobinasKg", 14), [form])
-  const salidaBobinas = useMemo(() => getNumericSeries(form, "lamSalidaBobinasKg", 22), [form])
+  const entradaImpresaBobinas = useMemo(
+    () => getNumericSeries(form, "lamEntradaImpresaBobinasKg", LAM_BOBINAS_SLOTS),
+    [form],
+  )
+  const entradaVirgenBobinas = useMemo(
+    () => getNumericSeries(form, "lamEntradaVirgenBobinasKg", LAM_BOBINAS_SLOTS),
+    [form],
+  )
+  const salidaBobinas = useMemo(() => getNumericSeries(form, "lamSalidaBobinasKg", LAM_BOBINAS_SLOTS), [form])
+  const entradaImpresaBobinasMeta = useMemo(
+    () => getMetaSeries(form, "lamEntradaImpresaBobinasMeta", LAM_BOBINAS_SLOTS),
+    [form],
+  )
+  const entradaVirgenBobinasMeta = useMemo(
+    () => getMetaSeries(form, "lamEntradaVirgenBobinasMeta", LAM_BOBINAS_SLOTS),
+    [form],
+  )
+  const salidaBobinasMeta = useMemo(() => getMetaSeries(form, "lamSalidaBobinasMeta", LAM_BOBINAS_SLOTS), [form])
   const totalEntradaImpresa = useMemo(() => entradaImpresaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaImpresaBobinas])
   const totalEntradaVirgen = useMemo(() => entradaVirgenBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaVirgenBobinas])
   const sustratosLam = useMemo(() => getSustratosLamRows(form), [form])
@@ -375,6 +468,56 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
     })
   }
 
+  function openLabelEditor(mode: LamLabelEditorMode, idx: number) {
+    const meta =
+      mode === "impresa"
+        ? entradaImpresaBobinasMeta[idx]
+        : mode === "virgen"
+          ? entradaVirgenBobinasMeta[idx]
+          : salidaBobinasMeta[idx]
+    setLabelEditorMode(mode)
+    setLabelEditorIndex(idx)
+    setLabelEditorDraft(meta ? { ...meta } : emptyBobinaLabelMeta())
+    setLabelEditorError("")
+    setLabelEditorOpen(true)
+  }
+
+  function updateLabelDraft(key: keyof BobinaLabelMeta, value: string) {
+    setLabelEditorDraft((prev) => ({ ...prev, [key]: value }))
+    if (key === "fecha" && labelEditorError) setLabelEditorError("")
+  }
+
+  function clearLabelEditor() {
+    setLabelEditorDraft(emptyBobinaLabelMeta())
+    setLabelEditorError("")
+  }
+
+  function saveLabelEditor() {
+    const normalized = normalizeBobinaLabelMeta(labelEditorDraft)
+    const hasAnyValue = Object.values(normalized).some((v) => v !== "")
+    const fechaPattern = /^\d{2}\/\d{2}\/\d{4}$/
+    if (hasAnyValue && !fechaPattern.test(normalized.fecha)) {
+      setLabelEditorError("Fecha obligatoria con formato dd/mm/aaaa.")
+      return
+    }
+
+    const key =
+      labelEditorMode === "impresa"
+        ? "lamEntradaImpresaBobinasMeta"
+        : labelEditorMode === "virgen"
+          ? "lamEntradaVirgenBobinasMeta"
+          : "lamSalidaBobinasMeta"
+
+    markAsUserEdited()
+    setForm((prev) => {
+      const next = getMetaSeries(prev, key, LAM_BOBINAS_SLOTS)
+      next[labelEditorIndex] = normalized
+      return { ...prev, [key]: next }
+    })
+    setLabelEditorOpen(false)
+    setLabelEditorError("")
+  }
+
   async function guardar() {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
     const operador = readString(form.lamOperador).trim()
@@ -382,12 +525,21 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
       toast.error("Laminación: debe indicar el operador antes de guardar.")
       return
     }
+    const normalizedForm: Record<string, unknown> = {
+      ...form,
+      lamEntradaImpresaBobinasKg: entradaImpresaBobinas.map((v) => normalizeNumericString(v)),
+      lamEntradaVirgenBobinasKg: entradaVirgenBobinas.map((v) => normalizeNumericString(v)),
+      lamSalidaBobinasKg: salidaBobinas.map((v) => normalizeNumericString(v)),
+      lamEntradaImpresaBobinasMeta: entradaImpresaBobinasMeta.map((m) => normalizeBobinaLabelMeta(m)),
+      lamEntradaVirgenBobinasMeta: entradaVirgenBobinasMeta.map((m) => normalizeBobinaLabelMeta(m)),
+      lamSalidaBobinasMeta: salidaBobinasMeta.map((m) => normalizeBobinaLabelMeta(m)),
+    }
     setSaving(true)
     try {
       await apiFetch(`work-orders/${workOrderId}/orden-trabajo`, {
         method: "PUT",
         body: JSON.stringify({
-          form,
+          form: normalizedForm,
           origin_area: "laminacion",
           notify_on_production_save: true,
         }),
@@ -580,8 +732,11 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
         ayudante={readString(form.lamAyudante)}
         supervisor={readString(form.lamSupervisor)}
         entradaImpresaBobinas={entradaImpresaBobinas}
+        entradaImpresaMeta={entradaImpresaBobinasMeta}
         entradaVirgenBobinas={entradaVirgenBobinas}
+        entradaVirgenMeta={entradaVirgenBobinasMeta}
         salidaBobinas={salidaBobinas}
+        salidaMeta={salidaBobinasMeta}
         metrajeRaw={readNumberString(form.lamMetrajeProduccion)}
         adhesivoEntradaRaw={readNumberString(form.lamAdhesivoEntradaKg)}
         adhesivoSobroRaw={readNumberString(form.lamAdhesivoSobroKg)}
@@ -627,18 +782,21 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
           next[idx] = v
           setNumericSeries(setForm, "lamEntradaImpresaBobinasKg", next)
         }}
+        onOpenImpresaLabel={(idx) => openLabelEditor("impresa", idx)}
         onEntradaVirgenChange={(idx, v) => {
           markAsUserEdited()
           const next = [...entradaVirgenBobinas]
           next[idx] = v
           setNumericSeries(setForm, "lamEntradaVirgenBobinasKg", next)
         }}
+        onOpenVirgenLabel={(idx) => openLabelEditor("virgen", idx)}
         onSalidaChange={(idx, v) => {
           markAsUserEdited()
           const next = [...salidaBobinas]
           next[idx] = v
           setNumericSeries(setForm, "lamSalidaBobinasKg", next)
         }}
+        onOpenSalidaLabel={(idx) => openLabelEditor("salida", idx)}
         onSetMetraje={(v) => {
           markAsUserEdited()
           setKey(setForm, "lamMetrajeProduccion", v)
@@ -679,6 +837,15 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
           markAsUserEdited()
           setKey(setForm, "lamScrapLaminadoKg", v)
         }}
+        labelEditorOpen={labelEditorOpen}
+        labelEditorMode={labelEditorMode}
+        labelEditorIndex={labelEditorIndex}
+        labelEditorDraft={labelEditorDraft}
+        labelEditorError={labelEditorError}
+        onLabelOpenChange={setLabelEditorOpen}
+        onLabelDraftChange={updateLabelDraft}
+        onLabelClear={clearLabelEditor}
+        onLabelSave={saveLabelEditor}
       />
 
       <div className="rounded-lg border bg-card p-3">

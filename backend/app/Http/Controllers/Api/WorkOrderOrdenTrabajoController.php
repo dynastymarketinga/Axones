@@ -39,14 +39,21 @@ class WorkOrderOrdenTrabajoController extends Controller
     {
         $form = $request->validated()['form'];
         $doc = $this->ordenTrabajo->syncForm($work_order, $form);
+        $saveFingerprint = $doc->updated_at?->toIso8601String() ?? (string) time();
+        $broadcastSummary = $this->productionNotifications->notifyOnWorkOrderSavedBroadcast(
+            $work_order->fresh(),
+            $request->user(),
+            $saveFingerprint,
+        );
         $originArea = strtolower(trim((string) $request->input('origin_area', '')));
         $notifyOnProductionSave = filter_var(
             $request->input('notify_on_production_save', false),
             FILTER_VALIDATE_BOOLEAN,
         );
 
+        $productionSummary = null;
         if ($notifyOnProductionSave && $originArea !== '') {
-            $this->productionNotifications->notifyOnProductionSave(
+            $productionSummary = $this->productionNotifications->notifyOnProductionSave(
                 $work_order->fresh(),
                 $request->user(),
                 $originArea,
@@ -56,6 +63,10 @@ class WorkOrderOrdenTrabajoController extends Controller
         return response()->json([
             'work_order_id' => $work_order->getKey(),
             'updated_at' => $doc->updated_at,
+            'notification_summary' => [
+                'broadcast' => $broadcastSummary,
+                'production' => $productionSummary,
+            ],
         ]);
     }
 
@@ -72,8 +83,9 @@ class WorkOrderOrdenTrabajoController extends Controller
             FILTER_VALIDATE_BOOLEAN,
         );
 
+        $productionSummary = null;
         if ($notifyOnProductionSave && $originArea !== '') {
-            $this->productionNotifications->notifyOnProductionSave(
+            $productionSummary = $this->productionNotifications->notifyOnProductionSave(
                 $work_order->fresh(),
                 $request->user(),
                 $originArea,
@@ -83,6 +95,10 @@ class WorkOrderOrdenTrabajoController extends Controller
         return response()->json([
             'work_order_id' => $work_order->getKey(),
             'updated_at' => $doc->updated_at,
+            'notification_summary' => [
+                'broadcast' => null,
+                'production' => $productionSummary,
+            ],
         ]);
     }
 }

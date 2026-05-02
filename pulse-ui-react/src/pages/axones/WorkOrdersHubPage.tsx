@@ -1,9 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { createSearchParams, Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { ArrowRightCircle, CircleHelp, FileText, Search } from "lucide-react"
+import { CircleHelp, Eye, FilePenLine, Search } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -12,7 +12,7 @@ import type {
   LaravelPaginated,
   WorkOrderListRow,
 } from "@/types/api"
-import { InlineSpinner, LoadingButtonLabel, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 type MachineValue =
   | ""
@@ -65,28 +66,28 @@ function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
 }
 
-function normalizeTipoImpresionEstructura(value: unknown): "superficie" | "reverso" {
-  const raw = readString(value).toLowerCase().trim()
-  if (raw.includes("superf")) return "superficie"
-  if (raw.includes("revers")) return "reverso"
-  return "reverso"
-}
+// Estas funciones extraen y formatean información de la orden respecto a la máquina y los kilogramos pedidos.
+// Sirven para mostrar estos valores en la tabla principal de las Órdenes de Trabajo. Si no existe el dato, devuelven "—" para dejar la celda vacía y explícita.
 
 function formMachine(row: WorkOrderListRow): string {
+  // Intenta acceder al campo 'maquina' dentro de 'technical_document.form'
   const doc = row.technical_document?.form
-  if (!doc) return "—"
-  const m = readString(doc.maquina)
-  return m || "—"
+  if (!doc) return "—" // Si no existe la estructura, regresa "—"
+  const m = readString(doc.maquina) // Normaliza a string por si acaso el formato es extraño
+  return m || "—" // Si hay máquina la devuelve, sino "—"
 }
 
 function formPedidoKg(row: WorkOrderListRow): string {
+  // Accede al campo 'pedidoKg' dentro de 'technical_document.form'
   const doc = row.technical_document?.form
-  if (!doc) return "—"
+  if (!doc) return "—" // Si no existe, regresa "—"
   const v = doc.pedidoKg
+  // Si es número, lo convierte a string. Si es string no vacío, lo deja igual. Sino, regresa "—".
   if (typeof v === "number") return String(v)
   if (typeof v === "string" && v.trim()) return v.trim()
   return "—"
 }
+
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—"
@@ -106,24 +107,28 @@ function formatDate(iso: string | null | undefined): string {
 type SupervisorFilter = "all" | "created" | "in_progress" | "completed"
 
 function statusLabel(value: string | null | undefined): string {
-  const s = (value ?? "").toLowerCase().trim()
-  if (s === "open") return "Abierta"
-  if (s === "in_progress") return "En proceso"
-  if (s === "completed") return "Completada"
-  if (s === "cancelled") return "Cancelada"
-  return value?.trim() || "—"
+  const statuses: Record<string, string> = {
+    open: "Abierta",
+    in_progress: "En proceso",
+    completed: "Completada",
+    cancelled: "Cancelada",
+  }
+  const key = (value ?? "").toLowerCase().trim()
+  return statuses[key] ?? (value?.trim() || "—")
 }
 
 function boardStageLabel(value: string | null | undefined): string {
-  const s = (value ?? "").toLowerCase().trim()
-  if (s === "nueva") return "Creada (pendiente OT)"
-  if (s === "pendiente") return "Programación"
-  if (s === "montaje") return "Montaje"
-  if (s === "impresion") return "Impresión"
-  if (s === "laminacion") return "Laminación"
-  if (s === "corte") return "Corte / Embalaje"
-  if (s === "completada") return "Completada"
-  return value?.trim() || "—"
+  const stages: Record<string, string> = {
+    nueva: "Creada (registrada, no procesada)",
+    pendiente: "Programación",
+    montaje: "Montaje",
+    impresion: "Impresión",
+    laminacion: "Laminación",
+    corte: "Corte / Embalaje",
+    completada: "Completada",
+  }
+  const key = (value ?? "").toLowerCase().trim()
+  return stages[key] ?? (value?.trim() || "—")
 }
 
 function supervisorBucket(row: WorkOrderListRow): Exclude<SupervisorFilter, "all"> {
@@ -150,7 +155,6 @@ export default function WorkOrdersHubPage() {
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
   const [supervisorFilter, setSupervisorFilter] = useState<SupervisorFilter>("all")
 
-  const [creating, setCreating] = useState(false)
   const [coLoading, setCoLoading] = useState(false)
   const [clientOrders, setClientOrders] = useState<ClientOrderRow[]>([])
   const [clientOrderId, setClientOrderId] = useState<string>("")
@@ -267,59 +271,19 @@ export default function WorkOrdersHubPage() {
     return parts.length ? parts.join(" — ") : c.code
   }
 
-  async function createOt() {
+  function createOt() {
     const coId = clientOrderId.trim() ? Number(clientOrderId) : null
     if (!coId || !Number.isFinite(coId) || coId < 1) {
       toast.error("Seleccione un pedido del cliente (OC) ya registrado.")
       return
     }
-    setCreating(true)
     const importMaterial = canImportMaterialFromCo
-    try {
-      const res = await apiFetch<{ id: number }>("work-orders", {
-        method: "POST",
-        body: JSON.stringify({
-          client_order_id: coId,
-          import_client_order_lines: importMaterial,
-          auto_create_material_request: importMaterial,
-          originating_area: "printing",
-          board_stage: "nueva",
-        }),
-      })
-
-      // Guardar el “maestro” de la planilla (maquina/planchas) en el JSON del documento OT.
-      if (maquina) {
-        const payload = await apiFetch<{ prefill: Record<string, unknown>; form: Record<string, unknown> | null }>(
-          `work-orders/${res.id}/orden-trabajo`,
-        )
-        const currentForm = {
-          ...(payload.prefill ?? {}),
-          ...(payload.form ?? {}),
-        } as Record<string, unknown>
-        const tipoImpresionEstructura = normalizeTipoImpresionEstructura(
-          readString(currentForm.tipoImpresionEstructura) || readString(currentForm.tipoImpresion),
-        )
-
-        await apiFetch(`work-orders/${res.id}/orden-trabajo`, {
-          method: "PUT",
-          body: JSON.stringify({
-            form: {
-              ...currentForm,
-              maquina,
-              tipoImpresionEstructura,
-            },
-          }),
-        })
-      }
-
-      toast.success("OT creada.")
-      nav(`/ordenes-trabajo/${res.id}`)
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo crear la OT.")
-    } finally {
-      setCreating(false)
+    const params: Record<string, string> = {
+      client_order_id: String(coId),
+      import_material: importMaterial ? "1" : "0",
     }
+    if (maquina) params.maquina = maquina
+    nav({ pathname: "/ordenes-trabajo/nueva", search: `?${createSearchParams(params)}` })
   }
 
   return (
@@ -375,14 +339,16 @@ export default function WorkOrdersHubPage() {
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <p className="md:col-span-3 text-sm text-muted-foreground">
-                Seleccione el <span className="font-medium text-foreground">pedido del cliente</span> y la{" "}
-                <span className="font-medium text-foreground">máquina</span>, luego pulse{" "}
-                <span className="font-medium text-foreground">Crear orden</span>.
+                Elija el <span className="font-medium text-foreground">pedido del cliente</span> y, si ya lo sabe, la{" "}
+                <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
+                <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
+                <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
+                <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
               </p>
               <div className="grid gap-2 md:col-span-2">
                 <Label>Pedido del cliente (OC) a vincular *</Label>
                 <Select
-                  value={clientOrderId}
+                  value={clientOrderId || undefined}
                   onValueChange={(v) => setClientOrderId(v)}
                   onOpenChange={(open) => {
                     if (open && clientOrders.length === 0 && !coLoading) void loadClientOrders()
@@ -436,8 +402,8 @@ export default function WorkOrdersHubPage() {
               </div>
 
               <div className="md:col-span-3">
-                <Button type="button" onClick={() => void createOt()} disabled={creating}>
-                  <LoadingButtonLabel loading={creating} loadingText="Creando..." idleText="Crear orden" />
+                <Button type="button" onClick={() => createOt()}>
+                  Crear orden
                 </Button>
               </div>
             </CardContent>
@@ -447,8 +413,8 @@ export default function WorkOrdersHubPage() {
             <p className="flex items-start gap-2">
               <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
               <span>
-                <span className="font-medium text-slate-900">Paso siguiente:</span> pulse{" "}
-                <span className="font-semibold text-slate-900">Abrir planilla existente</span>.
+                <span className="font-medium text-slate-900">En la lista:</span> use los iconos de{" "}
+                <span className="font-semibold text-slate-900">Acciones</span> para abrir la edición de una OT existente o la vista previa.
               </span>
             </p>
               </div>
@@ -458,10 +424,10 @@ export default function WorkOrdersHubPage() {
               Todas ({supervisorCounts.all})
             </Button>
             <Button type="button" size="sm" variant={supervisorFilter === "created" ? "default" : "outline"} onClick={() => setSupervisorFilter("created")}>
-              Creadas ({supervisorCounts.created})
+              Nuevas ({supervisorCounts.created})
             </Button>
             <Button type="button" size="sm" variant={supervisorFilter === "in_progress" ? "default" : "outline"} onClick={() => setSupervisorFilter("in_progress")}>
-              En proceso ({supervisorCounts.in_progress})
+              Activas ({supervisorCounts.in_progress})
             </Button>
             <Button type="button" size="sm" variant={supervisorFilter === "completed" ? "default" : "outline"} onClick={() => setSupervisorFilter("completed")}>
               Completadas ({supervisorCounts.completed})
@@ -496,6 +462,22 @@ export default function WorkOrdersHubPage() {
                 ) : (
                   visibleRows.map((o) => (
                     <TableRow key={o.id} className="text-sm transition-colors hover:bg-muted/50">
+                      {/* 
+                        Esta sección renderiza las celdas de una fila en la tabla principal de Órdenes de Trabajo.
+                        Cada <TableCell> representa una columna distinta de información sobre la orden (`o`).
+                        
+                        Explicación columna por columna:
+                        - o.code: El código o número de la orden, mostrado con una fuente monoespaciada.
+                        - formatDate(o.document_date): La fecha del documento, formateada a formato legible. Si falta, muestra "—".
+                        - o.client?.name ?? "—": El nombre del cliente, o "—" si no existe.
+                        - o.product?.name ?? "—": El nombre del producto, o "—" si no hay producto.
+                        - formMachine(o): El nombre de la máquina asociada. Si no hay, "—".
+                        - boardStageLabel(o.board_stage): Etapa actual del "board" o flujo de la orden (ejemplo: "Montaje", "Impresión"...).
+                        - statusLabel(o.status): Muestra el estado de la OT (ejemplo: "Abierta", "Completada"...).
+                        - o.creator?.name ?? "—": Nombre de la persona que creó la OT, o "—" si no hay datos.
+                        - formPedidoKg(o): Cantidad de kilogramos solicitados en la orden. Si no hay datos, "—".
+                        - Última celda: Reservada para los botones de acciones (editar/vista previa).
+                      */}
                       <TableCell className="font-mono text-sm py-3.5">{o.code}</TableCell>
                       <TableCell className="py-3.5">{formatDate(o.document_date)}</TableCell>
                       <TableCell className="py-3.5">{o.client?.name ?? "—"}</TableCell>
@@ -506,34 +488,47 @@ export default function WorkOrdersHubPage() {
                       <TableCell className="py-3.5">{o.creator?.name ?? "—"}</TableCell>
                       <TableCell className="py-3.5">{formPedidoKg(o)}</TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {canPreviewPlanillaReport(o) ? (
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 shrink-0 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
-                              title="Vista previa del reporte"
-                              aria-label="Vista previa del reporte"
-                              asChild
-                            >
-                              <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
-                                <FileText className="h-4 w-4" />
-                              </Link>
-                            </Button>
-                          ) : null}
-                          <Button
-                            asChild
-                            size="sm"
-                            variant="secondary"
-                            className="gap-1.5"
-                          >
-                            <Link to={`/ordenes-trabajo/${o.id}`}>
-                              <ArrowRightCircle className="h-4 w-4" />
-                              Abrir planilla existente
-                            </Link>
-                          </Button>
-                        </div>
+                 
+                        <TooltipProvider delayDuration={150}>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8 shrink-0 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                                  aria-label="Editar OT"
+                                  asChild
+                                >
+                                  <Link to={`/ordenes-trabajo/${o.id}`}>
+                                    <FilePenLine className="h-4 w-4" />
+                                  </Link>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Editar OT (abrir formulario para completar/ajustar datos).</TooltipContent>
+                            </Tooltip>
+                            {canPreviewPlanillaReport(o) ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    className="h-8 w-8 shrink-0 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
+                                    aria-label="Vista previa del reporte"
+                                    asChild
+                                  >
+                                    <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
+                                      <Eye className="h-4 w-4" />
+                                    </Link>
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Ver vista previa del reporte de esta OT.</TooltipContent>
+                              </Tooltip>
+                            ) : null}
+                          </div>
+                        </TooltipProvider>
                       </TableCell>
                     </TableRow>
                   ))

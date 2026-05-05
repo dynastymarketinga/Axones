@@ -215,13 +215,19 @@ export default function AreaTintasPage() {
   }, [woNum])
 
   useEffect(() => {
-    if (mode === "list") {
-      void loadAreaRows()
-      return
-    }
+    if (mode !== "list") return
+    void loadAreaRows()
+  }, [loadAreaRows, mode])
+
+  useEffect(() => {
+    if (mode === "list") return
     void loadLists()
+  }, [loadLists, mode])
+
+  useEffect(() => {
+    if (mode === "list") return
     void loadWorkOrderConsumables()
-  }, [loadAreaRows, loadLists, loadWorkOrderConsumables, mode])
+  }, [loadWorkOrderConsumables, mode])
 
   async function save() {
     if (!Number.isFinite(woNum) || woNum < 1) {

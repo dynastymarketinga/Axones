@@ -1237,4 +1237,3 @@ export default function AreaTintasPage() {
     </div>
   )
 }
-

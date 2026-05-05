@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -18,6 +19,7 @@ class Material extends Model
         'unit',
         'min_stock',
         'notes',
+        'supplier_id',
     ];
 
     protected function casts(): array
@@ -28,6 +30,11 @@ class Material extends Model
             'micras' => 'decimal:3',
             'ancho' => 'decimal:3',
         ];
+    }
+
+    public function supplier(): BelongsTo
+    {
+        return $this->belongsTo(Supplier::class);
     }
 
     public function movements(): HasMany

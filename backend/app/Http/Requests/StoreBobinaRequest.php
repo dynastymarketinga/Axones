@@ -21,7 +21,7 @@ class StoreBobinaRequest extends FormRequest
             'material_id' => ['required', 'integer', 'exists:materials,id'],
             'code' => ['required', 'string', 'max:64', 'unique:bobinas,code'],
             'weight_kg' => ['required', 'numeric', 'min:0.001'],
-            'status' => ['nullable', 'string', Rule::in(['available', 'consumed', 'rejected'])],
+            'status' => ['nullable', 'string', Rule::in(['available', 'issued', 'consumed', 'rejected'])],
             'inventory_return_id' => ['nullable', 'integer', 'exists:inventory_returns,id'],
         ];
     }

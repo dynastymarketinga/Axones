@@ -26,6 +26,7 @@ export type ProductRecord = {
   id: number
   client_id: number | null
   name: string
+  barcode?: string | null
   cpe: string | null
   mps: string | null
   print_type: string | null
@@ -86,6 +87,8 @@ export type MaterialRow = {
   tinta_subareas?: Array<{ id: number; subarea: string }>
   substrate_products?: Array<Pick<ProductRecord, "id" | "name">>
   notes?: string | null
+  supplier_id?: number | null
+  supplier?: Pick<SupplierRecord, "id" | "name"> | null
   created_at?: string
   updated_at?: string
 }
@@ -176,6 +179,10 @@ export type InventoryMovementRow = {
   reference_type: string | null
   reference_id: number | null
   is_invalid_reference?: boolean
+  reason?: string | null
+  reason_scope?: string | null
+  is_manual_adjustment?: boolean
+  metadata?: Record<string, unknown> | null
   material?: {
     sku: string
     name: string

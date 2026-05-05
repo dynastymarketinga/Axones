@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -40,27 +40,58 @@ type EditableLine = PrefillLine & { include: boolean }
 type DispatchSelectionItem = {
   corte_bobina_usage_id: number
   work_order_id: number
+  work_order_code?: string
+  client_name?: string
   product_id: number | null
+  product_name?: string
+  product_cpe?: string
   description: string
+  quantity_finished_kg?: string
+  quantity_dispatched_kg?: string
+  quantity_remaining_kg?: string
   quantity_kg: string
   pallet_code: string
   bobbin_count: number
 }
 
+type EditableLineWithSource = EditableLine & {
+  work_order_code?: string
+  client_name?: string
+  product_name?: string
+  product_cpe?: string
+  quantity_finished_kg?: string
+  quantity_dispatched_kg?: string
+  quantity_remaining_kg?: string
+}
+
 const DISPATCH_SELECTION_KEY = "axones.dispatch.selection.v1"
 
+function lineOriginLabel(line: EditableLineWithSource): string {
+  if (line.description && line.description.trim() !== "") {
+    return line.description
+  }
+  if (line.work_order_id) {
+    return `OT #${line.work_order_id}`
+  }
+  return "—"
+}
+
 export default function DeliveryNoteCreatePage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const fromDispatchSelection = searchParams.get("source") === "despacho-corte"
   const [woId, setWoId] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [prefill, setPrefill] = useState<Prefill | null>(null)
-  const [lines, setLines] = useState<EditableLine[]>([])
+  const [lines, setLines] = useState<EditableLineWithSource[]>([])
   const [documentDate, setDocumentDate] = useState("")
   const [sequentialNumber, setSequentialNumber] = useState("")
   const [driverName, setDriverName] = useState("")
-  const [vehicleNotes, setVehicleNotes] = useState("")
+  const [driverDocument, setDriverDocument] = useState("")
+  const [vehicleName, setVehicleName] = useState("")
+  const [vehiclePlate, setVehiclePlate] = useState("")
   const [notes, setNotes] = useState("")
   const [autoloadedFromQuery, setAutoloadedFromQuery] = useState(false)
   const [loadedFromDispatchSelection, setLoadedFromDispatchSelection] =
@@ -75,11 +106,20 @@ export default function DeliveryNoteCreatePage() {
       setDocumentDate(p.suggested_document_date ?? "")
       setSequentialNumber(String(p.next_sequential_number ?? ""))
       setDriverName(p.transport?.driver_name ?? "")
-      setVehicleNotes(p.transport?.vehicle_notes ?? "")
+      setDriverDocument("")
+      setVehicleName(p.transport?.vehicle_notes ?? "")
+      setVehiclePlate("")
       setLines(
         (p.suggested_lines ?? []).map((L) => ({
           ...L,
           include: Number(L.quantity_kg) > 0,
+          work_order_code: undefined,
+          client_name: undefined,
+          product_name: undefined,
+          product_cpe: undefined,
+          quantity_finished_kg: String(L.quantity_kg),
+          quantity_dispatched_kg: "0.000",
+          quantity_remaining_kg: String(L.quantity_kg),
         })),
       )
     } catch (e) {
@@ -134,6 +174,13 @@ export default function DeliveryNoteCreatePage() {
           work_order_id: Number(line.work_order_id),
           product_id: line.product_id ? Number(line.product_id) : null,
           description: line.description ?? null,
+          work_order_code: line.work_order_code ?? undefined,
+          client_name: line.client_name ?? undefined,
+          product_name: line.product_name ?? undefined,
+          product_cpe: line.product_cpe ?? undefined,
+          quantity_finished_kg: line.quantity_finished_kg ?? undefined,
+          quantity_dispatched_kg: line.quantity_dispatched_kg ?? undefined,
+          quantity_remaining_kg: line.quantity_remaining_kg ?? undefined,
           include: Number(line.quantity_kg) > 0,
         })),
       )
@@ -185,21 +232,41 @@ export default function DeliveryNoteCreatePage() {
     const parentWorkOrderId =
       uniqueWorkOrders.length === 1 ? uniqueWorkOrders[0] : null
 
+    const normalizedDriver = driverName.trim()
+    const normalizedDocument = driverDocument.trim()
+    const normalizedVehicleName = vehicleName.trim()
+    const normalizedVehiclePlate = vehiclePlate.trim()
+    const mergedDriver =
+      normalizedDriver || normalizedDocument
+        ? [normalizedDriver, normalizedDocument ? `CI: ${normalizedDocument}` : null]
+            .filter(Boolean)
+            .join(" · ")
+        : null
+    const mergedVehicle = [normalizedVehicleName, normalizedVehiclePlate]
+      .filter(Boolean)
+      .join(" · ")
+
     setSaving(true)
     try {
-      await apiFetch("delivery-notes", {
+      const created = await apiFetch<{ id?: number }>("delivery-notes", {
         method: "POST",
         body: JSON.stringify({
           work_order_id: parentWorkOrderId,
           sequential_number: seq,
           document_date: documentDate || null,
-          driver_name: driverName.trim() || null,
-          vehicle_notes: vehicleNotes.trim() || null,
+          driver_name: mergedDriver,
+          vehicle_notes: mergedVehicle || null,
           notes: notes.trim() || null,
           lines: payloadLines,
         }),
       })
       toast.success("Nota de entrega creada.")
+      const createdId = Number(created?.id)
+      if (Number.isFinite(createdId) && createdId > 0) {
+        navigate(`/notas-entrega/${createdId}/vista-previa?from=create`)
+      } else {
+        navigate("/notas-entrega")
+      }
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo crear la nota.")
@@ -229,64 +296,103 @@ export default function DeliveryNoteCreatePage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-card p-4 shadow-sm">
-        <div className="grid gap-2">
-          <Label htmlFor="dn-wo">ID de orden de trabajo</Label>
-          <Input
-            id="dn-wo"
-            inputMode="numeric"
-            value={woId}
-            onChange={(ev) => setWoId(ev.target.value)}
-            placeholder="Ejemplo: 12"
-          />
+      {!fromDispatchSelection ? (
+        <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-card p-4 shadow-sm">
+          <div className="grid gap-2">
+            <Label htmlFor="dn-wo">ID de orden de trabajo</Label>
+            <Input
+              id="dn-wo"
+              inputMode="numeric"
+              value={woId}
+              onChange={(ev) => setWoId(ev.target.value)}
+              placeholder="Ejemplo: 12"
+            />
+          </div>
+          <Button type="button" onClick={() => void loadPrefill()} disabled={loading}>
+            {loading ? "…" : "Cargar datos"}
+          </Button>
         </div>
-        <Button type="button" onClick={() => void loadPrefill()} disabled={loading}>
-          {loading ? "…" : "Cargar datos"}
-        </Button>
-      </div>
+      ) : null}
 
       {prefill || lines.length ? (
         <form onSubmit={(ev) => void submit(ev)} className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 rounded-xl border bg-card p-4 shadow-sm md:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="dn-seq">Número secuencial *</Label>
+              <Label htmlFor="dn-seq" className="text-sm font-medium">
+                Número secuencial (automático)
+              </Label>
               <Input
                 id="dn-seq"
-                inputMode="numeric"
-                value={sequentialNumber}
-                onChange={(ev) => setSequentialNumber(ev.target.value)}
+                className="h-10"
+                value={sequentialNumber || "Se asigna automáticamente al crear"}
+                readOnly
+                disabled
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="dn-date">Fecha documento</Label>
+              <Label htmlFor="dn-date" className="text-sm font-medium">
+                Fecha documento
+              </Label>
               <Input
                 id="dn-date"
                 type="date"
+                className="h-10"
                 value={documentDate}
                 onChange={(ev) => setDocumentDate(ev.target.value)}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="dn-driver">Conductor</Label>
+              <Label htmlFor="dn-driver" className="text-sm font-medium">
+                Conductor
+              </Label>
               <Input
                 id="dn-driver"
+                className="h-10"
                 value={driverName}
                 onChange={(ev) => setDriverName(ev.target.value)}
               />
             </div>
-            <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="dn-veh">Vehículo / placas</Label>
+            <div className="grid gap-2">
+              <Label htmlFor="dn-driver-doc" className="text-sm font-medium">
+                Cédula del conductor
+              </Label>
               <Input
-                id="dn-veh"
-                value={vehicleNotes}
-                onChange={(ev) => setVehicleNotes(ev.target.value)}
+                id="dn-driver-doc"
+                className="h-10"
+                value={driverDocument}
+                onChange={(ev) => setDriverDocument(ev.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="dn-vehicle" className="text-sm font-medium">
+                Vehículo
+              </Label>
+              <Input
+                id="dn-vehicle"
+                className="h-10"
+                value={vehicleName}
+                onChange={(ev) => setVehicleName(ev.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="dn-plate" className="text-sm font-medium">
+                Placa
+              </Label>
+              <Input
+                id="dn-plate"
+                className="h-10"
+                value={vehiclePlate}
+                onChange={(ev) => setVehiclePlate(ev.target.value)}
               />
             </div>
             <div className="grid gap-2 md:col-span-3">
-              <Label htmlFor="dn-notes">Notas</Label>
+              <Label htmlFor="dn-notes" className="text-sm font-medium">
+                Observaciones
+              </Label>
               <Textarea
                 id="dn-notes"
-                rows={2}
+                rows={3}
+                className="min-h-[96px]"
                 value={notes}
                 onChange={(ev) => setNotes(ev.target.value)}
               />
@@ -294,66 +400,61 @@ export default function DeliveryNoteCreatePage() {
           </div>
 
           <div className="rounded-xl border bg-card overflow-x-auto shadow-sm">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">OK</TableHead>
-                  <TableHead>Paleta</TableHead>
-                  <TableHead>Bobinas</TableHead>
-                  <TableHead>Kg</TableHead>
-                  <TableHead>Uso corte #</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lines.map((L, i) => (
-                  <TableRow key={i}>
-                    <TableCell>
-                      <input
-                        type="checkbox"
-                        checked={L.include}
-                        onChange={(ev) =>
-                          updateLine(i, { include: ev.target.checked })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        value={L.pallet_code}
-                        onChange={(ev) =>
-                          updateLine(i, { pallet_code: ev.target.value })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="w-28">
-                      <Input
-                        inputMode="numeric"
-                        value={String(L.bobbin_count)}
-                        onChange={(ev) =>
-                          updateLine(i, {
-                            bobbin_count: Number(ev.target.value) || 0,
-                          })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="w-32">
-                      <Input
-                        inputMode="decimal"
-                        value={String(L.quantity_kg)}
-                        onChange={(ev) =>
-                          updateLine(i, { quantity_kg: ev.target.value })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {L.corte_bobina_usage_id}
-                    </TableCell>
+            <div className="border-b bg-muted/30 px-4 py-2 text-sm">
+              Paletas seleccionadas: <span className="font-medium">{lines.filter((l) => l.include).length}</span>
+            </div>
+            {!fromDispatchSelection ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10">OK</TableHead>
+                    <TableHead>OT de producción</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-right">Terminado</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {lines.map((L, i) => (
+                    <TableRow key={i}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={L.include}
+                          onChange={(ev) =>
+                            updateLine(i, { include: ev.target.checked })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm font-medium">
+                          {L.work_order_code ?? `OT-${L.work_order_id ?? "-"}`}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {L.client_name ?? lineOriginLabel(L)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {L.product_name ?? "Producto"}
+                        </div>
+                        <div className="text-muted-foreground text-xs">
+                          {L.product_cpe ?? "—"}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {L.quantity_finished_kg ?? String(L.quantity_kg)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : null}
           </div>
 
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" className="h-10" disabled={saving}>
             {saving ? "Creando…" : "Crear nota de entrega"}
           </Button>
         </form>

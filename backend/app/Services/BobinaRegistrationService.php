@@ -55,7 +55,7 @@ class BobinaRegistrationService
                 ['bobina_code' => $bobina->code],
             );
 
-            return $bobina->fresh()->load('material');
+            return $bobina->fresh()->load(['material.supplier:id,name']);
         });
     }
 
@@ -126,6 +126,6 @@ class BobinaRegistrationService
             'status' => $data['status'] ?? 'rejected',
         ]);
 
-        return $bobina->fresh()->load(['material', 'inventoryReturn.workOrder']);
+        return $bobina->fresh()->load(['material.supplier:id,name', 'inventoryReturn.workOrder']);
     }
 }

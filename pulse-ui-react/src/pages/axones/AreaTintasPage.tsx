@@ -29,6 +29,14 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 
 export default function AreaTintasPage() {
+  const [mode, setMode] = useState<"list" | "consumo">("list")
+  const [activeTab, setActiveTab] = useState<"mias" | "historial">("mias")
+  const [q, setQ] = useState("")
+  const [search, setSearch] = useState("")
+  const [status, setStatus] = useState<string>("all")
+  const [page, setPage] = useState(1)
+  const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
+
   const [workOrders, setWorkOrders] = useState<WorkOrderListRow[]>([])
   const [woId, setWoId] = useState<string>("")
   const woNum = Number(woId)
@@ -91,13 +99,35 @@ export default function AreaTintasPage() {
     [workOrders, woNum],
   )
 
+  const loadAreaRows = useCallback(async () => {
+    setLoading(true)
+    try {
+      const query: Record<string, string | number | undefined> = {
+        page,
+        per_page: 20,
+        status: status !== "all" ? status : undefined,
+        client_order_reference: search || undefined,
+      }
+      if (activeTab === "mias") query.mi_area = "tintas"
+      else query.historial_area = "tintas"
+
+      const data = await apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", { query })
+      setRows(data)
+      setWorkOrders(data.data ?? [])
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudieron cargar las órdenes.")
+      setRows(null)
+      setWorkOrders([])
+    } finally {
+      setLoading(false)
+    }
+  }, [activeTab, page, search, status])
+
   const loadLists = useCallback(async () => {
     setLoading(true)
     try {
-      const [woRes, mats, invT, invC, mixes] = await Promise.all([
-        apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", {
-          query: { mi_area: "tintas", per_page: 50, page: 1 },
-        }),
+      const [mats, invT, invC, mixes] = await Promise.all([
         apiFetch<LaravelPaginated<MaterialRow>>("materials", {
           query: { per_page: 400, page: 1 },
         }),
@@ -111,7 +141,6 @@ export default function AreaTintasPage() {
           query: { page: mixPage, per_page: 20 },
         }).catch(() => null),
       ])
-      setWorkOrders(woRes.data ?? [])
       setTintaMaterials(
         (mats.data ?? []).filter(
           (m) =>
@@ -186,12 +215,13 @@ export default function AreaTintasPage() {
   }, [woNum])
 
   useEffect(() => {
+    if (mode === "list") {
+      void loadAreaRows()
+      return
+    }
     void loadLists()
-  }, [loadLists])
-
-  useEffect(() => {
     void loadWorkOrderConsumables()
-  }, [loadWorkOrderConsumables])
+  }, [loadAreaRows, loadLists, loadWorkOrderConsumables, mode])
 
   async function save() {
     if (!Number.isFinite(woNum) || woNum < 1) {
@@ -320,241 +350,602 @@ export default function AreaTintasPage() {
     }
   }
 
+  function stageLabel(boardStage?: string | null): string {
+    if (boardStage === "nueva") return "Pendiente por OT"
+    if (boardStage === "pendiente") return "Programación"
+    if (boardStage === "montaje") return "Montaje"
+    if (boardStage === "impresion") return "Impresión"
+    if (boardStage === "laminacion") return "Laminación"
+    if (boardStage === "corte") return "Corte"
+    if (boardStage === "completada") return "Completada"
+    return boardStage ?? "—"
+  }
+
+  const totalOriginalKg = useMemo(
+    () =>
+      inkLines.reduce((acc, row) => {
+        const value = Number(row.quantity_original_kg || 0)
+        return acc + (Number.isFinite(value) ? value : 0)
+      }, 0),
+    [inkLines],
+  )
+  const totalSolventadaKg = useMemo(
+    () =>
+      inkLines.reduce((acc, row) => {
+        const value = Number(row.quantity_solventada_kg || 0)
+        return acc + (Number.isFinite(value) ? value : 0)
+      }, 0),
+    [inkLines],
+  )
+  const totalDevolucionKg = useMemo(
+    () =>
+      inkLines.reduce((acc, row) => {
+        const value = Number(row.quantity_return_kg || 0)
+        return acc + (Number.isFinite(value) ? value : 0)
+      }, 0),
+    [inkLines],
+  )
+  const totalQuimicosKg = useMemo(
+    () =>
+      chemRows.reduce((acc, row) => {
+        const value = Number(row.quantity_loaded_kg || 0)
+        return acc + (Number.isFinite(value) ? value : 0)
+      }, 0),
+    [chemRows],
+  )
+
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Área: Tintas</h1>
-          <p className="text-muted-foreground text-sm">
-            Seleccione una OT y registre el consumo de tintas y químicos. Los
-            cambios quedan guardados al confirmar.
+          <p className="text-muted-foreground text-[13px]">
+            Órdenes con solicitud pendiente para tu área (sin depender del tablero).
+            Historial: todas las OT que tuvieron solicitud hacia esta área.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={() => void loadLists()} disabled={loading}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              if (mode === "list") {
+                void loadAreaRows()
+                return
+              }
+              void loadLists()
+              void loadWorkOrderConsumables()
+            }}
+            disabled={loading}
+          >
             Actualizar
-          </Button>
-          <Button type="button" variant="outline" asChild>
-            <Link to="/ordenes-trabajo">Ir a OTs</Link>
           </Button>
         </div>
       </div>
 
-      <Tabs defaultValue="consumo" className="w-full">
-        <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1">
-          <TabsTrigger value="consumo">Consumo por OT</TabsTrigger>
-          <TabsTrigger value="inventario">Inventario</TabsTrigger>
-          <TabsTrigger value="cementerio">Cementerio</TabsTrigger>
-          <TabsTrigger value="mezclas">Mezclas (Pantone)</TabsTrigger>
-        </TabsList>
+      {mode === "list" ? (
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            setActiveTab(v as "mias" | "historial")
+            setPage(1)
+          }}
+        >
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
+            <TabsTrigger value="mias" className="text-xs">
+              En mi fase
+            </TabsTrigger>
+            <TabsTrigger value="historial" className="text-xs">
+              Historial
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="consumo" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Seleccionar OT (en impresión)</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>OT</Label>
-                <Select value={woId} onValueChange={setWoId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccione…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workOrders.map((w) => (
-                      <SelectItem key={w.id} value={String(w.id)}>
-                        {w.code} — {w.client?.name ?? "—"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedWo ? (
-                  <p className="text-muted-foreground text-xs">
-                    {selectedWo.product?.name ?? "—"} · tablero{" "}
-                    {selectedWo.board_stage ?? "—"}
-                  </p>
-                ) : null}
+          <TabsContent value="mias" className="mt-4 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="grid flex-1 gap-2">
+                <Label htmlFor="tintas-q-mias" className="text-xs font-medium">
+                  Ref. pedido cliente
+                </Label>
+                <Input
+                  id="tintas-q-mias"
+                  placeholder="Buscar por referencia..."
+                  className="h-8 text-xs"
+                  value={q}
+                  onChange={(ev) => setQ(ev.target.value)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter") {
+                      setPage(1)
+                      setSearch(q.trim())
+                    }
+                  }}
+                />
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Tintas y cementerio</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-          {inkLines.map((L, i) => (
-            <div key={i} className="grid gap-2 rounded-lg border p-3 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <Label className="text-xs">Tinta / cementerio</Label>
+              <div className="grid w-48 gap-2">
+                <Label className="text-xs font-medium">Estado</Label>
                 <Select
-                  value={L.material_id || undefined}
-                  onValueChange={(v) =>
-                    setInkLines((rows) =>
-                      rows.map((r, j) => (j === i ? { ...r, material_id: v } : r)),
-                    )
-                  }
+                  value={status}
+                  onValueChange={(v) => {
+                    setStatus(v)
+                    setPage(1)
+                  }}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Material…" />
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {tintaMaterials.map((m) => (
-                      <SelectItem key={m.id} value={String(m.id)}>
-                        {m.sku} — {m.name}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="open">Abierta</SelectItem>
+                    <SelectItem value="completed">Completada</SelectItem>
+                    <SelectItem value="cancelled">Cancelada</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="md:col-span-2">
-                <Label className="text-xs">Original kg</Label>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
+                onClick={() => {
+                  setPage(1)
+                  setSearch(q.trim())
+                }}
+              >
+                Buscar
+              </Button>
+            </div>
+
+            <div className="bg-card border rounded-xl shadow-sm overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-8 py-2 text-xs">Código</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Tablero</TableHead>
+                    <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-muted-foreground">
+                        Cargando...
+                      </TableCell>
+                    </TableRow>
+                  ) : !rows?.data.length ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-muted-foreground">
+                        Sin órdenes en esta fase.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.data.map((o) => (
+                      <TableRow key={o.id} className="h-9">
+                        <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
+                        <TableCell className="py-2 text-xs">{stageLabel(o.board_stage)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => {
+                                setWoId(String(o.id))
+                                setMode("consumo")
+                              }}
+                            >
+                              Registrar consumo
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="historial" className="mt-4 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="grid flex-1 gap-2">
+                <Label htmlFor="tintas-q-historial" className="text-xs font-medium">
+                  Ref. pedido cliente
+                </Label>
                 <Input
-                  inputMode="decimal"
-                  value={L.quantity_original_kg}
-                  onChange={(ev) =>
-                    setInkLines((rows) =>
-                      rows.map((r, j) =>
-                        j === i ? { ...r, quantity_original_kg: ev.target.value } : r,
-                      ),
-                    )
-                  }
+                  id="tintas-q-historial"
+                  placeholder="Buscar por referencia..."
+                  className="h-8 text-xs"
+                  value={q}
+                  onChange={(ev) => setQ(ev.target.value)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter") {
+                      setPage(1)
+                      setSearch(q.trim())
+                    }
+                  }}
                 />
               </div>
-              <div className="md:col-span-2">
-                <Label className="text-xs">Solventada kg</Label>
-                <Input
-                  inputMode="decimal"
-                  value={L.quantity_solventada_kg}
-                  onChange={(ev) =>
-                    setInkLines((rows) =>
-                      rows.map((r, j) =>
-                        j === i
-                          ? { ...r, quantity_solventada_kg: ev.target.value }
-                          : r,
-                      ),
-                    )
-                  }
-                />
+              <div className="grid w-48 gap-2">
+                <Label className="text-xs font-medium">Estado</Label>
+                <Select
+                  value={status}
+                  onValueChange={(v) => {
+                    setStatus(v)
+                    setPage(1)
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="open">Abierta</SelectItem>
+                    <SelectItem value="completed">Completada</SelectItem>
+                    <SelectItem value="cancelled">Cancelada</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="md:col-span-2">
-                <Label className="text-xs">Devolución kg</Label>
-                <Input
-                  inputMode="decimal"
-                  value={L.quantity_return_kg}
-                  onChange={(ev) =>
-                    setInkLines((rows) =>
-                      rows.map((r, j) =>
-                        j === i ? { ...r, quantity_return_kg: ev.target.value } : r,
-                      ),
-                    )
-                  }
-                />
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
+                onClick={() => {
+                  setPage(1)
+                  setSearch(q.trim())
+                }}
+              >
+                Buscar
+              </Button>
+            </div>
+
+            <div className="bg-card border rounded-xl shadow-sm overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-8 py-2 text-xs">Código</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Tablero</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Estado</TableHead>
+                    <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-muted-foreground">
+                        Cargando...
+                      </TableCell>
+                    </TableRow>
+                  ) : !rows?.data.length ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-muted-foreground">
+                        Sin resultados.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.data.map((o) => (
+                      <TableRow key={o.id} className="h-9">
+                        <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
+                        <TableCell className="py-2 text-xs">{stageLabel(o.board_stage)}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.status}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => {
+                                setWoId(String(o.id))
+                                setMode("consumo")
+                              }}
+                            >
+                              Registrar consumo
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold">Consumo por OT</p>
+              <p className="text-muted-foreground text-xs">
+                {selectedWo ? `${selectedWo.code} · ${selectedWo.client?.name ?? "—"}` : "Sin OT seleccionada"}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => setMode("list")}>
+                Volver al listado
+              </Button>
+            </div>
+          </div>
+
+          <Tabs defaultValue="consumo" className="w-full">
+            <TabsList className="flex h-auto min-h-9 w-full flex-wrap justify-start gap-1 p-1">
+              <TabsTrigger value="consumo" className="text-xs">Consumo por OT</TabsTrigger>
+              <TabsTrigger value="inventario" className="text-xs">Inventario</TabsTrigger>
+              <TabsTrigger value="cementerio" className="text-xs">Cementerio</TabsTrigger>
+              <TabsTrigger value="mezclas" className="text-xs">Mezclas (Pantone)</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="consumo" className="mt-4 space-y-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Seleccionar OT (en impresión)</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-12">
+                    <div className="grid gap-2 md:col-span-6">
+                      <Label className="text-xs">OT</Label>
+                      <Select value={woId} onValueChange={setWoId}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Seleccione…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workOrders.map((w) => (
+                            <SelectItem key={w.id} value={String(w.id)}>
+                              {w.code} — {w.client?.name ?? "—"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2 md:col-span-3">
+                      <Label className="text-xs">Estado</Label>
+                      <Input value={selectedWo?.status ?? "Sin OT"} disabled className="h-8 text-xs" />
+                    </div>
+                    <div className="grid gap-2 md:col-span-3">
+                      <Label className="text-xs">Tablero</Label>
+                      <Input
+                        value={selectedWo ? stageLabel(selectedWo.board_stage) : "—"}
+                        disabled
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                  {selectedWo ? (
+                    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                      <p>
+                        <span className="font-medium">Cliente:</span>{" "}
+                        {selectedWo.client?.name ?? "—"}
+                      </p>
+                      <p>
+                        <span className="font-medium">Producto:</span>{" "}
+                        {selectedWo.product?.name ?? "—"}
+                      </p>
+                      <p>
+                        <span className="font-medium">Código OT:</span> {selectedWo.code}
+                      </p>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Tintas y cementerio</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {inkLines.map((L, i) => (
+                      <div key={i} className="grid gap-2 rounded-md border p-2 md:grid-cols-12">
+                        <div className="md:col-span-4">
+                          <Label className="text-xs">Tinta / cementerio</Label>
+                          <Select
+                            value={L.material_id || undefined}
+                            onValueChange={(v) =>
+                              setInkLines((rows) =>
+                                rows.map((r, j) => (j === i ? { ...r, material_id: v } : r)),
+                              )
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Material…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {tintaMaterials.map((m) => (
+                                <SelectItem key={m.id} value={String(m.id)}>
+                                  {m.sku} — {m.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="md:col-span-2">
+                          <Label className="text-xs">Original kg</Label>
+                          <Input
+                            inputMode="decimal"
+                            className="h-8 text-xs"
+                            value={L.quantity_original_kg}
+                            onChange={(ev) =>
+                              setInkLines((rows) =>
+                                rows.map((r, j) =>
+                                  j === i ? { ...r, quantity_original_kg: ev.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <Label className="text-xs">Solventada kg</Label>
+                          <Input
+                            inputMode="decimal"
+                            className="h-8 text-xs"
+                            value={L.quantity_solventada_kg}
+                            onChange={(ev) =>
+                              setInkLines((rows) =>
+                                rows.map((r, j) =>
+                                  j === i
+                                    ? { ...r, quantity_solventada_kg: ev.target.value }
+                                    : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <Label className="text-xs">Devolución kg</Label>
+                          <Input
+                            inputMode="decimal"
+                            className="h-8 text-xs"
+                            value={L.quantity_return_kg}
+                            onChange={(ev) =>
+                              setInkLines((rows) =>
+                                rows.map((r, j) =>
+                                  j === i ? { ...r, quantity_return_kg: ev.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="md:col-span-2 flex items-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            onClick={() => setInkLines((rows) => rows.filter((_, j) => j !== i))}
+                            disabled={inkLines.length <= 1}
+                          >
+                            Quitar
+                          </Button>
+                        </div>
+                        <div className="md:col-span-12">
+                          <Input
+                            placeholder="Notas línea"
+                            className="h-8 text-xs"
+                            value={L.notes}
+                            onChange={(ev) =>
+                              setInkLines((rows) =>
+                                rows.map((r, j) =>
+                                  j === i ? { ...r, notes: ev.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    <div className="grid gap-2 text-sm md:grid-cols-3">
+                      <div className="rounded-md border bg-muted/30 p-2">
+                        <span className="text-muted-foreground">Total original:</span>{" "}
+                        <strong>{totalOriginalKg.toFixed(2)} kg</strong>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-2">
+                        <span className="text-muted-foreground">Total solventada:</span>{" "}
+                        <strong>{totalSolventadaKg.toFixed(2)} kg</strong>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-2">
+                        <span className="text-muted-foreground">Total devolución:</span>{" "}
+                        <strong>{totalDevolucionKg.toFixed(2)} kg</strong>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() =>
+                        setInkLines((rows) => [
+                          ...rows,
+                          {
+                            material_id: "",
+                            quantity_original_kg: "",
+                            quantity_solventada_kg: "",
+                            quantity_return_kg: "",
+                            notes: "",
+                          },
+                        ])
+                      }
+                    >
+                      Añadir línea de tinta
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Químicos</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {chemRows.map((r, i) => (
+                      <div
+                        key={r.chemical_type}
+                        className="grid gap-2 rounded-md border p-2 md:grid-cols-4"
+                      >
+                        <div className="text-sm font-medium capitalize">{r.chemical_type}</div>
+                        <Input
+                          placeholder="Cargado kg"
+                          inputMode="decimal"
+                          className="h-8 text-xs"
+                          value={r.quantity_loaded_kg}
+                          onChange={(ev) =>
+                            setChemRows((rows) =>
+                              rows.map((x, j) =>
+                                j === i ? { ...x, quantity_loaded_kg: ev.target.value } : x,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Devuelto kg"
+                          inputMode="decimal"
+                          className="h-8 text-xs"
+                          value={r.quantity_return_kg}
+                          onChange={(ev) =>
+                            setChemRows((rows) =>
+                              rows.map((x, j) =>
+                                j === i ? { ...x, quantity_return_kg: ev.target.value } : x,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Notas"
+                          className="h-8 text-xs"
+                          value={r.notes}
+                          onChange={(ev) =>
+                            setChemRows((rows) =>
+                              rows.map((x, j) => (j === i ? { ...x, notes: ev.target.value } : x)),
+                            )
+                          }
+                        />
+                      </div>
+                    ))}
+                    <div className="rounded-md border bg-muted/30 p-2 text-sm">
+                      <span className="text-muted-foreground">Total químicos cargados:</span>{" "}
+                      <strong>{totalQuimicosKg.toFixed(2)} kg</strong>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-              <div className="md:col-span-2 flex items-end gap-1">
+
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant="ghost"
                   size="sm"
-                  onClick={() => setInkLines((rows) => rows.filter((_, j) => j !== i))}
-                  disabled={inkLines.length <= 1}
+                  className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
+                  onClick={() => void save()}
+                  disabled={saving || loading}
                 >
-                  Quitar
+                  {saving ? "Guardando…" : "Guardar consumo"}
                 </Button>
               </div>
-              <div className="md:col-span-12">
-                <Input
-                  placeholder="Notas línea"
-                  value={L.notes}
-                  onChange={(ev) =>
-                    setInkLines((rows) =>
-                      rows.map((r, j) => (j === i ? { ...r, notes: ev.target.value } : r)),
-                    )
-                  }
-                />
-              </div>
-            </div>
-          ))}
+            </TabsContent>
 
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setInkLines((rows) => [
-                ...rows,
-                {
-                  material_id: "",
-                  quantity_original_kg: "",
-                  quantity_solventada_kg: "",
-                  quantity_return_kg: "",
-                  notes: "",
-                },
-              ])
-            }
-          >
-            Añadir línea de tinta
-          </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Químicos</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-          {chemRows.map((r, i) => (
-            <div key={r.chemical_type} className="grid gap-2 rounded-md border p-2 md:grid-cols-4">
-              <div className="font-medium capitalize">{r.chemical_type}</div>
-              <Input
-                placeholder="Cargado kg"
-                inputMode="decimal"
-                value={r.quantity_loaded_kg}
-                onChange={(ev) =>
-                  setChemRows((rows) =>
-                    rows.map((x, j) => (j === i ? { ...x, quantity_loaded_kg: ev.target.value } : x)),
-                  )
-                }
-              />
-              <Input
-                placeholder="Devuelto kg"
-                inputMode="decimal"
-                value={r.quantity_return_kg}
-                onChange={(ev) =>
-                  setChemRows((rows) =>
-                    rows.map((x, j) => (j === i ? { ...x, quantity_return_kg: ev.target.value } : x)),
-                  )
-                }
-              />
-              <Input
-                placeholder="Notas"
-                value={r.notes}
-                onChange={(ev) =>
-                  setChemRows((rows) =>
-                    rows.map((x, j) => (j === i ? { ...x, notes: ev.target.value } : x)),
-                  )
-                }
-              />
-            </div>
-          ))}
-            </CardContent>
-          </Card>
-
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => void save()} disabled={saving || loading}>
-              {saving ? "Guardando…" : "Guardar consumo"}
-            </Button>
-            {Number.isFinite(woNum) && woNum > 0 ? (
-              <Button type="button" variant="outline" asChild>
-                <Link to={`/ordenes-trabajo/${woNum}?tab=printing`}>
-                  Abrir OT (Impresión)
-                </Link>
-              </Button>
-            ) : null}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="inventario" className="mt-4 space-y-3">
+            <TabsContent value="inventario" className="mt-4 space-y-3">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Inventario de tintas</CardTitle>
@@ -565,14 +956,17 @@ export default function AreaTintasPage() {
                   <TableRow>
                     <TableHead>SKU</TableHead>
                     <TableHead>Nombre</TableHead>
+                    <TableHead>Tipo</TableHead>
                     <TableHead>Stock</TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Lote / notas</TableHead>
                     <TableHead>Unidad</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {!invTintas.length ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-muted-foreground">
+                      <TableCell colSpan={7} className="text-muted-foreground">
                         Sin ítems.
                       </TableCell>
                     </TableRow>
@@ -581,7 +975,10 @@ export default function AreaTintasPage() {
                       <TableRow key={m.id}>
                         <TableCell className="font-mono text-xs">{m.sku}</TableCell>
                         <TableCell>{m.name}</TableCell>
+                        <TableCell>{m.tinta_subareas?.[0]?.subarea ?? "—"}</TableCell>
                         <TableCell>{m.quantity_on_hand}</TableCell>
+                        <TableCell>{m.supplier?.name ?? "—"}</TableCell>
+                        <TableCell>{m.notes || "—"}</TableCell>
                         <TableCell>{m.unit}</TableCell>
                       </TableRow>
                     ))
@@ -590,9 +987,9 @@ export default function AreaTintasPage() {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
+            </TabsContent>
 
-        <TabsContent value="cementerio" className="mt-4 space-y-3">
+            <TabsContent value="cementerio" className="mt-4 space-y-3">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Cementerio de tintas</CardTitle>
@@ -603,14 +1000,17 @@ export default function AreaTintasPage() {
                   <TableRow>
                     <TableHead>SKU</TableHead>
                     <TableHead>Nombre</TableHead>
+                    <TableHead>Tipo</TableHead>
                     <TableHead>Stock</TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Motivo / notas</TableHead>
                     <TableHead>Unidad</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {!invCementerio.length ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-muted-foreground">
+                      <TableCell colSpan={7} className="text-muted-foreground">
                         Sin ítems.
                       </TableCell>
                     </TableRow>
@@ -619,7 +1019,10 @@ export default function AreaTintasPage() {
                       <TableRow key={m.id}>
                         <TableCell className="font-mono text-xs">{m.sku}</TableCell>
                         <TableCell>{m.name}</TableCell>
+                        <TableCell>{m.tinta_subareas?.[0]?.subarea ?? "—"}</TableCell>
                         <TableCell>{m.quantity_on_hand}</TableCell>
+                        <TableCell>{m.supplier?.name ?? "—"}</TableCell>
+                        <TableCell>{m.notes || "—"}</TableCell>
                         <TableCell>{m.unit}</TableCell>
                       </TableRow>
                     ))
@@ -628,12 +1031,12 @@ export default function AreaTintasPage() {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
+            </TabsContent>
 
-        <TabsContent value="mezclas" className="mt-4 space-y-4">
+            <TabsContent value="mezclas" className="mt-4 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Nueva mezcla (receta / Pantone)</CardTitle>
+              <CardTitle className="text-base">Crear nueva mezcla (Pantone)</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -723,7 +1126,7 @@ export default function AreaTintasPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Historial de mezclas</CardTitle>
+              <CardTitle className="text-base">Recetario de mezclas</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -801,8 +1204,36 @@ export default function AreaTintasPage() {
               ) : null}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
+
+      {rows && rows.last_page > 1 && mode === "list" ? (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Página {rows.current_page} de {rows.last_page} · {rows.total}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={rows.current_page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={rows.current_page >= rows.last_page || loading}
+              onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -31,6 +31,7 @@ class StoreMaterialRequest extends FormRequest
             'min_stock' => ['nullable', 'numeric', 'min:0'],
             'quantity_on_hand' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id'],
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
         ];
@@ -56,13 +57,37 @@ class StoreMaterialRequest extends FormRequest
                 }
             }
 
-            if ($area === InventoryArea::Tintas->value && ! $this->filled('tinta_subarea')) {
+            if (in_array($area, [InventoryArea::Tintas->value, InventoryArea::CementerioTintas->value], true) && ! $this->filled('tinta_subarea')) {
                 $validator->errors()->add('tinta_subarea', 'Subárea es obligatoria para tintas.');
             }
 
             $allowedUnits = $this->allowedUnitsByArea($area);
             if (! in_array($unit, $allowedUnits, true)) {
                 $validator->errors()->add('unit', 'Unidad inválida para el área seleccionada.');
+            }
+
+            $supplierRequiredAreas = [
+                InventoryArea::Material->value,
+                InventoryArea::Tintas->value,
+                InventoryArea::CementerioTintas->value,
+                InventoryArea::Quimicos->value,
+                InventoryArea::Miscelaneos->value,
+            ];
+            if (in_array($area, $supplierRequiredAreas, true) && ! $this->filled('supplier_id')) {
+                $validator->errors()->add('supplier_id', 'El proveedor es obligatorio para sustratos, tintas, cementerio de tintas, químicos y misceláneos.');
+            }
+
+            if ($this->filled('supplier_id')) {
+                $supplierAllowedAreas = [
+                    InventoryArea::Material->value,
+                    InventoryArea::Tintas->value,
+                    InventoryArea::CementerioTintas->value,
+                    InventoryArea::Quimicos->value,
+                    InventoryArea::Miscelaneos->value,
+                ];
+                if (! in_array($area, $supplierAllowedAreas, true)) {
+                    $validator->errors()->add('supplier_id', 'El proveedor solo aplica a sustratos, tintas, cementerio de tintas, químicos o misceláneos.');
+                }
             }
         });
     }
@@ -75,7 +100,9 @@ class StoreMaterialRequest extends FormRequest
         return match ($area) {
             InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
             InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo'],
-            InventoryArea::Tintas->value, InventoryArea::Quimicos->value => ['kg', 'unidad'],
+            InventoryArea::Tintas->value,
+            InventoryArea::CementerioTintas->value,
+            InventoryArea::Quimicos->value => ['kg', 'unidad'],
             default => ['kg', 'unidad'],
         };
     }

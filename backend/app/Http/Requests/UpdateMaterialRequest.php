@@ -34,8 +34,11 @@ class UpdateMaterialRequest extends FormRequest
             'unit' => ['nullable', 'string', 'max:16'],
             'min_stock' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id'],
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
+            'change_reason' => ['nullable', 'string', 'min:5', 'max:500'],
+            'request_approval' => ['nullable', 'boolean'],
         ];
     }
 
@@ -67,7 +70,7 @@ class UpdateMaterialRequest extends FormRequest
             $hasSubarea = $this->exists('tinta_subarea')
                 ? $this->filled('tinta_subarea')
                 : ($material?->tintaSubareas()->exists() ?? false);
-            if ($area === InventoryArea::Tintas->value && ! $hasSubarea) {
+            if (in_array($area, [InventoryArea::Tintas->value, InventoryArea::CementerioTintas->value], true) && ! $hasSubarea) {
                 $validator->errors()->add('tinta_subarea', 'Subárea es obligatoria para tintas.');
             }
 
@@ -75,7 +78,100 @@ class UpdateMaterialRequest extends FormRequest
             if (! in_array($unit, $allowedUnits, true)) {
                 $validator->errors()->add('unit', 'Unidad inválida para el área seleccionada.');
             }
+
+            $supplierRequiredAreas = [
+                InventoryArea::Material->value,
+                InventoryArea::Tintas->value,
+                InventoryArea::CementerioTintas->value,
+                InventoryArea::Quimicos->value,
+                InventoryArea::Miscelaneos->value,
+            ];
+            if (in_array($area, $supplierRequiredAreas, true)) {
+                if ($this->exists('supplier_id') && ($this->input('supplier_id') === null || $this->input('supplier_id') === '')) {
+                    $validator->errors()->add('supplier_id', 'El proveedor es obligatorio para sustratos, tintas, cementerio de tintas, químicos y misceláneos.');
+                } elseif (! $this->exists('supplier_id') && (! $material?->supplier_id || (int) $material->supplier_id < 1)) {
+                    $validator->errors()->add('supplier_id', 'El proveedor es obligatorio para sustratos, tintas, cementerio de tintas, químicos y misceláneos.');
+                }
+            }
+
+            if ($this->filled('supplier_id')) {
+                $supplierAllowedAreas = [
+                    InventoryArea::Material->value,
+                    InventoryArea::Tintas->value,
+                    InventoryArea::CementerioTintas->value,
+                    InventoryArea::Quimicos->value,
+                    InventoryArea::Miscelaneos->value,
+                ];
+                if (! in_array($area, $supplierAllowedAreas, true)) {
+                    $validator->errors()->add('supplier_id', 'El proveedor solo aplica a sustratos, tintas, cementerio de tintas, químicos o misceláneos.');
+                }
+            }
+
+            if ($material && $this->hasCriticalChanges($material)) {
+                $reason = trim((string) $this->input('change_reason', ''));
+                if ($reason === '') {
+                    $validator->errors()->add('change_reason', 'Debe indicar una razón.');
+                }
+            }
         });
+    }
+
+    private function hasCriticalChanges(Material $material): bool
+    {
+        $criticalFields = [
+            'sku',
+            'name',
+            'barcode',
+            'inventory_area',
+            'tinta_subarea',
+            'micras',
+            'ancho',
+            'unit',
+            'min_stock',
+            'notes',
+            'supplier_id',
+            'product_ids',
+        ];
+
+        foreach ($criticalFields as $field) {
+            if (! $this->exists($field)) {
+                continue;
+            }
+
+            if ($field === 'tinta_subarea') {
+                $currentSubarea = optional($material->tintaSubareas()->first())->subarea;
+                $incomingSubarea = $this->filled('tinta_subarea')
+                    ? trim((string) $this->input('tinta_subarea'))
+                    : null;
+                if ($incomingSubarea !== $currentSubarea) {
+                    return true;
+                }
+                continue;
+            }
+
+            if ($field === 'product_ids') {
+                $current = $material->substrateProducts()->pluck('products.id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+                $incoming = collect($this->input('product_ids', []))
+                    ->map(fn ($id) => (int) $id)
+                    ->filter(fn ($id) => $id > 0)
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->all();
+                if ($incoming !== $current) {
+                    return true;
+                }
+                continue;
+            }
+
+            $incoming = $this->input($field);
+            $current = $material->getAttribute($field);
+            if ((string) $incoming !== (string) $current) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -86,7 +182,9 @@ class UpdateMaterialRequest extends FormRequest
         return match ($area) {
             InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
             InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo'],
-            InventoryArea::Tintas->value, InventoryArea::Quimicos->value => ['kg', 'unidad'],
+            InventoryArea::Tintas->value,
+            InventoryArea::CementerioTintas->value,
+            InventoryArea::Quimicos->value => ['kg', 'unidad'],
             default => ['kg', 'unidad'],
         };
     }

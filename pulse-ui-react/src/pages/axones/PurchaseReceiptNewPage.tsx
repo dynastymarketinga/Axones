@@ -455,7 +455,7 @@ export default function PurchaseReceiptNewPage() {
     })
     setProductModalOpen(false)
     setProductComboOpen(false)
-    setNewProductDraft({ name: "" })
+    setNewProductDraft({ name: "", clientId: "" })
   }
 
   async function createMaterialQuickly() {

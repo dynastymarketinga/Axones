@@ -35,6 +35,13 @@ class InventoryMovementController extends Controller
     {
         $data = $request->validated();
         $type = InventoryMovementType::from($data['movement_type']);
+        $reasonText = trim((string) ($data['reason'] ?? ''));
+        $metadata = is_array($data['metadata'] ?? null) ? $data['metadata'] : [];
+        if ($reasonText !== '') {
+            $metadata['reason_text'] = $reasonText;
+            $metadata['reason_scope'] = 'manual_adjustment';
+            $metadata['reason_code'] = 'inventory_movement_manual';
+        }
 
         $movement = $this->ledger->apply(
             $material,
@@ -43,7 +50,7 @@ class InventoryMovementController extends Controller
             $request->user(),
             $data['reference_type'] ?? null,
             isset($data['reference_id']) ? (int) $data['reference_id'] : null,
-            $data['metadata'] ?? null,
+            $metadata ?: null,
             isset($data['occurred_at']) ? new \DateTimeImmutable($data['occurred_at']) : null,
         );
 

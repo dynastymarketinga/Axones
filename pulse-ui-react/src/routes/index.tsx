@@ -28,8 +28,11 @@ import MaterialRequestsPage from "@/pages/axones/MaterialRequestsPage"
 import PurchaseReceiptsPage from "@/pages/axones/PurchaseReceiptsPage"
 import MiscellaneousReceiptsPage from "@/pages/axones/MiscellaneousReceiptsPage"
 import BobinasPage from "@/pages/axones/BobinasPage"
+import BobinaDetailPage from "@/pages/axones/BobinaDetailPage"
+import BobinaFormPage from "@/pages/axones/BobinaFormPage"
 import BobinaRejectedRegisterPage from "@/pages/axones/BobinaRejectedRegisterPage"
 import InventoryReturnsPage from "@/pages/axones/InventoryReturnsPage"
+import InventoryReturnNewPage from "@/pages/axones/InventoryReturnNewPage"
 import ProgramacionBoardPage from "@/pages/axones/ProgramacionBoardPage"
 import WorkOrdersHubPage from "@/pages/axones/WorkOrdersHubPage"
 import WorkOrderDetailPage from "@/pages/axones/WorkOrderDetailPage"
@@ -37,6 +40,7 @@ import WorkOrderPlanillaPage from "@/pages/axones/WorkOrderPlanillaPage"
 import WorkOrderProductionPreviewPage from "@/pages/axones/WorkOrderProductionPreviewPage"
 import CorteDispatchPage from "@/pages/axones/CorteDispatchPage"
 import DeliveryNotesPage from "@/pages/axones/DeliveryNotesPage"
+import DeliveryNotePreviewPage from "@/pages/axones/DeliveryNotePreviewPage"
 import PrefillNotaEntregaPage from "@/pages/axones/PrefillNotaEntregaPage"
 import AreaRequestsPage from "@/pages/axones/AreaRequestsPage"
 import GateMovementsPage from "@/pages/axones/GateMovementsPage"
@@ -156,11 +160,15 @@ export const router = createBrowserRouter(
           element: guardAxonesRoute({ routeKey: "miscelaneos", element: <MiscellaneousReceiptsPage /> }),
         },
         { path: "miscelaneos/nuevo", element: guardAxonesRoute({ routeKey: "miscelaneos/nuevo", element: <MiscellaneousReceiptNewPage /> }) },
-        { path: "bobinas", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinasPage /> }) },
+        { path: "bobinas/nueva", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaFormPage /> }) },
         {
           path: "bobinas/registrar-rechazada",
           element: guardAxonesRoute({ routeKey: "bobinas/registrar-rechazada", element: <BobinaRejectedRegisterPage /> }),
         },
+        { path: "bobinas/:bobinaId/editar", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaFormPage /> }) },
+        { path: "bobinas/:bobinaId", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaDetailPage /> }) },
+        { path: "bobinas", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinasPage /> }) },
+        { path: "devoluciones/nueva", element: guardAxonesRoute({ routeKey: "devoluciones", element: <InventoryReturnNewPage /> }) },
         { path: "devoluciones", element: guardAxonesRoute({ routeKey: "devoluciones", element: <InventoryReturnsPage /> }) },
         {
           path: "solicitudes-material",
@@ -198,6 +206,10 @@ export const router = createBrowserRouter(
         { path: "nota-entrega-nueva", element: guardAxonesRoute({ routeKey: "nota-entrega-nueva", element: <DeliveryNoteCreatePage /> }) },
         { path: "despacho-corte", element: guardAxonesRoute({ routeKey: "despacho-corte", element: <CorteDispatchPage /> }) },
         { path: "notas-entrega", element: guardAxonesRoute({ routeKey: "notas-entrega", element: <DeliveryNotesPage /> }) },
+        {
+          path: "notas-entrega/:noteId/vista-previa",
+          element: guardAxonesRoute({ routeKey: "notas-entrega", element: <DeliveryNotePreviewPage /> }),
+        },
         { path: "calidad", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityWorkOrderPage /> }) },
         { path: "calidad/vista-previa", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityCertificatePreviewPage /> }) },
         { path: "solicitudes-area", element: guardAxonesRoute({ routeKey: "solicitudes-area", element: <AreaRequestsPage /> }) },

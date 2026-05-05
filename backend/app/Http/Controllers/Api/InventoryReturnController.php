@@ -21,14 +21,14 @@ class InventoryReturnController extends Controller
 
     public function show(InventoryReturn $inventoryReturn): JsonResponse
     {
-        $inventoryReturn->load(['material', 'workOrder']);
+        $inventoryReturn->load(['material.supplier:id,name', 'workOrder']);
 
         return response()->json($inventoryReturn);
     }
 
     public function index(Request $request): JsonResponse
     {
-        $query = InventoryReturn::query()->with(['material', 'workOrder'])->orderByDesc('created_at');
+        $query = InventoryReturn::query()->with(['material.supplier:id,name', 'workOrder'])->orderByDesc('created_at');
 
         if ($request->query('work_order_id')) {
             $query->where('work_order_id', $request->query('work_order_id'));
@@ -62,7 +62,7 @@ class InventoryReturnController extends Controller
             'reason' => $data['reason'] ?? null,
         ]);
 
-        $return->load(['material', 'workOrder']);
+        $return->load(['material.supplier:id,name', 'workOrder']);
 
         return response()->json($return, 201);
     }
@@ -72,6 +72,16 @@ class InventoryReturnController extends Controller
         if ($inventoryReturn->status !== 'pending') {
             throw ValidationException::withMessages([
                 'status' => ['Esta devolución ya fue procesada.'],
+            ]);
+        }
+
+        $reasonText = trim((string) $request->input('reason', ''));
+        if ($reasonText === '') {
+            $reasonText = trim((string) ($inventoryReturn->reason ?? ''));
+        }
+        if ($reasonText === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['Debe indicar una razón.'],
             ]);
         }
 
@@ -91,16 +101,22 @@ class InventoryReturnController extends Controller
                 $request->user(),
                 'inventory_return',
                 $inventoryReturn->getKey(),
-                ['note' => 'Ingreso por devolución aceptada'],
+                [
+                    'note' => 'Ingreso por devolución aceptada',
+                    'reason_scope' => 'manual_adjustment',
+                    'reason_code' => 'inventory_return_accept',
+                    'reason_text' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
+                ],
             );
 
             $inventoryReturn->update([
                 'status' => 'accepted',
                 'accepted_by' => $request->user()->getKey(),
                 'accepted_at' => now(),
+                'reason' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
             ]);
 
-            return $inventoryReturn->fresh(['material', 'workOrder']);
+            return $inventoryReturn->fresh(['material.supplier:id,name', 'workOrder']);
         });
 
         return response()->json($inventoryReturn);

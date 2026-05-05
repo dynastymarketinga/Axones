@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
-import { Barcode, Boxes, CalendarDays, Check, ChevronDown, ChevronsUpDown, Layers, Package2, Ruler, ScanLine, Scale, StickyNote, Warehouse } from "lucide-react"
+import { Barcode, Boxes, Building2, CalendarDays, Check, ChevronDown, ChevronsUpDown, Layers, Package2, Ruler, ScanLine, Scale, StickyNote, Warehouse } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord } from "@/types/api"
+import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord, SupplierRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { ReasonModal } from "@/components/axones/ReasonModal"
 
 type DuplicateCheckResponse = {
   has_duplicates: boolean
@@ -136,16 +137,25 @@ export default function MaterialFormPage() {
   const [newProductDraft, setNewProductDraft] = useState<NewProductDraft>({ name: "", clientId: "" })
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([])
   const [tintaSubarea, setTintaSubarea] = useState<"laminacion" | "superficie" | "prueba_laminacion" | "laminacion_nueva">("laminacion")
+  /** En pestaña Tintas: `tintas` vs `cementerio_tintas` (misma UI, distinto área en API). */
+  const [tintaAreaChoice, setTintaAreaChoice] = useState<"tintas" | "cementerio_tintas">("tintas")
   const [consumibleUnit, setConsumibleUnit] = useState<(typeof MISC_UNITS)[number]>("unidad")
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
+  const [supplierId, setSupplierId] = useState<number | null>(null)
+  const [preferredSupplierOpen, setPreferredSupplierOpen] = useState(false)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateCheckResponse["matches"]>([])
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null)
+  const [reasonModalOpen, setReasonModalOpen] = useState(false)
+  const [pendingReasonPayload, setPendingReasonPayload] = useState<Record<string, unknown> | null>(null)
+  const [changeReason, setChangeReason] = useState("")
   const [skuError, setSkuError] = useState(false)
   const [nameError, setNameError] = useState(false)
   const [micrasError, setMicrasError] = useState(false)
   const [anchoError, setAnchoError] = useState(false)
   const [tintaSubareaError, setTintaSubareaError] = useState(false)
   const [receivedOnError, setReceivedOnError] = useState(false)
+  const [supplierIdError, setSupplierIdError] = useState(false)
 
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
@@ -162,6 +172,7 @@ export default function MaterialFormPage() {
       setName(row.name ?? "")
       setBarcode(row.barcode ?? "")
       setTab(inferTabFromArea(row.inventory_area))
+      setTintaAreaChoice(row.inventory_area === "cementerio_tintas" ? "cementerio_tintas" : "tintas")
       setTintaSubarea((row.tinta_subareas?.[0]?.subarea as "laminacion" | "superficie" | "prueba_laminacion" | "laminacion_nueva") || "laminacion")
       setMicras(row.micras ?? "")
       setAncho(row.ancho ?? "")
@@ -170,6 +181,8 @@ export default function MaterialFormPage() {
       setQuantity(formatToTwoDecimals(row.quantity_on_hand))
       setConsumibleUnit(MISC_UNITS.includes((row.unit ?? "") as (typeof MISC_UNITS)[number]) ? (row.unit as (typeof MISC_UNITS)[number]) : "unidad")
       setSelectedProductIds((row.substrate_products ?? []).map((p) => p.id))
+      const sid = row.supplier_id ?? row.supplier?.id ?? null
+      setSupplierId(typeof sid === "number" && sid > 0 ? sid : null)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar el material.")
@@ -181,6 +194,14 @@ export default function MaterialFormPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    setPreferredSupplierOpen(false)
+  }, [tab])
+
+  useEffect(() => {
+    if (supplierId != null && supplierId > 0) setSupplierIdError(false)
+  }, [supplierId])
 
   useEffect(() => {
     let cancelled = false
@@ -216,6 +237,33 @@ export default function MaterialFormPage() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
+          query: { per_page: 300, page: 1 },
+        })
+        if (!cancelled) setSuppliers(res.data)
+      } catch {
+        if (!cancelled) setSuppliers([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const supplierOptions = useMemo(
+    () => [...suppliers].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    [suppliers],
+  )
+
+  const selectedPreferredSupplier = useMemo(
+    () => (supplierId != null ? supplierOptions.find((s) => s.id === supplierId) ?? null : null),
+    [supplierId, supplierOptions],
+  )
+
   const selectedProductsLabel = useMemo(() => {
     if (!selectedProductIds.length) return "Seleccione productos..."
     const names = products
@@ -245,6 +293,7 @@ export default function MaterialFormPage() {
         quantity_on_hand: Number(quantity || "0"),
         product_ids: selectedProductIds,
         notes: commonNotes || null,
+        supplier_id: supplierId ?? null,
       }
     }
     if (tab === "tintas") {
@@ -252,12 +301,13 @@ export default function MaterialFormPage() {
         sku: sku.trim().toUpperCase(),
         name: name.trim(),
         barcode: null,
-        inventory_area: "tintas",
+        inventory_area: tintaAreaChoice,
         unit: "kg",
         min_stock: Number(minStock || "0"),
         quantity_on_hand: Number(quantity || "0"),
         tinta_subarea: tintaSubarea,
         notes: notes.trim() || null,
+        supplier_id: supplierId ?? null,
       }
     }
     if (tab === "quimicos") {
@@ -270,6 +320,7 @@ export default function MaterialFormPage() {
         min_stock: Number(minStock || "0"),
         quantity_on_hand: Number(quantity || "0"),
         notes: notes.trim() || null,
+        supplier_id: supplierId ?? null,
       }
     }
     return {
@@ -283,6 +334,7 @@ export default function MaterialFormPage() {
       min_stock: Number(minStock || "0"),
       quantity_on_hand: Number(quantity || "0"),
       notes: notes.trim() || null,
+      supplier_id: supplierId ?? null,
     }
   }
 
@@ -320,6 +372,7 @@ export default function MaterialFormPage() {
     const anchoOk = tab !== "sustratos" || (ancho.trim().length > 0 && Number(ancho) > 0)
     const tintaSubareaOk = tab !== "tintas" || Boolean(tintaSubarea)
     const receivedOnOk = receivedOn.trim().length > 0
+    const supplierOk = supplierId != null && supplierId > 0
 
     setSkuError(!skuOk)
     setNameError(!nameOk)
@@ -327,6 +380,7 @@ export default function MaterialFormPage() {
     setAnchoError(!anchoOk)
     setTintaSubareaError(!tintaSubareaOk)
     setReceivedOnError(!receivedOnOk)
+    setSupplierIdError(!supplierOk)
 
     const activeSkuId =
       tab === "sustratos"
@@ -358,6 +412,19 @@ export default function MaterialFormPage() {
       toast.error("La fecha de ingreso es obligatoria.")
       return
     }
+    if (!supplierOk) {
+      const supplierAnchor =
+        tab === "quimicos"
+          ? "material-preferred-supplier-quimicos"
+          : tab === "tintas"
+            ? "material-preferred-supplier-tintas"
+            : tab === "miscelaneo"
+              ? "material-preferred-supplier-misc"
+              : "material-preferred-supplier-sustratos"
+      document.getElementById(supplierAnchor)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("Seleccione un proveedor.")
+      return
+    }
 
     const payload = buildPayloadByTab()
     try {
@@ -377,6 +444,12 @@ export default function MaterialFormPage() {
       }
     } catch {
       // warning is preventive; don't block create/update
+    }
+
+    if (isEdit) {
+      setPendingReasonPayload(payload)
+      setReasonModalOpen(true)
+      return
     }
 
     await persist(payload)
@@ -481,6 +554,71 @@ export default function MaterialFormPage() {
                 }} className={cn("pl-10", FILTER_INPUT_CLASS, anchoError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
                 <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
                 <div className="grid gap-2 md:col-span-3">
+                  <Label htmlFor="material-preferred-supplier-sustratos">Proveedor *</Label>
+                  <Popover open={preferredSupplierOpen} onOpenChange={setPreferredSupplierOpen}>
+                    <PopoverTrigger asChild>
+                      <div className="group/field relative max-w-md">
+                        <Building2
+                          className={cn(
+                            "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within/field:text-primary",
+                            supplierIdError ? "text-red-500" : "text-muted-foreground",
+                          )}
+                          aria-hidden
+                        />
+                        <Button
+                          id="material-preferred-supplier-sustratos"
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={preferredSupplierOpen}
+                          className={cn(
+                            "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                            supplierIdError ? "border-red-500 focus-visible:ring-red-500" : "",
+                          )}
+                        >
+                          <span className={cn("truncate text-left", !selectedPreferredSupplier && "text-muted-foreground")}>
+                            {selectedPreferredSupplier?.name || "Buscar proveedor…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                      <Command shouldFilter>
+                        <CommandInput placeholder="Buscar proveedor..." />
+                        <CommandList className="max-h-60">
+                          <CommandEmpty>No hay coincidencias.</CommandEmpty>
+                          <CommandGroup>
+                            {supplierOptions.map((supplier) => (
+                              <CommandItem
+                                key={supplier.id}
+                                value={`sustratos-${supplier.id}-${supplier.name} ${supplier.rif ?? ""}`}
+                                onSelect={() => {
+                                  setSupplierId(supplier.id)
+                                  setPreferredSupplierOpen(false)
+                                  setSupplierIdError(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    supplierId === supplier.id ? "opacity-100" : "opacity-0",
+                                  )}
+                                  aria-hidden
+                                />
+                                <span>{supplier.name}</span>
+                                {supplier.rif ? (
+                                  <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span>
+                                ) : null}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="grid gap-2 md:col-span-3">
                   <Label>Productos vinculados (opcional)</Label>
                   <div className="flex items-center gap-2">
                     <Popover open={productComboOpen} onOpenChange={setProductComboOpen}>
@@ -571,6 +709,87 @@ export default function MaterialFormPage() {
                   </div>
                 </div>
                 <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                <div className="grid gap-2 md:col-span-3">
+                  <Label htmlFor="material-tinta-area-choice">Área de inventario *</Label>
+                  <div className="group/field relative max-w-md">
+                    <Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden />
+                    <select
+                      id="material-tinta-area-choice"
+                      className={cn("border-input h-10 w-full appearance-none rounded-md border px-3 pl-10 pr-10 text-sm", FILTER_INPUT_CLASS)}
+                      value={tintaAreaChoice}
+                      onChange={(ev) => setTintaAreaChoice(ev.target.value as "tintas" | "cementerio_tintas")}
+                    >
+                      <option value="tintas">Tintas</option>
+                      <option value="cementerio_tintas">Cementerio de tintas</option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  </div>
+                </div>
+                <div className="grid gap-2 md:col-span-3">
+                  <Label htmlFor="material-preferred-supplier-tintas">Proveedor *</Label>
+                  <Popover open={preferredSupplierOpen} onOpenChange={setPreferredSupplierOpen}>
+                    <PopoverTrigger asChild>
+                      <div className="group/field relative max-w-md">
+                        <Building2
+                          className={cn(
+                            "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within/field:text-primary",
+                            supplierIdError ? "text-red-500" : "text-muted-foreground",
+                          )}
+                          aria-hidden
+                        />
+                        <Button
+                          id="material-preferred-supplier-tintas"
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={preferredSupplierOpen}
+                          className={cn(
+                            "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                            supplierIdError ? "border-red-500 focus-visible:ring-red-500" : "",
+                          )}
+                        >
+                          <span className={cn("truncate text-left", !selectedPreferredSupplier && "text-muted-foreground")}>
+                            {selectedPreferredSupplier?.name || "Buscar proveedor…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                      <Command shouldFilter>
+                        <CommandInput placeholder="Buscar proveedor..." />
+                        <CommandList className="max-h-60">
+                          <CommandEmpty>No hay coincidencias.</CommandEmpty>
+                          <CommandGroup>
+                            {supplierOptions.map((supplier) => (
+                              <CommandItem
+                                key={supplier.id}
+                                value={`${supplier.name} ${supplier.rif ?? ""}`}
+                                onSelect={() => {
+                                  setSupplierId(supplier.id)
+                                  setPreferredSupplierOpen(false)
+                                  setSupplierIdError(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    supplierId === supplier.id ? "opacity-100" : "opacity-0",
+                                  )}
+                                  aria-hidden
+                                />
+                                <span>{supplier.name}</span>
+                                {supplier.rif ? (
+                                  <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span>
+                                ) : null}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
             </TabsContent>
 
@@ -587,6 +806,71 @@ export default function MaterialFormPage() {
                 }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
                 <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
                 <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                <div className="grid gap-2 md:col-span-3">
+                  <Label htmlFor="material-preferred-supplier-quimicos">Proveedor *</Label>
+                  <Popover open={preferredSupplierOpen} onOpenChange={setPreferredSupplierOpen}>
+                    <PopoverTrigger asChild>
+                      <div className="group/field relative max-w-md">
+                        <Building2
+                          className={cn(
+                            "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within/field:text-primary",
+                            supplierIdError ? "text-red-500" : "text-muted-foreground",
+                          )}
+                          aria-hidden
+                        />
+                        <Button
+                          id="material-preferred-supplier-quimicos"
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={preferredSupplierOpen}
+                          className={cn(
+                            "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                            supplierIdError ? "border-red-500 focus-visible:ring-red-500" : "",
+                          )}
+                        >
+                          <span className={cn("truncate text-left", !selectedPreferredSupplier && "text-muted-foreground")}>
+                            {selectedPreferredSupplier?.name || "Buscar proveedor…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                      <Command shouldFilter>
+                        <CommandInput placeholder="Buscar proveedor..." />
+                        <CommandList className="max-h-60">
+                          <CommandEmpty>No hay coincidencias.</CommandEmpty>
+                          <CommandGroup>
+                            {supplierOptions.map((supplier) => (
+                              <CommandItem
+                                key={supplier.id}
+                                value={`quimicos-${supplier.id}-${supplier.name} ${supplier.rif ?? ""}`}
+                                onSelect={() => {
+                                  setSupplierId(supplier.id)
+                                  setPreferredSupplierOpen(false)
+                                  setSupplierIdError(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    supplierId === supplier.id ? "opacity-100" : "opacity-0",
+                                  )}
+                                  aria-hidden
+                                />
+                                <span>{supplier.name}</span>
+                                {supplier.rif ? (
+                                  <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span>
+                                ) : null}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
             </TabsContent>
 
@@ -615,6 +899,71 @@ export default function MaterialFormPage() {
                   </div>
                 </div>
                 <div className="grid gap-2"><Label>Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => setMinStock(normalizeDecimalInput(ev.target.value))} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                <div className="grid gap-2 md:col-span-3">
+                  <Label htmlFor="material-preferred-supplier-misc">Proveedor *</Label>
+                  <Popover open={preferredSupplierOpen} onOpenChange={setPreferredSupplierOpen}>
+                    <PopoverTrigger asChild>
+                      <div className="group/field relative max-w-md">
+                        <Building2
+                          className={cn(
+                            "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 group-focus-within/field:text-primary",
+                            supplierIdError ? "text-red-500" : "text-muted-foreground",
+                          )}
+                          aria-hidden
+                        />
+                        <Button
+                          id="material-preferred-supplier-misc"
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={preferredSupplierOpen}
+                          className={cn(
+                            "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                            supplierIdError ? "border-red-500 focus-visible:ring-red-500" : "",
+                          )}
+                        >
+                          <span className={cn("truncate text-left", !selectedPreferredSupplier && "text-muted-foreground")}>
+                            {selectedPreferredSupplier?.name || "Buscar proveedor…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                      <Command shouldFilter>
+                        <CommandInput placeholder="Buscar proveedor..." />
+                        <CommandList className="max-h-60">
+                          <CommandEmpty>No hay coincidencias.</CommandEmpty>
+                          <CommandGroup>
+                            {supplierOptions.map((supplier) => (
+                              <CommandItem
+                                key={supplier.id}
+                                value={`misc-${supplier.id}-${supplier.name} ${supplier.rif ?? ""}`}
+                                onSelect={() => {
+                                  setSupplierId(supplier.id)
+                                  setPreferredSupplierOpen(false)
+                                  setSupplierIdError(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    supplierId === supplier.id ? "opacity-100" : "opacity-0",
+                                  )}
+                                  aria-hidden
+                                />
+                                <span>{supplier.name}</span>
+                                {supplier.rif ? (
+                                  <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span>
+                                ) : null}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
             </TabsContent>
           </Tabs>
@@ -692,7 +1041,13 @@ export default function MaterialFormPage() {
               onClick={() => {
                 const payload = pendingPayload
                 setDuplicateDialogOpen(false)
-                if (payload) void persist(payload)
+                if (!payload) return
+                if (isEdit) {
+                  setPendingReasonPayload(payload)
+                  setReasonModalOpen(true)
+                  return
+                }
+                void persist(payload)
               }}
             >
               Continuar y guardar
@@ -700,6 +1055,23 @@ export default function MaterialFormPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ReasonModal
+        open={reasonModalOpen}
+        loading={saving}
+        initialValue={changeReason}
+        onCancel={() => {
+          setReasonModalOpen(false)
+          setPendingReasonPayload(null)
+        }}
+        onConfirm={(reason) => {
+          setChangeReason(reason)
+          const payload = pendingReasonPayload
+          if (!payload) return
+          setReasonModalOpen(false)
+          void persist({ ...payload, change_reason: reason })
+        }}
+      />
 
       <Dialog
         open={productModalOpen}

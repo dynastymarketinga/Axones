@@ -50,8 +50,15 @@ type CorteDispatchGroup = {
 type DispatchSelectionItem = {
   corte_bobina_usage_id: number
   work_order_id: number
+  work_order_code?: string
+  client_name?: string
   product_id: number | null
+  product_name?: string
+  product_cpe?: string
   description: string
+  quantity_finished_kg?: string
+  quantity_dispatched_kg?: string
+  quantity_remaining_kg?: string
   quantity_kg: string
   pallet_code: string
   bobbin_count: number
@@ -172,10 +179,21 @@ export default function CorteDispatchPage() {
       .map((r) => ({
         corte_bobina_usage_id: Number(r.corte_bobina_usage_id),
         work_order_id: Number(r.work_order_id),
+        work_order_code: r.work_order_code ?? undefined,
+        client_name: r.client_name ?? undefined,
         product_id: r.product_id ? Number(r.product_id) : null,
+        product_name: r.product_name ?? undefined,
+        product_cpe: r.product_cpe ?? undefined,
         description:
-          [r.product_name, r.product_cpe].filter(Boolean).join(" · ") ||
-          "Línea de despacho",
+          [
+            r.client_name ? `Cliente: ${r.client_name}` : null,
+            [r.product_name, r.product_cpe].filter(Boolean).join(" · "),
+          ]
+            .filter(Boolean)
+            .join(" | ") || "Línea de despacho",
+        quantity_finished_kg: String(r.quantity_finished_kg ?? "0.000"),
+        quantity_dispatched_kg: String(r.quantity_dispatched_kg ?? "0.000"),
+        quantity_remaining_kg: String(r.quantity_remaining_kg ?? "0.000"),
         quantity_kg: String(r.quantity_remaining_kg ?? "0.000"),
         pallet_code:
           r.pallet_code ?? r.bobina_code ?? (r.bobina_id ? `BOB-${r.bobina_id}` : ""),
@@ -239,7 +257,7 @@ export default function CorteDispatchPage() {
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Despacho · saldo corte
+          Despacho · producto terminado
         </h1>
         <p className="text-muted-foreground text-sm">
           Material terminado pendiente de nota de entrega.
@@ -316,12 +334,10 @@ export default function CorteDispatchPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Producto consolidado</TableHead>
-              <TableHead>SKU</TableHead>
-              <TableHead>OT</TableHead>
+              <TableHead>OT de producción</TableHead>
+              <TableHead>Cliente</TableHead>
+              <TableHead>Producto</TableHead>
               <TableHead className="text-right">Terminado</TableHead>
-              <TableHead className="text-right">Despachado</TableHead>
-              <TableHead className="text-right">Pendiente</TableHead>
               <TableHead className="text-right">Seleccionar</TableHead>
             </TableRow>
           </TableHeader>
@@ -340,6 +356,16 @@ export default function CorteDispatchPage() {
               pagedRows.map((group) => {
                 const key = groupKey(group)
                 const details = group.rows ?? []
+                const otList = Array.from(
+                  new Set(
+                    details
+                      .map((r) => r.work_order_code ?? (r.work_order_id ? `OT-${r.work_order_id}` : ""))
+                      .filter(Boolean),
+                  ),
+                )
+                const clientList = Array.from(
+                  new Set(details.map((r) => r.client_name ?? "").filter(Boolean)),
+                )
                 const selectableRows = details.filter(
                   (r) =>
                     Number(r.quantity_remaining_kg) > 0 && !!r.corte_bobina_usage_id,
@@ -362,22 +388,21 @@ export default function CorteDispatchPage() {
                           className="font-medium hover:underline"
                           onClick={() => toggleGroup(group)}
                         >
-                          {expanded ? "▼" : "▶"} {group.product_name ?? "Producto"}
+                          {expanded ? "▼" : "▶"} {otList.join(", ") || "OT"}
                         </button>
+                        <div className="text-muted-foreground text-xs">
+                          {group.work_order_count ?? 0} OT(s)
+                        </div>
+                      </TableCell>
+                      <TableCell>{clientList.join(", ") || "-"}</TableCell>
+                      <TableCell>
+                        <div>{group.product_name ?? "Producto"}</div>
                         <div className="text-muted-foreground text-xs">
                           {group.product_cpe ?? "-"}
                         </div>
                       </TableCell>
-                      <TableCell>{group.material_sku ?? "-"}</TableCell>
-                      <TableCell>{group.work_order_count ?? 0}</TableCell>
                       <TableCell className="text-right">
                         {formatKg(group.total_finished_kg)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatKg(group.total_dispatched_kg)}
-                      </TableCell>
-                      <TableCell className="text-right font-medium text-rose-600">
-                        {formatKg(group.total_remaining_kg)}
                       </TableCell>
                       <TableCell className="text-right">
                         <input
@@ -396,14 +421,12 @@ export default function CorteDispatchPage() {
                             key={`detail-${key}-${r.corte_bobina_usage_id ?? idx}`}
                           >
                             <TableCell>
-                              <div className="text-xs">
-                                OT: {r.work_order_code ?? r.work_order_id ?? "-"}
-                              </div>
-                              <div className="text-muted-foreground text-xs">
-                                Cliente: {r.client_name ?? "-"}
-                              </div>
+                              <div className="text-xs">{r.work_order_code ?? r.work_order_id ?? "-"}</div>
                             </TableCell>
-                            <TableCell colSpan={2}>
+                            <TableCell>
+                              <div className="text-xs">{r.client_name ?? "-"}</div>
+                            </TableCell>
+                            <TableCell>
                               <div className="text-xs">
                                 Paleta:{" "}
                                 {r.pallet_code ??
@@ -416,18 +439,6 @@ export default function CorteDispatchPage() {
                             </TableCell>
                             <TableCell className="text-right">
                               {formatKg(r.quantity_finished_kg)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatKg(r.quantity_dispatched_kg)}
-                            </TableCell>
-                            <TableCell
-                              className={
-                                Number(r.quantity_remaining_kg) > 0
-                                  ? "text-right font-medium text-rose-600"
-                                  : "text-right font-medium text-emerald-600"
-                              }
-                            >
-                              {formatKg(r.quantity_remaining_kg)}
                             </TableCell>
                             <TableCell className="text-right">
                               <input

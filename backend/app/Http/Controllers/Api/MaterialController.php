@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\InventoryArea;
 use App\Enums\InventoryMovementType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\MaterialIndexRequest;
 use App\Http\Requests\StoreMaterialRequest;
 use App\Http\Requests\UpdateMaterialRequest;
+use App\Models\InventoryChangeApproval;
+use App\Models\InventoryMovement;
 use App\Models\Material;
 use App\Models\TintaSubarea;
 use App\Services\InventoryLedgerService;
@@ -15,6 +18,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
 
 class MaterialController extends Controller
 {
@@ -30,7 +34,7 @@ class MaterialController extends Controller
             ? Carbon::parse((string) $validated['as_of_date'])->startOfDay()
             : null;
 
-        $query = Material::query()->with(['tintaSubareas', 'substrateProducts:id,name']);
+        $query = Material::query()->with(['tintaSubareas', 'substrateProducts:id,name', 'supplier:id,name']);
         $stockExpr = 'CAST(COALESCE(materials.quantity_on_hand, 0) AS DECIMAL(20,3))';
 
         if ($stockMode === 'as_of_date' && $asOfDate instanceof Carbon) {
@@ -184,7 +188,7 @@ class MaterialController extends Controller
 
             $material = Material::query()->create($data);
 
-            if ($material->inventory_area === 'tintas' && is_string($tintaSubarea) && trim($tintaSubarea) !== '') {
+            if (in_array($material->inventory_area, ['tintas', 'cementerio_tintas'], true) && is_string($tintaSubarea) && trim($tintaSubarea) !== '') {
                 TintaSubarea::query()->updateOrCreate(
                     ['material_id' => $material->getKey()],
                     ['subarea' => trim($tintaSubarea)]
@@ -208,7 +212,7 @@ class MaterialController extends Controller
                 $material->refresh();
             }
 
-            return $material->fresh(['tintaSubareas', 'substrateProducts']);
+            return $material->fresh(['tintaSubareas', 'substrateProducts', 'supplier']);
         });
 
         return response()->json($material, 201);
@@ -216,7 +220,7 @@ class MaterialController extends Controller
 
     public function show(Material $material): JsonResponse
     {
-        $material->load(['tintaSubareas', 'substrateProducts']);
+        $material->load(['tintaSubareas', 'substrateProducts', 'supplier']);
 
         return response()->json($material);
     }
@@ -226,14 +230,36 @@ class MaterialController extends Controller
         $this->assertCanManageMaterials($request);
 
         $data = $request->validated();
+        $reasonText = trim((string) ($data['change_reason'] ?? ''));
+        $requestApproval = (bool) ($data['request_approval'] ?? false);
         $tintaSubarea = $data['tinta_subarea'] ?? null;
         $productIds = collect($data['product_ids'] ?? [])->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->unique()->values()->all();
+        if ($requestApproval && $this->isMajorMaterialChange($material, $data) && ! $this->isApproverRole((string) ($request->user()?->role ?? ''))) {
+            $approval = InventoryChangeApproval::query()->create([
+                'entity_type' => 'material',
+                'entity_id' => $material->getKey(),
+                'change_payload' => $data,
+                'reason_text' => $reasonText,
+                'requested_by' => (int) $request->user()->getKey(),
+                'status' => 'pending',
+            ]);
+
+            return response()->json([
+                'status' => 'pending_approval',
+                'message' => 'Cambio mayor enviado para aprobación de jefatura.',
+                'approval_id' => $approval->id,
+            ], 202);
+        }
+
+        unset($data['change_reason']);
+        unset($data['request_approval']);
         unset($data['tinta_subarea']);
         unset($data['product_ids']);
 
+        $before = $this->snapshotForAudit($material);
         $material->update($data);
 
-        if ($material->inventory_area !== 'tintas') {
+        if (! in_array($material->inventory_area, ['tintas', 'cementerio_tintas'], true)) {
             $material->tintaSubareas()->delete();
         } elseif (is_string($tintaSubarea) && trim($tintaSubarea) !== '') {
             $material->tintaSubareas()->where('subarea', '!=', trim($tintaSubarea))->delete();
@@ -249,7 +275,14 @@ class MaterialController extends Controller
             $material->substrateProducts()->detach();
         }
 
-        return response()->json($material->fresh(['tintaSubareas', 'substrateProducts']));
+        $material->refresh()->load(['tintaSubareas', 'substrateProducts']);
+        $after = $this->snapshotForAudit($material);
+        $changed = $this->changedFields($before, $after);
+        if ($changed !== [] && $reasonText !== '') {
+            $this->auditMaterialChange($material, $request, $reasonText, $changed, $before, $after);
+        }
+
+        return response()->json($material->fresh(['tintaSubareas', 'substrateProducts', 'supplier']));
     }
 
     /**
@@ -262,5 +295,101 @@ class MaterialController extends Controller
         if (! in_array($role, $allowed, true)) {
             throw new AuthorizationException('No autorizado para gestionar materiales.');
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function snapshotForAudit(Material $material): array
+    {
+        return [
+            'sku' => $material->sku,
+            'name' => $material->name,
+            'barcode' => $material->barcode,
+            'inventory_area' => $material->inventory_area,
+            'unit' => $material->unit,
+            'micras' => $material->micras,
+            'ancho' => $material->ancho,
+            'min_stock' => (string) $material->min_stock,
+            'supplier_id' => $material->supplier_id,
+            'notes' => $material->notes,
+            'tinta_subarea' => optional($material->tintaSubareas->first())->subarea,
+            'product_ids' => $material->substrateProducts->pluck('id')->map(fn ($id) => (int) $id)->sort()->values()->all(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array<int, string>
+     */
+    private function changedFields(array $before, array $after): array
+    {
+        $changed = [];
+        foreach (array_keys($before) as $key) {
+            $beforeValue = Arr::get($before, $key);
+            $afterValue = Arr::get($after, $key);
+            $beforeComparable = is_array($beforeValue) ? json_encode($beforeValue) : (string) $beforeValue;
+            $afterComparable = is_array($afterValue) ? json_encode($afterValue) : (string) $afterValue;
+            if ($beforeComparable !== $afterComparable) {
+                $changed[] = $key;
+            }
+        }
+
+        return $changed;
+    }
+
+    /**
+     * @param  array<int, string>  $changedFields
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     */
+    private function auditMaterialChange(
+        Material $material,
+        Request $request,
+        string $reasonText,
+        array $changedFields,
+        array $before,
+        array $after
+    ): void {
+        InventoryMovement::query()->create([
+            'material_id' => $material->getKey(),
+            'movement_type' => InventoryMovementType::AdjustmentAdd->value,
+            'quantity' => '0',
+            'reference_type' => 'inventory_adjustment',
+            'reference_id' => $material->getKey(),
+            'user_id' => $request->user()?->getKey(),
+            'metadata' => [
+                'reason_scope' => 'master_edit',
+                'reason_text' => $reasonText,
+                'reason_code' => 'material_master_update',
+                'changed_fields' => $changedFields,
+                'before' => $before,
+                'after' => $after,
+            ],
+            'occurred_at' => now(),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function isMajorMaterialChange(Material $material, array $payload): bool
+    {
+        if (array_key_exists('inventory_area', $payload) && (string) $payload['inventory_area'] !== (string) $material->inventory_area) {
+            return true;
+        }
+        if (array_key_exists('supplier_id', $payload) && (string) ($payload['supplier_id'] ?? '') !== (string) ($material->supplier_id ?? '')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function isApproverRole(string $role): bool
+    {
+        $normalized = mb_strtolower(trim($role));
+
+        return in_array($normalized, ['boss', 'admin', 'jefe_supremo', 'superadmin', 'inventory_chief', 'jefe_inventario'], true);
     }
 }

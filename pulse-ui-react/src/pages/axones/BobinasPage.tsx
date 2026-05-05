@@ -5,7 +5,7 @@ import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated } from "@/types/api"
+import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -26,17 +26,40 @@ import {
 
 type BobinaRow = {
   id: number
+  code?: string | null
+  material_id?: number
   status: string
   weight_kg: string | null
-  material?: { sku: string; name: string }
+  material?: { sku: string; name: string; supplier?: { id: number; name: string } | null }
   inventory_return?: { work_order_id: number | null }
+}
+
+function bobinaStatusLabel(status: string): string {
+  if (status === "available") return "Disponible"
+  if (status === "issued") return "Despachada"
+  if (status === "consumed") return "Consumida"
+  if (status === "rejected") return "Rechazada"
+  return status
 }
 
 export default function BobinasPage() {
   const [status, setStatus] = useState<string>("all")
+  const [materialId, setMaterialId] = useState<string>("all")
+  const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<BobinaRow> | null>(null)
+
+  const loadMaterials = useCallback(async () => {
+    try {
+      const data = await apiFetch<LaravelPaginated<MaterialRow>>("materials", {
+        query: { per_page: 200, page: 1 },
+      })
+      setMaterials(data.data ?? [])
+    } catch {
+      setMaterials([])
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -46,6 +69,7 @@ export default function BobinasPage() {
           page,
           per_page: 50,
           status: status !== "all" ? status : undefined,
+          material_id: materialId !== "all" ? materialId : undefined,
         },
       })
       setRows(data)
@@ -56,7 +80,11 @@ export default function BobinasPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, status])
+  }, [page, status, materialId])
+
+  useEffect(() => {
+    void loadMaterials()
+  }, [loadMaterials])
 
   useEffect(() => {
     void load()
@@ -72,6 +100,9 @@ export default function BobinasPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="default" size="sm" asChild>
+            <Link to="/bobinas/nueva">Registrar</Link>
+          </Button>
           <Button type="button" variant="outline" size="sm" asChild>
             <Link to="/devoluciones">Devoluciones</Link>
           </Button>
@@ -82,6 +113,28 @@ export default function BobinasPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
+        <div className="grid w-56 gap-2">
+          <Label>Material</Label>
+          <Select
+            value={materialId}
+            onValueChange={(v) => {
+              setMaterialId(v)
+              setPage(1)
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Todos los materiales" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los materiales</SelectItem>
+              {materials.map((m) => (
+                <SelectItem key={m.id} value={String(m.id)}>
+                  {m.sku} · {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="grid w-48 gap-2">
           <Label>Estado</Label>
           <Select
@@ -96,10 +149,10 @@ export default function BobinasPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="available">available</SelectItem>
-              <SelectItem value="issued">issued</SelectItem>
-              <SelectItem value="consumed">consumed</SelectItem>
-              <SelectItem value="rejected">rejected</SelectItem>
+              <SelectItem value="available">{bobinaStatusLabel("available")}</SelectItem>
+              <SelectItem value="issued">{bobinaStatusLabel("issued")}</SelectItem>
+              <SelectItem value="consumed">{bobinaStatusLabel("consumed")}</SelectItem>
+              <SelectItem value="rejected">{bobinaStatusLabel("rejected")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -113,22 +166,25 @@ export default function BobinasPage() {
           <TableHeader>
             <TableRow>
               <TableHead>ID</TableHead>
+              <TableHead>Código</TableHead>
               <TableHead>Material</TableHead>
+              <TableHead>Proveedor</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead>Peso kg</TableHead>
               <TableHead>OT devolución</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows?.data.length ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Sin bobinas.
                 </TableCell>
               </TableRow>
@@ -136,15 +192,29 @@ export default function BobinasPage() {
               rows.data.map((b) => (
                 <TableRow key={b.id}>
                   <TableCell>{b.id}</TableCell>
+                  <TableCell className="font-mono text-sm">{b.code?.trim() ? b.code : "—"}</TableCell>
                   <TableCell>
                     {b.material
                       ? `${b.material.sku} · ${b.material.name}`
                       : "—"}
                   </TableCell>
-                  <TableCell>{b.status}</TableCell>
+                  <TableCell className="text-muted-foreground max-w-[10rem] truncate" title={b.material?.supplier?.name ?? undefined}>
+                    {b.material?.supplier?.name?.trim() ? b.material.supplier.name : "—"}
+                  </TableCell>
+                  <TableCell>{bobinaStatusLabel(b.status)}</TableCell>
                   <TableCell>{b.weight_kg ?? "—"}</TableCell>
                   <TableCell>
                     {b.inventory_return?.work_order_id ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex flex-wrap justify-end gap-1">
+                      <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                        <Link to={`/bobinas/${b.id}`}>Visualizar</Link>
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                        <Link to={`/bobinas/${b.id}/editar`}>Editar</Link>
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

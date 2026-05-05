@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\GateMovementController;
 use App\Http\Controllers\Api\InventoryMovementController;
 use App\Http\Controllers\Api\InventoryMovementsController;
 use App\Http\Controllers\Api\InventoryReturnController;
+use App\Http\Controllers\Api\InventoryChangeApprovalController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\MaterialRequestController;
 use App\Http\Controllers\Api\MiscellaneousReceiptController;
@@ -239,8 +240,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/inventory-returns', [InventoryReturnController::class, 'store']);
     Route::post('/inventory-returns/{inventory_return}/accept', [InventoryReturnController::class, 'accept']);
 
+    Route::get('/inventory-change-approvals', [InventoryChangeApprovalController::class, 'index']);
+    Route::post('/inventory-change-approvals', [InventoryChangeApprovalController::class, 'store']);
+    Route::patch('/inventory-change-approvals/{inventory_change_approval}/decision', [InventoryChangeApprovalController::class, 'decide']);
+
     Route::get('/bobinas', [BobinaController::class, 'index']);
     Route::post('/bobinas', [BobinaController::class, 'store']);
+    Route::get('/bobinas/{bobina}', [BobinaController::class, 'show']);
+    Route::patch('/bobinas/{bobina}', [BobinaController::class, 'update']);
 
     Route::get('/tinta-mixtures', [TintaMixtureController::class, 'index']);
     Route::post('/tinta-mixtures', [TintaMixtureController::class, 'store'])

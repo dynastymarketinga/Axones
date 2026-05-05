@@ -398,6 +398,7 @@ export default function InventoryMovementsPage() {
               <TableHead>Material</TableHead>
               <TableHead>Área</TableHead>
               <TableHead>Cantidad</TableHead>
+              <TableHead>Motivo</TableHead>
               <TableHead>Usuario</TableHead>
               <TableHead>Ref.</TableHead>
             </TableRow>
@@ -405,13 +406,13 @@ export default function InventoryMovementsPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows?.data.length ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Sin movimientos en el rango.
                 </TableCell>
               </TableRow>
@@ -430,6 +431,19 @@ export default function InventoryMovementsPage() {
                   <TableCell>{m.material?.inventory_area ?? "—"}</TableCell>
                   <TableCell>
                     {m.quantity} {m.material?.unit ?? ""}
+                  </TableCell>
+                  <TableCell className="max-w-[240px]">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="truncate text-sm"
+                        title={m.reason ?? undefined}
+                      >
+                        {m.reason ?? "—"}
+                      </span>
+                      {m.is_manual_adjustment ? (
+                        <Badge variant="outline">Ajuste manual</Badge>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell>{m.user?.name ?? "—"}</TableCell>
                   <TableCell className="text-xs">

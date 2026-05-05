@@ -7,6 +7,12 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
+import {
+  AXONES_INVENTORY_FILTER_INPUT_CLASS,
+  AXONES_INVENTORY_PAGE_CLASS,
+  AxonesPageHeader,
+  AxonesTableCard,
+} from "@/components/axones/inventory-page-layout"
 import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Calendar as UiCalendar } from "@/components/ui/calendar"
@@ -276,22 +282,16 @@ export default function PurchaseReceiptsPage() {
   }, [selectedReceipt?.id])
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Recepción de material
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Historial de ingresos registrados en inventario.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <div className={AXONES_INVENTORY_PAGE_CLASS}>
+      <AxonesPageHeader
+        title="Recepción de material"
+        description="Historial de ingresos registrados en inventario."
+        actions={
           <Button type="button" asChild>
             <Link to="/recepciones-nueva">Nueva recepción</Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       {showInitialSkeleton ? (
         <div className="space-y-4">
@@ -300,6 +300,8 @@ export default function PurchaseReceiptsPage() {
         </div>
       ) : (
         <>
+          <AxonesTableCard>
+          <div className="border-b p-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12">
         <div className="grid gap-2 xl:col-span-2">
           <Label htmlFor="receipt-from" className="inline-flex items-center gap-2 font-semibold text-foreground">
@@ -312,7 +314,7 @@ export default function PurchaseReceiptsPage() {
                 id="receipt-from"
                 type="button"
                 variant="outline"
-                className="w-full justify-start border-primary/25 bg-background/90 text-left font-normal"
+                className={`w-full justify-start text-left font-normal ${AXONES_INVENTORY_FILTER_INPUT_CLASS}`}
               >
                 {formatApiDateToDisplay(fromInput)}
               </Button>
@@ -337,7 +339,7 @@ export default function PurchaseReceiptsPage() {
                 id="receipt-to"
                 type="button"
                 variant="outline"
-                className="w-full justify-start border-primary/25 bg-background/90 text-left font-normal"
+                className={`w-full justify-start text-left font-normal ${AXONES_INVENTORY_FILTER_INPUT_CLASS}`}
               >
                 {formatApiDateToDisplay(toInput)}
               </Button>
@@ -360,7 +362,7 @@ export default function PurchaseReceiptsPage() {
             id="receipt-supplier"
             placeholder="Nombre de proveedor..."
             value={supplierInput}
-            className="border-primary/25 bg-background/90 focus-visible:ring-primary/40"
+            className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
             onChange={(ev) => setSupplierInput(ev.target.value)}
             onKeyDown={(ev) => {
               if (ev.key === "Enter") applyFilters()
@@ -376,7 +378,7 @@ export default function PurchaseReceiptsPage() {
             id="receipt-invoice"
             placeholder="Número de factura..."
             value={invoiceInput}
-            className="border-primary/25 bg-background/90 focus-visible:ring-primary/40"
+            className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
             onChange={(ev) => setInvoiceInput(ev.target.value.toUpperCase().slice(0, 15))}
             onKeyDown={(ev) => {
               if (ev.key === "Enter") applyFilters()
@@ -392,7 +394,7 @@ export default function PurchaseReceiptsPage() {
             id="receipt-material"
             placeholder="Código de material..."
             value={materialInput}
-            className="border-primary/25 bg-background/90 focus-visible:ring-primary/40"
+            className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
             onChange={(ev) => setMaterialInput(ev.target.value)}
             onKeyDown={(ev) => {
               if (ev.key === "Enter") applyFilters()
@@ -440,8 +442,9 @@ export default function PurchaseReceiptsPage() {
           </TooltipProvider>
         </div>
           </div>
+          </div>
 
-          <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
+          <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -517,6 +520,7 @@ export default function PurchaseReceiptsPage() {
           </TableBody>
         </Table>
           </div>
+          </AxonesTableCard>
 
           {rows && rows.last_page > 1 ? (
             <div className="flex items-center justify-between text-sm">

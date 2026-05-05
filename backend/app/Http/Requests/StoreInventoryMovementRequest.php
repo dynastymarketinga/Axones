@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Enums\InventoryMovementType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreInventoryMovementRequest extends FormRequest
 {
@@ -24,7 +25,26 @@ class StoreInventoryMovementRequest extends FormRequest
             'reference_type' => ['nullable', 'string', 'max:128'],
             'reference_id' => ['nullable', 'integer'],
             'metadata' => ['nullable', 'array'],
+            'reason' => ['nullable', 'string', 'min:5', 'max:500'],
             'occurred_at' => ['nullable', 'date'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $movementType = (string) $this->input('movement_type');
+            $isManualAdjustment = in_array($movementType, [
+                InventoryMovementType::AdjustmentAdd->value,
+                InventoryMovementType::AdjustmentSub->value,
+            ], true);
+            if (! $isManualAdjustment) {
+                return;
+            }
+
+            if (trim((string) $this->input('reason', '')) === '') {
+                $validator->errors()->add('reason', 'Debe indicar una razón.');
+            }
+        });
     }
 }

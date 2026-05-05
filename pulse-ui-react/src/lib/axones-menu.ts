@@ -20,8 +20,6 @@ import { isAxonesFullAccess, type AxonesMenuNode } from "@/lib/axones-roles"
 const MENU_HIDDEN_URLS = new Set([
   "miscelaneos",
   "miscelaneos/nuevo",
-  "bobinas",
-  "devoluciones",
   "asistente",
 ])
 
@@ -73,6 +71,8 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
         url: "recepciones-oc",
         icon: PackageOpen,
       },
+      { title: "Bobinas", url: "bobinas", icon: Package },
+      { title: "Movimientos", url: "movimientos-inventario", icon: ScrollText },
       {
         title: "Misceláneos",
         url: "#",
@@ -82,8 +82,6 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
           { title: "Nueva (adjuntos)", url: "miscelaneos/nuevo", icon: Receipt },
         ],
       },
-      { title: "Movimientos", url: "movimientos-inventario", icon: ScrollText },
-      { title: "Bobinas", url: "bobinas", icon: Package },
       { title: "Devoluciones", url: "devoluciones", icon: PackageOpen },
     ],
   },
@@ -121,7 +119,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     url: "#",
     icon: Truck,
     items: [
-      { title: "Saldo (corte)", url: "despacho-corte", icon: Truck },
+      { title: "Producto terminado", url: "despacho-corte", icon: Truck },
       { title: "Solicitudes de material", url: "solicitudes-material", icon: ClipboardList },
     ],
   },

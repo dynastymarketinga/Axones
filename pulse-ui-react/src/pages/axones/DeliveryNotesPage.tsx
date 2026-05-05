@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -124,18 +125,19 @@ export default function DeliveryNotesPage() {
               <TableHead>Fecha doc.</TableHead>
               <TableHead>OT</TableHead>
               <TableHead>Cliente</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows?.data.length ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Sin notas.
                 </TableCell>
               </TableRow>
@@ -155,6 +157,11 @@ export default function DeliveryNotesPage() {
                     {n.work_order?.code ?? n.work_order_id ?? "—"}
                   </TableCell>
                   <TableCell>{n.work_order?.client?.name ?? "—"}</TableCell>
+                  <TableCell className="text-right">
+                    <Button type="button" variant="outline" size="sm" asChild>
+                      <Link to={`/notas-entrega/${n.id}/vista-previa`}>Vista previa</Link>
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))
             )}

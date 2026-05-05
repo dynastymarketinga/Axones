@@ -132,7 +132,15 @@ class InventoryMovementsController extends Controller
         $invalidLookup = array_fill_keys($invalidIds, true);
         $paginator->setCollection(
             $paginator->getCollection()->map(function (InventoryMovement $m) use ($invalidLookup) {
+                $metadata = is_array($m->metadata) ? $m->metadata : [];
+                $reasonText = trim((string) ($metadata['reason_text'] ?? $metadata['note'] ?? ''));
+                $reasonScope = trim((string) ($metadata['reason_scope'] ?? ''));
+                $isManualAdjustment = in_array($m->movement_type, ['adjustment_add', 'adjustment_sub'], true)
+                    || $reasonScope === 'manual_adjustment';
                 $m->setAttribute('is_invalid_reference', isset($invalidLookup[$m->id]));
+                $m->setAttribute('reason', $reasonText !== '' ? $reasonText : null);
+                $m->setAttribute('reason_scope', $reasonScope !== '' ? $reasonScope : null);
+                $m->setAttribute('is_manual_adjustment', $isManualAdjustment);
 
                 return $m;
             })

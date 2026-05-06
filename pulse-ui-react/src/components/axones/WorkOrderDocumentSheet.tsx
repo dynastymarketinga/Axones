@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Plus, Trash2 } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { CLIENT_ORDER_MODULE_TITLE } from "@/pages/axones/client-order-i18n"
 import type {
   LaravelPaginated,
   MaterialRow,
@@ -252,9 +253,7 @@ export function WorkOrderDocumentSheet({
           </div>
 
           <div className="space-y-2 rounded-lg border bg-muted/30 p-3 md:col-span-2">
-            <div className="font-medium text-foreground">
-              Pedido del cliente
-            </div>
+            <div className="font-medium text-foreground">{CLIENT_ORDER_MODULE_TITLE}</div>
             {co ? (
               <div className="text-muted-foreground grid gap-2 md:grid-cols-2">
                 <div>
@@ -289,15 +288,14 @@ export function WorkOrderDocumentSheet({
                       ))}
                     </ul>
                   ) : (
-                    <span className="text-xs">Sin líneas en el pedido.</span>
+                    <span className="text-xs">Sin líneas en la orden.</span>
                   )}
                 </div>
               </div>
             ) : (
               <p className="text-muted-foreground text-xs">
-                Esta OT no está ligada a un pedido del cliente en el sistema.
-                Puede enlazarse al crear o editar la orden desde el módulo de
-                pedidos.
+                Esta OT no está ligada a una orden de producción (Pedido del cliente) en el sistema. Puede enlazarse al crear o
+                editar la orden desde ese módulo.
               </p>
             )}
             {workOrder.production_items?.length ? (

@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, useLocation } from "react-router-dom"
+import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom"
 import type { ReactElement } from "react"
 
 import AppLayout from "@/layouts/AppLayout"
@@ -54,7 +54,11 @@ import InventoryAreaPreviewPage from "@/pages/axones/InventoryAreaPreviewPage"
 import ClientFormPage from "@/pages/axones/ClientFormPage"
 import ProductFormPage from "@/pages/axones/ProductFormPage"
 import SupplierFormPage from "@/pages/axones/SupplierFormPage"
+import VendorsPage from "@/pages/axones/VendorsPage"
+import VendorFormPage from "@/pages/axones/VendorFormPage"
+import MastersHubPage from "@/pages/axones/MastersHubPage"
 import PurchaseOrderNewPage from "@/pages/axones/PurchaseOrderNewPage"
+import PurchaseOrderPreviewPage from "@/pages/axones/PurchaseOrderPreviewPage"
 import PurchaseReceiptNewPage from "@/pages/axones/PurchaseReceiptNewPage"
 import PurchaseReceiptPreviewPage from "@/pages/axones/PurchaseReceiptPreviewPage"
 import MiscellaneousReceiptNewPage from "@/pages/axones/MiscellaneousReceiptNewPage"
@@ -117,14 +121,45 @@ export const router = createBrowserRouter(
         { index: true, element: <AxonesDashboardPage /> },
         { path: "resumen", element: guardAxonesRoute({ routeKey: "resumen", element: <AxonesDashboardPage /> }) },
         { path: "alertas", element: guardAxonesRoute({ routeKey: "alertas", element: <AxonesOperationalAlertsPage /> }) },
+        { path: "datos-maestros", element: guardAxonesRoute({ routeKey: "datos-maestros", element: <MastersHubPage /> }) },
         { path: "clientes", element: guardAxonesRoute({ routeKey: "clientes", element: <ClientsPage /> }) },
         { path: "clientes/form", element: guardAxonesRoute({ routeKey: "clientes", element: <ClientFormPage /> }) },
         { path: "productos", element: guardAxonesRoute({ routeKey: "productos", element: <ProductsPage /> }) },
         { path: "productos/form", element: guardAxonesRoute({ routeKey: "productos", element: <ProductFormPage /> }) },
         { path: "proveedores", element: guardAxonesRoute({ routeKey: "proveedores", element: <SuppliersPage /> }) },
         { path: "proveedores/form", element: guardAxonesRoute({ routeKey: "proveedores", element: <SupplierFormPage /> }) },
-        { path: "ordenes-compra", element: guardAxonesRoute({ routeKey: "ordenes-compra", element: <PurchaseOrdersPage /> }) },
-        { path: "ordenes-compra/nueva", element: guardAxonesRoute({ routeKey: "ordenes-compra/nueva", element: <PurchaseOrderNewPage /> }) },
+        { path: "vendedores", element: guardAxonesRoute({ routeKey: "vendedores", element: <VendorsPage /> }) },
+        { path: "vendedores/form", element: guardAxonesRoute({ routeKey: "vendedores/form", element: <VendorFormPage /> }) },
+        {
+          path: "ordenes-compra",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-compra",
+            element: <Outlet />,
+          }),
+          children: [
+            {
+              index: true,
+              element: guardAxonesRoute({
+                routeKey: "ordenes-compra",
+                element: <PurchaseOrdersPage />,
+              }),
+            },
+            {
+              path: "nueva",
+              element: guardAxonesRoute({
+                routeKey: "ordenes-compra/nueva",
+                element: <PurchaseOrderNewPage />,
+              }),
+            },
+            {
+              path: ":id/vista-previa",
+              element: guardAxonesRoute({
+                routeKey: "ordenes-compra",
+                element: <PurchaseOrderPreviewPage />,
+              }),
+            },
+          ],
+        },
         { path: "ordenes-cliente", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrdersPage /> }) },
         { path: "ordenes-cliente/nueva", element: guardAxonesRoute({ routeKey: "ordenes-cliente/nueva", element: <ClientOrderNewPage /> }) },
         { path: "ordenes-cliente/:coId/edit", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderEditPage /> }) },

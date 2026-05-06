@@ -20,8 +20,14 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(AxonesUsersSeeder::class);
 
-        /** @var AxonesDemoDataService $demo */
-        $demo = app(AxonesDemoDataService::class);
-        $demo->seed(20);
+        // Por defecto, no cargar datos demo para evitar contaminar pruebas reales.
+        // Para habilitar demo: definir AXONES_DEMO_SEED=1 (o true) en el .env.
+        $flag = strtolower(trim((string) env('AXONES_DEMO_SEED', '0')));
+        $seedDemo = in_array($flag, ['1', 'true', 'yes', 'on'], true);
+        if ($seedDemo) {
+            /** @var AxonesDemoDataService $demo */
+            $demo = app(AxonesDemoDataService::class);
+            $demo->seed(20);
+        }
     }
 }

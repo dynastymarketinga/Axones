@@ -2,10 +2,24 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\SpanishMultilineValidation;
+use App\Support\RifNormalizer;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreClientRequest extends FormRequest
 {
+    use SpanishMultilineValidation;
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('rif')) {
+            $this->merge([
+                'rif' => RifNormalizer::normalize($this->input('rif')),
+            ]);
+        }
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -17,10 +31,11 @@ class StoreClientRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
-            'rif' => ['required', 'string', 'max:32'],
+            'name' => ['required', 'string', 'max:255', Rule::unique('clients', 'name')],
+            'rif' => ['required', 'string', 'max:32', Rule::unique('clients', 'rif')],
             'state' => ['nullable', 'string', 'max:255'],
             'city' => ['nullable', 'string', 'max:255'],
+            'vendor_id' => ['nullable', 'integer', 'exists:vendors,id'],
             'address' => ['nullable', 'string', 'max:2000'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => [
@@ -45,6 +60,14 @@ class StoreClientRequest extends FormRequest
                     }
                 },
             ],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'name.unique' => 'Este cliente ya existe (nombre).',
+            'rif.unique' => 'Este RIF ya existe.',
         ];
     }
 }

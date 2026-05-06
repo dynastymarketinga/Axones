@@ -1,15 +1,92 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { SupplierRecord } from "@/types/api"
+import type { LaravelPaginated, SupplierRecord } from "@/types/api"
+import { getStoredUser } from "@/lib/auth-storage"
+import { normalizeRole } from "@/lib/axones-roles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
+import { ArrowLeft, Hash, Mail, MapPin, Phone, UserRound } from "lucide-react"
+
+const RIF_LETTERS = ["J", "V", "E", "G", "P", "C"] as const
+
+const fieldLabelClass = "leading-snug"
+
+const fieldIconClass =
+  "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors"
+
+const inputWithIconClass = "h-9 pl-10 leading-none md:text-sm"
+
+const PHONE_MAX_DIGITS = 15
+
+/** Límites alineados con ClientFormPage; teléfono en API suppliers hasta 64, UI igual que clientes. */
+const LIM = {
+  name: 255,
+  address: 2000,
+  email: 255,
+  phone: 22,
+} as const
+
+function clampStr(s: string, max: number): string {
+  return s.slice(0, max)
+}
+
+function sanitizePhoneInput(raw: string): string {
+  return raw.replace(/[^\d+().\-\s]/g, "").slice(0, LIM.phone)
+}
+
+function onlyDigits(s: string, maxLen: number): string {
+  return s.replace(/\D/g, "").slice(0, maxLen)
+}
+
+function looseRifNumberInput(raw: string, currentLetter: string): { letter: string; digits: string } {
+  const u = raw.trim().toUpperCase()
+  const withLead = u.match(/^([JVEGPC])\s*[^\d]*([\s\S]*)$/)
+  let letter = currentLetter.trim().toUpperCase()
+  let tail = u
+  if (withLead && RIF_LETTERS.includes(withLead[1] as (typeof RIF_LETTERS)[number])) {
+    letter = withLead[1]
+    tail = withLead[2] ?? ""
+  }
+  const digits = onlyDigits(tail, 9)
+  return { letter, digits }
+}
+
+function parseRifFromStored(rif: string | null | undefined): {
+  letter: string
+  main: string
+  dv: string
+} {
+  const s = (rif ?? "").trim().toUpperCase().replace(/\s+/g, "")
+  if (!s) return { letter: "", main: "", dv: "" }
+  const withHyphens = s.match(/^([JVEGPC])-(\d{7,8})-(\d)$/)
+  if (withHyphens) {
+    return { letter: withHyphens[1], main: withHyphens[2], dv: withHyphens[3] }
+  }
+  const compact = s.replace(/[.\-_]/g, "")
+  const m = compact.match(/^([JVEGPC])(\d{8,9})$/)
+  if (!m) return { letter: "", main: "", dv: "" }
+  const digits = m[2]
+  return {
+    letter: m[1],
+    main: digits.slice(0, -1),
+    dv: digits.slice(-1),
+  }
+}
 
 export default function SupplierFormPage() {
   const location = useLocation()
@@ -22,17 +99,32 @@ export default function SupplierFormPage() {
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState("")
-  const [rif, setRif] = useState("")
+  const [rifLetter, setRifLetter] = useState("")
+  const [rifDigits, setRifDigits] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
   const [address, setAddress] = useState("")
+
+  const session = getStoredUser()
+  const isInventory = (() => {
+    const r = normalizeRole(session?.role)
+    return r === "inventory" || r === "inventario"
+  })()
 
   const [errors, setErrors] = useState<{
     name?: string
     rif?: string
     phone?: string
     email?: string
+    address?: string
   }>({})
+
+  const nameRef = useRef<HTMLInputElement>(null)
+  const rifLetterTriggerRef = useRef<HTMLButtonElement>(null)
+  const rifDigitsRef = useRef<HTMLInputElement>(null)
+  const phoneRef = useRef<HTMLInputElement>(null)
+  const emailRef = useRef<HTMLInputElement>(null)
+  const addressRef = useRef<HTMLTextAreaElement>(null)
 
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
@@ -44,7 +136,7 @@ export default function SupplierFormPage() {
     const raw = value.trim().toUpperCase().replace(/\s+/g, "")
     if (!raw) return ""
     const compact = raw.replace(/-/g, "")
-    const m = compact.match(/^([JVEGPC])(\d{7,9})$/)
+    const m = compact.match(/^([JVEGPC])(\d{8,9})$/)
     if (!m) return raw
     const letter = m[1]
     const digits = m[2]
@@ -54,35 +146,117 @@ export default function SupplierFormPage() {
     return `${letter}-${main}-${dv}`
   }, [])
 
+  const composeRifForSubmit = useCallback((): string => {
+    const d = onlyDigits(rifDigits, 9)
+    const L = rifLetter.trim().toUpperCase()
+    if (!L || d.length < 8) return ""
+    return normalizeRif(`${L}${d}`)
+  }, [normalizeRif, rifDigits, rifLetter])
+
   const validate = useCallback(
-    (draft?: { name?: string; rif?: string; phone?: string; email?: string }) => {
-      const n = (draft?.name ?? name).trim()
-      const r = (draft?.rif ?? rif).trim()
+    (draft?: {
+      name?: string
+      rifLetter?: string
+      rifDigits?: string
+      phone?: string
+      email?: string
+      address?: string
+    }) => {
+      const nRaw = draft?.name ?? name
+      const n = nRaw.trim()
+      const L = (draft?.rifLetter ?? rifLetter).trim().toUpperCase()
+      const bodyRaw = draft?.rifDigits ?? rifDigits
+      const d = onlyDigits(bodyRaw, 9)
       const p = (draft?.phone ?? phone).trim()
       const e = (draft?.email ?? email).trim()
+      const addr = (draft?.address ?? address).trim()
 
       const next: typeof errors = {}
       if (!n) next.name = "El nombre es obligatorio."
+      else if (n.length > LIM.name) next.name = `Máximo ${LIM.name} caracteres.`
 
-      if (r) {
-        const rr = normalizeRif(r)
-        if (!/^[JVEGPC]-\d{7,8}-\d$/.test(rr)) next.rif = "RIF inválido. Ej: J-12345678-9"
+      if (addr.length > LIM.address) next.address = `Máximo ${LIM.address} caracteres.`
+
+      if (!L && d.length === 0) {
+        // RIF opcional en proveedores (API nullable)
+      } else if (!L && d.length > 0) {
+        next.rif = "Elija la letra (J, V, E, G, P o C)."
+      } else if (L && !RIF_LETTERS.includes(L as (typeof RIF_LETTERS)[number])) {
+        next.rif = "Elija la letra (J, V, E, G, P o C)."
+      } else if (L && d.length === 0) {
+        next.rif = "Ingrese el número (puede pegar 2818787-4 o 123456789)."
+      } else if (d.length < 8) {
+        next.rif = "Faltan dígitos (8+verificador o 7+verificador)."
+      } else if (d.length === 8) {
+        const composed = normalizeRif(`${L}${d}`)
+        if (!/^[JVEGPC]-\d{7}-\d$/.test(composed)) {
+          next.rif = "RIF inválido: 8 cifras no encajan; pruebe 9 cifras (estándar J-12345678-9)."
+        }
+      } else {
+        const composed = normalizeRif(`${L}${d}`)
+        if (!/^[JVEGPC]-\d{8}-\d$/.test(composed)) {
+          next.rif = "RIF inválido: revise número y verificador."
+        }
       }
 
       if (p) {
-        const compact = p.replace(/[^\d]/g, "")
-        if (compact.length < 7) next.phone = "Teléfono inválido."
-        else if (!/^[+\d()\-\s.]+$/.test(p)) next.phone = "Teléfono inválido."
+        if (p.length > LIM.phone) next.phone = `Máximo ${LIM.phone} caracteres.`
+        else if (/[a-zA-Z]/.test(p)) next.phone = "No use letras en el teléfono."
+        else {
+          const compact = p.replace(/[^\d]/g, "")
+          if (compact.length < 7) next.phone = "Teléfono inválido: se requieren al menos 7 dígitos."
+          else if (compact.length > PHONE_MAX_DIGITS)
+            next.phone = `Teléfono inválido: máximo ${PHONE_MAX_DIGITS} dígitos.`
+          else if (!/^[+\d()\-\s.]+$/.test(p)) next.phone = "Teléfono inválido: use dígitos y separadores habituales."
+        }
       }
 
       if (e) {
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) next.email = "Correo inválido."
+        if (e.length > LIM.email) next.email = `Máximo ${LIM.email} caracteres.`
+        else if (!e.includes("@")) next.email = "El correo debe incluir @."
+        else {
+          const parts = e.split("@")
+          if (parts.length !== 2) next.email = "Use una sola arroba (@)."
+          else {
+            const [local, domain] = parts
+            if (!local?.trim() || !domain?.trim())
+              next.email = "Correo inválido: texto antes y después de @."
+          }
+        }
       }
 
       setErrors(next)
       return next
     },
-    [email, name, normalizeRif, phone, rif],
+    [address, email, name, normalizeRif, phone, rifDigits, rifLetter],
+  )
+
+  const checkDuplicateSupplier = useCallback(
+    async (field: "name" | "rif", value: string) => {
+      const v = value.trim()
+      if (!v) return
+      try {
+        const res = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
+          query: { q: v, per_page: 20, page: 1 },
+        })
+        const list = res.data ?? []
+        const matches = list.filter((s) => {
+          if (supplierId && s.id === supplierId) return false
+          if (field === "rif") return String(s.rif ?? "").trim().toUpperCase() === v.toUpperCase()
+          return String(s.name ?? "").trim().toLowerCase() === v.toLowerCase()
+        })
+        if (matches.length) {
+          setErrors((prev) => ({
+            ...prev,
+            [field]: field === "rif" ? "Este RIF ya existe." : "Este proveedor ya existe (nombre).",
+          }))
+          toast.error(field === "rif" ? "Este RIF ya existe." : "Este proveedor ya existe (nombre).")
+        }
+      } catch {
+        // chequeo preventivo
+      }
+    },
+    [supplierId],
   )
 
   const load = useCallback(async () => {
@@ -90,11 +264,13 @@ export default function SupplierFormPage() {
     setLoading(true)
     try {
       const s = await apiFetch<SupplierRecord>(`suppliers/${supplierId}`)
-      setName(s.name ?? "")
-      setRif(s.rif ?? "")
-      setEmail(s.email ?? "")
-      setPhone(s.phone ?? "")
-      setAddress(s.address ?? "")
+      setName(clampStr(s.name ?? "", LIM.name))
+      const parts = parseRifFromStored(s.rif)
+      setRifLetter(parts.letter)
+      setRifDigits(parts.main + parts.dv)
+      setEmail(clampStr(s.email ?? "", LIM.email))
+      setPhone(sanitizePhoneInput(s.phone ?? ""))
+      setAddress(clampStr(s.address ?? "", LIM.address))
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar el proveedor.")
@@ -107,22 +283,51 @@ export default function SupplierFormPage() {
     void load()
   }, [load])
 
+  function focusFirstError(v: typeof errors) {
+    requestAnimationFrame(() => {
+      if (v.name) {
+        nameRef.current?.focus()
+        return
+      }
+      if (v.rif) {
+        const letterOk =
+          rifLetter.trim() !== "" &&
+          RIF_LETTERS.includes(rifLetter.trim().toUpperCase() as (typeof RIF_LETTERS)[number])
+        if (!letterOk) rifLetterTriggerRef.current?.focus()
+        else rifDigitsRef.current?.focus()
+        return
+      }
+      if (v.phone) {
+        phoneRef.current?.focus()
+        return
+      }
+      if (v.email) {
+        emailRef.current?.focus()
+        return
+      }
+      if (v.address) addressRef.current?.focus()
+    })
+  }
+
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
     const v = validate()
     if (Object.keys(v).length) {
       toast.error("Revisa los campos marcados.")
+      focusFirstError(v)
       return
     }
     setSaving(true)
     try {
-      const normalizedRif = normalizeRif(rif)
-      const body = {
+      const normalizedRif = composeRifForSubmit().trim()
+      const body: Record<string, unknown> = {
         name: name.trim(),
-        rif: normalizedRif.trim() || null,
-        email: email.trim() || null,
-        phone: phone.trim() || null,
-        address: address.trim() || null,
+        rif: normalizedRif || null,
+      }
+      if (!isInventory) {
+        body.email = email.trim() || null
+        body.phone = phone.trim() || null
+        body.address = address.trim() || null
       }
       if (isEdit && supplierId) {
         await apiFetch<SupplierRecord>(`suppliers/${supplierId}`, {
@@ -140,8 +345,20 @@ export default function SupplierFormPage() {
         navigate(returnTo)
       }
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo guardar.")
+      if (e instanceof ApiError) {
+        const errs = e.body?.errors
+        if (e.status === 422 && errs && Object.keys(errs).length) {
+          const msg = Object.values(errs)
+            .flat()
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .filter((x, i, a) => a.indexOf(x) === i)
+            .join("\n")
+          toast.error(msg || e.message)
+        } else {
+          toast.error(e.message)
+        }
+      } else toast.error("No se pudo guardar.")
     } finally {
       setSaving(false)
     }
@@ -158,8 +375,10 @@ export default function SupplierFormPage() {
             Complete o actualice los datos del proveedor.
           </p>
         </div>
-        <Button type="button" variant="outline" asChild>
-          <Link to={returnTo}>Volver al listado</Link>
+        <Button type="button" variant="outline" size="icon" asChild>
+          <Link to={returnTo} title="Volver al listado" aria-label="Volver al listado">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
         </Button>
       </div>
 
@@ -167,100 +386,247 @@ export default function SupplierFormPage() {
         <p className="text-muted-foreground text-sm">Cargando…</p>
       ) : (
         <form
+          noValidate
           onSubmit={(ev) => void submit(ev)}
           className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
         >
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 md:items-start">
             <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="s-name">Nombre *</Label>
-              <Input
-                id="s-name"
-                value={name}
-                onChange={(ev) => {
-                  setName(ev.target.value)
-                  if (errors.name) validate({ name: ev.target.value })
-                }}
-                aria-invalid={Boolean(errors.name)}
-                required
-              />
-              {errors.name ? (
-                <p className="text-destructive text-xs">{errors.name}</p>
-              ) : null}
+              <Label htmlFor="s-name" className={fieldLabelClass}>
+                Nombre *
+              </Label>
+              <div className="group/field relative">
+                <UserRound
+                  className={cn(
+                    fieldIconClass,
+                    errors.name
+                      ? "text-destructive"
+                      : "text-muted-foreground group-focus-within/field:text-primary",
+                  )}
+                  aria-hidden
+                />
+                <Input
+                  ref={nameRef}
+                  id="s-name"
+                  className={inputWithIconClass}
+                  maxLength={LIM.name}
+                  value={name}
+                  onChange={(ev) => {
+                    const next = clampStr(ev.target.value, LIM.name)
+                    setName(next)
+                    if (errors.name) validate({ name: next })
+                  }}
+                  onBlur={() => {
+                    validate({ name })
+                    void checkDuplicateSupplier("name", name)
+                  }}
+                  aria-invalid={Boolean(errors.name)}
+                  autoComplete="organization"
+                  placeholder="Ej. Distribuidora Los Andes C.A."
+                />
+              </div>
+              {errors.name ? <p className="text-destructive text-xs">{errors.name}</p> : null}
             </div>
 
+            <div className="grid min-w-0 gap-2 gap-x-4 md:col-span-2 md:grid-cols-2 md:gap-y-2">
+              <Label htmlFor="s-rif-digits" className={cn(fieldLabelClass, "md:col-start-1 md:row-start-1")}>
+                RIF
+              </Label>
+              <div
+                className={cn(
+                  "flex min-h-9 min-w-0 items-stretch overflow-hidden rounded-md border border-input bg-background shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring md:col-start-1 md:row-start-2",
+                  errors.rif && "border-destructive focus-within:ring-destructive",
+                )}
+              >
+                <Select
+                  value={rifLetter || "__clear"}
+                  onValueChange={(val) => {
+                    const L = val === "__clear" ? "" : val
+                    setRifLetter(L)
+                    if (errors.rif) validate({ rifLetter: L, rifDigits })
+                  }}
+                >
+                  <SelectTrigger
+                    ref={rifLetterTriggerRef}
+                    aria-label="Letra del RIF"
+                    className="h-9 w-[3.25rem] shrink-0 self-stretch rounded-none border-0 border-r border-input bg-muted/50 px-2 shadow-none ring-offset-0 focus:ring-0 focus:ring-offset-0 data-[placeholder]:text-muted-foreground [&>svg]:h-3.5 [&>svg]:w-3.5"
+                    aria-invalid={Boolean(errors.rif)}
+                  >
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__clear">—</SelectItem>
+                    {RIF_LETTERS.map((letter) => (
+                      <SelectItem key={letter} value={letter}>
+                        {letter}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="group/rifdigits relative flex min-h-9 min-w-0 flex-1 items-center">
+                  <Hash
+                    className={cn(
+                      fieldIconClass,
+                      errors.rif
+                        ? "text-destructive"
+                        : "text-muted-foreground group-focus-within/rifdigits:text-primary",
+                    )}
+                    aria-hidden
+                  />
+                  <Input
+                    ref={rifDigitsRef}
+                    id="s-rif-digits"
+                    className="h-9 min-w-0 flex-1 rounded-none border-0 bg-transparent py-0 pl-9 pr-3 font-mono text-sm leading-none shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="2818787-4 o 123456789"
+                    value={rifDigits}
+                    onChange={(ev) => {
+                      const { letter: nextL, digits: nextD } = looseRifNumberInput(ev.target.value, rifLetter)
+                      if (nextL !== rifLetter) setRifLetter(nextL)
+                      setRifDigits(nextD)
+                      if (errors.rif) validate({ rifLetter: nextL, rifDigits: nextD })
+                    }}
+                    onBlur={() => {
+                      const { letter: nextL, digits: nextD } = looseRifNumberInput(rifDigits, rifLetter)
+                      if (nextL !== rifLetter) setRifLetter(nextL)
+                      if (nextD !== rifDigits) setRifDigits(nextD)
+                      validate({ rifLetter: nextL, rifDigits: nextD })
+                      const composed = normalizeRif(`${nextL}${nextD}`)
+                      if (composed) void checkDuplicateSupplier("rif", composed)
+                    }}
+                    aria-invalid={Boolean(errors.rif)}
+                  />
+                </div>
+              </div>
+              <div className="min-h-[1.125rem] md:col-start-1 md:row-start-3">
+                {errors.rif ? (
+                  <p className="text-destructive text-xs leading-tight">{errors.rif}</p>
+                ) : null}
+              </div>
+
+              {!isInventory ? (
+                <>
+                  <Label htmlFor="s-phone" className={cn(fieldLabelClass, "md:col-start-2 md:row-start-1")}>
+                    Teléfono
+                  </Label>
+                  <div className="group/field relative min-w-0 md:col-start-2 md:row-start-2">
+                    <Phone
+                      className={cn(
+                        fieldIconClass,
+                        errors.phone
+                          ? "text-destructive"
+                          : "text-muted-foreground group-focus-within/field:text-primary",
+                      )}
+                      aria-hidden
+                    />
+                    <Input
+                      ref={phoneRef}
+                      id="s-phone"
+                      className={inputWithIconClass}
+                      maxLength={LIM.phone}
+                      value={phone}
+                      onChange={(ev) => {
+                        const next = sanitizePhoneInput(ev.target.value)
+                        setPhone(next)
+                        if (errors.phone) validate({ phone: next })
+                      }}
+                      onBlur={() => validate({ phone })}
+                      placeholder="+58 412 0000000"
+                      aria-invalid={Boolean(errors.phone)}
+                      autoComplete="tel"
+                    />
+                  </div>
+                  <div className="min-h-[1.125rem] md:col-start-2 md:row-start-3">
+                    {errors.phone ? (
+                      <p className="text-destructive text-xs leading-tight">{errors.phone}</p>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          {!isInventory ? (
             <div className="grid gap-2">
-              <Label htmlFor="s-rif">RIF</Label>
-              <Input
-                id="s-rif"
-                value={rif}
-                onChange={(ev) => {
-                  setRif(ev.target.value)
-                  if (errors.rif) validate({ rif: ev.target.value })
-                }}
-                onBlur={() => {
-                  const n = normalizeRif(rif)
-                  if (n !== rif) setRif(n)
-                  validate({ rif: n })
-                }}
-                placeholder="J-12345678-9"
-                aria-invalid={Boolean(errors.rif)}
-              />
-              {errors.rif ? (
-                <p className="text-destructive text-xs">{errors.rif}</p>
-              ) : null}
+              <Label htmlFor="s-email" className={fieldLabelClass}>
+                Correo
+              </Label>
+              <div className="group/field relative">
+                <Mail
+                  className={cn(
+                    fieldIconClass,
+                    errors.email
+                      ? "text-destructive"
+                      : "text-muted-foreground group-focus-within/field:text-primary",
+                  )}
+                  aria-hidden
+                />
+                <Input
+                  ref={emailRef}
+                  id="s-email"
+                  type="text"
+                  inputMode="email"
+                  className={inputWithIconClass}
+                  maxLength={LIM.email}
+                  value={email}
+                  onChange={(ev) => {
+                    const next = clampStr(ev.target.value, LIM.email)
+                    setEmail(next)
+                    if (errors.email) validate({ email: next })
+                  }}
+                  onBlur={() => validate({ email })}
+                  placeholder="compras@proveedor.com"
+                  aria-invalid={Boolean(errors.email)}
+                  autoComplete="email"
+                />
+              </div>
+              {errors.email ? <p className="text-destructive text-xs">{errors.email}</p> : null}
             </div>
+          ) : null}
 
+          {!isInventory ? (
             <div className="grid gap-2">
-              <Label htmlFor="s-phone">Teléfono</Label>
-              <Input
-                id="s-phone"
-                value={phone}
-                onChange={(ev) => {
-                  setPhone(ev.target.value)
-                  if (errors.phone) validate({ phone: ev.target.value })
-                }}
-                onBlur={() => validate()}
-                placeholder="+58 412 0000000"
-                aria-invalid={Boolean(errors.phone)}
-              />
-              {errors.phone ? (
-                <p className="text-destructive text-xs">{errors.phone}</p>
-              ) : null}
+              <Label htmlFor="s-address" className={fieldLabelClass}>
+                Dirección (opcional)
+              </Label>
+              <div className="group/field relative">
+                <MapPin
+                  className={cn(
+                    "pointer-events-none absolute left-3 top-3 h-4 w-4 transition-colors",
+                    errors.address
+                      ? "text-destructive"
+                      : "text-muted-foreground group-focus-within/field:text-primary",
+                  )}
+                  aria-hidden
+                />
+                <Textarea
+                  ref={addressRef}
+                  id="s-address"
+                  rows={4}
+                  className="h-[7.5rem] min-h-[7.5rem] max-h-[7.5rem] resize-none overflow-y-auto pl-10 pt-2 md:text-sm"
+                  maxLength={LIM.address}
+                  value={address}
+                  onChange={(ev) => {
+                    const next = clampStr(ev.target.value, LIM.address)
+                    setAddress(next)
+                    if (errors.address) validate({ address: next })
+                  }}
+                  onBlur={() => validate({ address })}
+                  autoComplete="street-address"
+                  aria-invalid={Boolean(errors.address)}
+                  placeholder="Ej. Av. Principal, edificio X, local 2"
+                />
+              </div>
+              {errors.address ? <p className="text-destructive text-xs">{errors.address}</p> : null}
             </div>
-          </div>
+          ) : null}
 
-          <div className="grid gap-2">
-            <Label htmlFor="s-email">Correo</Label>
-            <Input
-              id="s-email"
-              type="email"
-              value={email}
-              onChange={(ev) => {
-                setEmail(ev.target.value)
-                if (errors.email) validate({ email: ev.target.value })
-              }}
-              onBlur={() => validate()}
-              placeholder="compras@proveedor.com"
-              aria-invalid={Boolean(errors.email)}
-            />
-            {errors.email ? (
-              <p className="text-destructive text-xs">{errors.email}</p>
-            ) : null}
+          <div className="flex justify-center pt-2">
+            <Button type="submit" disabled={saving} className="min-w-[12rem]">
+              {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear proveedor"}
+            </Button>
           </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="s-address">Dirección (opcional)</Label>
-            <Textarea
-              id="s-address"
-              rows={3}
-              value={address}
-              onChange={(ev) => setAddress(ev.target.value)}
-            />
-          </div>
-
-          <Button type="submit" disabled={saving}>
-            {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear proveedor"}
-          </Button>
         </form>
       )}
     </div>

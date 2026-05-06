@@ -26,6 +26,12 @@ class PurchaseOrderController extends Controller
             $query->where('status', $request->query('status'));
         }
 
+        if ($request->filled('q')) {
+            $raw = trim((string) $request->query('q'));
+            $escaped = addcslashes($raw, '%_\\');
+            $query->where('code', 'like', '%'.$escaped.'%');
+        }
+
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
     }
 
@@ -35,7 +41,10 @@ class PurchaseOrderController extends Controller
         $lines = $data['lines'];
         unset($data['lines']);
 
-        $data['status'] = $data['status'] ?? PurchaseOrderStatus::Open->value;
+        $data['status'] = PurchaseOrderStatus::Open->value;
+        if (! array_key_exists('tax_applies', $data)) {
+            $data['tax_applies'] = true;
+        }
 
         $order = DB::transaction(function () use ($data, $lines) {
             $po = PurchaseOrder::query()->create($data);
@@ -48,6 +57,7 @@ class PurchaseOrderController extends Controller
                     'quantity_ordered' => $line['quantity_ordered'],
                     'quantity_received' => 0,
                     'unit' => $line['unit'] ?? 'kg',
+                    'unit_price' => $line['unit_price'] ?? 0,
                 ]);
             }
 
@@ -72,10 +82,10 @@ class PurchaseOrderController extends Controller
             'status' => ['nullable', 'string', Rule::in(PurchaseOrderStatus::values())],
         ]);
 
-        if (isset($payload['status']) && $payload['status'] === PurchaseOrderStatus::Cancelled->value) {
-            if ($purchase_order->status === PurchaseOrderStatus::Completed->value) {
-                return response()->json(['message' => 'No se puede cancelar una OC ya completada.'], 422);
-            }
+        if (isset($payload['status']) && $payload['status'] === PurchaseOrderStatus::Partial->value) {
+            return response()->json([
+                'message' => 'El estado Parcial lo define el inventario al registrar recepciones; no se puede fijar manualmente.',
+            ], 422);
         }
 
         $purchase_order->update($payload);

@@ -14,12 +14,14 @@ class PurchaseOrder extends Model
         'status',
         'ordered_at',
         'notes',
+        'tax_applies',
     ];
 
     protected function casts(): array
     {
         return [
             'ordered_at' => 'date',
+            'tax_applies' => 'boolean',
         ];
     }
 

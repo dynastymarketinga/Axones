@@ -3,21 +3,50 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createSearchParams, Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { CircleHelp, Eye, FilePenLine, Search } from "lucide-react"
+import {
+  Barcode,
+  CalendarDays,
+  CircleDot,
+  CircleHelp,
+  ClipboardList,
+  Eye,
+  Factory,
+  FilePenLine,
+  GitBranch,
+  ListOrdered,
+  Package,
+  Scale,
+  Settings2,
+  UserCircle,
+  Users,
+} from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { CLIENT_ORDER_MODULE_LIST_FOCUS } from "@/pages/axones/client-order-i18n"
 import type {
   ClientOrderDetailRecord,
   ClientOrderRow,
   LaravelPaginated,
   WorkOrderListRow,
 } from "@/types/api"
+import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
+import {
+  CatalogTableHead,
+  CatalogTableHeadRight,
+} from "@/components/axones/CatalogTableHead"
+import {
+  catalogActionButtonClass,
+  catalogSelectTriggerClass,
+  catalogTableBodyCellClass,
+  catalogTableBodyRowClass,
+  catalogTableHeaderRowClass,
+} from "@/components/axones/catalog-list-classes"
 import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -34,6 +63,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+
+const WO_SEARCH_DEBOUNCE_MS = 320
 
 type MachineValue =
   | ""
@@ -148,8 +180,9 @@ export default function WorkOrdersHubPage() {
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
 
-  const [q, setQ] = useState("")
-  const [search, setSearch] = useState("")
+  const [qInput, setQInput] = useState("")
+  const [qApi, setQApi] = useState("")
+  const qDebounceRef = useRef<number | null>(null)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
@@ -171,6 +204,16 @@ export default function WorkOrdersHubPage() {
   }, [coDetail])
 
   const prefillAppliedRef = useRef(false)
+  useEffect(() => {
+    if (qDebounceRef.current) window.clearTimeout(qDebounceRef.current)
+    qDebounceRef.current = window.setTimeout(() => {
+      setQApi(qInput.trim())
+    }, WO_SEARCH_DEBOUNCE_MS)
+    return () => {
+      if (qDebounceRef.current) window.clearTimeout(qDebounceRef.current)
+    }
+  }, [qInput])
+
   useEffect(() => {
     if (prefillAppliedRef.current) return
     const fromUrl = (searchParams.get("prefillCo") ?? "").trim()
@@ -210,7 +253,7 @@ export default function WorkOrdersHubPage() {
         query: {
           page,
           per_page: 20,
-          q: search || undefined,
+          q: qApi || undefined,
         },
       })
       setRows(data)
@@ -221,7 +264,7 @@ export default function WorkOrdersHubPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search])
+  }, [page, qApi])
 
   const loadClientOrders = useCallback(async () => {
     setCoLoading(true)
@@ -232,7 +275,7 @@ export default function WorkOrdersHubPage() {
       setClientOrders(data.data ?? [])
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudieron cargar los pedidos del cliente.")
+      else toast.error(`No se pudieron cargar las ${CLIENT_ORDER_MODULE_LIST_FOCUS}.`)
       setClientOrders([])
     } finally {
       setCoLoading(false)
@@ -274,7 +317,7 @@ export default function WorkOrdersHubPage() {
   function createOt() {
     const coId = clientOrderId.trim() ? Number(clientOrderId) : null
     if (!coId || !Number.isFinite(coId) || coId < 1) {
-      toast.error("Seleccione un pedido del cliente (OC) ya registrado.")
+      toast.error("Seleccione una orden de producción (Pedido del cliente, OC) ya registrada.")
       return
     }
     const importMaterial = canImportMaterialFromCo
@@ -286,67 +329,69 @@ export default function WorkOrdersHubPage() {
     nav({ pathname: "/ordenes-trabajo/nueva", search: `?${createSearchParams(params)}` })
   }
 
-  return (
-    <div className="space-y-6 p-4 md:p-6">
-      <Tabs value="lista">
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
-          <TabsTrigger value="lista">Lista de órdenes de trabajo</TabsTrigger>
-        </TabsList>
+  const rowPageBase = rows ? (rows.current_page - 1) * rows.per_page : 0
 
-        <TabsContent value="lista" className="mt-4 space-y-4">
-          {showInitialSkeleton ? (
-            <div className="space-y-4">
-              <PageLoadingBlock />
-              <PageLoadingBlock />
-              <PageLoadingBlock />
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="grid flex-1 gap-2">
-              <Label htmlFor="wo-ref">Buscar orden (número / referencia / cliente)</Label>
-              <Input
-                id="wo-ref"
+  return (
+    <TooltipProvider delayDuration={150}>
+      <CatalogPageShell
+        title="Órdenes de trabajo"
+        subtitle="Lista, creación desde orden de producción (Pedido del cliente) y acceso a planillas."
+        icon={ClipboardList}
+        action={
+          <Button type="button" variant="outline" onClick={() => void loadList()}>
+            Actualizar
+          </Button>
+        }
+      >
+        {showInitialSkeleton ? (
+          <div className="space-y-4">
+            <PageLoadingBlock />
+            <PageLoadingBlock />
+            <PageLoadingBlock />
+          </div>
+        ) : (
+          <>
+            <CatalogFilterGrid>
+              <CatalogSearchField
+                id="wo-q"
+                label="Buscar orden (número / referencia / cliente)"
                 placeholder="Ej: OT-2026-0007, PED-…, Millennium…"
-                value={q}
-                onChange={(ev) => setQ(ev.target.value)}
+                value={qInput}
+                onChange={(ev) => {
+                  setPage(1)
+                  setQInput(ev.target.value)
+                }}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter") {
                     setPage(1)
-                    setSearch(q.trim())
+                    const next = ev.currentTarget.value.trim()
+                    setQApi(next)
                   }
                 }}
+                className="min-w-0 lg:col-span-12"
               />
-            </div>
-            <Button
-              type="button"
-              onClick={() => {
-                setPage(1)
-                setSearch(q.trim())
-              }}
-            >
-              <Search className="mr-2 h-4 w-4" />
-              Buscar
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => void loadList()}>
-              Actualizar
-            </Button>
-              </div>
+              <p className="text-muted-foreground text-xs lg:col-span-12">
+                El listado se actualiza al escribir (filtro con breve demora). Use Actualizar para recargar desde el servidor.
+              </p>
+            </CatalogFilterGrid>
 
-              <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base text-center text-black">Crear orden de trabajo</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-3">
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-center text-base font-semibold">
+                  Crear orden de trabajo
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-3">
               <p className="md:col-span-3 text-sm text-muted-foreground">
-                Elija el <span className="font-medium text-foreground">pedido del cliente</span> y, si ya lo sabe, la{" "}
+                Elija la{" "}
+                <span className="font-medium text-foreground">orden de producción (Pedido del cliente)</span> y, si ya lo sabe, la{" "}
                 <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
                 <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
                 <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
                 <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
               </p>
               <div className="grid gap-2 md:col-span-2">
-                <Label>Pedido del cliente (OC) a vincular *</Label>
+                <Label>Orden de producción (Pedido del cliente, OC) a vincular *</Label>
                 <Select
                   value={clientOrderId || undefined}
                   onValueChange={(v) => setClientOrderId(v)}
@@ -354,7 +399,9 @@ export default function WorkOrdersHubPage() {
                     if (open && clientOrders.length === 0 && !coLoading) void loadClientOrders()
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger
+                    className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+                  >
                     <SelectValue placeholder={coLoading ? "Cargando…" : "Seleccione…"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -377,14 +424,18 @@ export default function WorkOrdersHubPage() {
               ) : null}
               {clientOrderId && !coDetailLoading && !coDetail ? (
                 <p className="md:col-span-3 text-sm text-destructive">
-                  No se pudo cargar la información del pedido. Intente otra vez en unos segundos.
+                  No se pudo cargar la información de la orden de producción (Pedido del cliente). Intente otra vez en unos
+                  segundos.
                 </p>
               ) : null}
 
               <div className="grid gap-2">
                 <Label>Máquina</Label>
                 <select
-                  className="h-10 rounded-md border bg-background px-3 text-sm"
+                  className={cn(
+                    "h-11 rounded-md border bg-background/95 px-3 text-sm",
+                    catalogSelectTriggerClass,
+                  )}
                   value={maquina}
                   onChange={(ev) => setMaquina(ev.target.value as MachineValue)}
                 >
@@ -407,166 +458,205 @@ export default function WorkOrdersHubPage() {
                 </Button>
               </div>
             </CardContent>
-              </Card>
+            </Card>
 
-              <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-slate-700 shadow-sm">
-            <p className="flex items-start gap-2">
-              <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
-              <span>
-                <span className="font-medium text-slate-900">En la lista:</span> use los iconos de{" "}
-                <span className="font-semibold text-slate-900">Acciones</span> para abrir la edición de una OT existente o la vista previa.
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={supervisorFilter === "all" ? "default" : "outline"}
+                onClick={() => setSupervisorFilter("all")}
+              >
+                Todas ({supervisorCounts.all})
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={supervisorFilter === "created" ? "default" : "outline"}
+                onClick={() => setSupervisorFilter("created")}
+              >
+                Nuevas ({supervisorCounts.created})
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={supervisorFilter === "in_progress" ? "default" : "outline"}
+                onClick={() => setSupervisorFilter("in_progress")}
+              >
+                Activas ({supervisorCounts.in_progress})
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={supervisorFilter === "completed" ? "default" : "outline"}
+                onClick={() => setSupervisorFilter("completed")}
+              >
+                Completadas ({supervisorCounts.completed})
+              </Button>
+            </div>
+
+            <p className="text-muted-foreground text-xs lg:col-span-12">
+              En la lista, use Acciones para editar una OT o abrir la vista previa del reporte cuando esté disponible.
             </p>
-              </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" variant={supervisorFilter === "all" ? "default" : "outline"} onClick={() => setSupervisorFilter("all")}>
-              Todas ({supervisorCounts.all})
-            </Button>
-            <Button type="button" size="sm" variant={supervisorFilter === "created" ? "default" : "outline"} onClick={() => setSupervisorFilter("created")}>
-              Nuevas ({supervisorCounts.created})
-            </Button>
-            <Button type="button" size="sm" variant={supervisorFilter === "in_progress" ? "default" : "outline"} onClick={() => setSupervisorFilter("in_progress")}>
-              Activas ({supervisorCounts.in_progress})
-            </Button>
-            <Button type="button" size="sm" variant={supervisorFilter === "completed" ? "default" : "outline"} onClick={() => setSupervisorFilter("completed")}>
-              Completadas ({supervisorCounts.completed})
-            </Button>
-              </div>
-
-              <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-center text-black">N° Orden</TableHead>
-                  <TableHead className="text-center text-black">Fecha</TableHead>
-                  <TableHead className="text-center text-black">Cliente</TableHead>
-                  <TableHead className="text-center text-black">Producto</TableHead>
-                  <TableHead className="text-center text-black">Máquina</TableHead>
-                  <TableHead className="text-center text-black">Etapa real</TableHead>
-                  <TableHead className="text-center text-black">Estado OT</TableHead>
-                  <TableHead className="text-center text-black">Creada por</TableHead>
-                  <TableHead className="text-center text-black">Kg</TableHead>
-                  <TableHead className="text-center text-black">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <LoadingTableRow colSpan={10} />
-                ) : !visibleRows.length ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-muted-foreground">
-                      Sin órdenes para este filtro.
-                    </TableCell>
+            <div className="bg-card w-full min-w-0 overflow-x-auto rounded-2xl border shadow-sm">
+              <Table>
+                <TableHeader>
+                  <TableRow className={catalogTableHeaderRowClass}>
+                    <CatalogTableHead icon={ListOrdered} className="w-14 whitespace-nowrap">
+                      N.º
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Barcode} className="whitespace-nowrap">
+                      Código
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={CalendarDays} className="whitespace-nowrap">
+                      Fecha
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
+                    <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
+                    <CatalogTableHead icon={Factory}>Máquina</CatalogTableHead>
+                    <CatalogTableHead icon={GitBranch}>Etapa</CatalogTableHead>
+                    <CatalogTableHead icon={CircleDot}>Estado OT</CatalogTableHead>
+                    <CatalogTableHead icon={UserCircle}>Creada por</CatalogTableHead>
+                    <CatalogTableHead icon={Scale}>Kg</CatalogTableHead>
+                    <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
+                      Acciones
+                    </CatalogTableHeadRight>
                   </TableRow>
-                ) : (
-                  visibleRows.map((o) => (
-                    <TableRow key={o.id} className="text-sm transition-colors hover:bg-muted/50">
-                      {/* 
-                        Esta sección renderiza las celdas de una fila en la tabla principal de Órdenes de Trabajo.
-                        Cada <TableCell> representa una columna distinta de información sobre la orden (`o`).
-                        
-                        Explicación columna por columna:
-                        - o.code: El código o número de la orden, mostrado con una fuente monoespaciada.
-                        - formatDate(o.document_date): La fecha del documento, formateada a formato legible. Si falta, muestra "—".
-                        - o.client?.name ?? "—": El nombre del cliente, o "—" si no existe.
-                        - o.product?.name ?? "—": El nombre del producto, o "—" si no hay producto.
-                        - formMachine(o): El nombre de la máquina asociada. Si no hay, "—".
-                        - boardStageLabel(o.board_stage): Etapa actual del "board" o flujo de la orden (ejemplo: "Montaje", "Impresión"...).
-                        - statusLabel(o.status): Muestra el estado de la OT (ejemplo: "Abierta", "Completada"...).
-                        - o.creator?.name ?? "—": Nombre de la persona que creó la OT, o "—" si no hay datos.
-                        - formPedidoKg(o): Cantidad de kilogramos solicitados en la orden. Si no hay datos, "—".
-                        - Última celda: Reservada para los botones de acciones (editar/vista previa).
-                      */}
-                      <TableCell className="font-mono text-sm py-3.5">{o.code}</TableCell>
-                      <TableCell className="py-3.5">{formatDate(o.document_date)}</TableCell>
-                      <TableCell className="py-3.5">{o.client?.name ?? "—"}</TableCell>
-                      <TableCell className="py-3.5">{o.product?.name ?? "—"}</TableCell>
-                      <TableCell className="py-3.5">{formMachine(o)}</TableCell>
-                      <TableCell className="py-3.5">{boardStageLabel(o.board_stage)}</TableCell>
-                      <TableCell className="py-3.5">{statusLabel(o.status)}</TableCell>
-                      <TableCell className="py-3.5">{o.creator?.name ?? "—"}</TableCell>
-                      <TableCell className="py-3.5">{formPedidoKg(o)}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                 
-                        <TooltipProvider delayDuration={150}>
-                          <div className="flex flex-wrap justify-end gap-2">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-8 w-8 shrink-0 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800"
-                                  aria-label="Editar OT"
-                                  asChild
-                                >
-                                  <Link to={`/ordenes-trabajo/${o.id}`}>
-                                    <FilePenLine className="h-4 w-4" />
-                                  </Link>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Editar OT (abrir formulario para completar/ajustar datos).</TooltipContent>
-                            </Tooltip>
-                            {canPreviewPlanillaReport(o) ? (
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <LoadingTableRow colSpan={11} />
+                  ) : !visibleRows.length ? (
+                    <TableRow className={catalogTableBodyRowClass}>
+                      <TableCell
+                        colSpan={11}
+                        className={cn("text-muted-foreground", catalogTableBodyCellClass)}
+                      >
+                        Sin órdenes para este filtro.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    visibleRows.map((o, vidx) => {
+                      const idxOnPage = rows?.data.findIndex((r) => r.id === o.id) ?? -1
+                      const n =
+                        idxOnPage >= 0 ? rowPageBase + idxOnPage + 1 : rowPageBase + vidx + 1
+                      return (
+                        <TableRow key={o.id} className={cn("text-sm", catalogTableBodyRowClass)}>
+                          <TableCell
+                            className={cn(
+                              "tabular-nums text-muted-foreground w-14",
+                              catalogTableBodyCellClass,
+                            )}
+                          >
+                            {n}
+                          </TableCell>
+                          <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
+                            {o.code}
+                          </TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>
+                            {formatDate(o.document_date)}
+                          </TableCell>
+                          <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
+                            {o.client?.name ?? "—"}
+                          </TableCell>
+                          <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
+                            {o.product?.name ?? "—"}
+                          </TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>
+                            {formMachine(o)}
+                          </TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>
+                            {boardStageLabel(o.board_stage)}
+                          </TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>
+                            {statusLabel(o.status)}
+                          </TableCell>
+                          <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
+                            {o.creator?.name ?? "—"}
+                          </TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>
+                            {formPedidoKg(o)}
+                          </TableCell>
+                          <TableCell className={cn("whitespace-nowrap text-right", catalogTableBodyCellClass)}>
+                            <div className="inline-flex flex-wrap justify-end gap-1.5">
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
                                     type="button"
                                     size="icon"
                                     variant="outline"
-                                    className="h-8 w-8 shrink-0 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
-                                    aria-label="Vista previa del reporte"
+                                    className={cn("shrink-0", catalogActionButtonClass)}
+                                    aria-label="Editar OT"
                                     asChild
                                   >
-                                    <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
-                                      <Eye className="h-4 w-4" />
+                                    <Link to={`/ordenes-trabajo/${o.id}`}>
+                                      <FilePenLine className="h-4 w-4" />
                                     </Link>
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Ver vista previa del reporte de esta OT.</TooltipContent>
+                                <TooltipContent>
+                                  Editar OT (abrir formulario para completar o ajustar datos).
+                                </TooltipContent>
                               </Tooltip>
-                            ) : null}
-                          </div>
-                        </TooltipProvider>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-              </div>
+                              {canPreviewPlanillaReport(o) ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className={cn("shrink-0", catalogActionButtonClass)}
+                                      aria-label="Vista previa del reporte"
+                                      asChild
+                                    >
+                                      <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
+                                        <Eye className="h-4 w-4" />
+                                      </Link>
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Vista previa del reporte de esta OT.</TooltipContent>
+                                </Tooltip>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
 
-              {rows && rows.last_page > 1 ? (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Página {rows.current_page} de {rows.last_page} · {rows.total}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={rows.current_page <= 1 || loading}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    >
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={rows.current_page >= rows.last_page || loading}
-                      onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                    >
-                      Siguiente
-                    </Button>
-                  </div>
+            {rows && rows.last_page > 1 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                <span className="text-muted-foreground">
+                  Página {rows.current_page} de {rows.last_page} · {rows.total}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={rows.current_page <= 1 || loading}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={rows.current_page >= rows.last_page || loading}
+                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                  >
+                    Siguiente
+                  </Button>
                 </div>
-              ) : null}
-            </>
-          )}
-        </TabsContent>
-      </Tabs>
-    </div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </CatalogPageShell>
+    </TooltipProvider>
   )
 }
 

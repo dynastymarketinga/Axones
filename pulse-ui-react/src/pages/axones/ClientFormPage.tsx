@@ -5,11 +5,22 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { ClientRecord } from "@/types/api"
+import type { ClientRecord, LaravelPaginated, VendorRecord } from "@/types/api"
+import { getStoredUser } from "@/lib/auth-storage"
+import { isAxonesFullAccess, normalizeRole } from "@/lib/axones-roles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import {
   Select,
   SelectContent,
@@ -21,6 +32,8 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   ArrowLeft,
   Building2,
+  Check,
+  ChevronsUpDown,
   Hash,
   Mail,
   MapPin,
@@ -90,7 +103,7 @@ function parseRifFromStored(rif: string | null | undefined): {
   if (withHyphens) {
     return { letter: withHyphens[1], main: withHyphens[2], dv: withHyphens[3] }
   }
-  const compact = s.replace(/-/g, "")
+  const compact = s.replace(/[.\-_]/g, "")
   const m = compact.match(/^([JVEGPC])(\d{8,9})$/)
   if (!m) return { letter: "", main: "", dv: "" }
   const digits = m[2]
@@ -117,9 +130,19 @@ export default function ClientFormPage() {
   const [rifDigits, setRifDigits] = useState("")
   const [state, setState] = useState("")
   const [city, setCity] = useState("")
+  const [vendors, setVendors] = useState<VendorRecord[]>([])
+  const [vendorId, setVendorId] = useState<number | null>(null)
+  const [vendorOpen, setVendorOpen] = useState(false)
   const [address, setAddress] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
+
+  const session = getStoredUser()
+  const isInventory = (() => {
+    const r = normalizeRole(session?.role)
+    return r === "inventory" || r === "inventario"
+  })()
+  const isFullAccess = isAxonesFullAccess(session?.role, session?.id)
 
   const [errors, setErrors] = useState<{
     name?: string
@@ -258,6 +281,7 @@ export default function ClientFormPage() {
       setRifDigits(parts.main + parts.dv)
       setState(clampStr(c.state ?? "", LIM.state))
       setCity(clampStr(c.city ?? "", LIM.city))
+      setVendorId(typeof c.vendor_id === "number" && c.vendor_id > 0 ? c.vendor_id : null)
       setAddress(clampStr(c.address ?? "", LIM.address))
       setEmail(clampStr(c.email ?? "", LIM.email))
       setPhone(sanitizePhoneInput(c.phone ?? ""))
@@ -269,9 +293,59 @@ export default function ClientFormPage() {
     }
   }, [clientId, isEdit])
 
+  const checkDuplicateClient = useCallback(
+    async (field: "name" | "rif", value: string) => {
+      const v = value.trim()
+      if (!v) return
+      try {
+        const res = await apiFetch<LaravelPaginated<ClientRecord>>("clients", {
+          query: { q: v, per_page: 20, page: 1 },
+        })
+        const list = res.data ?? []
+        const matches = list.filter((c) => {
+          if (clientId && c.id === clientId) return false
+          if (field === "rif") return String(c.rif ?? "").trim().toUpperCase() === v.toUpperCase()
+          return String(c.name ?? "").trim().toLowerCase() === v.toLowerCase()
+        })
+        if (matches.length) {
+          setErrors((prev) => ({
+            ...prev,
+            [field]: field === "rif" ? "Este RIF ya existe." : "Este cliente ya existe (nombre).",
+          }))
+          toast.error(field === "rif" ? "Este RIF ya existe." : "Este cliente ya existe (nombre).")
+        }
+      } catch {
+        // no bloquear por chequeo preventivo
+      }
+    },
+    [clientId],
+  )
+
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!isFullAccess) {
+      setVendors([])
+      setVendorId(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<VendorRecord>>("vendors", {
+          query: { per_page: 300, page: 1, active: 1 },
+        })
+        if (!cancelled) setVendors(res.data ?? [])
+      } catch {
+        if (!cancelled) setVendors([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isFullAccess])
 
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
@@ -314,14 +388,21 @@ export default function ClientFormPage() {
     setSaving(true)
     try {
       const normalizedRif = composeRifForSubmit().trim()
-      const body = {
+      const body: Record<string, unknown> = {
         name: name.trim(),
         rif: normalizedRif,
-        state: state.trim() || null,
-        city: city.trim() || null,
         address: address.trim() || null,
-        email: email.trim() || null,
-        phone: phone.trim() || null,
+      }
+      // En inventario ocultamos campos no relevantes y no los enviamos para no sobrescribir
+      // datos existentes al editar (solo se ocultan, no se eliminan).
+      if (!isInventory) {
+        body.state = state.trim() || null
+        body.city = city.trim() || null
+        body.email = email.trim() || null
+        body.phone = phone.trim() || null
+      }
+      if (isFullAccess) {
+        body.vendor_id = vendorId ?? null
       }
       if (isEdit && clientId) {
         await apiFetch<ClientRecord>(`clients/${clientId}`, {
@@ -340,7 +421,20 @@ export default function ClientFormPage() {
         else navigate(returnTo)
       }
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
+      if (e instanceof ApiError) {
+        const errs = e.body?.errors
+        if (e.status === 422 && errs && Object.keys(errs).length) {
+          const msg = Object.values(errs)
+            .flat()
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join("\n")
+          toast.error(msg || e.message)
+        } else {
+          toast.error(e.message)
+        }
+      }
       else toast.error("No se pudo guardar.")
     } finally {
       setSaving(false)
@@ -399,7 +493,10 @@ export default function ClientFormPage() {
                     setName(next)
                     if (errors.name) validate({ name: next })
                   }}
-                  onBlur={() => validate({ name })}
+                  onBlur={() => {
+                    validate({ name })
+                    void checkDuplicateClient("name", name)
+                  }}
                   aria-invalid={Boolean(errors.name)}
                   autoComplete="organization"
                   placeholder="Ej. Distribuidora Los Andes C.A."
@@ -487,6 +584,8 @@ export default function ClientFormPage() {
                         rifLetter: nextL,
                         rifDigits: nextD,
                       })
+                      const composed = normalizeRif(`${nextL}${nextD}`)
+                      void checkDuplicateClient("rif", composed)
                     }}
                     aria-invalid={Boolean(errors.rif)}
                   />
@@ -497,139 +596,217 @@ export default function ClientFormPage() {
                   <p className="text-destructive text-xs leading-tight">{errors.rif}</p>
                 ) : null}
               </div>
-              <Label htmlFor="c-phone" className={cn(fieldLabelClass, "md:col-start-2 md:row-start-1")}>
-                Teléfono
+              {!isInventory ? (
+                <>
+                  <Label htmlFor="c-phone" className={cn(fieldLabelClass, "md:col-start-2 md:row-start-1")}>
+                    Teléfono
+                  </Label>
+                  <div className="group/field relative min-w-0 md:col-start-2 md:row-start-2">
+                    <Phone
+                      className={cn(
+                        fieldIconClass,
+                        errors.phone
+                          ? "text-destructive"
+                          : "text-muted-foreground group-focus-within/field:text-primary",
+                      )}
+                      aria-hidden
+                    />
+                    <Input
+                      ref={phoneRef}
+                      id="c-phone"
+                      className={inputWithIconClass}
+                      maxLength={LIM.phone}
+                      value={phone}
+                      onChange={(ev) => {
+                        const next = sanitizePhoneInput(ev.target.value)
+                        setPhone(next)
+                        if (errors.phone) validate({ phone: next })
+                      }}
+                      onBlur={() => validate({ phone })}
+                      placeholder="+58 412 0000000"
+                      aria-invalid={Boolean(errors.phone)}
+                      autoComplete="tel"
+                    />
+                  </div>
+                  <div className="min-h-[1.125rem] md:col-start-2 md:row-start-3">
+                    {errors.phone ? (
+                      <p className="text-destructive text-xs leading-tight">{errors.phone}</p>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            {!isInventory ? (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="c-state" className={fieldLabelClass}>
+                    Estado
+                  </Label>
+                  <div className="group/field relative">
+                    <MapPinned
+                      className={cn(fieldIconClass, "text-muted-foreground group-focus-within/field:text-primary")}
+                      aria-hidden
+                    />
+                    <Input
+                      ref={stateRef}
+                      id="c-state"
+                      className={inputWithIconClass}
+                      maxLength={LIM.state}
+                      value={state}
+                      onChange={(ev) => {
+                        const next = clampStr(ev.target.value, LIM.state)
+                        setState(next)
+                        if (errors.state) validate({ state: next })
+                      }}
+                      onBlur={() => validate({ state })}
+                      autoComplete="address-level1"
+                      aria-invalid={Boolean(errors.state)}
+                      placeholder="Ej. Aragua"
+                    />
+                  </div>
+                  {errors.state ? <p className="text-destructive text-xs">{errors.state}</p> : null}
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="c-city" className={fieldLabelClass}>
+                    Ciudad
+                  </Label>
+                  <div className="group/field relative">
+                    <Building2
+                      className={cn(fieldIconClass, "text-muted-foreground group-focus-within/field:text-primary")}
+                      aria-hidden
+                    />
+                    <Input
+                      ref={cityRef}
+                      id="c-city"
+                      className={inputWithIconClass}
+                      maxLength={LIM.city}
+                      value={city}
+                      onChange={(ev) => {
+                        const next = clampStr(ev.target.value, LIM.city)
+                        setCity(next)
+                        if (errors.city) validate({ city: next })
+                      }}
+                      onBlur={() => validate({ city })}
+                      autoComplete="address-level2"
+                      aria-invalid={Boolean(errors.city)}
+                      placeholder="Ej. Turmero"
+                    />
+                  </div>
+                  {errors.city ? <p className="text-destructive text-xs">{errors.city}</p> : null}
+                </div>
+
+                {isFullAccess ? (
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label className={fieldLabelClass}>Vendedor</Label>
+                    <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={vendorOpen}
+                          className={cn("h-10 w-full justify-between font-normal", "border-primary/25 bg-background/90")}
+                        >
+                          <span className={cn("truncate text-left", !vendorId && "text-muted-foreground")}>
+                            {vendorId
+                              ? vendors.find((v) => v.id === vendorId)?.name ?? "Seleccione vendedor…"
+                              : "Seleccione vendedor…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                        <Command shouldFilter>
+                          <CommandInput placeholder="Buscar vendedor..." />
+                          <CommandList className="max-h-60">
+                            <CommandEmpty>Sin resultados.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="__none__"
+                                onSelect={() => {
+                                  setVendorId(null)
+                                  setVendorOpen(false)
+                                }}
+                              >
+                                <Check className={cn("mr-2 h-4 w-4", vendorId == null ? "opacity-100" : "opacity-0")} aria-hidden />
+                                <span>Sin vendedor</span>
+                              </CommandItem>
+                              {vendors.map((v) => (
+                                <CommandItem
+                                  key={v.id}
+                                  value={`${v.name} ${v.phone_primary ?? v.phone_secondary ?? ""}`}
+                                  onSelect={() => {
+                                    setVendorId(v.id)
+                                    setVendorOpen(false)
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      vendorId === v.id ? "opacity-100" : "opacity-0",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  <span>{v.name}</span>
+                                  {v.phone_primary || v.phone_secondary ? (
+                                    <span className="text-muted-foreground ml-2 text-xs">
+                                      {v.phone_primary ?? v.phone_secondary}
+                                    </span>
+                                  ) : null}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+
+          {!isInventory ? (
+            <div className="grid gap-2">
+              <Label htmlFor="c-email" className={fieldLabelClass}>
+                Correo
               </Label>
-              <div className="group/field relative min-w-0 md:col-start-2 md:row-start-2">
-                <Phone
+              <div className="group/field relative">
+                <Mail
                   className={cn(
                     fieldIconClass,
-                    errors.phone
+                    errors.email
                       ? "text-destructive"
                       : "text-muted-foreground group-focus-within/field:text-primary",
                   )}
                   aria-hidden
                 />
                 <Input
-                  ref={phoneRef}
-                  id="c-phone"
+                  ref={emailRef}
+                  id="c-email"
+                  type="text"
+                  inputMode="email"
                   className={inputWithIconClass}
-                  maxLength={LIM.phone}
-                  value={phone}
+                  maxLength={LIM.email}
+                  value={email}
                   onChange={(ev) => {
-                    const next = sanitizePhoneInput(ev.target.value)
-                    setPhone(next)
-                    if (errors.phone) validate({ phone: next })
+                    const next = clampStr(ev.target.value, LIM.email)
+                    setEmail(next)
+                    if (errors.email) validate({ email: next })
                   }}
-                  onBlur={() => validate({ phone })}
-                  placeholder="+58 412 0000000"
-                  aria-invalid={Boolean(errors.phone)}
-                  autoComplete="tel"
+                  onBlur={() => validate({ email })}
+                  placeholder="compras@cliente.com"
+                  aria-invalid={Boolean(errors.email)}
+                  autoComplete="email"
                 />
               </div>
-              <div className="min-h-[1.125rem] md:col-start-2 md:row-start-3">
-                {errors.phone ? (
-                  <p className="text-destructive text-xs leading-tight">{errors.phone}</p>
-                ) : null}
-              </div>
+              {errors.email ? (
+                <p className="text-destructive text-xs">{errors.email}</p>
+              ) : null}
             </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="c-state" className={fieldLabelClass}>
-                Estado
-              </Label>
-              <div className="group/field relative">
-                <MapPinned
-                  className={cn(fieldIconClass, "text-muted-foreground group-focus-within/field:text-primary")}
-                  aria-hidden
-                />
-                <Input
-                  ref={stateRef}
-                  id="c-state"
-                  className={inputWithIconClass}
-                  maxLength={LIM.state}
-                  value={state}
-                  onChange={(ev) => {
-                    const next = clampStr(ev.target.value, LIM.state)
-                    setState(next)
-                    if (errors.state) validate({ state: next })
-                  }}
-                  onBlur={() => validate({ state })}
-                  autoComplete="address-level1"
-                  aria-invalid={Boolean(errors.state)}
-                  placeholder="Ej. Aragua"
-                />
-              </div>
-              {errors.state ? <p className="text-destructive text-xs">{errors.state}</p> : null}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="c-city" className={fieldLabelClass}>
-                Ciudad
-              </Label>
-              <div className="group/field relative">
-                <Building2
-                  className={cn(fieldIconClass, "text-muted-foreground group-focus-within/field:text-primary")}
-                  aria-hidden
-                />
-                <Input
-                  ref={cityRef}
-                  id="c-city"
-                  className={inputWithIconClass}
-                  maxLength={LIM.city}
-                  value={city}
-                  onChange={(ev) => {
-                    const next = clampStr(ev.target.value, LIM.city)
-                    setCity(next)
-                    if (errors.city) validate({ city: next })
-                  }}
-                  onBlur={() => validate({ city })}
-                  autoComplete="address-level2"
-                  aria-invalid={Boolean(errors.city)}
-                  placeholder="Ej. Turmero"
-                />
-              </div>
-              {errors.city ? <p className="text-destructive text-xs">{errors.city}</p> : null}
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="c-email" className={fieldLabelClass}>
-              Correo
-            </Label>
-            <div className="group/field relative">
-              <Mail
-                className={cn(
-                  fieldIconClass,
-                  errors.email
-                    ? "text-destructive"
-                    : "text-muted-foreground group-focus-within/field:text-primary",
-                )}
-                aria-hidden
-              />
-              <Input
-                ref={emailRef}
-                id="c-email"
-                type="text"
-                inputMode="email"
-                className={inputWithIconClass}
-                maxLength={LIM.email}
-                value={email}
-                onChange={(ev) => {
-                  const next = clampStr(ev.target.value, LIM.email)
-                  setEmail(next)
-                  if (errors.email) validate({ email: next })
-                }}
-                onBlur={() => validate({ email })}
-                placeholder="compras@cliente.com"
-                aria-invalid={Boolean(errors.email)}
-                autoComplete="email"
-              />
-            </div>
-            {errors.email ? (
-              <p className="text-destructive text-xs">{errors.email}</p>
-            ) : null}
-          </div>
+          ) : null}
 
           <div className="grid gap-2">
             <Label htmlFor="c-address" className={fieldLabelClass}>

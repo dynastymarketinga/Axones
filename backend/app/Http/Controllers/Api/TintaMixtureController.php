@@ -22,6 +22,19 @@ class TintaMixtureController extends Controller
             ->withCount('components')
             ->orderByDesc('created_at');
 
+        $q = trim((string) $request->query('q', ''));
+        if ($q !== '') {
+            $escaped = addcslashes($q, '%_\\');
+            $like = '%'.$escaped.'%';
+            $query->where(function ($w) use ($like): void {
+                $w->whereHas('outputMaterial', function ($m) use ($like): void {
+                    $m->where('name', 'like', $like)->orWhere('sku', 'like', $like);
+                })->orWhereHas('creator', function ($u) use ($like): void {
+                    $u->where('name', 'like', $like);
+                });
+            });
+        }
+
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
     }
 

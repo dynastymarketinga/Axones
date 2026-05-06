@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   clientOrderStatusBadgeClass,
   clientOrderStatusLabel,
+  CLIENT_ORDER_MODULE_EDIT_TITLE,
 } from "@/pages/axones/client-order-i18n"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -58,7 +59,7 @@ export default function ClientOrderEditPage() {
       setNotes(co.notes ?? "")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar el pedido del cliente.")
+      else toast.error("No se pudo cargar la orden de producción (Pedido del cliente).")
       setOrderCode("")
       setOrder(null)
     } finally {
@@ -112,11 +113,11 @@ export default function ClientOrderEditPage() {
           notes: notes.trim() || null,
         }),
       })
-      toast.success("Pedido del cliente actualizado.")
+      toast.success("Orden de producción (Pedido del cliente) actualizada.")
       nav(`/ordenes-cliente/${orderId}`)
     } catch (err) {
       if (err instanceof ApiError) toast.error(err.message)
-      else toast.error("No se pudo guardar el pedido del cliente.")
+      else toast.error("No se pudo guardar la orden de producción (Pedido del cliente).")
     } finally {
       setSaving(false)
     }
@@ -143,7 +144,7 @@ export default function ClientOrderEditPage() {
   if (loading) {
     return (
       <div className="p-4 md:p-6">
-        <p className="text-muted-foreground text-sm">Cargando pedido del cliente…</p>
+        <p className="text-muted-foreground text-sm">Cargando orden de producción (Pedido del cliente)…</p>
       </div>
     )
   }
@@ -163,7 +164,7 @@ export default function ClientOrderEditPage() {
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Editar pedido del cliente</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{CLIENT_ORDER_MODULE_EDIT_TITLE}</h1>
           <p className="text-foreground/90 mt-1 font-mono text-sm">{orderCode}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <span>Estado</span>
@@ -286,13 +287,13 @@ export default function ClientOrderEditPage() {
                 <Ban className="h-6 w-6" />
               </div>
               <DialogTitle className="text-center sm:text-left sm:leading-tight">
-                ¿Anular este pedido del cliente?
+                ¿Anular esta orden de producción (Pedido del cliente)?
               </DialogTitle>
             </div>
           </DialogHeader>
           <DialogDescription className="px-6 py-4 text-sm leading-relaxed text-muted-foreground">
-            El pedido quedará en estado <span className="font-medium text-foreground">Anulada</span>. Será redirigido
-            al detalle de la orden.
+            La orden quedará en estado <span className="font-medium text-foreground">Anulada</span>. Será redirigido al
+            detalle.
           </DialogDescription>
           <DialogFooter className="flex flex-row items-center justify-center border-t border-border/60 bg-muted/20 px-6 py-4 sm:justify-center">
             <Button

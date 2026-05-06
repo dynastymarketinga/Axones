@@ -14,6 +14,7 @@ class PurchaseOrderLine extends Model
         'quantity_ordered',
         'quantity_received',
         'unit',
+        'unit_price',
     ];
 
     protected function casts(): array
@@ -21,6 +22,7 @@ class PurchaseOrderLine extends Model
         return [
             'quantity_ordered' => 'decimal:3',
             'quantity_received' => 'decimal:3',
+            'unit_price' => 'decimal:4',
         ];
     }
 

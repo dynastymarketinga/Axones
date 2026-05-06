@@ -21,14 +21,16 @@ class StorePurchaseOrderRequest extends FormRequest
         return [
             'supplier_id' => ['required', 'integer', 'exists:suppliers,id'],
             'code' => ['required', 'string', 'max:64', 'unique:purchase_orders,code'],
-            'status' => ['nullable', 'string', Rule::in(PurchaseOrderStatus::values())],
+            'status' => ['nullable', 'string', Rule::in([PurchaseOrderStatus::Open->value])],
             'ordered_at' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
+            'tax_applies' => ['sometimes', 'boolean'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.description' => ['nullable', 'string'],
             'lines.*.material_id' => ['nullable', 'integer', 'exists:materials,id'],
             'lines.*.quantity_ordered' => ['required', 'numeric', 'min:0.001'],
             'lines.*.unit' => ['nullable', 'string', 'max:16'],
+            'lines.*.unit_price' => ['nullable', 'numeric', 'min:0'],
         ];
     }
 }

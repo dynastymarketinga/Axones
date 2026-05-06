@@ -1,7 +1,7 @@
 "use client"
 
 import { ChevronRight, type LucideIcon } from "lucide-react"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import {
   Collapsible,
@@ -34,6 +34,7 @@ export function NavMain({
   groupLabel?: string
 }) {
   const location = useLocation()
+  const navigate = useNavigate()
 
   const toHref = (url: string) => {
     if (!url || url === "#") return url
@@ -89,6 +90,11 @@ export function NavMain({
               <SidebarMenuButton
                 tooltip={item.title}
                 isActive={isParentActive}
+                onClick={() => {
+                  if (item.title === "Datos maestros") {
+                    navigate("/datos-maestros")
+                  }
+                }}
               >
                 {item.icon && <item.icon className="h-4 w-4" />}
                 <span>{item.title}</span>

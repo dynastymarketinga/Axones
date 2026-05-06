@@ -37,6 +37,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import {
+  CLIENT_ORDER_MODULE_NEW_TITLE,
+  CLIENT_ORDER_MODULE_TITLE,
+} from "@/pages/axones/client-order-i18n"
 
 type LineDraft = {
   key: string
@@ -229,11 +233,11 @@ export default function ClientOrderNewPage() {
           lines: payloadLines,
         }),
       })
-      toast.success(`Pedido del cliente ${res.code ?? ""} creado.`.trim())
+      toast.success(`${CLIENT_ORDER_MODULE_TITLE} ${res.code ?? ""} creada.`.trim())
       nav("/ordenes-cliente")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo guardar el pedido del cliente.")
+      else toast.error("No se pudo guardar la orden de producción (Pedido del cliente).")
     } finally {
       setSaving(false)
     }
@@ -256,7 +260,7 @@ export default function ClientOrderNewPage() {
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 max-w-3xl">
-          <h1 className="text-2xl font-semibold tracking-tight">Nuevo pedido del cliente</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{CLIENT_ORDER_MODULE_NEW_TITLE}</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" asChild>
@@ -480,7 +484,7 @@ export default function ClientOrderNewPage() {
 
         <div className="flex flex-wrap gap-2 border-t pt-2">
           <Button type="submit" size="lg" disabled={saving} className="min-w-40">
-            <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Guardar pedido del cliente" />
+            <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Guardar orden de producción (Pedido del cliente)" />
           </Button>
           <Button type="button" variant="outline" asChild>
             <Link to="/ordenes-cliente">Cancelar</Link>
@@ -492,7 +496,10 @@ export default function ClientOrderNewPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Nuevo producto</DialogTitle>
-            <DialogDescription>Creación rápida desde pedido del cliente. El producto queda asociado al cliente seleccionado.</DialogDescription>
+            <DialogDescription>
+              Creación rápida desde orden de producción (Pedido del cliente). El producto queda asociado al cliente
+              seleccionado.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={(ev) => void submitQuickProduct(ev)} className="space-y-4">
             <div className="grid gap-2">

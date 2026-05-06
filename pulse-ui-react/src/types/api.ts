@@ -15,6 +15,7 @@ export type ClientRecord = {
   rif: string | null
   state: string | null
   city: string | null
+  vendor_id?: number | null
   address: string | null
   email: string | null
   phone: string | null
@@ -43,6 +44,18 @@ export type SupplierRecord = {
   email: string | null
   phone: string | null
   address: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export type VendorRecord = {
+  id: number
+  name: string
+  phone_primary?: string | null
+  phone_secondary?: string | null
+  active: boolean
+  created_at?: string
+  updated_at?: string
 }
 
 export type PurchaseOrderRow = {
@@ -51,7 +64,9 @@ export type PurchaseOrderRow = {
   code: string
   status: string
   ordered_at: string | null
+  created_at?: string | null
   notes: string | null
+  tax_applies?: boolean
   supplier?: Pick<SupplierRecord, "id" | "name">
   lines_count?: number
 }

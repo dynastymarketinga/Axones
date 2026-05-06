@@ -12,10 +12,12 @@ import {
   ShoppingCart,
   Tags,
   Truck,
+  Users,
   Warehouse,
 } from "lucide-react"
 
 import { isAxonesFullAccess, type AxonesMenuNode } from "@/lib/axones-roles"
+import { CLIENT_ORDER_MODULE_TITLE } from "@/pages/axones/client-order-i18n"
 
 const MENU_HIDDEN_URLS = new Set([
   "miscelaneos",
@@ -54,6 +56,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     url: "#",
     icon: Tags,
     items: [
+      { title: "Vendedores", url: "vendedores", icon: Users },
       { title: "Clientes", url: "clientes", icon: ClipboardList },
       { title: "Productos", url: "productos", icon: Package },
       { title: "Proveedores", url: "proveedores", icon: Truck },
@@ -95,7 +98,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
       { title: "Laminación (mi área)", url: "laminacion", icon: Factory },
       { title: "Corte (mi área)", url: "corte", icon: Factory },
       { title: "Tintas (mi área)", url: "tintas", icon: Factory },
-      { title: "Pedido del cliente", url: "ordenes-cliente", icon: ScrollText },
+      { title: CLIENT_ORDER_MODULE_TITLE, url: "ordenes-cliente", icon: ScrollText },
       { title: "Órdenes de trabajo", url: "ordenes-trabajo", icon: ClipboardList },
       { title: "Mezclas y tintas", url: "mezclas-tinta", icon: Boxes },
     ],

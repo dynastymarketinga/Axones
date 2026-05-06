@@ -80,10 +80,15 @@ class PurchaseReceiptService
             $po = null;
             if (! $without) {
                 $po = PurchaseOrder::query()->whereKey((int) $data['purchase_order_id'])->lockForUpdate()->firstOrFail();
-                if ($po->status === PurchaseOrderStatus::Cancelled->value) {
-                    throw ValidationException::withMessages([
-                        'purchase_order_id' => ['La orden de compra está cancelada.'],
-                    ]);
+                $po->load('lines');
+                if ($po->status === PurchaseOrderStatus::Completed->value) {
+                    foreach ($po->lines as $line) {
+                        if (bccomp((string) $line->quantity_received, (string) $line->quantity_ordered, 3) === -1) {
+                            throw ValidationException::withMessages([
+                                'purchase_order_id' => ['La orden de compra está cerrada.'],
+                            ]);
+                        }
+                    }
                 }
             }
 

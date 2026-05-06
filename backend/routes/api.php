@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\TintaMixtureController;
 use App\Http\Controllers\Api\UserPasswordController;
+use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\WorkOrderController;
 use App\Http\Controllers\Api\WorkOrderCorteController;
 use App\Http\Controllers\Api\WorkOrderLaminacionController;
@@ -113,6 +114,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/products', [ProductController::class, 'store']);
     Route::get('/products/{product}', [ProductController::class, 'show']);
     Route::patch('/products/{product}', [ProductController::class, 'update']);
+
+    Route::get('/vendors', [VendorController::class, 'index']);
+    Route::post('/vendors', [VendorController::class, 'store']);
+    Route::get('/vendors/{vendor}', [VendorController::class, 'show']);
+    Route::patch('/vendors/{vendor}', [VendorController::class, 'update']);
 
     Route::get('/purchase-orders', [PurchaseOrderController::class, 'index']);
     Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);

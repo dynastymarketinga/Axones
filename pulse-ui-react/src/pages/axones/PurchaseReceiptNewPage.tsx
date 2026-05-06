@@ -1,12 +1,19 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord, SupplierRecord } from "@/types/api"
+import type {
+  ClientRecord,
+  LaravelPaginated,
+  MaterialRow,
+  ProductRecord,
+  PurchaseOrderRow,
+  SupplierRecord,
+} from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,7 +46,26 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
+type PurchaseOrderLineDetail = {
+  id: number
+  description?: string | null
+  quantity_ordered: string | number
+  quantity_received?: string | number
+  unit?: string | null
+  material_id?: number | null
+  material?: { id?: number; name?: string; sku?: string } | null
+}
+
+type PurchaseOrderDetailPayload = {
+  id: number
+  supplier_id: number
+  code: string
+  status: string
+  lines?: PurchaseOrderLineDetail[]
+}
+
 type FreeLine = {
+  purchase_order_line_id: string
   item_type: string
   material_id: string
   micras: string
@@ -168,6 +194,7 @@ function inferPrintTypeByArea(area: NewMaterialDraft["inventory_area"]) {
 
 function emptyLine(): FreeLine {
   return {
+    purchase_order_line_id: "",
     item_type: "",
     material_id: "",
     micras: "",
@@ -175,6 +202,29 @@ function emptyLine(): FreeLine {
     quantity: "",
     unit: "kg",
   }
+}
+
+function inferUiItemTypeFromInventoryArea(area: string): string {
+  const a = normalizeKey(area)
+  if (a === "tintas") return "Tinta"
+  if (a === "quimicos") return "Químico"
+  if (a === "miscelaneos") return "Misceláneo"
+  return "Sustrato"
+}
+
+function polRemainingQty(line: PurchaseOrderLineDetail): number {
+  const o = Number(line.quantity_ordered ?? 0)
+  const r = Number(line.quantity_received ?? 0)
+  if (!Number.isFinite(o) || !Number.isFinite(r)) return 0
+  return Math.max(0, o - r)
+}
+
+function purchaseOrderStatusHint(status: string): string {
+  if (status === "open") return "Abierta"
+  if (status === "partial") return "Parcial"
+  if (status === "completed") return "Completada"
+  if (status === "cancelled") return "Completada"
+  return status
 }
 
 function formatReceiptCode(id: number | null | undefined): string {
@@ -188,7 +238,6 @@ export default function PurchaseReceiptNewPage() {
   const todayDate = getTodayLocalDate()
   const [supplierId, setSupplierId] = useState<number | null>(null)
   const [invoiceNumber, setInvoiceNumber] = useState("")
-  const [purchaseOrderReference, setPurchaseOrderReference] = useState("")
   const [notes, setNotes] = useState("")
   const [receivedAt, setReceivedAt] = useState(`${todayDate}T00:00`)
 
@@ -203,6 +252,14 @@ export default function PurchaseReceiptNewPage() {
   const [creatingSupplier, setCreatingSupplier] = useState(false)
   const [creatingProduct, setCreatingProduct] = useState(false)
   const [supplierComboOpen, setSupplierComboOpen] = useState(false)
+  const prevSupplierRef = useRef<number | null>(null)
+  const [purchaseOrderOptions, setPurchaseOrderOptions] = useState<PurchaseOrderRow[]>([])
+  const [poListLoading, setPoListLoading] = useState(false)
+  const [purchaseOrderId, setPurchaseOrderId] = useState<number | null>(null)
+  const [purchaseOrderDetail, setPurchaseOrderDetail] = useState<PurchaseOrderDetailPayload | null>(null)
+  const [poDetailLoading, setPoDetailLoading] = useState(false)
+  const [poComboOpen, setPoComboOpen] = useState(false)
+  const [purchaseOrderError, setPurchaseOrderError] = useState(false)
   const [productComboOpen, setProductComboOpen] = useState(false)
   const [supplierModalOpen, setSupplierModalOpen] = useState(false)
   const [productModalOpen, setProductModalOpen] = useState(false)
@@ -289,6 +346,75 @@ export default function PurchaseReceiptNewPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (prevSupplierRef.current !== null && prevSupplierRef.current !== supplierId) {
+      setPurchaseOrderId(null)
+      setPurchaseOrderDetail(null)
+      setFreeLines([emptyLine()])
+    }
+    prevSupplierRef.current = supplierId
+  }, [supplierId])
+
+  useEffect(() => {
+    if (!supplierId) {
+      setPurchaseOrderOptions([])
+      setPoListLoading(false)
+      return
+    }
+    let cancelled = false
+    setPoListLoading(true)
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<PurchaseOrderRow>>("purchase-orders", {
+          query: { supplier_id: String(supplierId), per_page: 100, page: 1 },
+        })
+        const eligible = res.data.filter((po) => po.status === "open" || po.status === "partial")
+        if (!cancelled) setPurchaseOrderOptions(eligible)
+      } catch {
+        if (!cancelled) setPurchaseOrderOptions([])
+      } finally {
+        if (!cancelled) setPoListLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [supplierId])
+
+  useEffect(() => {
+    if (!purchaseOrderId) {
+      setPurchaseOrderDetail(null)
+      setPoDetailLoading(false)
+      return
+    }
+    setFreeLines([emptyLine()])
+    let cancelled = false
+    setPoDetailLoading(true)
+    void (async () => {
+      try {
+        const d = await apiFetch<PurchaseOrderDetailPayload>(`purchase-orders/${purchaseOrderId}`)
+        if (cancelled) return
+        if ((supplierId ?? 0) > 0 && d.supplier_id !== supplierId) {
+          toast.error("La orden no pertenece al proveedor seleccionado.")
+          setPurchaseOrderId(null)
+          setPurchaseOrderDetail(null)
+          return
+        }
+        setPurchaseOrderDetail(d)
+      } catch {
+        if (!cancelled) {
+          setPurchaseOrderDetail(null)
+          toast.error("No se pudo cargar la orden de compra.")
+        }
+      } finally {
+        if (!cancelled) setPoDetailLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [purchaseOrderId, supplierId])
+
   const supplierOptions = useMemo(
     () => [...suppliers].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
     [suppliers],
@@ -297,6 +423,10 @@ export default function PurchaseReceiptNewPage() {
   const selectedSupplier = useMemo(
     () => supplierOptions.find((supplier) => supplier.id === supplierId) ?? null,
     [supplierId, supplierOptions],
+  )
+  const selectedPurchaseOrderRow = useMemo(
+    () => purchaseOrderOptions.find((p) => p.id === purchaseOrderId) ?? null,
+    [purchaseOrderId, purchaseOrderOptions],
   )
   const selectedProduct = useMemo(
     () => products.find((product) => String(product.id) === newMaterialDraft.productId) ?? null,
@@ -586,9 +716,14 @@ export default function PurchaseReceiptNewPage() {
     const supplierOk = Number.isFinite(supplierId) && (supplierId ?? 0) > 0
     const invoiceOk = invoiceNumber.trim().length > 0
     const receivedAtOk = receivedAt.trim().length > 0
+    const purchaseOrderOk =
+      Number.isFinite(purchaseOrderId) &&
+      (purchaseOrderId ?? 0) > 0 &&
+      Boolean(purchaseOrderDetail?.code)
     setSupplierError(!supplierOk)
     setInvoiceNumberError(!invoiceOk)
     setReceivedAtError(!receivedAtOk)
+    setPurchaseOrderError(!purchaseOrderOk)
 
     if (!supplierOk) {
       document.getElementById("supplier-name")?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -605,16 +740,24 @@ export default function PurchaseReceiptNewPage() {
       toast.error("La fecha recibido es obligatoria.")
       return
     }
+    if (!purchaseOrderOk) {
+      document.getElementById("purchase-order-field")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("Seleccione la orden de compra del proveedor.")
+      return
+    }
+    const poDetail = purchaseOrderDetail
+    if (!poDetail?.code) return
 
     const rowsWithContent = freeLines
       .map((row, index) => ({ row, index }))
       .filter(({ row }) => {
+        const hasPol = row.purchase_order_line_id.trim() !== ""
         const hasType = row.item_type.trim() !== ""
         const hasMaterial = row.material_id.trim() !== ""
         const hasQuantity = row.quantity.trim() !== ""
         const hasMicras = row.micras.trim() !== ""
         const hasAncho = row.ancho_mm.trim() !== ""
-        return hasType || hasMaterial || hasQuantity || hasMicras || hasAncho
+        return hasPol || hasType || hasMaterial || hasQuantity || hasMicras || hasAncho
       })
 
     if (!rowsWithContent.length) {
@@ -625,6 +768,7 @@ export default function PurchaseReceiptNewPage() {
     }
 
     const firstInvalid = rowsWithContent.findIndex(({ row }) => {
+      const hasPol = row.purchase_order_line_id.trim().length > 0
       const hasType = row.item_type.trim().length > 0
       const materialId = Number(row.material_id)
       const quantity = Number(row.quantity)
@@ -637,7 +781,7 @@ export default function PurchaseReceiptNewPage() {
       )
       const materialOk = Number.isFinite(materialId) && materialId > 0
       const quantityOk = Number.isFinite(quantity) && quantity > 0
-      return !hasType || !materialOk || !quantityOk || !dimensionsOk
+      return !hasPol || !hasType || !materialOk || !quantityOk || !dimensionsOk
     })
 
     if (firstInvalid !== -1) {
@@ -647,7 +791,7 @@ export default function PurchaseReceiptNewPage() {
         .getElementById(`receipt-row-${invalidRowIndex}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" })
       toast.error(
-        "Complete el Tipo, Material/Descripción y Cantidad. En Sustrato también indique Micras y Ancho.",
+        "Seleccione la línea de OC, tipo, material y cantidad. En Sustrato también indique Micras y Ancho.",
       )
       return
     }
@@ -655,6 +799,7 @@ export default function PurchaseReceiptNewPage() {
     setFirstInvalidRowIndex(null)
     const lines = rowsWithContent
       .map((row) => ({
+        purchase_order_line_id: Number(row.row.purchase_order_line_id),
         material_id: Number(row.row.material_id),
         quantity: Number(row.row.quantity),
         item_type: mapUiItemTypeToApi(row.row.item_type),
@@ -664,13 +809,13 @@ export default function PurchaseReceiptNewPage() {
       }))
 
     const payload = {
-      purchase_order_id: null,
-      without_purchase_order: true,
+      purchase_order_id: purchaseOrderId,
+      without_purchase_order: false,
       exception_reason: null,
       supplier_id: supplierId,
       supplier_name: selectedSupplier?.name?.trim() || null,
       invoice_number: invoiceNumber.trim() || null,
-      purchase_order_reference: purchaseOrderReference.trim() || null,
+      purchase_order_reference: poDetail.code.trim(),
       notes: notes.trim() || null,
       received_at: receivedAt || null,
       lines,
@@ -682,7 +827,7 @@ export default function PurchaseReceiptNewPage() {
           query: {
             supplier_id: String(supplierId ?? ""),
             invoice_number: invoiceNumber.trim() || undefined,
-            purchase_order_reference: purchaseOrderReference.trim() || undefined,
+            purchase_order_reference: poDetail.code.trim() || undefined,
           },
         })
         if (duplicateCheck.has_duplicates) {
@@ -869,29 +1014,93 @@ export default function PurchaseReceiptNewPage() {
               />
             </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="po-reference">N° OC (referencia, opcional)</Label>
-            <div className="group/field relative">
-              <ClipboardList
-                className={cn(
-                  "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                  saving
-                    ? "text-muted-foreground/50"
-                    : "text-muted-foreground group-focus-within/field:text-primary",
-                )}
-                aria-hidden
-              />
-              <Input
-                id="po-reference"
-                value={purchaseOrderReference}
-                onChange={(ev) => setPurchaseOrderReference(ev.target.value.slice(0, 120))}
-                placeholder="Ej. número o código de OC (solo referencia)"
-                disabled={saving}
-                className="pl-10"
-              />
-            </div>
+          <div id="purchase-order-field" className="grid gap-2">
+            <Label>Orden de compra *</Label>
+            <Popover open={poComboOpen} onOpenChange={setPoComboOpen}>
+              <PopoverTrigger asChild>
+                <div className="group/field relative">
+                  <ClipboardList
+                    className={cn(
+                      "pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 transition-colors",
+                      purchaseOrderError
+                        ? "text-red-500"
+                        : saving
+                          ? "text-muted-foreground/50"
+                          : "text-muted-foreground group-focus-within/field:text-primary",
+                    )}
+                    aria-hidden
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={poComboOpen}
+                    disabled={saving || !supplierId || poListLoading}
+                    className={cn(
+                      "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                      purchaseOrderError ? "border-red-500 focus-visible:ring-red-500" : "",
+                    )}
+                  >
+                    <span className={cn("truncate text-left", !purchaseOrderId && "text-muted-foreground")}>
+                      {!supplierId
+                        ? "Seleccione proveedor primero…"
+                        : poListLoading
+                          ? "Cargando órdenes…"
+                          : purchaseOrderId
+                            ? `${purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code ?? "…"} · ${purchaseOrderStatusHint(
+                                purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
+                              )}${poDetailLoading ? " (cargando…)" : ""}`
+                            : "Seleccione orden de compra…"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </div>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                <Command shouldFilter>
+                  <CommandInput placeholder="Buscar por código OC…" />
+                  <CommandList className="max-h-60">
+                    <CommandEmpty>
+                      {supplierId && !poListLoading
+                        ? "No hay órdenes abiertas o parciales para este proveedor."
+                        : "Seleccione un proveedor."}
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {purchaseOrderOptions.map((po) => (
+                        <CommandItem
+                          key={po.id}
+                          value={`${po.code} ${po.status}`}
+                          onSelect={() => {
+                            setPurchaseOrderId(po.id)
+                            if (purchaseOrderError) setPurchaseOrderError(false)
+                            setPoComboOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              purchaseOrderId === po.id ? "opacity-100" : "opacity-0",
+                            )}
+                            aria-hidden
+                          />
+                          <span className="truncate">{po.code}</span>
+                          <span className="text-muted-foreground ml-2 text-xs">
+                            {purchaseOrderStatusHint(po.status)}
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
+
+        <p className="text-muted-foreground text-xs">
+          Cada ingreso va contra una orden de compra del mismo proveedor. En cada fila elija la línea de la OC; los
+          estados Parcial y Completa de la orden se calculan solos al guardar la recepción.
+        </p>
 
         <div className="grid gap-2">
           <Label htmlFor="rc-notes">Observaciones</Label>
@@ -927,6 +1136,7 @@ export default function PurchaseReceiptNewPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-14">N°</TableHead>
+                  <TableHead className="min-w-[200px]">Línea OC *</TableHead>
                   <TableHead className="w-40">Tipo</TableHead>
                   <TableHead className="min-w-[260px]">Material / descripción *</TableHead>
                   <TableHead className="w-24">Micras</TableHead>
@@ -947,6 +1157,56 @@ export default function PurchaseReceiptNewPage() {
                       <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
                         {i + 1}
                       </div>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <Select
+                        value={line.purchase_order_line_id || "none"}
+                        disabled={saving || !purchaseOrderDetail?.lines?.length}
+                        onValueChange={(v) => {
+                          if (v === "none") {
+                            updateFreeLine(i, { purchase_order_line_id: "" })
+                            return
+                          }
+                          const pol = purchaseOrderDetail?.lines?.find((ln) => String(ln.id) === v)
+                          if (!pol) return
+                          const matId =
+                            pol.material_id != null && pol.material_id !== undefined
+                              ? String(pol.material_id)
+                              : ""
+                          const mat = matId ? materials.find((m) => String(m.id) === matId) : undefined
+                          const itemType = mat
+                            ? inferUiItemTypeFromInventoryArea(mat.inventory_area)
+                            : line.item_type
+                          const unitRaw = (pol.unit || mat?.unit || line.unit || "kg").trim()
+                          updateFreeLine(i, {
+                            purchase_order_line_id: v,
+                            ...(matId ? { material_id: matId } : {}),
+                            ...(mat ? { item_type: itemType } : {}),
+                            unit: unitRaw || "kg",
+                          })
+                        }}
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Línea…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Seleccione línea…</SelectItem>
+                          {(purchaseOrderDetail?.lines ?? []).map((pol) => {
+                            const rem = polRemainingQty(pol)
+                            const sku = pol.material?.sku ?? "Sin SKU"
+                            const disabled = rem <= 0
+                            return (
+                              <SelectItem key={pol.id} value={String(pol.id)} disabled={disabled}>
+                                {sku} · pend. {rem.toLocaleString("es-VE", {
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 3,
+                                })}{" "}
+                                {pol.unit ?? "kg"}
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                     <TableCell className="align-top">
                       <Select
@@ -1450,8 +1710,8 @@ export default function PurchaseReceiptNewPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
-            <p><strong>Qué hace:</strong> suma existencias al inventario desde una recepción (proveedor, factura, fecha e ítems).</p>
-            <p><strong>Flujo por línea:</strong> seleccione tipo, material y cantidad; si no existe el material, use <strong>+ Nuevo material</strong> y continúe.</p>
+            <p><strong>Qué hace:</strong> suma existencias al inventario desde una recepción ligada a una orden de compra (proveedor, factura, fecha e ítems).</p>
+            <p><strong>Flujo por línea:</strong> elija la línea de la OC, tipo, material y cantidad; si no existe el material, use <strong>+ Nuevo material</strong> y continúe.</p>
             <p><strong>Importante:</strong> esta pantalla no reemplaza el maestro de productos; solo gestiona entradas de materiales.</p>
             <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo, 3) Ingreso de material cuando llegue físicamente.</p>
           </div>

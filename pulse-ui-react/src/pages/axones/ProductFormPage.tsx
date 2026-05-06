@@ -27,6 +27,26 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+const PRODUCT_PRINT_TYPES = ["Trimilaminado", "Bilaminado", "Superficie"] as const
+
+/** Radix Select no admite value vacío; se usa como opción “sin tipo”. */
+const PRINT_TYPE_EMPTY = "__print_type_empty__"
+
+function isStandardPrintType(value: string): value is (typeof PRODUCT_PRINT_TYPES)[number] {
+  return (PRODUCT_PRINT_TYPES as readonly string[]).includes(value)
+}
+
+/** Unifica mayúsculas/minúsculas del API (p. ej. legacy en MAYÚSCULAS) al formato estándar en pantalla. */
+function canonicalizeLoadedPrintType(raw: string): string {
+  const t = raw.trim()
+  if (!t) return ""
+  const lower = t.toLowerCase()
+  for (const opt of PRODUCT_PRINT_TYPES) {
+    if (opt.toLowerCase() === lower) return opt
+  }
+  return t
+}
+
 export default function ProductFormPage() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -54,6 +74,12 @@ export default function ProductFormPage() {
     const from = st?.from?.trim()
     return from && from.startsWith("/") ? from : "/productos"
   }, [location.state])
+
+  const trimmedPrintType = printType.trim()
+  const printTypeSelectValue = trimmedPrintType === "" ? PRINT_TYPE_EMPTY : trimmedPrintType
+
+  const showLegacyPrintTypeOption =
+    trimmedPrintType !== "" && !isStandardPrintType(trimmedPrintType)
 
   const validate = useCallback(
     (draft?: { name?: string; clientId?: string }) => {
@@ -95,7 +121,7 @@ export default function ProductFormPage() {
       setName(p.name ?? "")
       setCpe(p.cpe ?? "")
       setMps(p.mps ?? "")
-      setPrintType(p.print_type ?? "")
+      setPrintType(canonicalizeLoadedPrintType(p.print_type ?? ""))
       setStructure(p.structure ?? "")
       setClientId(p.client_id ? String(p.client_id) : "")
     } catch (e) {
@@ -149,7 +175,20 @@ export default function ProductFormPage() {
         navigate(returnTo)
       }
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
+      if (e instanceof ApiError) {
+        const errs = e.body?.errors
+        if (e.status === 422 && errs && Object.keys(errs).length) {
+          const msg = Object.values(errs)
+            .flat()
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join("\n")
+          toast.error(msg || e.message)
+        } else {
+          toast.error(e.message)
+        }
+      }
       else toast.error("No se pudo guardar.")
     } finally {
       setSaving(false)
@@ -249,12 +288,30 @@ export default function ProductFormPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="p-print">Tipo de impresión</Label>
-              <Input
-                id="p-print"
-                value={printType}
-                onChange={(ev) => setPrintType(ev.target.value)}
-              />
+              <Label htmlFor="p-print-trigger">Tipo de impresión</Label>
+              <Select
+                value={printTypeSelectValue}
+                onValueChange={(value) => {
+                  setPrintType(value === PRINT_TYPE_EMPTY ? "" : value)
+                }}
+              >
+                <SelectTrigger id="p-print-trigger">
+                  <SelectValue placeholder="Seleccione tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PRINT_TYPE_EMPTY}>Seleccione tipo</SelectItem>
+                  {PRODUCT_PRINT_TYPES.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                  {showLegacyPrintTypeOption ? (
+                    <SelectItem value={trimmedPrintType}>
+                      {`${trimmedPrintType} (valor guardado)`}
+                    </SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid gap-2 md:col-span-2">

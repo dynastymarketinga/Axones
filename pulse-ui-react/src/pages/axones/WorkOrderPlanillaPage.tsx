@@ -753,7 +753,7 @@ export default function WorkOrderPlanillaPage() {
       setForm(merged)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar el pedido del cliente para el borrador.")
+      else toast.error("No se pudo cargar la orden de producción (Pedido del cliente) para el borrador.")
       setPrefill({})
       setForm({})
       setWoClientId(null)
@@ -916,7 +916,9 @@ export default function WorkOrderPlanillaPage() {
   async function guardar() {
     if (isDraftRoute) {
       if (!draftCoId) {
-        toast.error("Falta el pedido del cliente (OC) en la URL. Vuelva a la lista e inténtelo otra vez.")
+        toast.error(
+          "Falta la orden de producción (Pedido del cliente, OC) en la URL. Vuelva a la lista e inténtelo otra vez.",
+        )
         return
       }
     } else if (!Number.isFinite(id) || id < 1) {
@@ -1169,7 +1171,9 @@ export default function WorkOrderPlanillaPage() {
   if (isDraftRoute && !draftCoId) {
     return (
       <div className="p-6">
-        <p className="text-destructive">No se indicó un pedido del cliente (OC) para esta nueva orden.</p>
+        <p className="text-destructive">
+          No se indicó una orden de producción (Pedido del cliente, OC) para esta nueva orden.
+        </p>
         <Link to="/ordenes-trabajo" className="underline">
           Volver a la lista
         </Link>
@@ -1200,7 +1204,8 @@ export default function WorkOrderPlanillaPage() {
           <p className="text-muted-foreground mt-1 text-sm">
             {isDraftRoute ? (
               <>
-                Esta pantalla prepara una <span className="font-medium text-foreground">nueva</span> orden a partir del pedido del cliente; aún no hay
+                Esta pantalla prepara una <span className="font-medium text-foreground">nueva</span> orden a partir de la orden de
+                producción (Pedido del cliente); aún no hay
                 fila en base de datos. Al pulsar <span className="font-medium text-foreground">Guardar orden</span> se crea la OT, se revisan los
                 obligatorios y la verá en la lista de órdenes de trabajo.
               </>
@@ -1282,7 +1287,7 @@ export default function WorkOrderPlanillaPage() {
           {/* Row: Cabecera OC + datos producto */}
           <div className="ot-section">
             <div className="ot-two-col">
-              {/* Cabecera vinculada al pedido del cliente */}
+              {/* Cabecera vinculada a la orden de producción (Pedido del cliente) */}
               <div>
                 <div className="section-header">
                   <span className="inline-flex items-center gap-2">

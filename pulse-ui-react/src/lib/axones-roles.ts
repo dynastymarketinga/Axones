@@ -61,6 +61,14 @@ const INVENTORY_URLS = new Set([
   "solicitudes-material",
 ])
 
+// Inventario + maestros operativos (sin Órdenes de compra).
+const INVENTORY_WITH_MASTERS_URLS = new Set([
+  ...INVENTORY_URLS,
+  "clientes",
+  "productos",
+  "proveedores",
+])
+
 const PRINTING_URLS = new Set([
   "resumen",
   "alertas",
@@ -119,6 +127,14 @@ export function isAxonesUrlAllowed(
   if (url === "account/password-reset-requests") {
     return isAxonesFullAccess(role, userId)
   }
+  // Hub de datos maestros: página contenedora (filtra internamente por rol).
+  if (url === "datos-maestros") {
+    return true
+  }
+  // Vendedores: solo boss/admin.
+  if (url === "vendedores" || url === "vendedores/form") {
+    return isAxonesFullAccess(role, userId)
+  }
   const r = normalizeRole(role)
 
   if (r === "gate" || r === "vigilancia") {
@@ -128,7 +144,7 @@ export function isAxonesUrlAllowed(
     return INVENTORY_CHIEF_URLS.has(url)
   }
   if (r === "inventory" || r === "inventario") {
-    return INVENTORY_URLS.has(url)
+    return INVENTORY_WITH_MASTERS_URLS.has(url)
   }
   if (r === "quality" || r === "calidad") {
     return !url.startsWith("vigilancia")
@@ -174,7 +190,6 @@ export function filterAxonesMenuTree(
 ): AxonesMenuNode[] {
   if (isAxonesFullAccess(role, userId)) return nodes
 
-  const normalizedRole = normalizeRole(role)
   const out: AxonesMenuNode[] = []
   for (const node of nodes) {
     if (isBranch(node)) {

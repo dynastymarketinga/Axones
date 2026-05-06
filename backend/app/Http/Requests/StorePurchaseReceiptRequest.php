@@ -19,7 +19,7 @@ class StorePurchaseReceiptRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'purchase_order_id' => ['nullable', 'integer', 'exists:purchase_orders,id'],
+            'purchase_order_id' => ['required', 'integer', 'exists:purchase_orders,id'],
             'supplier_id' => ['required', 'integer', 'exists:suppliers,id'],
             'without_purchase_order' => ['sometimes', 'boolean'],
             'exception_reason' => ['nullable', 'string'],
@@ -35,7 +35,7 @@ class StorePurchaseReceiptRequest extends FormRequest
             'lines.*.unit' => ['required', 'string', Rule::in(['kg', 'unidad', 'm', 'rollo'])],
             'lines.*.micras' => ['nullable', 'numeric', 'min:0.001'],
             'lines.*.ancho_mm' => ['nullable', 'numeric', 'min:0.001'],
-            'lines.*.purchase_order_line_id' => ['nullable', 'integer', 'exists:purchase_order_lines,id'],
+            'lines.*.purchase_order_line_id' => ['required', 'integer', 'exists:purchase_order_lines,id'],
             // Bobina única: si se indica bobina_count, se generan N bobinas y el ingreso se registra por bobina.
             'lines.*.bobina_count' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'lines.*.bobina_weight_kg' => ['nullable', 'numeric', 'min:0.001'],
@@ -45,6 +45,13 @@ class StorePurchaseReceiptRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            if ($this->boolean('without_purchase_order')) {
+                $validator->errors()->add(
+                    'without_purchase_order',
+                    'Las recepciones deben estar ligadas a una orden de compra.'
+                );
+            }
+
             $lines = $this->input('lines', []);
             if (! is_array($lines)) {
                 return;

@@ -110,7 +110,7 @@ class AxonesDemoDataService
             $this->seedAlerts($boss);
 
             $this->seedHeavyDemoGraph($workOrders, $materials, $bobinas, $printingUser, $boss);
-            $this->seedAuxiliaryVolume($workOrders, $materials, $products, $printingUser, $inventoryUser, $boss);
+            $this->seedAuxiliaryVolume($workOrders, $materials, $products, $suppliers, $printingUser, $inventoryUser, $boss);
 
             return [
                 'users' => array_map(fn (User $u) => $u->only(['id', 'name', 'email', 'role']), $users),
@@ -430,6 +430,7 @@ class AxonesDemoDataService
             'quantity_ordered' => '500.000',
             'quantity_received' => '0.000',
             'unit' => 'kg',
+            'unit_price' => '0.0000',
         ]);
         $line2 = PurchaseOrderLine::query()->create([
             'purchase_order_id' => $po1->getKey(),
@@ -438,6 +439,7 @@ class AxonesDemoDataService
             'quantity_ordered' => '300.000',
             'quantity_received' => '0.000',
             'unit' => 'kg',
+            'unit_price' => '0.0000',
         ]);
 
         $receipt = $this->purchaseReceipts->store([
@@ -462,25 +464,54 @@ class AxonesDemoDataService
             ],
         ], $inventoryUser);
 
-        $receipt2 = $this->purchaseReceipts->store([
+        $po2 = PurchaseOrder::query()->create([
             'supplier_id' => $suppliers[0]->getKey(),
-            'without_purchase_order' => true,
-            'exception_reason' => 'Stock de seguridad demo',
-            'notes' => 'Recepción sin OC demo',
+            'code' => 'OC-DEMO-00002',
+            'status' => PurchaseOrderStatus::Open->value,
+            'ordered_at' => now()->subDays(3),
+            'notes' => 'OC demo recepción tinta/químico',
+        ]);
+        $polTinta = PurchaseOrderLine::query()->create([
+            'purchase_order_id' => $po2->getKey(),
+            'description' => 'Tinta demo',
+            'material_id' => $tinta->getKey(),
+            'quantity_ordered' => '10.000',
+            'quantity_received' => '0.000',
+            'unit' => 'kg',
+            'unit_price' => '0.0000',
+        ]);
+        $polQuim = PurchaseOrderLine::query()->create([
+            'purchase_order_id' => $po2->getKey(),
+            'description' => 'Químico demo',
+            'material_id' => $quim->getKey(),
+            'quantity_ordered' => '5.000',
+            'quantity_received' => '0.000',
+            'unit' => 'kg',
+            'unit_price' => '0.0000',
+        ]);
+
+        $receipt2 = $this->purchaseReceipts->store([
+            'purchase_order_id' => $po2->getKey(),
+            'supplier_id' => $suppliers[0]->getKey(),
+            'without_purchase_order' => false,
+            'purchase_order_reference' => $po2->code,
+            'notes' => 'Recepción demo ligada a OC',
             'received_at' => now()->subDays(2)->toDateTimeString(),
             'lines' => [
                 [
+                    'purchase_order_line_id' => $polTinta->getKey(),
                     'material_id' => $tinta->getKey(),
                     'quantity' => '10.000',
                 ],
                 [
+                    'purchase_order_line_id' => $polQuim->getKey(),
                     'material_id' => $quim->getKey(),
                     'quantity' => '5.000',
                 ],
             ],
         ], $inventoryUser);
 
-        $out = [$po1->fresh(), $receipt->fresh(), $receipt2->fresh()];
+        $out = [$po1->fresh(), $po2->fresh(), $receipt->fresh(), $receipt2->fresh()];
         $ns = count($suppliers);
         $nm = count($materials);
 
@@ -499,6 +530,7 @@ class AxonesDemoDataService
                 'quantity_ordered' => '100.000',
                 'quantity_received' => '0.000',
                 'unit' => 'kg',
+                'unit_price' => '0.0000',
             ]);
             $out[] = $po->fresh();
         }
@@ -1014,13 +1046,14 @@ class AxonesDemoDataService
     /**
      * @param  array<int, WorkOrder>  $workOrders
      * @param  array<int, Material>  $materials
-     * @param  array<int, Supplier>  $suppliers
      * @param  array<int, Product>  $products
+     * @param  array<int, Supplier>  $suppliers
      */
     private function seedAuxiliaryVolume(
         array $workOrders,
         array $materials,
         array $products,
+        array $suppliers,
         User $printingUser,
         User $inventoryUser,
         User $boss,
@@ -1103,22 +1136,43 @@ class AxonesDemoDataService
             ]);
         }
 
-        while (PurchaseReceipt::query()->count() < $this->demoVolume) {
-            $k = PurchaseReceipt::query()->count() + 1;
-            $pr = PurchaseReceipt::query()->create([
-                'purchase_order_id' => null,
-                'without_purchase_order' => true,
-                'exception_reason' => 'Recepción volumen demo '.$k,
-                'user_id' => $inventoryUser->getKey(),
-                'received_at' => now()->subDays($k % 20),
-                'notes' => 'Recepción directa demo',
-            ]);
-            PurchaseReceiptLine::query()->create([
-                'purchase_receipt_id' => $pr->getKey(),
-                'purchase_order_line_id' => null,
-                'material_id' => $materials[($k - 1) % $nm]->getKey(),
-                'quantity' => '15.000',
-            ]);
+        $supplier = $suppliers[0] ?? null;
+        if ($supplier && $nm > 0) {
+            while (PurchaseReceipt::query()->count() < $this->demoVolume) {
+                $k = PurchaseReceipt::query()->count() + 1;
+                $mat = $materials[($k - 1) % $nm];
+                $po = PurchaseOrder::query()->create([
+                    'supplier_id' => $supplier->getKey(),
+                    'code' => 'OC-DEMO-VOL-'.str_pad((string) $k, 5, '0', STR_PAD_LEFT),
+                    'status' => PurchaseOrderStatus::Open->value,
+                    'ordered_at' => now()->subDays($k % 20),
+                    'notes' => 'OC demo volumen recepción',
+                ]);
+                $pol = PurchaseOrderLine::query()->create([
+                    'purchase_order_id' => $po->getKey(),
+                    'description' => 'Línea volumen '.$k,
+                    'material_id' => $mat->getKey(),
+                    'quantity_ordered' => '100.000',
+                    'quantity_received' => '0.000',
+                    'unit' => 'kg',
+                    'unit_price' => '0.0000',
+                ]);
+                $this->purchaseReceipts->store([
+                    'purchase_order_id' => $po->getKey(),
+                    'supplier_id' => $supplier->getKey(),
+                    'without_purchase_order' => false,
+                    'purchase_order_reference' => $po->code,
+                    'received_at' => now()->subDays($k % 20)->toDateTimeString(),
+                    'notes' => 'Recepción volumen demo',
+                    'lines' => [
+                        [
+                            'purchase_order_line_id' => $pol->getKey(),
+                            'material_id' => $mat->getKey(),
+                            'quantity' => '15.000',
+                        ],
+                    ],
+                ], $inventoryUser);
+            }
         }
 
     }

@@ -21,6 +21,7 @@ import {
 import {
   clientOrderStatusBadgeClass,
   clientOrderStatusLabel,
+  CLIENT_ORDER_MODULE_TITLE,
 } from "@/pages/axones/client-order-i18n"
 import { cn } from "@/lib/utils"
 import {
@@ -52,7 +53,7 @@ export default function ClientOrderDetailPage() {
       setRow(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar el pedido del cliente.")
+      else toast.error("No se pudo cargar la orden de producción (Pedido del cliente).")
       setRow(null)
     } finally {
       setLoading(false)
@@ -118,7 +119,7 @@ export default function ClientOrderDetailPage() {
     <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Pedido del cliente</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{CLIENT_ORDER_MODULE_TITLE}</h1>
           <p className="mt-1 font-mono text-sm text-foreground">{row.code}</p>
           <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
             Solicitud comercial. La producción vive en{" "}
@@ -251,7 +252,7 @@ export default function ClientOrderDetailPage() {
               {wos.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={2} className="text-muted-foreground text-sm">
-                    Aún no hay OT vinculada a este pedido del cliente.
+                    Aún no hay OT vinculada a esta orden de producción (Pedido del cliente).
                   </TableCell>
                 </TableRow>
               ) : (
@@ -285,12 +286,12 @@ export default function ClientOrderDetailPage() {
                 <Ban className="h-6 w-6" />
               </div>
               <DialogTitle className="text-center sm:text-left sm:leading-tight">
-                ¿Anular este pedido del cliente?
+                ¿Anular esta orden de producción (Pedido del cliente)?
               </DialogTitle>
             </div>
           </DialogHeader>
           <DialogDescription className="px-6 py-4 text-sm leading-relaxed text-muted-foreground">
-            El pedido quedará en estado <span className="font-medium text-foreground">Anulada</span>. Puede volver a este
+            La orden quedará en estado <span className="font-medium text-foreground">Anulada</span>. Puede volver a este
             detalle para revisar el historial cuando lo necesite.
           </DialogDescription>
           <DialogFooter className="flex flex-row items-center justify-center border-t border-border/60 bg-muted/20 px-6 py-4 sm:justify-center">

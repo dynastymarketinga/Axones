@@ -1,3 +1,15 @@
+/** Nombre visible del módulo OC (pedido comercial) — coincide con menú y pantallas. */
+export const CLIENT_ORDER_MODULE_TITLE = "Orden de producción (Pedido del cliente)"
+
+/** Fragmento para listados (p. ej. «Listado de …»). */
+export const CLIENT_ORDER_MODULE_LIST_FOCUS = "órdenes de producción (Pedido del cliente)"
+
+/** Pantalla crear OC. */
+export const CLIENT_ORDER_MODULE_NEW_TITLE = "Nueva orden de producción (Pedido del cliente)"
+
+/** Pantalla editar OC. */
+export const CLIENT_ORDER_MODULE_EDIT_TITLE = "Editar orden de producción (Pedido del cliente)"
+
 /** Etiquetas en pantalla para estados almacenados en inglés en la API. */
 export const CLIENT_ORDER_STATUS_ES: Record<string, string> = {
   open: "Abierta",

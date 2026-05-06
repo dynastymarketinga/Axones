@@ -1,16 +1,42 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { Search } from "lucide-react"
+import {
+  Barcode,
+  CalendarDays,
+  ListOrdered,
+  Mail,
+  MapPin,
+  Pencil,
+  Phone,
+  Settings2,
+  Truck,
+} from "lucide-react"
 import { toast } from "sonner"
 
-import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, SupplierRecord } from "@/types/api"
+import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
+import {
+  CatalogTableHead,
+  CatalogTableHeadRight,
+} from "@/components/axones/CatalogTableHead"
+import {
+  catalogActionButtonClass,
+  catalogTableBodyCellClass,
+  catalogTableBodyRowClass,
+  catalogTableHeaderRowClass,
+} from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -19,32 +45,58 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { apiFetch, ApiError } from "@/lib/api"
+import type { LaravelPaginated, SupplierRecord } from "@/types/api"
+import { getStoredUser } from "@/lib/auth-storage"
+import { normalizeRole } from "@/lib/axones-roles"
+import { cn } from "@/lib/utils"
+
+const SEARCH_DEBOUNCE_MS = 320
+const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
+
+function formatDateDMY(value: string | null | undefined): string {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  return new Intl.DateTimeFormat("es-VE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d)
+}
 
 export default function SuppliersPage() {
   const location = useLocation()
-  const [q, setQ] = useState("")
+  const [query, setQuery] = useState("")
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState<number>(20)
   const [loading, setLoading] = useState(true)
-  const [rows, setRows] = useState<LaravelPaginated<SupplierRecord> | null>(
-    null,
-  )
+  const [rows, setRows] = useState<LaravelPaginated<SupplierRecord> | null>(null)
+  const debounceRef = useRef<number | null>(null)
+  const skipSearchPageReset = useRef(true)
+
+  const session = getStoredUser()
+  const isInventory = (() => {
+    const r = normalizeRole(session?.role)
+    return r === "inventory" || r === "inventario"
+  })()
 
   const from = useMemo(() => {
     const params = new URLSearchParams()
     if (search.trim()) params.set("q", search.trim())
     if (page > 1) params.set("page", String(page))
+    if (perPage !== 20) params.set("per_page", String(perPage))
     const qs = params.toString()
     return `${location.pathname}${qs ? `?${qs}` : ""}`
-  }, [location.pathname, page, search])
+  }, [location.pathname, page, perPage, search])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await apiFetch<LaravelPaginated<SupplierRecord>>(
-        "suppliers",
-        { query: { q: search || undefined, page, per_page: 20 } },
-      )
+      const data = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
+        query: { q: search || undefined, page, per_page: perPage },
+      })
       setRows(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -53,30 +105,47 @@ export default function SuppliersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search])
+  }, [page, perPage, search])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(() => {
+      setSearch(query.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    }
+  }, [query])
+
+  useEffect(() => {
+    if (skipSearchPageReset.current) {
+      skipSearchPageReset.current = false
+      return
+    }
+    setPage(1)
+  }, [search])
+
   const showInitialSkeleton = loading && rows === null
 
+  const colCount = isInventory ? 5 : 8
+
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Proveedores</h1>
-          <p className="text-muted-foreground text-sm">
-            Proveedores usados en compras y órdenes de compra.
-          </p>
-        </div>
+    <CatalogPageShell
+      title="Proveedores"
+      subtitle="Proveedores usados en compras y órdenes de compra."
+      icon={Truck}
+      action={
         <Button type="button" asChild>
           <Link to="/proveedores/form" state={{ from }}>
             Nuevo proveedor
           </Link>
         </Button>
-      </div>
-
+      }
+    >
       {showInitialSkeleton ? (
         <div className="space-y-4">
           <PageLoadingBlock />
@@ -84,107 +153,172 @@ export default function SuppliersPage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="grid flex-1 gap-2">
-              <Label htmlFor="sup-q">Buscar</Label>
-              <Input
-                id="sup-q"
-                placeholder="Nombre o RIF…"
-                value={q}
-                onChange={(ev) => setQ(ev.target.value)}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter") {
-                    setPage(1)
-                    setSearch(q.trim())
-                  }
-                }}
-              />
-            </div>
-            <Button
-              type="button"
-              onClick={() => {
-                setPage(1)
-                setSearch(q.trim())
+          <CatalogFilterGrid>
+            <CatalogSearchField
+              id="sup-q"
+              label="Buscar por nombre o RIF"
+              placeholder="Ej. razón social, RIF…"
+              value={query}
+              onChange={(ev) => setQuery(ev.target.value)}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") {
+                  const next = ev.currentTarget.value.trim()
+                  setSearch((prev) => (prev === next ? prev : next))
+                  setPage(1)
+                }
               }}
-            >
-              <Search className="mr-2 h-4 w-4" />
-              Buscar
-            </Button>
-          </div>
+              className="min-w-0 lg:col-span-6"
+            />
+            <p className="text-muted-foreground text-xs lg:col-span-12">
+              El filtro se aplica automáticamente al escribir.
+            </p>
+          </CatalogFilterGrid>
 
-          <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
-            <Table>
+          <div className="bg-card w-full min-w-0 overflow-x-auto rounded-2xl border shadow-sm">
+            <Table className={cn(!isInventory && "min-w-[720px]")}>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>RIF</TableHead>
-                  <TableHead>Correo</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Dirección</TableHead>
-                  <TableHead className="text-right">Editar</TableHead>
+                <TableRow className={catalogTableHeaderRowClass}>
+                  <CatalogTableHead icon={ListOrdered} className="w-16">
+                    N.º
+                  </CatalogTableHead>
+                  <CatalogTableHead icon={Truck}>Nombre</CatalogTableHead>
+                  <CatalogTableHead icon={Barcode}>RIF</CatalogTableHead>
+                  {!isInventory ? (
+                    <>
+                      <CatalogTableHead icon={Mail}>Correo</CatalogTableHead>
+                      <CatalogTableHead icon={Phone}>Teléfono</CatalogTableHead>
+                      <CatalogTableHead icon={MapPin}>Dirección</CatalogTableHead>
+                    </>
+                  ) : null}
+                  <CatalogTableHead icon={CalendarDays}>Creado</CatalogTableHead>
+                  <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <LoadingTableRow colSpan={6} />
+                  <LoadingTableRow colSpan={colCount} />
                 ) : !rows?.data.length ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
-                      Sin registros.
+                    <TableCell colSpan={colCount} className="text-muted-foreground">
+                      Sin proveedores.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.data.map((s) => (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium">{s.name}</TableCell>
-                      <TableCell>{s.rif ?? "—"}</TableCell>
-                      <TableCell>{s.email ?? "—"}</TableCell>
-                      <TableCell>{s.phone ?? "—"}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">
-                        {s.address ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="link" className="h-auto p-0" asChild>
-                          <Link to={`/proveedores/form?id=${s.id}`} state={{ from }}>
-                            Editar
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  rows.data.map((s, index) => {
+                    const n = (rows.current_page - 1) * rows.per_page + index + 1
+                    return (
+                      <TableRow key={s.id} className={catalogTableBodyRowClass}>
+                        <TableCell
+                          className={cn(
+                            "tabular-nums text-muted-foreground",
+                            catalogTableBodyCellClass,
+                          )}
+                        >
+                          {n}
+                        </TableCell>
+                        <TableCell className={cn("font-medium", catalogTableBodyCellClass)}>
+                          {s.name}
+                        </TableCell>
+                        <TableCell className={catalogTableBodyCellClass}>{s.rif ?? "—"}</TableCell>
+                        {!isInventory ? (
+                          <>
+                            <TableCell className={catalogTableBodyCellClass}>{s.email ?? "—"}</TableCell>
+                            <TableCell className={catalogTableBodyCellClass}>{s.phone ?? "—"}</TableCell>
+                            <TableCell
+                              className={cn("max-w-[200px] truncate", catalogTableBodyCellClass)}
+                            >
+                              {s.address ?? "—"}
+                            </TableCell>
+                          </>
+                        ) : null}
+                        <TableCell className={cn("whitespace-nowrap", catalogTableBodyCellClass)}>
+                          {formatDateDMY(s.created_at)}
+                        </TableCell>
+                        <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={catalogActionButtonClass}
+                            title="Editar proveedor"
+                            aria-label="Editar proveedor"
+                            asChild
+                          >
+                            <Link to={`/proveedores/form?id=${s.id}`} state={{ from }}>
+                              <Pencil className="h-4 w-4" />
+                              <span className="sr-only">Editar</span>
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
           </div>
 
-          {rows && rows.last_page > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Página {rows.current_page} de {rows.last_page} · {rows.total}{" "}
-                registros
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                >
-                  Siguiente
-                </Button>
+          {rows ? (
+            <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <p className="text-muted-foreground min-w-0">
+                {rows.total === 0
+                  ? "Sin resultados con los filtros actuales."
+                  : rows.last_page > 1
+                    ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
+                    : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
+              </p>
+              <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Por página</span>
+                  <Select
+                    value={String(perPage)}
+                    onValueChange={(v) => {
+                      setPerPage(Number(v))
+                      setPage(1)
+                    }}
+                  >
+                    <SelectTrigger
+                      id="suppliers-per-page"
+                      className="h-8 w-[4.5rem] text-sm"
+                      aria-label="Registros por página"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PER_PAGE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt} value={String(opt)}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    disabled={rows.current_page <= 1 || loading}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    type="button"
+                  >
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    disabled={rows.current_page >= rows.last_page || loading}
+                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                    type="button"
+                  >
+                    Siguiente
+                  </Button>
+                </div>
               </div>
             </div>
           ) : null}
         </>
       )}
-    </div>
+    </CatalogPageShell>
   )
 }

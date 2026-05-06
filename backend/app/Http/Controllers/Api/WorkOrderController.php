@@ -45,6 +45,10 @@ class WorkOrderController extends Controller
             ->withCount(['materialRequests', 'lines', 'productionItems'])
             ->orderByDesc('created_at');
 
+        if ($request->boolean('exclude_cancelled')) {
+            $query->where('status', '!=', WorkOrderStatus::Cancelled->value);
+        }
+
         if ($request->query('status')) {
             $query->where('status', $request->query('status'));
         }
@@ -70,6 +74,20 @@ class WorkOrderController extends Controller
             $query->whereHas('areaRequests', function ($q) use ($historialArea) {
                 $q->where('area', $historialArea);
             });
+        } elseif (($rawIn = $request->query('board_stage_in')) !== null && $rawIn !== '') {
+            $rawList = is_array($rawIn) ? $rawIn : explode(',', (string) $rawIn);
+            $allowedStages = WorkOrderBoardStage::values();
+            $safe = [];
+            foreach ($rawList as $item) {
+                $v = strtolower(trim((string) $item));
+                if ($v !== '' && in_array($v, $allowedStages, true)) {
+                    $safe[] = $v;
+                }
+            }
+            $safe = array_values(array_unique($safe));
+            if ($safe !== []) {
+                $query->whereIn('board_stage', $safe);
+            }
         } elseif ($request->query('board_stage')) {
             $query->where('board_stage', $request->query('board_stage'));
         } elseif ($areaHistory = $request->query('area_history')) {

@@ -74,6 +74,7 @@ export default function WorkOrderPrintingInkTable({
                     <td className="min-w-[11rem] align-top">
                       <div className="flex min-w-0 max-w-full gap-1 no-print">
                         <Input
+                          data-field={kColor}
                           className="h-8 min-w-0 flex-1 text-xs"
                           value={readString(form[kColor])}
                           onChange={(e) => onSetField(kColor, e.target.value)}

@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\WorkOrderOrdenTrabajoController;
 use App\Http\Controllers\Api\WorkOrderPrintingController;
 use App\Http\Controllers\Api\WorkOrderProductionSummaryController;
 use App\Http\Controllers\Api\WorkOrderQualityController;
+use App\Http\Controllers\Api\WorkOrderTintasController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -73,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/alerts/stream', [OperationalAlertStreamController::class, 'stream']);
     Route::patch('/alerts/{operational_alert}/acknowledge', [OperationalAlertController::class, 'acknowledge']);
     Route::post('/alerts/acknowledge-all', [OperationalAlertController::class, 'acknowledgeAll']);
+    Route::post('/alerts/acknowledge-work-order-area', [OperationalAlertController::class, 'acknowledgeWorkOrderArea']);
 
     Route::get('/reports/inventory-daily', [ReportController::class, 'inventoryDaily']);
     Route::get('/reports/inventory-movements-general', [ReportController::class, 'inventoryMovementsGeneral']);
@@ -85,6 +87,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/rejected-bobinas', [ReportController::class, 'rejectedBobinas']);
     Route::get('/reports/work-order-material-summary', [ReportController::class, 'workOrderMaterialSummary']);
     Route::get('/reports/production-time-by-area', [ReportController::class, 'productionTimeByArea']);
+    Route::get('/reports/work-order-time-report', [ReportController::class, 'workOrderTimeReport']);
+    Route::get('/reports/work-order-time-report/preview', [ReportController::class, 'workOrderTimeReportPreview']);
+    Route::get('/reports/work-order-time-report.pdf', [ReportController::class, 'workOrderTimeReportPdf']);
     Route::get('/reports/scrap-by-filters', [ReportController::class, 'scrapByFilters']);
     Route::get('/reports/tinta-consumption-by-client', [ReportController::class, 'tintaConsumptionByClient']);
 
@@ -176,6 +181,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/work-orders/{work_order}/printing/consumables', [WorkOrderPrintingController::class, 'updateConsumables'])
         ->middleware('area.role:printing');
 
+    Route::get('/work-orders/{work_order}/tintas', [WorkOrderTintasController::class, 'show'])
+        ->middleware('area.role:tintas');
+    Route::post('/work-orders/{work_order}/tintas/time-segments/start', [WorkOrderTintasController::class, 'startTimeSegment'])
+        ->middleware('area.role:tintas');
+    Route::post('/work-orders/{work_order}/tintas/time-segments/{tintas_time_segment}/stop', [WorkOrderTintasController::class, 'stopTimeSegment'])
+        ->middleware('area.role:tintas');
+    Route::patch('/work-orders/{work_order}/tintas/summary', [WorkOrderTintasController::class, 'updateSummary'])
+        ->middleware('area.role:tintas');
+    Route::put('/work-orders/{work_order}/tintas/consumables', [WorkOrderTintasController::class, 'updateConsumables'])
+        ->middleware('area.role:tintas');
+
     Route::get('/work-orders/{work_order}/corte', [WorkOrderCorteController::class, 'show'])
         ->middleware('area.role:corte');
     Route::post('/work-orders/{work_order}/corte/time-segments/start', [WorkOrderCorteController::class, 'startTimeSegment'])
@@ -220,6 +236,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/corte-dispatch/available', [CorteDispatchController::class, 'available']);
 
     Route::get('/area-requests', [AreaRequestController::class, 'index']);
+    Route::get('/area-requests/counts', [AreaRequestController::class, 'counts']);
     Route::post('/area-requests', [AreaRequestController::class, 'store']);
     Route::patch('/area-requests/{area_request}', [AreaRequestController::class, 'update']);
 

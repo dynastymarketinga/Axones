@@ -28,6 +28,47 @@ class AreaRequestController extends Controller
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
     }
 
+    public function counts(Request $request): JsonResponse
+    {
+        $status = strtolower(trim((string) $request->query('status', AreaRequestStatus::Pending->value)));
+        if (! in_array($status, AreaRequestStatus::values(), true)) {
+            $status = AreaRequestStatus::Pending->value;
+        }
+
+        $areasRaw = (string) $request->query('areas', '');
+        $areas = array_values(array_filter(array_map(
+            static fn ($v) => strtolower(trim((string) $v)),
+            $areasRaw !== '' ? explode(',', $areasRaw) : []
+        )));
+
+        if ($areas === []) {
+            $areas = ['impresion', 'laminacion', 'corte', 'tintas'];
+        }
+
+        $areas = array_values(array_unique($areas));
+
+        $rows = AreaRequest::query()
+            ->selectRaw('area, COUNT(DISTINCT work_order_id) as c')
+            ->whereIn('area', $areas)
+            ->where('status', $status)
+            ->whereNotNull('work_order_id')
+            ->groupBy('area')
+            ->get();
+
+        $counts = [];
+        foreach ($areas as $a) {
+            $counts[$a] = 0;
+        }
+        foreach ($rows as $r) {
+            $counts[(string) $r->area] = (int) $r->c;
+        }
+
+        return response()->json([
+            'status' => $status,
+            'counts' => $counts,
+        ]);
+    }
+
     public function store(StoreFacilityAreaRequest $request): JsonResponse
     {
         $data = $request->validated();

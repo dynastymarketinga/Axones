@@ -33,6 +33,7 @@ import {
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -71,6 +72,25 @@ const AREA_ICON: Record<AreaKey, LucideIcon> = {
   laminacion: Layers2,
   corte: Scissors,
   tintas: Droplets,
+}
+
+function areaRequestStatusLabel(v?: string | null): string {
+  const key = (v ?? "").toLowerCase().trim()
+  if (key === "pending") return "Pendiente"
+  if (key === "done") return "Hecho"
+  if (key === "cancelled") return "Cancelado"
+  return v?.trim() || "—"
+}
+
+function areaRequestBadgeClass(v?: string | null): string {
+  const key = (v ?? "").toLowerCase().trim()
+  if (key === "done") {
+    return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-emerald-950 dark:text-emerald-100 border-emerald-500/28 bg-emerald-500/10"
+  }
+  if (key === "cancelled") {
+    return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground"
+  }
+  return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-amber-950 dark:text-amber-100 border-amber-500/30 bg-amber-500/10"
 }
 
 function areaTitle(area: AreaKey): string {
@@ -304,6 +324,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     </p>
   )
 
+  const pendingCount = activeTab === "mias" ? (rows?.total ?? 0) : 0
+
   const pagination =
     rows && rows.last_page > 1 ? (
       <div className="flex items-center justify-between text-sm">
@@ -360,6 +382,14 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
         </TabsList>
 
         <TabsContent value="mias" className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              Solicitudes pendientes para tu área.
+            </p>
+            <Badge variant="outline" className={areaRequestBadgeClass("pending")}>
+              {areaRequestStatusLabel("pending")}: {pendingCount}
+            </Badge>
+          </div>
           <CatalogFilterGrid>
             <CatalogSearchField
               id={`a-q-${area}`}
@@ -401,6 +431,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
                   <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
                   <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
+                  <CatalogTableHead icon={CircleDot}>Estatus</CatalogTableHead>
                   <CatalogTableHead icon={Columns3}>Tablero</CatalogTableHead>
                   <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
                 </TableRow>
@@ -408,19 +439,22 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
+                    <TableCell colSpan={7} className="text-muted-foreground">
                       Cargando…
                     </TableCell>
                   </TableRow>
                 ) : !rows?.data.length ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
+                    <TableCell colSpan={7} className="text-muted-foreground">
                       Sin órdenes en esta fase.
                     </TableCell>
                   </TableRow>
                 ) : (
                   rows.data.map((o, idx) => {
                     const n = (rows.current_page - 1) * rows.per_page + idx + 1
+                    const reqStatus =
+                      (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ??
+                      "pending"
                     return (
                       <TableRow key={o.id} className={catalogTableBodyRowClass}>
                         <TableCell
@@ -439,6 +473,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
                           {o.product?.name ?? "—"}
+                        </TableCell>
+                        <TableCell className={catalogTableBodyCellClass}>
+                          <Badge variant="outline" className={areaRequestBadgeClass(reqStatus)}>
+                            {areaRequestStatusLabel(reqStatus)}
+                          </Badge>
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
                           {stageLabel[o.board_stage ?? ""] ?? (o.board_stage ?? "—")}
@@ -566,7 +605,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
                   <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
                   <CatalogTableHead icon={Activity}>Proceso en área</CatalogTableHead>
-                  <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
+                  <CatalogTableHead icon={CircleDot}>Estatus</CatalogTableHead>
                   <CatalogTableHead icon={Columns3}>Tablero</CatalogTableHead>
                   <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
                 </TableRow>
@@ -592,6 +631,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       rows != null && pos >= 0
                         ? (rows.current_page - 1) * rows.per_page + pos + 1
                         : 0
+                    const reqStatus =
+                      (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ??
+                      null
                     return (
                       <TableRow key={o.id} className={catalogTableBodyRowClass}>
                         <TableCell
@@ -615,7 +657,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                           {processStateForArea(o.board_stage)}
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
-                          {statusLabel(o.status)}
+                          <Badge variant="outline" className={areaRequestBadgeClass(reqStatus)}>
+                            {areaRequestStatusLabel(reqStatus)}
+                          </Badge>
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
                           {stageLabel[o.board_stage ?? ""] ?? (o.board_stage ?? "—")}

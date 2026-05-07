@@ -10,6 +10,7 @@ class TintaMixture extends Model
 {
     protected $fillable = [
         'output_material_id',
+        'work_order_id',
         'notes',
         'created_by',
     ];
@@ -27,5 +28,10 @@ class TintaMixture extends Model
     public function components(): HasMany
     {
         return $this->hasMany(TintaMixtureComponent::class);
+    }
+
+    public function workOrder(): BelongsTo
+    {
+        return $this->belongsTo(WorkOrder::class);
     }
 }

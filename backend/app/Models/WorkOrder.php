@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\WorkOrderBoardStage;
+use App\Enums\WorkOrderPriority;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -25,6 +26,7 @@ class WorkOrder extends Model
         'status',
         'scheduling_status',
         'board_stage',
+        'priority',
         'notes',
         'winding_figure',
         'created_by',
@@ -130,6 +132,7 @@ class WorkOrder extends Model
     {
         return [
             'board_stage' => WorkOrderBoardStage::class,
+            'priority' => WorkOrderPriority::class,
             'document_date' => 'date',
             'winding_figure' => 'integer',
         ];

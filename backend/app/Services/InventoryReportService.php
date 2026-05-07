@@ -707,6 +707,208 @@ class InventoryReportService
     }
 
     /**
+     * Reporte detallado de tiempos por OT y/o rango de fechas.
+     * Agrega segmentos cerrados (efectivo / muerto / montaje) de las cinco áreas
+     * y devuelve también el detalle de cada parada con el motivo.
+     *
+     * @return array{
+     *   from: string,
+     *   to: string,
+     *   work_order_id: int|null,
+     *   work_order: array<string, mixed>|null,
+     *   summary: list<array<string, mixed>>,
+     *   totals: array<string, mixed>,
+     *   downtimes: list<array<string, mixed>>,
+     *   rows_csv: list<array<string, mixed>>,
+     *   generated_at: string
+     * }
+     */
+    public function workOrderTimeReport(Carbon $from, Carbon $to, ?int $workOrderId = null): array
+    {
+        $tables = [
+            'printing' => 'printing_time_segments',
+            'corte' => 'corte_time_segments',
+            'laminacion' => 'laminacion_time_segments',
+            'montaje' => 'montaje_time_segments',
+            'tintas' => 'tintas_time_segments',
+        ];
+
+        $driver = DB::connection()->getDriverName();
+
+        $summary = [];
+        $totals = [
+            'production_seconds' => 0,
+            'downtime_seconds' => 0,
+            'mount_seconds' => 0,
+            'total_seconds' => 0,
+        ];
+        $downtimes = [];
+        $rowsCsv = [];
+
+        foreach ($tables as $area => $table) {
+            $secondsExprAgg = $driver === 'sqlite'
+                ? "(CAST(strftime('%s', {$table}.ended_at) AS INTEGER) - CAST(strftime('%s', {$table}.started_at) AS INTEGER))"
+                : "TIMESTAMPDIFF(SECOND, {$table}.started_at, {$table}.ended_at)";
+
+            $secondsExprAlias = $driver === 'sqlite'
+                ? "(CAST(strftime('%s', t.ended_at) AS INTEGER) - CAST(strftime('%s', t.started_at) AS INTEGER))"
+                : 'TIMESTAMPDIFF(SECOND, t.started_at, t.ended_at)';
+
+            $aggQuery = DB::table($table)
+                ->whereNotNull('ended_at')
+                ->whereBetween('started_at', [$from, $to])
+                ->select('segment_type')
+                ->selectRaw("SUM({$secondsExprAgg}) as total_seconds")
+                ->selectRaw('COUNT(*) as segment_count')
+                ->groupBy('segment_type');
+
+            if ($workOrderId !== null) {
+                $aggQuery->where('work_order_id', $workOrderId);
+            }
+
+            $byType = [
+                'production' => 0,
+                'downtime' => 0,
+                'mount' => 0,
+            ];
+            $countByType = [
+                'production' => 0,
+                'downtime' => 0,
+                'mount' => 0,
+            ];
+            foreach ($aggQuery->get() as $g) {
+                $type = (string) $g->segment_type;
+                if (! array_key_exists($type, $byType)) {
+                    continue;
+                }
+                $byType[$type] = (int) $g->total_seconds;
+                $countByType[$type] = (int) $g->segment_count;
+            }
+
+            $areaTotal = $byType['production'] + $byType['downtime'] + $byType['mount'];
+            $effectivePct = $areaTotal > 0
+                ? round(($byType['production'] / $areaTotal) * 100, 2)
+                : 0.0;
+
+            if ($areaTotal > 0) {
+                $summary[] = [
+                    'area' => $area,
+                    'production_seconds' => $byType['production'],
+                    'downtime_seconds' => $byType['downtime'],
+                    'mount_seconds' => $byType['mount'],
+                    'total_seconds' => $areaTotal,
+                    'production_count' => $countByType['production'],
+                    'downtime_count' => $countByType['downtime'],
+                    'mount_count' => $countByType['mount'],
+                    'effective_percent' => number_format($effectivePct, 2, '.', ''),
+                ];
+            }
+
+            $totals['production_seconds'] += $byType['production'];
+            $totals['downtime_seconds'] += $byType['downtime'];
+            $totals['mount_seconds'] += $byType['mount'];
+            $totals['total_seconds'] += $areaTotal;
+
+            $downQuery = DB::table($table.' as t')
+                ->leftJoin('work_orders as wo', 't.work_order_id', '=', 'wo.id')
+                ->leftJoin('users as u', 't.user_id', '=', 'u.id')
+                ->whereNotNull('t.ended_at')
+                ->where('t.segment_type', 'downtime')
+                ->whereBetween('t.started_at', [$from, $to])
+                ->orderBy('t.started_at')
+                ->select([
+                    't.id',
+                    't.work_order_id',
+                    'wo.code as work_order_code',
+                    't.started_at',
+                    't.ended_at',
+                    't.notes',
+                    't.machine_code',
+                    'u.name as user_name',
+                ])
+                ->selectRaw("({$secondsExprAlias}) as duration_seconds");
+
+            if ($workOrderId !== null) {
+                $downQuery->where('t.work_order_id', $workOrderId);
+            }
+
+            foreach ($downQuery->get() as $row) {
+                $downtimes[] = [
+                    'id' => (int) $row->id,
+                    'area' => $area,
+                    'work_order_id' => $row->work_order_id !== null ? (int) $row->work_order_id : null,
+                    'work_order_code' => $row->work_order_code,
+                    'machine_code' => (string) ($row->machine_code ?? ''),
+                    'started_at' => $row->started_at,
+                    'ended_at' => $row->ended_at,
+                    'duration_seconds' => (int) $row->duration_seconds,
+                    'reason' => trim((string) ($row->notes ?? '')),
+                    'user_name' => $row->user_name,
+                ];
+            }
+
+            $rowsCsv[] = [
+                'section' => 'summary',
+                'area' => $area,
+                'production_seconds' => $byType['production'],
+                'downtime_seconds' => $byType['downtime'],
+                'mount_seconds' => $byType['mount'],
+                'total_seconds' => $areaTotal,
+                'effective_percent' => number_format($effectivePct, 2, '.', ''),
+            ];
+        }
+
+        foreach ($downtimes as $d) {
+            $rowsCsv[] = [
+                'section' => 'downtime',
+                'area' => $d['area'],
+                'work_order_id' => $d['work_order_id'],
+                'work_order_code' => $d['work_order_code'],
+                'machine_code' => $d['machine_code'],
+                'started_at' => $d['started_at'],
+                'ended_at' => $d['ended_at'],
+                'duration_seconds' => $d['duration_seconds'],
+                'reason' => $d['reason'],
+                'user_name' => $d['user_name'],
+            ];
+        }
+
+        $woMeta = null;
+        if ($workOrderId !== null) {
+            /** @var WorkOrder|null $wo */
+            $wo = WorkOrder::query()->with(['client:id,name', 'product:id,name'])->find($workOrderId);
+            if ($wo !== null) {
+                $woMeta = [
+                    'id' => $wo->getKey(),
+                    'code' => $wo->code,
+                    'status' => $wo->status,
+                    'client_id' => $wo->client_id,
+                    'client_name' => $wo->client?->name,
+                    'product_id' => $wo->product_id,
+                    'product_name' => $wo->product?->name,
+                ];
+            }
+        }
+
+        $totalsAll = $totals['total_seconds'];
+        $totals['effective_percent'] = $totalsAll > 0
+            ? number_format(round(($totals['production_seconds'] / $totalsAll) * 100, 2), 2, '.', '')
+            : '0.00';
+
+        return [
+            'from' => $from->toIso8601String(),
+            'to' => $to->toIso8601String(),
+            'work_order_id' => $workOrderId,
+            'work_order' => $woMeta,
+            'summary' => $summary,
+            'totals' => $totals,
+            'downtimes' => $downtimes,
+            'rows_csv' => $rowsCsv,
+            'generated_at' => now()->toIso8601String(),
+        ];
+    }
+
+    /**
      * Mermas registradas por OT y área (filtro por creación de OT).
      *
      * @return array{from: string, to: string, rows: list<array<string, mixed>>}

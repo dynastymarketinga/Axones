@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\AlertSeverity;
 use App\Enums\AreaRequestStatus;
+use App\Enums\WorkOrderPriority;
 use App\Models\AreaRequest;
 use App\Models\OperationalAlert;
 use App\Models\User;
@@ -328,6 +329,115 @@ class ProductionNotificationService
             'alert' => 'created',
             'note' => 'production_saved_self',
         ];
+
+        return $summary;
+    }
+
+    /**
+     * Asignación dirigida: solicitudes pendientes por área con motivo y alertas según prioridad.
+     *
+     * @param  list<string>  $areas  Valores en minúsculas: impresion, laminacion, corte, tintas
+     * @return array{event: string, work_order_id: int, priority: string, sent_to: list<string>, skipped: list<string>, errors: list<string>, areas: list<array<string, mixed>>}
+     */
+    public function notifyAssignedAreasWithReason(
+        WorkOrder $workOrder,
+        ?User $user,
+        array $areas,
+        string $reason,
+        string $priority,
+    ): array {
+        $summary = [
+            'event' => 'work_order_area_assignment',
+            'work_order_id' => $workOrder->getKey(),
+            'priority' => strtolower(trim($priority)) ?: WorkOrderPriority::Normal->value,
+            'sent_to' => [],
+            'skipped' => [],
+            'errors' => [],
+            'areas' => [],
+        ];
+
+        $reason = trim($reason);
+        if ($reason === '') {
+            $reason = 'Asignación sin motivo.';
+        }
+
+        $p = strtolower(trim($priority));
+        $severity = match ($p) {
+            WorkOrderPriority::Alta->value => AlertSeverity::Warning,
+            WorkOrderPriority::Urgente->value => AlertSeverity::Critical,
+            default => AlertSeverity::Info,
+        };
+
+        $seen = [];
+        foreach ($areas as $raw) {
+            $targetArea = strtolower(trim((string) $raw));
+            if ($targetArea === '' || ! in_array($targetArea, self::PRODUCTIVE_AREAS, true)) {
+                continue;
+            }
+            if (isset($seen[$targetArea])) {
+                continue;
+            }
+            $seen[$targetArea] = true;
+
+            $title = sprintf('OT %s — asignada a %s', $workOrder->code, ucfirst($targetArea));
+
+            $alreadyPending = AreaRequest::query()
+                ->where('work_order_id', $workOrder->getKey())
+                ->where('area', $targetArea)
+                ->where('status', AreaRequestStatus::Pending->value)
+                ->where('title', $title)
+                ->exists();
+
+            $areaRequestStatus = 'existing';
+            if (! $alreadyPending) {
+                AreaRequest::query()->create([
+                    'area' => $targetArea,
+                    'title' => $title,
+                    'body' => $reason,
+                    'status' => AreaRequestStatus::Pending->value,
+                    'work_order_id' => $workOrder->getKey(),
+                    'requested_by' => $user?->getKey(),
+                ]);
+                $areaRequestStatus = 'created';
+            } else {
+                AreaRequest::query()
+                    ->where('work_order_id', $workOrder->getKey())
+                    ->where('area', $targetArea)
+                    ->where('status', AreaRequestStatus::Pending->value)
+                    ->where('title', $title)
+                    ->update(['body' => $reason]);
+                $areaRequestStatus = 'updated';
+            }
+
+            OperationalAlert::query()->create([
+                'alert_type' => 'work_order_area_assignment',
+                'severity' => $severity->value,
+                'message' => sprintf(
+                    'OT %s asignada a %s (%s).',
+                    $workOrder->code,
+                    ucfirst($targetArea),
+                    ucfirst($summary['priority']),
+                ),
+                'work_order_id' => $workOrder->getKey(),
+                'material_id' => null,
+                'metadata' => [
+                    'origin_area' => 'orden_trabajo',
+                    'target_area' => $targetArea,
+                    'channel' => 'bell',
+                    'priority' => $summary['priority'],
+                    'reason' => $reason,
+                ],
+                'created_by' => $user?->getKey(),
+            ]);
+
+            $summary['sent_to'][] = $targetArea;
+            $summary['areas'][] = [
+                'area' => $targetArea,
+                'status' => 'sent',
+                'area_request' => $areaRequestStatus,
+                'alert' => 'created',
+            ];
+        }
 
         return $summary;
     }

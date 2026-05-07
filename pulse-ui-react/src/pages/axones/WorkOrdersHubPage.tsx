@@ -32,6 +32,7 @@ import type {
   LaravelPaginated,
   WorkOrderListRow,
 } from "@/types/api"
+import { getStoredUser } from "@/lib/auth-storage"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
@@ -66,6 +67,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -316,6 +325,9 @@ function workOrderRowAccent(row: WorkOrderListRow): {
 export default function WorkOrdersHubPage() {
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
+  const session = getStoredUser()
+  const role = (session?.role ?? "").toLowerCase().trim()
+  const canDeactivate = role === "admin" || role === "boss"
 
   const [qInput, setQInput] = useState("")
   const [qApi, setQApi] = useState("")
@@ -332,6 +344,10 @@ export default function WorkOrdersHubPage() {
   const [coDetailLoading, setCoDetailLoading] = useState(false)
 
   const [maquina, setMaquina] = useState<MachineValue>("")
+
+  const [deactivateOpen, setDeactivateOpen] = useState(false)
+  const [deactivateTarget, setDeactivateTarget] = useState<WorkOrderListRow | null>(null)
+  const [deactivateSaving, setDeactivateSaving] = useState(false)
 
   const canImportMaterialFromCo = useMemo(() => {
     if (!coDetail?.lines?.length) return false
@@ -470,18 +486,73 @@ export default function WorkOrdersHubPage() {
 
   const rowPageBase = rows ? (rows.current_page - 1) * rows.per_page : 0
 
+  async function submitDeactivate() {
+    const target = deactivateTarget
+    if (!target) return
+    setDeactivateSaving(true)
+    try {
+      await apiFetch(`work-orders/${target.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "cancelled" }),
+      })
+      toast.success("OT desactivada (cancelada).")
+      setDeactivateOpen(false)
+      setDeactivateTarget(null)
+      void loadList()
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo desactivar la OT.")
+    } finally {
+      setDeactivateSaving(false)
+    }
+  }
+
   return (
     <TooltipProvider delayDuration={150}>
       <CatalogPageShell
         title="Órdenes de trabajo"
         subtitle="Lista, creación desde orden de producción (Pedido del cliente) y acceso a planillas."
         icon={ClipboardList}
-        action={
-          <Button type="button" variant="outline" onClick={() => void loadList()}>
-            Actualizar
-          </Button>
-        }
       >
+        <Dialog
+          open={deactivateOpen}
+          onOpenChange={(open) => {
+            setDeactivateOpen(open)
+            if (!open) {
+              setDeactivateTarget(null)
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                Desactivar OT {deactivateTarget?.code ?? ""}
+              </DialogTitle>
+              <DialogDescription>
+                Esta acción marca la OT como <strong>Cancelada</strong>. Solo usuarios admin pueden desactivar OT.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeactivateOpen(false)}
+                disabled={deactivateSaving}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deactivateSaving}
+                onClick={() => void submitDeactivate()}
+              >
+                Desactivar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {showInitialSkeleton ? (
           <div className="space-y-4">
             <PageLoadingBlock />
@@ -490,30 +561,6 @@ export default function WorkOrdersHubPage() {
           </div>
         ) : (
           <>
-            <CatalogFilterGrid>
-              <CatalogSearchField
-                id="wo-q"
-                label="Buscar orden (número / referencia / cliente)"
-                placeholder="Ej: OT-2026-0007, PED-…, Millennium…"
-                value={qInput}
-                onChange={(ev) => {
-                  setPage(1)
-                  setQInput(ev.target.value)
-                }}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter") {
-                    setPage(1)
-                    const next = ev.currentTarget.value.trim()
-                    setQApi(next)
-                  }
-                }}
-                className="min-w-0 lg:col-span-12"
-              />
-              <p className="text-muted-foreground text-xs lg:col-span-12">
-                El listado se actualiza al escribir (filtro con breve demora). Use Actualizar para recargar desde el servidor.
-              </p>
-            </CatalogFilterGrid>
-
             <Card className="rounded-2xl border bg-card shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-center text-base font-semibold">
@@ -591,7 +638,7 @@ export default function WorkOrdersHubPage() {
                 </select>
               </div>
 
-              <div className="md:col-span-3">
+              <div className="md:col-span-3 flex justify-center">
                 <Button type="button" onClick={() => createOt()}>
                   Crear orden
                 </Button>
@@ -659,6 +706,30 @@ export default function WorkOrdersHubPage() {
                 )
               })}
             </div>
+
+            <CatalogFilterGrid>
+              <CatalogSearchField
+                id="wo-q"
+                label="Buscar orden (número / referencia / cliente)"
+                placeholder="Ej: OT-2026-0007, PED-…, Millennium…"
+                value={qInput}
+                onChange={(ev) => {
+                  setPage(1)
+                  setQInput(ev.target.value)
+                }}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") {
+                    setPage(1)
+                    const next = ev.currentTarget.value.trim()
+                    setQApi(next)
+                  }
+                }}
+                className="min-w-0 lg:col-span-12"
+              />
+              <p className="text-muted-foreground text-xs lg:col-span-12">
+                El listado se actualiza al escribir (filtro con breve demora).
+              </p>
+            </CatalogFilterGrid>
 
             <p className="text-muted-foreground text-xs lg:col-span-12">
               En la lista, use Acciones para editar una OT o abrir la vista previa del reporte cuando esté disponible.
@@ -781,6 +852,38 @@ export default function WorkOrdersHubPage() {
                                 </TooltipTrigger>
                                 <TooltipContent>
                                   Editar OT (abrir formulario para completar o ajustar datos).
+                                </TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    className={cn("shrink-0", catalogActionButtonClass)}
+                                    aria-label="Desactivar OT"
+                                    disabled={
+                                      !canDeactivate ||
+                                      (o.status ?? "").toLowerCase().trim() === "cancelled" ||
+                                      (o.status ?? "").toLowerCase().trim() === "completed"
+                                    }
+                                    onClick={() => {
+                                      if (!canDeactivate) return
+                                      setDeactivateTarget(o)
+                                      setDeactivateOpen(true)
+                                    }}
+                                  >
+                                    <Ban className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {(o.status ?? "").toLowerCase().trim() === "cancelled"
+                                    ? "Ya está desactivada (cancelada)."
+                                    : (o.status ?? "").toLowerCase().trim() === "completed"
+                                      ? "No se puede desactivar una OT completada."
+                                      : !canDeactivate
+                                        ? "Solo admin o jefatura (boss) puede desactivar OT."
+                                        : "Desactivar (admin/boss)"}
                                 </TooltipContent>
                               </Tooltip>
                               {canPreviewPlanillaReport(o) ? (

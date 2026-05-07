@@ -3,11 +3,13 @@
 namespace App\Http\Requests;
 
 use App\Enums\WorkOrderBoardStage;
+use App\Enums\WorkOrderPriority;
 use App\Enums\WorkOrderSchedulingStatus;
 use App\Enums\WorkOrderStatus;
 use App\Models\Product;
 use App\Models\WorkOrder;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
@@ -15,7 +17,23 @@ class WorkOrderUpdateRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        if (! $this->has('status')) {
+            return true;
+        }
+
+        $next = strtolower(trim((string) $this->input('status')));
+        if ($next !== WorkOrderStatus::Cancelled->value) {
+            return true;
+        }
+
+        $role = strtolower(trim((string) ($this->user()?->role ?? '')));
+
+        return in_array($role, ['admin', 'boss'], true);
+    }
+
+    protected function failedAuthorization(): void
+    {
+        throw new AuthorizationException('Solo admin o jefatura (boss) puede desactivar (cancelar) órdenes de trabajo.');
     }
 
     /**
@@ -45,6 +63,7 @@ class WorkOrderUpdateRequest extends FormRequest
             'status' => ['sometimes', 'string', Rule::in(WorkOrderStatus::values())],
             'scheduling_status' => ['sometimes', 'string', Rule::in(WorkOrderSchedulingStatus::values())],
             'board_stage' => ['sometimes', 'string', Rule::in(WorkOrderBoardStage::values())],
+            'priority' => ['sometimes', 'string', Rule::in(WorkOrderPriority::values())],
             'client_id' => ['sometimes', 'nullable', 'integer', 'exists:clients,id'],
             'product_id' => ['sometimes', 'nullable', 'integer', 'exists:products,id'],
             'winding_figure' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:24'],

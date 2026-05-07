@@ -44,6 +44,7 @@ export default function WorkOrderDetailPage() {
     role === "superadmin"
   const canUsePrintingOps = isBoss || role === "impresion" || role === "printing"
   const canUseLaminacionOps = isBoss || role === "laminacion"
+  const canUseTintasOps = isBoss || role === "tintas"
   const isPrintingOperator = role === "impresion" || role === "printing"
   const otBackPath = isPrintingOperator ? "/impresion" : "/ordenes-trabajo"
   const [searchParams] = useSearchParams()
@@ -51,6 +52,7 @@ export default function WorkOrderDetailPage() {
   const initialTab = (() => {
     if (tabParam === "printing" && canUsePrintingOps) return "printing"
     if (tabParam === "laminacion" && canUseLaminacionOps) return "laminacion"
+    if (tabParam === "tintas" && canUseTintasOps) return "tintas"
     if (tabParam === "montaje" || tabParam === "corte") return tabParam
     return "montaje"
   })()
@@ -226,7 +228,7 @@ export default function WorkOrderDetailPage() {
           ) : null}
 
           {isPrintingFocusedView ? (
-            <WorkOrderPrintingControlPanel workOrderId={id} />
+            <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
           ) : isCorteFocusedView ? (
             <WorkOrderCorteControlPanel workOrderId={id} />
           ) : (
@@ -240,6 +242,7 @@ export default function WorkOrderDetailPage() {
                   {canUseLaminacionOps ? (
                     <TabsTrigger value="laminacion">Laminación</TabsTrigger>
                   ) : null}
+                  {canUseTintasOps ? <TabsTrigger value="tintas">Tintas</TabsTrigger> : null}
                   <TabsTrigger value="corte">Corte</TabsTrigger>
                 </TabsList>
               ) : null}
@@ -253,12 +256,22 @@ export default function WorkOrderDetailPage() {
               </TabsContent>
               {canUsePrintingOps ? (
                 <TabsContent value="printing" className="mt-4">
-                  <WorkOrderPrintingControlPanel workOrderId={id} />
+                  <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
                 </TabsContent>
               ) : null}
               {canUseLaminacionOps ? (
                 <TabsContent value="laminacion" className="mt-4">
                   <WorkOrderLaminacionControlPanel workOrderId={id} />
+                </TabsContent>
+              ) : null}
+              {canUseTintasOps ? (
+                <TabsContent value="tintas" className="mt-4">
+                  <ProductionAreaPanel
+                    workOrderId={id}
+                    title="Tintas"
+                    areaPath="tintas"
+                    usageMode="none"
+                  />
                 </TabsContent>
               ) : null}
               <TabsContent value="corte" className="mt-4">
@@ -267,23 +280,6 @@ export default function WorkOrderDetailPage() {
             </Tabs>
           )}
 
-          <Collapsible className="rounded-xl border">
-            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 p-4 text-left text-sm font-medium hover:bg-muted/50">
-              <span>Datos técnicos (JSON)</span>
-              <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <pre className="max-h-80 overflow-auto border-t p-4 text-xs">
-                {JSON.stringify(
-                  {
-                    order,
-                  },
-                  null,
-                  2,
-                )}
-              </pre>
-            </CollapsibleContent>
-          </Collapsible>
         </>
       )}
     </div>

@@ -55,14 +55,14 @@ type OpenSeg = {
   user?: { name?: string }
 }
 
-type AreaPath = "montaje" | "printing" | "laminacion" | "corte"
+type AreaPath = "montaje" | "printing" | "laminacion" | "corte" | "tintas"
 
 export type ProductionAreaPanelProps = {
   workOrderId: number
   title: string
   areaPath: AreaPath
   /** montaje usa material_usages; el resto bobina_usages */
-  usageMode: "montaje" | "bobina"
+  usageMode: "montaje" | "bobina" | "none"
   /** Solo laminación: campos de solvente en resumen */
   laminacionSolvent?: boolean
 }
@@ -294,6 +294,7 @@ export function ProductionAreaPanel({
   }
 
   async function submitUsage() {
+    if (usageMode === "none") return
     if (usageMode === "montaje") {
       const mid = Number(matId)
       const q = Number(montajeQty)
@@ -589,15 +590,16 @@ export function ProductionAreaPanel({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                {usageMode === "montaje"
-                  ? "Material usado en montaje"
-                  : "Material por bobina"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+          {usageMode !== "none" ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {usageMode === "montaje"
+                    ? "Material usado en montaje"
+                    : "Material por bobina"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                 <div className="grid gap-2 md:col-span-2">
                   <Label>Material</Label>
@@ -724,8 +726,9 @@ export function ProductionAreaPanel({
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {areaPath === "printing" ? (
             <Card>

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Vista previa - Temporizador de impresión</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #0f172a;
+        --muted: #475569;
+        --border: #e2e8f0;
+        --card: #f8fafc;
+        --badge: #eef2ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-bottom: 16px;
+      }
+      button {
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--fg);
+        padding: 8px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.primary {
+        background: #2563eb;
+        color: #fff;
+        border-color: #2563eb;
+      }
+      .wrap { max-width: 980px; margin: 0 auto; }
+      .h1 { font-size: 18px; font-weight: 800; margin: 0; }
+      .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+      .grid { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 12px; }
+      .card {
+        border: 1px solid var(--border);
+        background: var(--card);
+        border-radius: 16px;
+        padding: 14px;
+      }
+      .row { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .kv { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+      .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+      .v { margin-top: 4px; font-weight: 700; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--badge);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      table { width: 100%; border-collapse: collapse; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+      th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 12px; text-align: left; vertical-align: top; }
+      th { background: #f1f5f9; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #334155; }
+      tr:last-child td { border-bottom: 0; }
+      .empty { color: var(--muted); font-size: 13px; }
+      @media print {
+        .toolbar { display: none !important; }
+        body { padding: 0; }
+        .card { box-shadow: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="toolbar">
+        <button type="button" id="btnDownload">Descargar HTML</button>
+        <button type="button" class="primary" onclick="window.print()">Imprimir</button>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <h1 class="h1">Vista previa · Temporizador de impresión</h1>
+            <div class="sub" id="metaLine">—</div>
+          </div>
+          <div class="badge" id="stateBadge">Pendiente</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="row">
+            <div class="kv">
+              <div class="k">OT</div>
+              <div class="v mono" id="woCode">—</div>
+            </div>
+            <div class="kv">
+              <div class="k">Turno / Grupo</div>
+              <div class="v" id="turnoGrupo">—</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="kv">
+              <div class="k">Operador</div>
+              <div class="v" id="operador">—</div>
+            </div>
+            <div class="kv">
+              <div class="k">Supervisor</div>
+              <div class="v" id="supervisor">—</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="kv" style="grid-column:1/-1">
+              <div class="k">Ayudantes</div>
+              <div class="v" id="ayudante">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <div class="kv">
+              <div class="k">Tiempo transcurrido</div>
+              <div class="v mono" id="totalHms">00:00:00</div>
+            </div>
+            <div class="kv">
+              <div class="k">Kg/Hora estimado</div>
+              <div class="v" id="kgHora">0.00</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="kv">
+              <div class="k">Tiempo efectivo</div>
+              <div class="v mono" id="effectiveHms">00:00:00</div>
+            </div>
+            <div class="kv">
+              <div class="k">Tiempo muerto</div>
+              <div class="v mono" id="deadHms">00:00:00</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <div class="k" style="font-weight:800">Paradas registradas</div>
+            <div class="sub" id="pausesCount">0 filas</div>
+          </div>
+          <div style="margin-top:10px" id="pausesWrap"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function safeStr(v) { return (typeof v === "string" ? v : "").trim(); }
+      function qs(name) {
+        try { return new URLSearchParams(location.search).get(name) || ""; } catch { return ""; }
+      }
+      function downloadHtml(filename, html) {
+        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(a.href);
+          a.remove();
+        }, 0);
+      }
+
+      const wo = qs("wo") || "0";
+      const key = `axones.printing.timer-preview.${wo}`;
+      let payload = null;
+      try {
+        payload = JSON.parse(localStorage.getItem(key) || "null");
+      } catch { payload = null; }
+
+      const metaLine = document.getElementById("metaLine");
+      const woCode = document.getElementById("woCode");
+      const turnoGrupo = document.getElementById("turnoGrupo");
+      const operador = document.getElementById("operador");
+      const ayudante = document.getElementById("ayudante");
+      const supervisor = document.getElementById("supervisor");
+      const stateBadge = document.getElementById("stateBadge");
+      const totalHms = document.getElementById("totalHms");
+      const deadHms = document.getElementById("deadHms");
+      const effectiveHms = document.getElementById("effectiveHms");
+      const kgHora = document.getElementById("kgHora");
+      const pausesWrap = document.getElementById("pausesWrap");
+      const pausesCount = document.getElementById("pausesCount");
+
+      if (!payload) {
+        metaLine.textContent = "No hay datos de vista previa. Vuelva a la OT y use “Vista previa”.";
+        pausesWrap.innerHTML = `<div class="empty">Sin datos para mostrar.</div>`;
+      } else {
+        metaLine.textContent = `Generado: ${safeStr(payload.generated_at) || "—"}`;
+        woCode.textContent = safeStr(payload.work_order_code) || `OT-${wo}`;
+        const t = payload.turno || {};
+        turnoGrupo.textContent = `${safeStr(t.turno) || "—"} / ${safeStr(t.grupo) || "—"}`;
+        operador.textContent = safeStr(t.operador) || "—";
+        ayudante.textContent = safeStr(t.ayudante) || "—";
+        supervisor.textContent = safeStr(t.supervisor) || "—";
+
+        const timer = payload.timer || {};
+        stateBadge.textContent = safeStr(timer.state) || "pending";
+        totalHms.textContent = safeStr(timer.total_hms) || "00:00:00";
+        deadHms.textContent = safeStr(timer.dead_hms) || "00:00:00";
+        effectiveHms.textContent = safeStr(timer.effective_hms) || "00:00:00";
+        kgHora.textContent = safeStr(timer.kg_hora) || "0.00";
+
+        const pauses = Array.isArray(payload.pauses) ? payload.pauses : [];
+        pausesCount.textContent = `${pauses.length} filas`;
+        if (pauses.length === 0) {
+          pausesWrap.innerHTML = `<div class="empty">Sin paradas registradas.</div>`;
+        } else {
+          const rows = pauses.map((p, idx) => {
+            const at = safeStr(p.at) || "—";
+            const reason = safeStr(p.reason) || "—";
+            const obs = safeStr(p.obs) || "";
+            const dur = safeStr(p.duration_hms) || "00:00:00";
+            return `<tr>
+              <td class="mono">${idx + 1}</td>
+              <td class="mono">${at}</td>
+              <td>${reason}${obs ? `<div class="sub" style="margin-top:4px">${obs}</div>` : ""}</td>
+              <td class="mono">${dur}</td>
+            </tr>`;
+          }).join("");
+          pausesWrap.innerHTML = `
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Fecha</th>
+                  <th>Motivo</th>
+                  <th>Duración</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          `;
+        }
+
+        document.getElementById("btnDownload").addEventListener("click", () => {
+          const name = (safeStr(payload.work_order_code) || `OT-${wo}`).replace(/[^\w\-]+/g, "_");
+          downloadHtml(`reporte-temporizador-${name}.html`, "<!doctype html>\n" + document.documentElement.outerHTML);
+        });
+      }
+    </script>
+  </body>
+</html>
+

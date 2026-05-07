@@ -26,10 +26,13 @@ type Notification = {
   title: string
   description: string
   time: string
+  createdAtIso: string
   unread?: boolean
   avatar?: string
   color?: string
   workOrderId?: number
+  targetArea?: string | null
+  hiddenCount?: number
 }
 
 type AlertApiRow = {
@@ -63,6 +66,7 @@ function streamPayloadToRow(row: StreamAlertPayload): AlertApiRow {
 const ALERT_TITLE_ES: Record<string, string> = {
   work_order_saved_broadcast: "Orden de trabajo guardada",
   work_order_created: "Orden de trabajo creada",
+  work_order_area_assignment: "OT asignada a área",
   production_handoff: "Producción actualizada entre áreas",
   production_saved: "Producción guardada",
   ot_material_shortage: "Falta de material",
@@ -76,12 +80,28 @@ function alertTitleInSpanish(alertType: string): string {
   return ALERT_TITLE_ES[key] ?? key.replaceAll("_", " ")
 }
 
-function routeForAlertType(alertType: string, workOrderId?: number): string {
+function routeForAreaTarget(targetArea?: string | null): string | null {
+  const a = (targetArea ?? "").toLowerCase().trim()
+  if (a === "impresion") return "/impresion"
+  if (a === "laminacion") return "/laminacion"
+  if (a === "corte") return "/corte"
+  if (a === "tintas") return "/tintas"
+  return null
+}
+
+function routeForAlertType(
+  alertType: string,
+  workOrderId?: number,
+  targetArea?: string | null,
+): string {
+  const areaRoute = routeForAreaTarget(targetArea)
+  if (areaRoute) return areaRoute
   const key = alertType.toLowerCase().trim()
   if (
     [
       "work_order_saved_broadcast",
       "work_order_created",
+      "work_order_area_assignment",
       "production_handoff",
       "production_saved",
       "ot_material_shortage",
@@ -194,27 +214,77 @@ export function NotificationDropdown() {
   async function handleNotificationClick(item: Notification) {
     try {
       if (item.unread) {
-        await acknowledgeOne(item.id)
+        const woId = Number(item.workOrderId ?? 0)
+        const ta = (item.targetArea ?? "").toLowerCase().trim()
+        if (woId > 0 && ta) {
+          await apiFetch<{ updated_count: number }>("alerts/acknowledge-work-order-area", {
+            method: "POST",
+            body: JSON.stringify({ work_order_id: woId, target_area: ta }),
+          })
+          setRows((prev) =>
+            prev.filter((r) => {
+              const rid = Number(r.work_order?.id ?? 0)
+              const rta = ((r.metadata?.target_area as string | undefined) ?? "").toLowerCase().trim()
+              return !(rid === woId && rta === ta)
+            }),
+          )
+        } else {
+          await acknowledgeOne(item.id)
+        }
       }
       setOpen(false)
-      navigate(routeForAlertType(item.alertType, item.workOrderId))
+      navigate(routeForAlertType(item.alertType, item.workOrderId, item.targetArea))
     } catch {
       // errores manejados en acknowledgeOne
     }
   }
 
   const notifications = useMemo<Notification[]>(
-    () =>
-      rows.map((r) => ({
-        id: r.id,
-        alertType: r.alert_type,
-        title: alertTitleInSpanish(r.alert_type),
-        description: r.message,
-        time: new Date(r.created_at).toLocaleString("es-VE"),
-        unread: !r.acknowledged_at,
-        color: severityColor(r.severity),
-        workOrderId: Number(r.work_order?.id ?? 0) || undefined,
-      })),
+    () => {
+      const byKey = new Map<
+        string,
+        { row: AlertApiRow; hidden: number }
+      >()
+
+      for (const r of rows) {
+        const woId = Number(r.work_order?.id ?? 0) || 0
+        const ta = ((r.metadata?.target_area as string | undefined) ?? "").toLowerCase().trim()
+        const key = woId > 0 && ta ? `${woId}:${ta}` : `id:${r.id}`
+
+        const existing = byKey.get(key)
+        if (!existing) {
+          byKey.set(key, { row: r, hidden: 0 })
+          continue
+        }
+
+        existing.hidden += 1
+        // quedarnos con la alerta más reciente (por created_at)
+        if (new Date(r.created_at).getTime() > new Date(existing.row.created_at).getTime()) {
+          existing.row = r
+        }
+      }
+
+      const grouped = Array.from(byKey.values()).map(({ row, hidden }) => {
+        const hiddenText = hidden > 0 ? ` (+${hidden})` : ""
+        return {
+          id: row.id,
+          alertType: row.alert_type,
+          title: `${alertTitleInSpanish(row.alert_type)}${hiddenText}`,
+          description: row.message,
+          time: new Date(row.created_at).toLocaleString("es-VE"),
+          createdAtIso: row.created_at,
+          unread: !row.acknowledged_at,
+          color: severityColor(row.severity),
+          workOrderId: Number(row.work_order?.id ?? 0) || undefined,
+          targetArea: (row.metadata?.target_area as string | undefined) ?? null,
+          hiddenCount: hidden,
+        } satisfies Notification
+      })
+
+      // Ordenar por más reciente
+      grouped.sort((a, b) => new Date(b.createdAtIso).getTime() - new Date(a.createdAtIso).getTime())
+      return grouped
+    },
     [rows],
   )
 

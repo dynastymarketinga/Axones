@@ -379,6 +379,93 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         ], $h)->assertUnprocessable();
     }
 
+    public function test_printing_control_persists_imp_turnos_and_turno_actual_json(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'impresion']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-JSON',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $turnos = [
+            [
+                'id' => 't1',
+                'started_at' => '2026-05-07T08:00:00.000Z',
+                'closed_at' => '2026-05-07T16:00:00.000Z',
+                'operador' => 'Ana',
+                'timer' => ['effectiveAccSec' => 3600],
+            ],
+        ];
+        $actual = [
+            'id' => 't2',
+            'started_at' => '2026-05-07T16:01:00.000Z',
+            'closed_at' => null,
+            'operador' => 'Luis',
+            'timer' => ['effectiveAccSec' => 0],
+        ];
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impTurnosImpresion' => $turnos,
+                'impTurnoActual' => $actual,
+                'impEstadoArea' => 'abierta',
+                'impOperador' => 'Luis',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.impTurnosImpresion.0.id', 't1')
+            ->assertJsonPath('form.impTurnosImpresion.0.operador', 'Ana')
+            ->assertJsonPath('form.impTurnoActual.id', 't2')
+            ->assertJsonPath('form.impTurnoActual.closed_at', null)
+            ->assertJsonPath('form.impEstadoArea', 'abierta');
+    }
+
+    public function test_printing_control_rejects_imp_estado_area_finalizada_for_non_boss(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'impresion']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-DENY-FIN',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertUnprocessable()
+            ->assertJsonValidationErrors(['form.impEstadoArea']);
+    }
+
+    public function test_printing_control_allows_imp_estado_area_finalizada_for_boss(): void
+    {
+        User::factory()->create();
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-ALLOW-FIN',
+            'status' => 'open',
+            'created_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.impEstadoArea', 'finalizada');
+    }
+
     public function test_put_orden_trabajo_broadcasts_saved_to_all_areas(): void
     {
         $user = User::factory()->create(['role' => 'calidad']);

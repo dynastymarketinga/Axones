@@ -169,7 +169,7 @@ export default function AreaTintasPage() {
     setLoading(true)
     try {
       const data = await apiFetch<Record<string, unknown>>(
-        `work-orders/${woNum}/printing`,
+        `work-orders/${woNum}/tintas`,
       )
       const inks = (data.ink_control_lines as unknown[]) ?? []
       setInkLines(
@@ -263,7 +263,7 @@ export default function AreaTintasPage() {
 
     setSaving(true)
     try {
-      await apiFetch(`work-orders/${woNum}/printing/consumables`, {
+      await apiFetch(`work-orders/${woNum}/tintas/consumables`, {
         method: "PUT",
         body: JSON.stringify({ ink_lines, chemical_usages }),
       })
@@ -335,6 +335,7 @@ export default function AreaTintasPage() {
         body: JSON.stringify({
           output_sku,
           output_name: name,
+          work_order_id: Number.isFinite(woNum) && woNum > 0 ? woNum : null,
           output_inventory_area: mixArea,
           output_tinta_subarea: mixArea === "tintas" ? "superficie" : null,
           unit: "kg",

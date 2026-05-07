@@ -91,6 +91,7 @@ export default function AreaRequestsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas</SelectItem>
+              <SelectItem value="almacen">almacen</SelectItem>
               <SelectItem value="impresion">impresion</SelectItem>
               <SelectItem value="laminacion">laminacion</SelectItem>
               <SelectItem value="corte">corte</SelectItem>

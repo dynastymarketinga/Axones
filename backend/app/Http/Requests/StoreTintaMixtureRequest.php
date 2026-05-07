@@ -24,6 +24,7 @@ class StoreTintaMixtureRequest extends FormRequest
             'output_sku' => ['required', 'string', 'max:64', 'unique:materials,sku'],
             'output_name' => ['required', 'string', 'max:255'],
             'output_barcode' => ['nullable', 'string', 'max:64'],
+            'work_order_id' => ['nullable', 'integer', 'exists:work_orders,id'],
             'output_inventory_area' => ['nullable', 'string', Rule::in([InventoryArea::Tintas->value, InventoryArea::CementerioTintas->value])],
             'output_tinta_subarea' => ['nullable', 'string', Rule::in(['laminacion', 'superficie', 'prueba_laminacion', 'laminacion_nueva'])],
             'unit' => ['nullable', 'string', 'max:16'],

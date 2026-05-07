@@ -23,7 +23,7 @@ class TintaMixtureService
      * Crea el material de salida, descuenta bases del inventario y da de alta el total mezclado como entrada.
      * La cantidad del producto mezclado = suma de cantidades de componentes (balance de masa).
      *
-     * @param  array{output_sku: string, output_name: string, output_barcode?: string|null, output_inventory_area?: string, output_tinta_subarea?: string|null, unit?: string|null, notes?: string|null, components: list<array{material_id: int, quantity: string|float}>}  $data
+     * @param  array{output_sku: string, output_name: string, output_barcode?: string|null, work_order_id?: int|null, output_inventory_area?: string, output_tinta_subarea?: string|null, unit?: string|null, notes?: string|null, components: list<array{material_id: int, quantity: string|float}>}  $data
      */
     public function create(array $data, User $user): TintaMixture
     {
@@ -31,6 +31,7 @@ class TintaMixtureService
 
         return DB::transaction(function () use ($data, $user) {
             $area = $data['output_inventory_area'] ?? InventoryArea::Tintas->value;
+            $workOrderId = isset($data['work_order_id']) ? (int) $data['work_order_id'] : null;
 
             $output = Material::query()->create([
                 'sku' => $data['output_sku'],
@@ -52,6 +53,7 @@ class TintaMixtureService
 
             $mixture = TintaMixture::query()->create([
                 'output_material_id' => $output->getKey(),
+                'work_order_id' => $workOrderId ?: null,
                 'notes' => $data['notes'] ?? null,
                 'created_by' => $user->getKey(),
             ]);
@@ -85,7 +87,11 @@ class TintaMixtureService
                     $user,
                     'tinta_mixture',
                     $mixture->getKey(),
-                    ['step' => 'component_consumption', 'output_material_id' => $output->getKey()],
+                    [
+                        'step' => 'component_consumption',
+                        'output_material_id' => $output->getKey(),
+                        'work_order_id' => $workOrderId ?: null,
+                    ],
                 );
             }
 
@@ -96,7 +102,11 @@ class TintaMixtureService
                 $user,
                 'tinta_mixture',
                 $mixture->getKey(),
-                ['step' => 'mixture_output', 'components_count' => count($sorted)],
+                [
+                    'step' => 'mixture_output',
+                    'components_count' => count($sorted),
+                    'work_order_id' => $workOrderId ?: null,
+                ],
             );
 
             return $mixture->fresh()->load(['components.material', 'outputMaterial', 'creator']);

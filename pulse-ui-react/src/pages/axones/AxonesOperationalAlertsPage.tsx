@@ -36,6 +36,7 @@ type AlertRow = {
 const ALERT_TYPE_LABEL: Record<string, string> = {
   work_order_saved_broadcast: "Orden de trabajo guardada",
   work_order_created: "Orden de trabajo creada",
+  work_order_area_assignment: "OT asignada a área",
   production_handoff: "Producción actualizada entre áreas",
   production_saved: "Producción guardada",
   ot_material_shortage: "Falta de material",

@@ -250,6 +250,13 @@ export type WorkOrderListRow = {
   status: string
   board_stage?: string
   scheduling_status?: string
+  areaRequests?: Array<{
+    id: number
+    area: string
+    status: string
+    work_order_id: number
+    created_at?: string
+  }>
   technical_document?: { form: Record<string, unknown> } | null
   client?: Pick<ClientRecord, "id" | "name">
   product?: Pick<ProductRecord, "id" | "name">

@@ -25,6 +25,7 @@ export function WindingFigurePicker({
   const v = (value || "").trim()
   const previewText =
     v.length === 0 ? "—" : v.length <= 3 ? v : `${v.slice(0, 2)}…`
+  const numericHelpText = helpText === "1–8 o libre" ? "1–8" : helpText
   return (
     <div
       className={cn("ax-winding space-y-2", className)}
@@ -49,9 +50,11 @@ export function WindingFigurePicker({
         <Input
           className="h-9 min-h-9 min-w-0 w-full max-w-full flex-1 sm:max-w-xs text-sm"
           value={v}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={helpText}
-          aria-label="Figura de embobinado (texto o número)"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 1))}
+          placeholder={numericHelpText}
+          aria-label="Figura de embobinado (1-8)"
         />
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground shrink-0 text-[10px] leading-tight max-w-[4.5rem] sm:max-w-[7rem]">

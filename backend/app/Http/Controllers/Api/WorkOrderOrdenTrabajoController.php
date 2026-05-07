@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\MergePrintingOrdenTrabajoRequest;
 use App\Http\Requests\UpdateWorkOrderOrdenTrabajoRequest;
 use App\Models\WorkOrder;
+use App\Enums\WorkOrderPriority;
 use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderOrdenTrabajoService;
 use Illuminate\Http\JsonResponse;
@@ -37,14 +38,51 @@ class WorkOrderOrdenTrabajoController extends Controller
 
     public function update(UpdateWorkOrderOrdenTrabajoRequest $request, WorkOrder $work_order): JsonResponse
     {
-        $form = $request->validated()['form'];
-        $doc = $this->ordenTrabajo->syncForm($work_order, $form);
+        $validated = $request->validated();
+        $form = $validated['form'];
+
+        if (
+            array_key_exists('priority', $validated)
+            && is_string($validated['priority'])
+            && $validated['priority'] !== ''
+        ) {
+            $work_order->update(['priority' => $validated['priority']]);
+        }
+
+        $doc = $this->ordenTrabajo->syncForm($work_order->fresh(), $form);
         $saveFingerprint = $doc->updated_at?->toIso8601String() ?? (string) time();
         $broadcastSummary = $this->productionNotifications->notifyOnWorkOrderSavedBroadcast(
             $work_order->fresh(),
             $request->user(),
             $saveFingerprint,
         );
+
+        $assignmentSummary = null;
+        $assignedRaw = $validated['assigned_areas'] ?? null;
+        if (is_array($assignedRaw)) {
+            $norm = [];
+            foreach ($assignedRaw as $raw) {
+                $a = strtolower(trim((string) $raw));
+                if ($a !== '' && in_array($a, ProductionNotificationService::PRODUCTIVE_AREAS, true)) {
+                    $norm[$a] = true;
+                }
+            }
+            $areas = array_keys($norm);
+            if ($areas !== []) {
+                $reason = trim((string) ($validated['assignment_reason'] ?? ''));
+                $prio = array_key_exists('priority', $validated) && $validated['priority'] !== null
+                    ? (string) $validated['priority']
+                    : ($work_order->fresh()->priority?->value ?? WorkOrderPriority::Normal->value);
+                $assignmentSummary = $this->productionNotifications->notifyAssignedAreasWithReason(
+                    $work_order->fresh(),
+                    $request->user(),
+                    $areas,
+                    $reason,
+                    $prio,
+                );
+            }
+        }
+
         $originArea = strtolower(trim((string) $request->input('origin_area', '')));
         $notifyOnProductionSave = filter_var(
             $request->input('notify_on_production_save', false),
@@ -66,6 +104,7 @@ class WorkOrderOrdenTrabajoController extends Controller
             'notification_summary' => [
                 'broadcast' => $broadcastSummary,
                 'production' => $productionSummary,
+                'assignment' => $assignmentSummary,
             ],
         ]);
     }
@@ -76,7 +115,7 @@ class WorkOrderOrdenTrabajoController extends Controller
     public function mergePrintingControl(MergePrintingOrdenTrabajoRequest $request, WorkOrder $work_order): JsonResponse
     {
         $form = $request->validated()['form'];
-        $doc = $this->ordenTrabajo->mergePrintingKeysIntoForm($work_order, $form);
+        $doc = $this->ordenTrabajo->mergePrintingKeysIntoForm($work_order, $form, $request->user());
         $originArea = strtolower(trim((string) $request->input('origin_area', '')));
         $notifyOnProductionSave = filter_var(
             $request->input('notify_on_production_save', false),

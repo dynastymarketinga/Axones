@@ -64,13 +64,16 @@ class WorkOrderController extends Controller
         $allowedAreaKeys = ['impresion', 'laminacion', 'corte', 'tintas'];
         $miArea = strtolower(trim((string) $request->query('mi_area', '')));
         $historialArea = strtolower(trim((string) $request->query('historial_area', '')));
+        $targetAreaForPayload = null;
 
         if ($miArea !== '' && in_array($miArea, $allowedAreaKeys, true)) {
+            $targetAreaForPayload = $miArea;
             $query->whereHas('areaRequests', function ($q) use ($miArea) {
                 $q->where('area', $miArea)
                     ->where('status', AreaRequestStatus::Pending->value);
             });
         } elseif ($historialArea !== '' && in_array($historialArea, $allowedAreaKeys, true)) {
+            $targetAreaForPayload = $historialArea;
             $query->whereHas('areaRequests', function ($q) use ($historialArea) {
                 $q->where('area', $historialArea);
             });
@@ -130,6 +133,14 @@ class WorkOrderController extends Controller
 
         if ($request->query('client_order_id')) {
             $query->where('client_order_id', $request->query('client_order_id'));
+        }
+
+        if ($targetAreaForPayload !== null) {
+            $query->with(['areaRequests' => function ($q) use ($targetAreaForPayload) {
+                $q->select(['id', 'area', 'status', 'work_order_id', 'created_at'])
+                    ->where('area', $targetAreaForPayload)
+                    ->orderByDesc('created_at');
+            }]);
         }
 
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));

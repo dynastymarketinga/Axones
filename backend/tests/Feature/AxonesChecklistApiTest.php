@@ -72,6 +72,21 @@ class AxonesChecklistApiTest extends TestCase
         $this->getJson('/api/reports/scrap-by-filters?from=2026-01-01&to=2026-12-31', $h)->assertOk();
         $this->getJson('/api/reports/tinta-consumption-by-client?from=2026-01-01&to=2026-12-31', $h)->assertOk();
 
+        $this->getJson('/api/reports/work-order-time-report?from=2026-01-01&to=2026-12-31', $h)->assertOk()
+            ->assertJsonStructure(['from', 'to', 'work_order_id', 'summary', 'totals', 'downtimes']);
+        $this->getJson("/api/reports/work-order-time-report?from=2026-01-01&to=2026-12-31&work_order_id={$wo->id}", $h)->assertOk();
+        $previewRes = $this->call('GET', '/api/reports/work-order-time-report/preview', [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+        ], [], [], $this->transformHeadersToServerVars($h));
+        $this->assertSame(200, $previewRes->getStatusCode());
+        $this->assertStringContainsString('text/html', (string) $previewRes->headers->get('Content-Type'));
+        $pdfRes = $this->call('GET', '/api/reports/work-order-time-report.pdf', [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+        ], [], [], $this->transformHeadersToServerVars($h));
+        $this->assertSame(200, $pdfRes->getStatusCode());
+
         $this->postJson('/api/gate-movements', [
             'direction' => 'in',
             'notes' => 'Camión proveedor',

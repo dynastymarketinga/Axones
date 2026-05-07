@@ -24,6 +24,7 @@ export type MenuItem = {
   url: string
   icon?: LucideIcon
   items?: MenuItem[]
+  badgeCount?: number
 }
 
 export function NavMain({
@@ -71,7 +72,12 @@ export function NavMain({
             >
               <Link to={toHref(item.url)}>
                 {item.icon && <item.icon className="h-4 w-4" />}
-                <span>{item.title}</span>
+                <span className="min-w-0 truncate">{item.title}</span>
+                {item.badgeCount && item.badgeCount > 0 ? (
+                  <span className="ml-auto inline-flex min-w-6 justify-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                    {item.badgeCount}
+                  </span>
+                ) : null}
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -116,8 +122,13 @@ export function NavMain({
                         <CollapsibleTrigger asChild>
                           <SidebarMenuSubButton>
                             {subItem.icon && <subItem.icon className="h-4 w-4" />}
-                            <span>{subItem.title}</span>
-                            <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                            <span className="min-w-0 truncate">{subItem.title}</span>
+                            {subItem.badgeCount && subItem.badgeCount > 0 ? (
+                              <span className="ml-auto inline-flex min-w-6 justify-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                                {subItem.badgeCount}
+                              </span>
+                            ) : null}
+                            <ChevronRight className="ml-2 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                           </SidebarMenuSubButton>
                         </CollapsibleTrigger>
 
@@ -133,7 +144,12 @@ export function NavMain({
                                     {child.icon && (
                                       <child.icon className="h-4 w-4" />
                                     )}
-                                    <span>{child.title}</span>
+                          <span className="min-w-0 truncate">{child.title}</span>
+                          {child.badgeCount && child.badgeCount > 0 ? (
+                            <span className="ml-auto inline-flex min-w-6 justify-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                              {child.badgeCount}
+                            </span>
+                          ) : null}
                                   </Link>
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>
@@ -150,7 +166,12 @@ export function NavMain({
                       >
                         <Link to={toHref(subItem.url)}>
                           {subItem.icon && <subItem.icon className="h-4 w-4" />}
-                          <span>{subItem.title}</span>
+                          <span className="min-w-0 truncate">{subItem.title}</span>
+                          {subItem.badgeCount && subItem.badgeCount > 0 ? (
+                            <span className="ml-auto inline-flex min-w-6 justify-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                              {subItem.badgeCount}
+                            </span>
+                          ) : null}
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>

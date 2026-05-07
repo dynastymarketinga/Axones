@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\OperationalAlert;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class OperationalAlertController extends Controller
 {
@@ -74,6 +75,29 @@ class OperationalAlertController extends Controller
         $updated = OperationalAlert::query()
             ->visibleTo($user)
             ->unread()
+            ->update([
+                'acknowledged_at' => now(),
+                'acknowledged_by' => $user->getKey(),
+            ]);
+
+        return response()->json([
+            'updated_count' => $updated,
+        ]);
+    }
+
+    public function acknowledgeWorkOrderArea(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $validated = $request->validate([
+            'work_order_id' => ['required', 'integer', 'min:1'],
+            'target_area' => ['required', 'string', Rule::in(['impresion', 'laminacion', 'corte', 'tintas', 'montaje'])],
+        ]);
+
+        $updated = OperationalAlert::query()
+            ->visibleTo($user)
+            ->unread()
+            ->where('work_order_id', (int) $validated['work_order_id'])
+            ->where('metadata->target_area', (string) $validated['target_area'])
             ->update([
                 'acknowledged_at' => now(),
                 'acknowledged_by' => $user->getKey(),

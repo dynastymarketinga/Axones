@@ -418,6 +418,17 @@
   min-height: 36px;
   max-height: 36px;
   font-size: 13px;
+  /* Más legible sobre fondos lavanda: inputs blancos */
+  background: #ffffff !important;
+}
+
+/* Segmentado (ToggleGroup) dentro de la planilla: que se vea “de plantilla” y ocupe el ancho */
+.ax-ot [data-radix-toggle-group-root] {
+  width: 100%;
+  justify-content: stretch;
+}
+.ax-ot [data-radix-toggle-group-item] {
+  flex: 1;
 }
 
 /* Tabla tintas: scroll horizontal en pantallas estrechas (evita columnas inútiles) */

@@ -40,7 +40,11 @@ const INVENTORY_CHIEF_URLS = new Set([
   "nota-entrega-nueva",
   "notas-entrega",
   "solicitudes-material",
-  "reportes",
+  "reportes/inventario",
+  "reportes/produccion",
+  "reportes/tiempos",
+  "reportes/mermas",
+  "reportes/por-orden-trabajo",
 ])
 
 const INVENTORY_URLS = new Set([
@@ -79,7 +83,11 @@ const PRINTING_URLS = new Set([
   "solicitudes-area",
   "solicitudes-material",
   "calidad",
-  "reportes",
+  "reportes/inventario",
+  "reportes/produccion",
+  "reportes/tiempos",
+  "reportes/mermas",
+  "reportes/por-orden-trabajo",
   "mezclas-tinta",
 ])
 

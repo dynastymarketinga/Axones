@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ReportDateRangeRequest;
 use App\Http\Requests\ReportWorkOrderMaterialSummaryRequest;
 use App\Http\Requests\ScrapReportRequest;
+use App\Http\Requests\WorkOrderTimeReportRequest;
 use App\Services\InventoryReportService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -283,6 +284,87 @@ class ReportController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Reporte de tiempos por OT y/o rango (CSV/JSON).
+     */
+    public function workOrderTimeReport(WorkOrderTimeReportRequest $request): JsonResponse|Response
+    {
+        $payload = $this->workOrderTimeReportPayload($request);
+
+        if (($request->validated()['format'] ?? null) === 'csv') {
+            $csv = $this->reports->rowsToCsv((array) ($payload['rows_csv'] ?? []));
+
+            return new Response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="'.$this->workOrderTimeReportFileBase($payload).'.csv"',
+            ]);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Vista previa HTML del reporte de tiempos.
+     */
+    public function workOrderTimeReportPreview(WorkOrderTimeReportRequest $request): Response
+    {
+        $payload = $this->workOrderTimeReportPayload($request);
+        $html = View::make('pdf.work_order_time_report', [
+            'report' => $payload,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ])->render();
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="'.$this->workOrderTimeReportFileBase($payload).'.html"',
+        ]);
+    }
+
+    /**
+     * Descarga PDF del reporte de tiempos.
+     */
+    public function workOrderTimeReportPdf(WorkOrderTimeReportRequest $request): Response
+    {
+        $payload = $this->workOrderTimeReportPayload($request);
+        $html = View::make('pdf.work_order_time_report', [
+            'report' => $payload,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ])->render();
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+
+        return $pdf->download($this->workOrderTimeReportFileBase($payload).'.pdf');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function workOrderTimeReportPayload(WorkOrderTimeReportRequest $request): array
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $woId = isset($validated['work_order_id']) ? (int) $validated['work_order_id'] : null;
+
+        return $this->reports->workOrderTimeReport($from, $to, $woId);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function workOrderTimeReportFileBase(array $payload): string
+    {
+        $tag = 'rango-'.Carbon::parse((string) $payload['from'])->format('Ymd').'-'.Carbon::parse((string) $payload['to'])->format('Ymd');
+        if (! empty($payload['work_order'])) {
+            $code = (string) ($payload['work_order']['code'] ?? ('ot-'.$payload['work_order_id']));
+            $code = str_replace(['/', '\\', ' '], '-', $code);
+            $tag = $code.'-'.$tag;
+        }
+
+        return 'reporte-tiempos-'.$tag;
     }
 
     /**

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 import type { BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
@@ -202,11 +203,51 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       <div className="mt-3 rounded-lg border border-amber-200/70 bg-amber-50/40 p-3">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">Información del turno</div>
         <div className="grid gap-2 md:grid-cols-2">
-          <div className="space-y-1"><Label className="ot-label">Turno</Label><div className="grid grid-cols-2 gap-2"><Button type="button" variant={props.turno === "diurno" ? "default" : "outline"} onClick={() => props.onSetTurno("diurno")}>Diurno</Button><Button type="button" variant={props.turno === "nocturno" ? "default" : "outline"} onClick={() => props.onSetTurno("nocturno")}>Nocturno</Button></div></div>
-          <div className="space-y-1"><Label className="ot-label">Grupo</Label><div className="grid grid-cols-3 gap-2">{(["A", "B", "C"] as const).map((g) => <Button key={g} type="button" variant={props.grupo === g ? "default" : "outline"} onClick={() => props.onSetGrupo(g)}>{g}</Button>)}</div></div>
-          <div className="ot-field"><label className="ot-label">Operador</label><input className="ot-input" value={props.operador} onChange={(e) => props.onSetOperador(e.target.value)} placeholder="Nombre operador" /></div>
-          <div className="ot-field"><label className="ot-label">Ayudante</label><input className="ot-input" value={props.ayudante} onChange={(e) => props.onSetAyudante(e.target.value)} placeholder="Nombre ayudante" /></div>
-          <div className="ot-field md:col-span-2"><label className="ot-label">Supervisor</label><input className="ot-input" value={props.supervisor} onChange={(e) => props.onSetSupervisor(e.target.value)} placeholder="Nombre supervisor" /></div>
+          <div className="space-y-1">
+            <Label className="ot-label">Turno</Label>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              className="w-full"
+              value={props.turno}
+              onValueChange={(v) => {
+                if (!v) return
+                props.onSetTurno(v as "diurno" | "nocturno")
+              }}
+            >
+              <ToggleGroupItem value="diurno" className="flex-1">Diurno</ToggleGroupItem>
+              <ToggleGroupItem value="nocturno" className="flex-1">Nocturno</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+          <div className="space-y-1">
+            <Label className="ot-label">Grupo</Label>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              className="w-full"
+              value={props.grupo}
+              onValueChange={(v) => {
+                if (!v) return
+                props.onSetGrupo(v as "A" | "B" | "C")
+              }}
+            >
+              {(["A", "B", "C"] as const).map((g) => (
+                <ToggleGroupItem key={g} value={g} className="flex-1">{g}</ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+          <div className="ot-field">
+            <Label className="ot-label">Operador</Label>
+            <Input className="ot-input-unified h-9" value={props.operador} onChange={(e) => props.onSetOperador(e.target.value)} placeholder="Nombre operador" />
+          </div>
+          <div className="ot-field">
+            <Label className="ot-label">Ayudante</Label>
+            <Input className="ot-input-unified h-9" value={props.ayudante} onChange={(e) => props.onSetAyudante(e.target.value)} placeholder="Nombre ayudante" />
+          </div>
+          <div className="ot-field md:col-span-2">
+            <Label className="ot-label">Supervisor</Label>
+            <Input className="ot-input-unified h-9" value={props.supervisor} onChange={(e) => props.onSetSupervisor(e.target.value)} placeholder="Nombre supervisor" />
+          </div>
         </div>
       </div>
 

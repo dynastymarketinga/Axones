@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\WorkOrderPriority;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
@@ -19,6 +21,10 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
     {
         return [
             'form' => ['required', 'array'],
+            'priority' => ['sometimes', 'nullable', 'string', Rule::in(WorkOrderPriority::values())],
+            'assigned_areas' => ['sometimes', 'array', 'max:10'],
+            'assigned_areas.*' => ['string', Rule::in(['impresion', 'laminacion', 'corte', 'tintas'])],
+            'assignment_reason' => ['nullable', 'string', 'max:500'],
         ];
     }
 
@@ -131,15 +137,39 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
      */
     private function validateCorte(Validator $validator, array $form): void
     {
+        // La planilla se guarda de forma incremental. Solo forzamos obligatorios de corte
+        // cuando la OT ya está en la etapa "corte" (en otras etapas, validar solo formatos).
+        $wo = $this->route('work_order');
+        $stage = strtolower(trim((string) ($wo?->board_stage?->value ?? $wo?->board_stage ?? '')));
+        $require = $stage === 'corte';
+
         foreach (['anchoCorteFinal', 'pesoBobina', 'metrosBobina', 'distFotoceldaBorde', 'distFiguraLadoContrario', 'distFiguraLadoFotocelda', 'diamBobina', 'anchoCore', 'diamCorePlg'] as $key) {
             $v = $this->asStringValue($form[$key] ?? null);
+            if ($require && $v === '') {
+                $validator->errors()->add("form.$key", "$key es obligatorio.");
+                continue;
+            }
             if ($v !== '' && ! $this->isMetricLikeOrNA($v)) {
                 $validator->errors()->add("form.$key", "$key tiene formato inválido.");
             }
         }
 
+        $orient = $this->asStringValue($form['orientacionEmbalaje'] ?? null);
+        if ($require && $orient === '') {
+            $validator->errors()->add('form.orientacionEmbalaje', 'Figura embobinado es obligatoria.');
+        }
+
+        $ubic = $this->asStringValue($form['ubicFotoceldaCorte'] ?? null);
+        if ($require && $ubic === '') {
+            $validator->errors()->add('form.ubicFotoceldaCorte', 'Ubic. fotocelda es obligatoria.');
+        }
+
         foreach (['maxEmpates', 'cantCores'] as $key) {
             $v = $this->asStringValue($form[$key] ?? null);
+            if ($require && $v === '') {
+                $validator->errors()->add("form.$key", "$key es obligatorio.");
+                continue;
+            }
             if ($v !== '' && ! $this->isPositiveIntLike($v)) {
                 $validator->errors()->add("form.$key", "$key debe ser entero mayor a 0.");
             }
@@ -147,6 +177,10 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
 
         foreach (['kgIngresadosCorte', 'kgSalidaCorte', 'kgMermaCorte', 'metrajeCorte'] as $key) {
             $v = $this->asStringValue($form[$key] ?? null);
+            if ($require && $v === '') {
+                $validator->errors()->add("form.$key", "$key es obligatorio.");
+                continue;
+            }
             if ($v !== '' && ! $this->isDecimalLike($v)) {
                 $validator->errors()->add("form.$key", "$key debe ser numérico.");
             }

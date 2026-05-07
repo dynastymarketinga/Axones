@@ -38,6 +38,8 @@ import WorkOrdersHubPage from "@/pages/axones/WorkOrdersHubPage"
 import WorkOrderDetailPage from "@/pages/axones/WorkOrderDetailPage"
 import WorkOrderPlanillaPage from "@/pages/axones/WorkOrderPlanillaPage"
 import WorkOrderProductionPreviewPage from "@/pages/axones/WorkOrderProductionPreviewPage"
+import WorkOrderPrintingTimerPreviewPage from "@/pages/axones/WorkOrderPrintingTimerPreviewPage"
+import WorkOrderPrintingDesperdicioPreviewPage from "@/pages/axones/WorkOrderPrintingDesperdicioPreviewPage"
 import CorteDispatchPage from "@/pages/axones/CorteDispatchPage"
 import DeliveryNotesPage from "@/pages/axones/DeliveryNotesPage"
 import DeliveryNotePreviewPage from "@/pages/axones/DeliveryNotePreviewPage"
@@ -46,7 +48,11 @@ import AreaRequestsPage from "@/pages/axones/AreaRequestsPage"
 import GateMovementsPage from "@/pages/axones/GateMovementsPage"
 import AxonesDashboardPage from "@/pages/axones/AxonesDashboardPage"
 import AxonesOperationalAlertsPage from "@/pages/axones/AxonesOperationalAlertsPage"
-import AxonesReportsPage from "@/pages/axones/AxonesReportsPage"
+import ReportsInventoryPage from "@/pages/axones/reports/ReportsInventoryPage"
+import ReportsProductionPage from "@/pages/axones/reports/ReportsProductionPage"
+import ReportsTimesPage from "@/pages/axones/reports/ReportsTimesPage"
+import ReportsScrapPage from "@/pages/axones/reports/ReportsScrapPage"
+import ReportsByWorkOrderPage from "@/pages/axones/reports/ReportsByWorkOrderPage"
 import TintaMixturesPage from "@/pages/axones/TintaMixturesPage"
 import QualityWorkOrderPage from "@/pages/axones/QualityWorkOrderPage"
 import QualityCertificatePreviewPage from "@/pages/axones/QualityCertificatePreviewPage"
@@ -227,6 +233,20 @@ export const router = createBrowserRouter(
           }),
         },
         {
+          path: "ordenes-trabajo/:woId/impresion/temporizador/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderPrintingTimerPreviewPage />,
+          }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/impresion/desperdicio/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderPrintingDesperdicioPreviewPage />,
+          }),
+        },
+        {
           path: "ordenes-trabajo/:woId",
           element: guardAxonesRoute({ routeKey: "ordenes-trabajo", element: <WorkOrderPlanillaPage /> }),
         },
@@ -250,7 +270,11 @@ export const router = createBrowserRouter(
         { path: "solicitudes-area", element: guardAxonesRoute({ routeKey: "solicitudes-area", element: <AreaRequestsPage /> }) },
         { path: "vigilancia", element: guardAxonesRoute({ routeKey: "vigilancia", element: <GateMovementsPage /> }) },
         { path: "vigilancia/nuevo", element: guardAxonesRoute({ routeKey: "vigilancia/nuevo", element: <GateMovementNewPage /> }) },
-        { path: "reportes", element: guardAxonesRoute({ routeKey: "reportes", element: <AxonesReportsPage /> }) },
+        { path: "reportes/inventario", element: guardAxonesRoute({ routeKey: "reportes/inventario", element: <ReportsInventoryPage /> }) },
+        { path: "reportes/produccion", element: guardAxonesRoute({ routeKey: "reportes/produccion", element: <ReportsProductionPage /> }) },
+        { path: "reportes/tiempos", element: guardAxonesRoute({ routeKey: "reportes/tiempos", element: <ReportsTimesPage /> }) },
+        { path: "reportes/mermas", element: guardAxonesRoute({ routeKey: "reportes/mermas", element: <ReportsScrapPage /> }) },
+        { path: "reportes/por-orden-trabajo", element: guardAxonesRoute({ routeKey: "reportes/por-orden-trabajo", element: <ReportsByWorkOrderPage /> }) },
         { path: "asistente", element: guardAxonesRoute({ routeKey: "asistente", element: <AxonesChatPage /> }) },
         { path: "mezclas-tinta", element: guardAxonesRoute({ routeKey: "mezclas-tinta", element: <TintaMixturesPage /> }) },
 

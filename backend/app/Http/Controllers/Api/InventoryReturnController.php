@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\InventoryMovementType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreInventoryReturnRequest;
+use App\Models\Bobina;
 use App\Models\InventoryReturn;
 use App\Models\Material;
 use App\Services\InventoryLedgerService;
@@ -53,14 +54,36 @@ class InventoryReturnController extends Controller
             ]);
         }
 
-        $return = InventoryReturn::query()->create([
-            'material_id' => $material->getKey(),
-            'work_order_id' => $data['work_order_id'] ?? null,
-            'destination_area' => $data['destination_area'],
-            'quantity' => $data['quantity'],
-            'status' => 'pending',
-            'reason' => $data['reason'] ?? null,
-        ]);
+        $return = DB::transaction(function () use ($data, $material) {
+            /** @var InventoryReturn $return */
+            $return = InventoryReturn::query()->create([
+                'material_id' => $material->getKey(),
+                'work_order_id' => $data['work_order_id'] ?? null,
+                'destination_area' => $data['destination_area'],
+                'quantity' => $data['quantity'],
+                'status' => 'pending',
+                'reason' => $data['reason'] ?? null,
+            ]);
+
+            // Si la devolución es hacia bobinas rechazadas, crear automáticamente la bobina rechazada
+            // para que aparezca en /axones/bobinas sin un paso manual adicional.
+            if (
+                ($data['destination_area'] ?? null) === 'bobinas_rechazadas' &&
+                ($data['work_order_id'] ?? null) &&
+                ! Bobina::query()->where('inventory_return_id', $return->getKey())->exists()
+            ) {
+                $suffix = strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+                Bobina::query()->create([
+                    'material_id' => $material->getKey(),
+                    'inventory_return_id' => $return->getKey(),
+                    'code' => "REJ-{$return->getKey()}-{$suffix}",
+                    'weight_kg' => $data['quantity'],
+                    'status' => 'rejected',
+                ]);
+            }
+
+            return $return;
+        });
 
         $return->load(['material.supplier:id,name', 'workOrder']);
 

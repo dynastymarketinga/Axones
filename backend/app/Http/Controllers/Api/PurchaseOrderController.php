@@ -303,18 +303,34 @@ class PurchaseOrderController extends Controller
             ->orderBy('id')
             ->get(['id', 'code', 'client_id', 'product_id']);
 
-        $items = $workOrders->map(function (WorkOrder $wo) {
-            $dispatchedCount = DeliveryNote::query()
-                ->where('work_order_id', $wo->getKey())
-                ->where('status', DeliveryNoteStatus::Dispatched->value)
-                ->count();
-            $draftCount = DeliveryNote::query()
-                ->where('work_order_id', $wo->getKey())
-                ->where('status', DeliveryNoteStatus::Draft->value)
-                ->count();
+        $noteCounts = DeliveryNote::query()
+            ->whereIn('work_order_id', $workOrderIds)
+            ->whereIn('status', [DeliveryNoteStatus::Dispatched->value, DeliveryNoteStatus::Draft->value])
+            ->selectRaw('work_order_id, status, COUNT(*) as cnt')
+            ->groupBy('work_order_id', 'status')
+            ->get();
+
+        $dispatchedByWorkOrderId = [];
+        $draftByWorkOrderId = [];
+        foreach ($noteCounts as $row) {
+            $woId = (int) $row->work_order_id;
+            $status = (string) $row->status;
+            $cnt = (int) $row->cnt;
+
+            if ($status === DeliveryNoteStatus::Dispatched->value) {
+                $dispatchedByWorkOrderId[$woId] = $cnt;
+            } elseif ($status === DeliveryNoteStatus::Draft->value) {
+                $draftByWorkOrderId[$woId] = $cnt;
+            }
+        }
+
+        $items = $workOrders->map(function (WorkOrder $wo) use ($dispatchedByWorkOrderId, $draftByWorkOrderId) {
+            $woId = (int) $wo->getKey();
+            $dispatchedCount = (int) ($dispatchedByWorkOrderId[$woId] ?? 0);
+            $draftCount = (int) ($draftByWorkOrderId[$woId] ?? 0);
 
             return [
-                'id' => $wo->getKey(),
+                'id' => $woId,
                 'code' => $wo->code,
                 'client_name' => $wo->client?->name,
                 'product_name' => $wo->product?->name,

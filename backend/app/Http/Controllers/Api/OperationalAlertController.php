@@ -86,7 +86,7 @@ class OperationalAlertController extends Controller
 
     private function hasFullAlertAccess(string $role): bool
     {
-        return in_array(strtolower(trim($role)), ['boss', 'admin', 'jefe_supremo', 'superadmin'], true);
+        return in_array(strtolower(trim($role)), ['boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones'], true);
     }
 
     private function resolveTargetAreaFromRole(string $role): ?string

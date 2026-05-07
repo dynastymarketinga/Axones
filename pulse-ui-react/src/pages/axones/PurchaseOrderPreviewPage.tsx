@@ -1,15 +1,26 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { FileDown } from "lucide-react"
+import { CheckCircle2, FileDown, Lock, RotateCcw, Truck } from "lucide-react"
 import { toast } from "sonner"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
+import { getStoredUser } from "@/lib/auth-storage"
 
 const AXONES_ADDRESS_LINE =
   "CALLE PARCELAMIENTO INDUSTRIAL GUERE, LOCAL 35, SECTOR LA JULIA. TURMERO-EDO ARAGUA, ZONA POSTAL 2115. TELFS: (0244) 663.53.76 – (0244) 663.50.60"
@@ -36,6 +47,9 @@ type PurchaseOrderPreviewDetail = {
   created_at?: string | null
   notes: string | null
   tax_applies?: boolean
+  manually_closed_at?: string | null
+  manual_close_reason?: string | null
+  manuallyClosedBy?: { id: number; name: string } | null
   supplier?: {
     id: number
     name: string
@@ -51,6 +65,23 @@ type PurchaseOrderPreviewDetail = {
     unit_price?: string | number | null
     material?: { name?: string | null; sku?: string | null } | null
   }>
+}
+
+type ConsumingWorkOrder = {
+  id: number
+  code: string
+  client_name?: string | null
+  product_name?: string | null
+  product_cpe?: string | null
+  dispatched_notes_count: number
+  draft_notes_count: number
+  has_dispatched_note: boolean
+}
+
+type ConsumingWorkOrdersResponse = {
+  work_orders: ConsumingWorkOrder[]
+  all_dispatched: boolean
+  no_consumers: boolean
 }
 
 function formatDateDMY(value: string | null | undefined): string {
@@ -300,34 +331,60 @@ export default function PurchaseOrderPreviewPage() {
   const [detail, setDetail] = useState<PurchaseOrderPreviewDetail | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [headerLogoSrc, setHeaderLogoSrc] = useState(REPORT_LOGO_VAR01)
+  const [consuming, setConsuming] = useState<ConsumingWorkOrdersResponse | null>(null)
+  const [closeOpen, setCloseOpen] = useState(false)
+  const [closeReason, setCloseReason] = useState("")
+  const [closeBusy, setCloseBusy] = useState(false)
+  const [reopenBusy, setReopenBusy] = useState(false)
+
+  const session = getStoredUser()
+  const role = (session?.role ?? "").toLowerCase().trim()
+  const isBoss =
+    role === "boss" ||
+    role === "admin" ||
+    role === "jefe_supremo" ||
+    role === "superadmin"
 
   useEffect(() => {
     setHeaderLogoSrc(REPORT_LOGO_VAR01)
   }, [id])
+
+  const reloadConsuming = useCallback(async (poId: number, signal?: { cancelled: boolean }) => {
+    try {
+      const res = await apiFetch<ConsumingWorkOrdersResponse>(
+        `purchase-orders/${poId}/consuming-work-orders`,
+      )
+      if (!signal?.cancelled) setConsuming(res)
+    } catch (e) {
+      if (!signal?.cancelled) setConsuming(null)
+      if (e instanceof ApiError) toast.error(e.message)
+    }
+  }, [])
 
   useEffect(() => {
     if (!Number.isFinite(id) || id < 1) {
       setLoading(false)
       return
     }
-    let cancelled = false
+    const signal = { cancelled: false }
     void (async () => {
       setLoading(true)
       try {
         const data = await apiFetch<PurchaseOrderPreviewDetail>(`purchase-orders/${id}`)
-        if (!cancelled) setDetail(data)
+        if (!signal.cancelled) setDetail(data)
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
         else toast.error("No se pudo cargar la vista previa de la orden de compra.")
-        if (!cancelled) setDetail(null)
+        if (!signal.cancelled) setDetail(null)
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!signal.cancelled) setLoading(false)
       }
     })()
+    void reloadConsuming(id, signal)
     return () => {
-      cancelled = true
+      signal.cancelled = true
     }
-  }, [id])
+  }, [id, reloadConsuming])
 
   const documentDate = useMemo(() => {
     if (!detail) return "—"
@@ -337,6 +394,51 @@ export default function PurchaseOrderPreviewPage() {
   const totals = useMemo(() => (detail ? purchaseOrderTotals(detail) : null), [detail])
 
   const supplier = detail?.supplier
+  const isManuallyClosed = Boolean(detail?.manually_closed_at)
+
+  async function submitManualClose() {
+    if (!detail) return
+    const trimmed = closeReason.trim()
+    if (trimmed.length < 5) {
+      toast.error("El motivo debe tener al menos 5 caracteres.")
+      return
+    }
+    setCloseBusy(true)
+    try {
+      const updated = await apiFetch<PurchaseOrderPreviewDetail>(
+        `purchase-orders/${detail.id}/manual-close`,
+        { method: "POST", body: JSON.stringify({ reason: trimmed }) },
+      )
+      setDetail(updated)
+      setCloseOpen(false)
+      setCloseReason("")
+      toast.success("Orden cerrada manualmente.")
+      void reloadConsuming(detail.id)
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cerrar la orden.")
+    } finally {
+      setCloseBusy(false)
+    }
+  }
+
+  async function submitReopen() {
+    if (!detail) return
+    if (!confirm("¿Reabrir esta orden de compra? El estado se recalculará automáticamente.")) return
+    setReopenBusy(true)
+    try {
+      const updated = await apiFetch<PurchaseOrderPreviewDetail>(
+        `purchase-orders/${detail.id}/reopen`,
+        { method: "POST" },
+      )
+      setDetail(updated)
+      toast.success("Orden reabierta.")
+      void reloadConsuming(detail.id)
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo reabrir la orden.")
+    } finally {
+      setReopenBusy(false)
+    }
+  }
 
   return (
     <div className="space-y-6 p-4 md:p-6 print:bg-white print:p-0">
@@ -347,10 +449,32 @@ export default function PurchaseOrderPreviewPage() {
             Revise el formato y descargue el PDF para imprimir o archivar.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" asChild>
             <Link to="/ordenes-compra">Volver al listado</Link>
           </Button>
+          {isBoss && detail ? (
+            isManuallyClosed ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={reopenBusy}
+                onClick={() => void submitReopen()}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                <LoadingButtonLabel loading={reopenBusy} loadingText="Reabriendo…" idleText="Reabrir orden" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCloseOpen(true)}
+              >
+                <Lock className="mr-2 h-4 w-4" />
+                Cerrar manualmente
+              </Button>
+            )
+          ) : null}
           <Button
             type="button"
             disabled={!detail || pdfBusy}
@@ -537,6 +661,134 @@ export default function PurchaseOrderPreviewPage() {
           </div>
         </article>
       )}
+
+      {detail ? (
+        <section className="mx-auto w-full max-w-[820px] space-y-3 rounded-xl border bg-white p-6 shadow-sm print:hidden">
+          <header className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold tracking-tight">
+                Estado de cierre · órdenes de trabajo consumidoras
+              </h2>
+              <p className="text-muted-foreground text-xs">
+                La OC pasa a <span className="font-medium">Completada</span> cuando todas las OTs que usaron material
+                de esta orden tienen al menos una nota de entrega despachada.
+              </p>
+            </div>
+            {isManuallyClosed ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <Lock className="h-3.5 w-3.5" />
+                Cerrada manualmente
+              </span>
+            ) : null}
+          </header>
+
+          {isManuallyClosed && detail.manual_close_reason ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+              <p>
+                <span className="font-semibold">Motivo:</span> {detail.manual_close_reason}
+              </p>
+              {detail.manuallyClosedBy?.name ? (
+                <p className="mt-1 text-emerald-800">
+                  Por {detail.manuallyClosedBy.name}
+                  {detail.manually_closed_at ? ` · ${formatDateDMY(detail.manually_closed_at)}` : ""}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!consuming ? (
+            <div className="text-muted-foreground text-sm">Cargando órdenes de trabajo…</div>
+          ) : consuming.no_consumers ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              No se detectaron órdenes de trabajo que hayan consumido material trazable a esta OC. La OC permanecerá
+              en <span className="font-medium">Parcial</span> hasta que jefatura la cierre manualmente.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-xs sm:text-sm">
+                <thead className="bg-muted/40">
+                  <tr>
+                    <th className="px-2 py-2 text-left font-semibold">OT</th>
+                    <th className="px-2 py-2 text-left font-semibold">Cliente</th>
+                    <th className="px-2 py-2 text-left font-semibold">Producto</th>
+                    <th className="px-2 py-2 text-center font-semibold">Notas borrador</th>
+                    <th className="px-2 py-2 text-center font-semibold">Notas despachadas</th>
+                    <th className="px-2 py-2 text-center font-semibold">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consuming.work_orders.map((wo) => (
+                    <tr key={wo.id} className="border-t">
+                      <td className="px-2 py-2 font-mono">{wo.code}</td>
+                      <td className="px-2 py-2">{wo.client_name ?? "—"}</td>
+                      <td className="px-2 py-2">
+                        {wo.product_name ?? wo.product_cpe ?? "—"}
+                      </td>
+                      <td className="px-2 py-2 text-center tabular-nums">{wo.draft_notes_count}</td>
+                      <td className="px-2 py-2 text-center tabular-nums">{wo.dispatched_notes_count}</td>
+                      <td className="px-2 py-2 text-center">
+                        {wo.has_dispatched_note ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700">
+                            <CheckCircle2 className="h-4 w-4" /> Despachada
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-amber-700">
+                            <Truck className="h-4 w-4" /> Pendiente
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {consuming.all_dispatched && !isManuallyClosed ? (
+                <p className="bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  Todas las OTs tienen al menos una nota despachada — la OC ya debería figurar como Completada.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <Dialog open={closeOpen} onOpenChange={(open) => { if (!closeBusy) setCloseOpen(open) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cerrar manualmente la orden</DialogTitle>
+            <DialogDescription>
+              Esta acción marca la OC como Completada aunque queden recepciones o despachos pendientes. Se registrará
+              el motivo y el usuario que la cierra.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-2">
+            <Label htmlFor="po-close-reason">Motivo del cierre</Label>
+            <Textarea
+              id="po-close-reason"
+              value={closeReason}
+              onChange={(ev) => setCloseReason(ev.target.value)}
+              placeholder="Ej. proveedor desistió, sobrante quedará en stock, etc."
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCloseOpen(false)}
+              disabled={closeBusy}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void submitManualClose()}
+              disabled={closeBusy}
+            >
+              <LoadingButtonLabel loading={closeBusy} loadingText="Cerrando…" idleText="Cerrar OC" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

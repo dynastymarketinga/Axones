@@ -20,6 +20,12 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(AxonesUsersSeeder::class);
 
+        // Usuarios reales Millennium: definir AXONES_SEED_MILLENNIUM_USERS=1 en .env
+        $millennium = strtolower(trim((string) env('AXONES_SEED_MILLENNIUM_USERS', '')));
+        if (in_array($millennium, ['1', 'true', 'yes', 'on'], true)) {
+            $this->call(MillenniumProductionUsersSeeder::class);
+        }
+
         // Por defecto, no cargar datos demo para evitar contaminar pruebas reales.
         // Para habilitar demo: definir AXONES_DEMO_SEED=1 (o true) en el .env.
         $flag = strtolower(trim((string) env('AXONES_DEMO_SEED', '0')));

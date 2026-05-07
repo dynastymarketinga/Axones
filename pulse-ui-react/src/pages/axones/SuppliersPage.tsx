@@ -5,6 +5,7 @@ import { Link, useLocation } from "react-router-dom"
 import {
   Barcode,
   CalendarDays,
+  Eye,
   ListOrdered,
   Mail,
   MapPin,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
@@ -65,6 +67,19 @@ function formatDateDMY(value: string | null | undefined): string {
   }).format(d)
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  return new Intl.DateTimeFormat("es-VE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d)
+}
+
 export default function SuppliersPage() {
   const location = useLocation()
   const [query, setQuery] = useState("")
@@ -73,6 +88,11 @@ export default function SuppliersPage() {
   const [perPage, setPerPage] = useState<number>(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<SupplierRecord> | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailId, setDetailId] = useState<number | null>(null)
+  const [detailRowNumber, setDetailRowNumber] = useState<number | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detail, setDetail] = useState<SupplierRecord | null>(null)
   const debounceRef = useRef<number | null>(null)
   const skipSearchPageReset = useRef(true)
 
@@ -129,9 +149,63 @@ export default function SuppliersPage() {
     setPage(1)
   }, [search])
 
+  useEffect(() => {
+    if (!detailOpen || detailId == null) return
+    let cancelled = false
+    setDetailLoading(true)
+    setDetail(null)
+    void (async () => {
+      try {
+        const d = await apiFetch<SupplierRecord>(`suppliers/${detailId}`)
+        if (!cancelled) setDetail(d)
+      } catch (e) {
+        if (!cancelled) {
+          if (e instanceof ApiError) toast.error(e.message)
+          else toast.error("No se pudo cargar el proveedor.")
+          setDetailOpen(false)
+          setDetailId(null)
+          setDetailRowNumber(null)
+        }
+      } finally {
+        if (!cancelled) setDetailLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [detailOpen, detailId])
+
   const showInitialSkeleton = loading && rows === null
 
   const colCount = isInventory ? 5 : 8
+
+  const detailFields =
+    detail && !detailLoading
+      ? [
+          {
+            label: "N.º",
+            value: detailRowNumber ?? "—",
+            mono: true,
+            icon: ListOrdered,
+          },
+          { label: "Nombre", value: detail.name, icon: Truck },
+          { label: "RIF", value: detail.rif?.trim() || "—", mono: true, icon: Barcode },
+          ...(!isInventory
+            ? [
+                { label: "Correo", value: detail.email?.trim() || "—", icon: Mail },
+                { label: "Teléfono", value: detail.phone?.trim() || "—", icon: Phone },
+                {
+                  label: "Dirección",
+                  value: detail.address?.trim() || "—",
+                  full: true as const,
+                  icon: MapPin,
+                },
+              ]
+            : []),
+          { label: "Creado", value: formatDateTime(detail.created_at), icon: CalendarDays },
+          { label: "Actualizado", value: formatDateTime(detail.updated_at), icon: CalendarDays },
+        ]
+      : []
 
   return (
     <CatalogPageShell
@@ -153,6 +227,31 @@ export default function SuppliersPage() {
         </div>
       ) : (
         <>
+          <EntityDetailDialog
+            open={detailOpen}
+            onOpenChange={(open) => {
+              setDetailOpen(open)
+              if (!open) {
+                setDetailId(null)
+                setDetailRowNumber(null)
+                setDetail(null)
+              }
+            }}
+            title="Detalle del proveedor"
+            description="Información completa del registro seleccionado."
+            loading={detailLoading}
+            fields={detailFields}
+            footer={
+              detailId != null ? (
+                <Button type="button" variant="outline" asChild>
+                  <Link to={`/proveedores/form?id=${detailId}`} state={{ from }}>
+                    Editar
+                  </Link>
+                </Button>
+              ) : null
+            }
+          />
+
           <CatalogFilterGrid>
             <CatalogSearchField
               id="sup-q"
@@ -235,19 +334,37 @@ export default function SuppliersPage() {
                           {formatDateDMY(s.created_at)}
                         </TableCell>
                         <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className={catalogActionButtonClass}
-                            title="Editar proveedor"
-                            aria-label="Editar proveedor"
-                            asChild
-                          >
-                            <Link to={`/proveedores/form?id=${s.id}`} state={{ from }}>
-                              <Pencil className="h-4 w-4" />
-                              <span className="sr-only">Editar</span>
-                            </Link>
-                          </Button>
+                          <div className="inline-flex justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className={catalogActionButtonClass}
+                              title="Ver detalle"
+                              aria-label="Ver detalle del proveedor"
+                              onClick={() => {
+                                setDetailRowNumber(n)
+                                setDetailId(s.id)
+                                setDetailOpen(true)
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">Ver detalle</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className={catalogActionButtonClass}
+                              title="Editar proveedor"
+                              aria-label="Editar proveedor"
+                              asChild
+                            >
+                              <Link to={`/proveedores/form?id=${s.id}`} state={{ from }}>
+                                <Pencil className="h-4 w-4" />
+                                <span className="sr-only">Editar</span>
+                              </Link>
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )

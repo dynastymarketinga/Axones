@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createSearchParams, Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+import type { LucideIcon } from "lucide-react"
 import {
+  Ban,
   Barcode,
   CalendarDays,
+  CheckCircle2,
   CircleDot,
-  CircleHelp,
   ClipboardList,
   Eye,
   Factory,
   FilePenLine,
   GitBranch,
+  Layers,
   ListOrdered,
   Package,
   Scale,
@@ -44,6 +47,7 @@ import {
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
 import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -136,7 +140,12 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-type SupervisorFilter = "all" | "created" | "in_progress" | "completed"
+type SupervisorFilter =
+  | "all"
+  | "created"
+  | "scheduling"
+  | "in_progress"
+  | "completed"
 
 function statusLabel(value: string | null | undefined): string {
   const statuses: Record<string, string> = {
@@ -168,12 +177,140 @@ function supervisorBucket(row: WorkOrderListRow): Exclude<SupervisorFilter, "all
   const status = (row.status ?? "").toLowerCase().trim()
   if (status === "completed" || stage === "completada") return "completed"
   if (stage === "nueva") return "created"
+  if (stage === "pendiente") return "scheduling"
   return "in_progress"
 }
 
 function canPreviewPlanillaReport(row: WorkOrderListRow): boolean {
   const s = (row.status ?? "").toLowerCase().trim()
   return s !== "completed" && s !== "cancelled"
+}
+
+type SupervisorBucket = Exclude<SupervisorFilter, "all">
+
+const SUPERVISOR_BUCKET_STYLES: Record<
+  SupervisorBucket,
+  {
+    tabActive: string
+    tabInactive: string
+    iconClass: string
+    iconClassActive: string
+    rowBorder: string
+    rowBg: string
+    badgeClass: string
+    badgeLabel: string
+    BadgeIcon: LucideIcon
+  }
+> = {
+  created: {
+    tabActive:
+      "border-2 border-sky-600/50 bg-sky-500/12 text-foreground shadow-sm",
+    tabInactive:
+      "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-sky-500/40",
+    iconClass: "text-sky-700 dark:text-sky-300",
+    iconClassActive: "text-sky-800 dark:text-sky-200",
+    rowBorder: "border-l-sky-600/65",
+    rowBg: "bg-sky-500/[0.06]",
+    badgeClass:
+      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-sky-950 dark:text-sky-100 border-sky-500/30 bg-sky-500/10",
+    badgeLabel: "Registrada",
+    BadgeIcon: FilePenLine,
+  },
+  scheduling: {
+    tabActive:
+      "border-2 border-violet-600/45 bg-violet-500/12 text-foreground shadow-sm",
+    tabInactive:
+      "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-violet-500/38",
+    iconClass: "text-violet-700 dark:text-violet-300",
+    iconClassActive: "text-violet-800 dark:text-violet-200",
+    rowBorder: "border-l-violet-600/60",
+    rowBg: "bg-violet-500/[0.055]",
+    badgeClass:
+      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-violet-950 dark:text-violet-100 border-violet-500/28 bg-violet-500/10",
+    badgeLabel: "Programación",
+    BadgeIcon: CalendarDays,
+  },
+  in_progress: {
+    tabActive:
+      "border-2 border-amber-600/45 bg-amber-500/12 text-foreground shadow-sm",
+    tabInactive:
+      "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-amber-500/40",
+    iconClass: "text-amber-800 dark:text-amber-300",
+    iconClassActive: "text-amber-900 dark:text-amber-200",
+    rowBorder: "border-l-amber-600/55",
+    rowBg: "bg-amber-500/[0.06]",
+    badgeClass:
+      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-amber-950 dark:text-amber-100 border-amber-500/30 bg-amber-500/10",
+    badgeLabel: "En proceso",
+    BadgeIcon: Factory,
+  },
+  completed: {
+    tabActive:
+      "border-2 border-emerald-600/45 bg-emerald-500/12 text-foreground shadow-sm",
+    tabInactive:
+      "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-emerald-500/38",
+    iconClass: "text-emerald-700 dark:text-emerald-300",
+    iconClassActive: "text-emerald-800 dark:text-emerald-200",
+    rowBorder: "border-l-emerald-600/58",
+    rowBg: "bg-emerald-500/[0.055]",
+    badgeClass:
+      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-emerald-950 dark:text-emerald-100 border-emerald-500/28 bg-emerald-500/10",
+    badgeLabel: "Cerrada",
+    BadgeIcon: CheckCircle2,
+  },
+}
+
+const ALL_TAB_STYLES = {
+  tabActive:
+    "border-2 border-primary/45 bg-primary/10 text-foreground shadow-sm",
+  tabInactive:
+    "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-primary/35",
+  iconIdle: "text-primary",
+  iconActive: "text-primary",
+}
+
+const SUPERVISOR_TAB_DEFS: Array<{
+  filter: SupervisorFilter
+  label: string
+  Icon: LucideIcon
+}> = [
+  { filter: "all", label: "Todas", Icon: Layers },
+  { filter: "created", label: "Registradas", Icon: FilePenLine },
+  { filter: "scheduling", label: "Programación", Icon: CalendarDays },
+  { filter: "in_progress", label: "En proceso", Icon: Factory },
+  { filter: "completed", label: "Cerradas", Icon: CheckCircle2 },
+]
+
+const SUPERVISOR_TAB_BTN_CLASS =
+  "inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+
+function workOrderRowAccent(row: WorkOrderListRow): {
+  rowClass: string
+  badgeClass: string
+  badgeLabel: string
+  BadgeIcon: LucideIcon
+} {
+  const bucket = supervisorBucket(row)
+  const st = (row.status ?? "").toLowerCase().trim()
+  if (st === "cancelled" && bucket === "in_progress") {
+    return {
+      rowClass: cn(
+        "border-l-4 border-l-muted-foreground/45",
+        "bg-muted/30",
+      ),
+      badgeClass:
+        "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground",
+      badgeLabel: "Cancelada",
+      BadgeIcon: Ban,
+    }
+  }
+  const s = SUPERVISOR_BUCKET_STYLES[bucket]
+  return {
+    rowClass: cn("border-l-4", s.rowBorder, s.rowBg),
+    badgeClass: s.badgeClass,
+    badgeLabel: s.badgeLabel,
+    BadgeIcon: s.BadgeIcon,
+  }
 }
 
 export default function WorkOrdersHubPage() {
@@ -297,11 +434,13 @@ export default function WorkOrdersHubPage() {
   const supervisorCounts = useMemo(() => {
     const all = rows?.data ?? []
     const created = all.filter((r) => supervisorBucket(r) === "created").length
+    const scheduling = all.filter((r) => supervisorBucket(r) === "scheduling").length
     const inProgress = all.filter((r) => supervisorBucket(r) === "in_progress").length
     const completed = all.filter((r) => supervisorBucket(r) === "completed").length
     return {
       all: all.length,
       created,
+      scheduling,
       in_progress: inProgress,
       completed,
     }
@@ -460,39 +599,65 @@ export default function WorkOrdersHubPage() {
             </CardContent>
             </Card>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={supervisorFilter === "all" ? "default" : "outline"}
-                onClick={() => setSupervisorFilter("all")}
-              >
-                Todas ({supervisorCounts.all})
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={supervisorFilter === "created" ? "default" : "outline"}
-                onClick={() => setSupervisorFilter("created")}
-              >
-                Nuevas ({supervisorCounts.created})
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={supervisorFilter === "in_progress" ? "default" : "outline"}
-                onClick={() => setSupervisorFilter("in_progress")}
-              >
-                Activas ({supervisorCounts.in_progress})
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={supervisorFilter === "completed" ? "default" : "outline"}
-                onClick={() => setSupervisorFilter("completed")}
-              >
-                Completadas ({supervisorCounts.completed})
-              </Button>
+            <div
+              role="tablist"
+              aria-label="Filtro por etapa de supervisión"
+              className="flex flex-wrap items-center gap-2"
+            >
+              {SUPERVISOR_TAB_DEFS.map(({ filter: f, label, Icon }) => {
+                const active = supervisorFilter === f
+                const count =
+                  f === "all"
+                    ? supervisorCounts.all
+                    : supervisorCounts[f]
+                if (f === "all") {
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={cn(
+                        SUPERVISOR_TAB_BTN_CLASS,
+                        active ? ALL_TAB_STYLES.tabActive : ALL_TAB_STYLES.tabInactive,
+                      )}
+                      onClick={() => setSupervisorFilter("all")}
+                    >
+                      <Icon
+                        className={cn(
+                          "h-4 w-4 shrink-0",
+                          active ? ALL_TAB_STYLES.iconActive : ALL_TAB_STYLES.iconIdle,
+                        )}
+                        aria-hidden
+                      />
+                      {label} ({count})
+                    </button>
+                  )
+                }
+                const st = SUPERVISOR_BUCKET_STYLES[f]
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={cn(
+                      SUPERVISOR_TAB_BTN_CLASS,
+                      active ? st.tabActive : st.tabInactive,
+                    )}
+                    onClick={() => setSupervisorFilter(f)}
+                  >
+                    <Icon
+                      className={cn(
+                        "h-4 w-4 shrink-0",
+                        active ? st.iconClassActive : st.iconClass,
+                      )}
+                      aria-hidden
+                    />
+                    {label} ({count})
+                  </button>
+                )
+              })}
             </div>
 
             <p className="text-muted-foreground text-xs lg:col-span-12">
@@ -503,7 +668,7 @@ export default function WorkOrdersHubPage() {
               <Table>
                 <TableHeader>
                   <TableRow className={catalogTableHeaderRowClass}>
-                    <CatalogTableHead icon={ListOrdered} className="w-14 whitespace-nowrap">
+                    <CatalogTableHead icon={ListOrdered} className="min-w-[9rem] whitespace-nowrap">
                       N.º
                     </CatalogTableHead>
                     <CatalogTableHead icon={Barcode} className="whitespace-nowrap">
@@ -541,15 +706,34 @@ export default function WorkOrdersHubPage() {
                       const idxOnPage = rows?.data.findIndex((r) => r.id === o.id) ?? -1
                       const n =
                         idxOnPage >= 0 ? rowPageBase + idxOnPage + 1 : rowPageBase + vidx + 1
+                      const accent = workOrderRowAccent(o)
+                      const RowBadgeIcon = accent.BadgeIcon
                       return (
-                        <TableRow key={o.id} className={cn("text-sm", catalogTableBodyRowClass)}>
+                        <TableRow
+                          key={o.id}
+                          className={cn("text-sm", catalogTableBodyRowClass, accent.rowClass)}
+                        >
                           <TableCell
                             className={cn(
-                              "tabular-nums text-muted-foreground w-14",
+                              "min-w-[9rem] align-top",
                               catalogTableBodyCellClass,
                             )}
                           >
-                            {n}
+                            <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+                              <span className="tabular-nums text-muted-foreground text-sm">
+                                {n}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "w-fit shrink-0 font-normal tabular-nums",
+                                  accent.badgeClass,
+                                )}
+                              >
+                                <RowBadgeIcon className="h-3 w-3 shrink-0" aria-hidden />
+                                {accent.badgeLabel}
+                              </Badge>
+                            </div>
                           </TableCell>
                           <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
                             {o.code}

@@ -6,6 +6,7 @@ import {
   Barcode,
   Boxes,
   CalendarDays,
+  Eye,
   ListOrdered,
   Package,
   Pencil,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
@@ -73,6 +75,19 @@ function formatDateDMY(value: string | null | undefined): string {
   }).format(d)
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  return new Intl.DateTimeFormat("es-VE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d)
+}
+
 export default function ProductsPage() {
   const location = useLocation()
   const [query, setQuery] = useState("")
@@ -83,6 +98,11 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ProductRecord> | null>(null)
   const [clients, setClients] = useState<ClientRecord[]>([])
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailId, setDetailId] = useState<number | null>(null)
+  const [detailRowNumber, setDetailRowNumber] = useState<number | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detail, setDetail] = useState<ProductRecord | null>(null)
   const debounceRef = useRef<number | null>(null)
   const skipSearchPageReset = useRef(true)
 
@@ -160,9 +180,70 @@ export default function ProductsPage() {
     setPage(1)
   }, [search])
 
+  useEffect(() => {
+    if (!detailOpen || detailId == null) return
+    let cancelled = false
+    setDetailLoading(true)
+    setDetail(null)
+    void (async () => {
+      try {
+        const d = await apiFetch<ProductRecord>(`products/${detailId}`)
+        if (!cancelled) setDetail(d)
+      } catch (e) {
+        if (!cancelled) {
+          if (e instanceof ApiError) toast.error(e.message)
+          else toast.error("No se pudo cargar el producto.")
+          setDetailOpen(false)
+          setDetailId(null)
+          setDetailRowNumber(null)
+        }
+      } finally {
+        if (!cancelled) setDetailLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [detailOpen, detailId])
+
   const showInitialSkeleton = loading && rows === null
 
   const colSpan = 9
+
+  const detailFields =
+    detail && !detailLoading
+      ? [
+          {
+            label: "N.º",
+            value: detailRowNumber ?? "—",
+            mono: true,
+            icon: ListOrdered,
+          },
+          { label: "Nombre", value: detail.name, icon: Package },
+          {
+            label: "Cliente",
+            value: detail.client?.name ?? (detail.client_id ? `#${detail.client_id}` : "—"),
+            icon: Users,
+          },
+          {
+            label: "Código de barras",
+            value: detail.barcode?.trim() || "—",
+            mono: true,
+            icon: Barcode,
+          },
+          { label: "CPE", value: detail.cpe?.trim() || "—", mono: true, icon: Barcode },
+          { label: "M.P.P.S", value: detail.mps?.trim() || "—", icon: Rows3 },
+          { label: "Tipo de impresión", value: detail.print_type?.trim() || "—", icon: Printer },
+          {
+            label: "Estructura",
+            value: detail.structure?.trim() || "—",
+            full: true,
+            icon: Boxes,
+          },
+          { label: "Creado", value: formatDateTime(detail.created_at), icon: CalendarDays },
+          { label: "Actualizado", value: formatDateTime(detail.updated_at), icon: CalendarDays },
+        ]
+      : []
 
   return (
     <CatalogPageShell
@@ -184,6 +265,31 @@ export default function ProductsPage() {
         </div>
       ) : (
         <>
+          <EntityDetailDialog
+            open={detailOpen}
+            onOpenChange={(open) => {
+              setDetailOpen(open)
+              if (!open) {
+                setDetailId(null)
+                setDetailRowNumber(null)
+                setDetail(null)
+              }
+            }}
+            title="Detalle del producto"
+            description="Información completa del registro seleccionado."
+            loading={detailLoading}
+            fields={detailFields}
+            footer={
+              detailId != null ? (
+                <Button type="button" variant="outline" asChild>
+                  <Link to={`/productos/form?id=${detailId}`} state={{ from }}>
+                    Editar
+                  </Link>
+                </Button>
+              ) : null
+            }
+          />
+
           <CatalogFilterGrid>
             <CatalogSearchField
               id="product-q"
@@ -291,19 +397,37 @@ export default function ProductsPage() {
                           {formatDateDMY(p.created_at)}
                         </TableCell>
                         <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className={catalogActionButtonClass}
-                            title="Editar producto"
-                            aria-label="Editar producto"
-                            asChild
-                          >
-                            <Link to={`/productos/form?id=${p.id}`} state={{ from }}>
-                              <Pencil className="h-4 w-4" />
-                              <span className="sr-only">Editar</span>
-                            </Link>
-                          </Button>
+                          <div className="inline-flex justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className={catalogActionButtonClass}
+                              title="Ver detalle"
+                              aria-label="Ver detalle del producto"
+                              onClick={() => {
+                                setDetailRowNumber(n)
+                                setDetailId(p.id)
+                                setDetailOpen(true)
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">Ver detalle</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className={catalogActionButtonClass}
+                              title="Editar producto"
+                              aria-label="Editar producto"
+                              asChild
+                            >
+                              <Link to={`/productos/form?id=${p.id}`} state={{ from }}>
+                                <Pencil className="h-4 w-4" />
+                                <span className="sr-only">Editar</span>
+                              </Link>
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )

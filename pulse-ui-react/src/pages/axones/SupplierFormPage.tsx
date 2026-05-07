@@ -9,6 +9,7 @@ import type { LaravelPaginated, SupplierRecord } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import { normalizeRole } from "@/lib/axones-roles"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -19,10 +20,26 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { cn } from "@/lib/utils"
 import { ArrowLeft, Hash, Mail, MapPin, Phone, UserRound } from "lucide-react"
 
 const RIF_LETTERS = ["J", "V", "E", "G", "P", "C"] as const
+
+const DEFAULT_RIF_LETTER: (typeof RIF_LETTERS)[number] = "V"
+
+function normalizeRifLetterForSelect(raw: string): (typeof RIF_LETTERS)[number] {
+  const L = raw.trim().toUpperCase()
+  return RIF_LETTERS.includes(L as (typeof RIF_LETTERS)[number]) ? (L as (typeof RIF_LETTERS)[number]) : DEFAULT_RIF_LETTER
+}
+
+const SUPPLIER_VALIDATION_TOAST_ORDER = [
+  { key: "name", label: "Nombre" },
+  { key: "rif", label: "RIF" },
+  { key: "phone", label: "Teléfono" },
+  { key: "email", label: "Correo" },
+  { key: "address", label: "Dirección" },
+] as const
 
 const fieldLabelClass = "leading-snug"
 
@@ -99,11 +116,12 @@ export default function SupplierFormPage() {
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState("")
-  const [rifLetter, setRifLetter] = useState("")
+  const [rifLetter, setRifLetter] = useState<(typeof RIF_LETTERS)[number]>(DEFAULT_RIF_LETTER)
   const [rifDigits, setRifDigits] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
   const [address, setAddress] = useState("")
+  const [noRif, setNoRif] = useState(false)
 
   const session = getStoredUser()
   const isInventory = (() => {
@@ -161,9 +179,11 @@ export default function SupplierFormPage() {
       phone?: string
       email?: string
       address?: string
+      noRif?: boolean
     }) => {
       const nRaw = draft?.name ?? name
       const n = nRaw.trim()
+      const useNoRif = draft?.noRif ?? noRif
       const L = (draft?.rifLetter ?? rifLetter).trim().toUpperCase()
       const bodyRaw = draft?.rifDigits ?? rifDigits
       const d = onlyDigits(bodyRaw, 9)
@@ -173,12 +193,15 @@ export default function SupplierFormPage() {
 
       const next: typeof errors = {}
       if (!n) next.name = "El nombre es obligatorio."
+      else if (n.length < 2) next.name = "Mínimo 2 caracteres."
       else if (n.length > LIM.name) next.name = `Máximo ${LIM.name} caracteres.`
 
       if (addr.length > LIM.address) next.address = `Máximo ${LIM.address} caracteres.`
 
-      if (!L && d.length === 0) {
-        // RIF opcional en proveedores (API nullable)
+      if (useNoRif) {
+        // Sin RIF: no validar dígitos
+      } else if (!L && d.length === 0) {
+        next.rif = "El RIF es obligatorio o marque «Sin RIF (proveedor informal)»."
       } else if (!L && d.length > 0) {
         next.rif = "Elija la letra (J, V, E, G, P o C)."
       } else if (L && !RIF_LETTERS.includes(L as (typeof RIF_LETTERS)[number])) {
@@ -228,13 +251,13 @@ export default function SupplierFormPage() {
       setErrors(next)
       return next
     },
-    [address, email, name, normalizeRif, phone, rifDigits, rifLetter],
+    [address, email, name, noRif, normalizeRif, phone, rifDigits, rifLetter],
   )
 
   const checkDuplicateSupplier = useCallback(
     async (field: "name" | "rif", value: string) => {
       const v = value.trim()
-      if (!v) return
+      if (!v || (field === "rif" && noRif)) return
       try {
         const res = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
           query: { q: v, per_page: 20, page: 1 },
@@ -256,7 +279,7 @@ export default function SupplierFormPage() {
         // chequeo preventivo
       }
     },
-    [supplierId],
+    [noRif, supplierId],
   )
 
   const load = useCallback(async () => {
@@ -265,9 +288,11 @@ export default function SupplierFormPage() {
     try {
       const s = await apiFetch<SupplierRecord>(`suppliers/${supplierId}`)
       setName(clampStr(s.name ?? "", LIM.name))
+      const hasRif = Boolean(s.rif && String(s.rif).trim())
+      setNoRif(!hasRif)
       const parts = parseRifFromStored(s.rif)
-      setRifLetter(parts.letter)
-      setRifDigits(parts.main + parts.dv)
+      setRifLetter(hasRif ? normalizeRifLetterForSelect(parts.letter) : DEFAULT_RIF_LETTER)
+      setRifDigits(hasRif ? parts.main + parts.dv : "")
       setEmail(clampStr(s.email ?? "", LIM.email))
       setPhone(sanitizePhoneInput(s.phone ?? ""))
       setAddress(clampStr(s.address ?? "", LIM.address))
@@ -289,7 +314,7 @@ export default function SupplierFormPage() {
         nameRef.current?.focus()
         return
       }
-      if (v.rif) {
+      if (v.rif && !noRif) {
         const letterOk =
           rifLetter.trim() !== "" &&
           RIF_LETTERS.includes(rifLetter.trim().toUpperCase() as (typeof RIF_LETTERS)[number])
@@ -313,7 +338,7 @@ export default function SupplierFormPage() {
     ev.preventDefault()
     const v = validate()
     if (Object.keys(v).length) {
-      toast.error("Revisa los campos marcados.")
+      toastFieldValidationErrors(v, SUPPLIER_VALIDATION_TOAST_ORDER)
       focusFirstError(v)
       return
     }
@@ -322,7 +347,8 @@ export default function SupplierFormPage() {
       const normalizedRif = composeRifForSubmit().trim()
       const body: Record<string, unknown> = {
         name: name.trim(),
-        rif: normalizedRif || null,
+        no_rif: noRif,
+        rif: noRif ? null : normalizedRif || null,
       }
       if (!isInventory) {
         body.email = email.trim() || null
@@ -439,9 +465,10 @@ export default function SupplierFormPage() {
                 )}
               >
                 <Select
-                  value={rifLetter || "__clear"}
+                  value={rifLetter}
+                  disabled={noRif}
                   onValueChange={(val) => {
-                    const L = val === "__clear" ? "" : val
+                    const L = normalizeRifLetterForSelect(val)
                     setRifLetter(L)
                     if (errors.rif) validate({ rifLetter: L, rifDigits })
                   }}
@@ -449,13 +476,13 @@ export default function SupplierFormPage() {
                   <SelectTrigger
                     ref={rifLetterTriggerRef}
                     aria-label="Letra del RIF"
-                    className="h-9 w-[3.25rem] shrink-0 self-stretch rounded-none border-0 border-r border-input bg-muted/50 px-2 shadow-none ring-offset-0 focus:ring-0 focus:ring-offset-0 data-[placeholder]:text-muted-foreground [&>svg]:h-3.5 [&>svg]:w-3.5"
+                    disabled={noRif}
+                    className="h-9 w-[3.25rem] shrink-0 self-stretch rounded-none border-0 border-r border-input bg-muted/50 px-2 shadow-none ring-offset-0 focus:ring-0 focus:ring-offset-0 [&>svg]:h-3.5 [&>svg]:w-3.5"
                     aria-invalid={Boolean(errors.rif)}
                   >
-                    <SelectValue placeholder="—" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__clear">—</SelectItem>
                     {RIF_LETTERS.map((letter) => (
                       <SelectItem key={letter} value={letter}>
                         {letter}
@@ -476,6 +503,7 @@ export default function SupplierFormPage() {
                   <Input
                     ref={rifDigitsRef}
                     id="s-rif-digits"
+                    disabled={noRif}
                     className="h-9 min-w-0 flex-1 rounded-none border-0 bg-transparent py-0 pl-9 pr-3 font-mono text-sm leading-none shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm"
                     inputMode="numeric"
                     autoComplete="off"
@@ -483,16 +511,19 @@ export default function SupplierFormPage() {
                     value={rifDigits}
                     onChange={(ev) => {
                       const { letter: nextL, digits: nextD } = looseRifNumberInput(ev.target.value, rifLetter)
-                      if (nextL !== rifLetter) setRifLetter(nextL)
+                      const letterNorm = normalizeRifLetterForSelect(nextL)
+                      if (letterNorm !== rifLetter) setRifLetter(letterNorm)
                       setRifDigits(nextD)
-                      if (errors.rif) validate({ rifLetter: nextL, rifDigits: nextD })
+                      if (errors.rif) validate({ rifLetter: letterNorm, rifDigits: nextD })
                     }}
                     onBlur={() => {
+                      if (noRif) return
                       const { letter: nextL, digits: nextD } = looseRifNumberInput(rifDigits, rifLetter)
-                      if (nextL !== rifLetter) setRifLetter(nextL)
+                      const letterNorm = normalizeRifLetterForSelect(nextL)
+                      if (letterNorm !== rifLetter) setRifLetter(letterNorm)
                       if (nextD !== rifDigits) setRifDigits(nextD)
-                      validate({ rifLetter: nextL, rifDigits: nextD })
-                      const composed = normalizeRif(`${nextL}${nextD}`)
+                      validate({ rifLetter: letterNorm, rifDigits: nextD })
+                      const composed = normalizeRif(`${letterNorm}${nextD}`)
                       if (composed) void checkDuplicateSupplier("rif", composed)
                     }}
                     aria-invalid={Boolean(errors.rif)}
@@ -544,6 +575,26 @@ export default function SupplierFormPage() {
                   </div>
                 </>
               ) : null}
+            </div>
+
+            <div className="flex items-start gap-2 md:col-span-2">
+              <Checkbox
+                id="s-no-rif"
+                checked={noRif}
+                onCheckedChange={(v) => {
+                  const next = v === true
+                  setNoRif(next)
+                  if (next) {
+                    setRifDigits("")
+                    validate({ noRif: true, rifDigits: "" })
+                  } else {
+                    validate({ noRif: false })
+                  }
+                }}
+              />
+              <Label htmlFor="s-no-rif" className="cursor-pointer text-sm font-normal leading-snug">
+                Sin RIF (proveedor informal)
+              </Label>
             </div>
           </div>
 

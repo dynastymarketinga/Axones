@@ -35,7 +35,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'inventory_area' => 'tintas',
                 'tinta_subarea' => 'laminacion',
                 'unit' => 'kg',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
                 'supplier_id' => $supplier->id,
@@ -76,7 +76,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'micras' => 12,
                 'ancho' => 100,
                 'unit' => 'kg',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
                 'supplier_id' => $supplier->id,
@@ -92,9 +92,9 @@ class MaterialPreferredSupplierTest extends TestCase
         ]);
     }
 
-    public function test_store_sustrato_without_supplier_is_unprocessable(): void
+    public function test_store_sustrato_without_supplier_or_reason_is_unprocessable_for_inventory_role(): void
     {
-        $user = User::factory()->create(['role' => 'admin']);
+        $user = User::factory()->create(['role' => 'inventory']);
         $token = $user->createToken('t')->plainTextToken;
 
         $response = $this->postJson(
@@ -107,7 +107,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'micras' => 12,
                 'ancho' => 100,
                 'unit' => 'kg',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
             ],
@@ -118,9 +118,140 @@ class MaterialPreferredSupplierTest extends TestCase
         $response->assertJsonValidationErrors(['supplier_id']);
     }
 
-    public function test_store_miscelaneos_without_supplier_is_unprocessable(): void
+    public function test_store_sustrato_boss_without_supplier_or_reason_succeeds(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'MAT-BOSS-NO-SUP',
+                'name' => 'Sustrato registro jefe',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'micras' => 18,
+                'ancho' => 520,
+                'unit' => 'kg',
+                'min_stock' => 1,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertCreated();
+        $response->assertJsonPath('supplier_id', null);
+        $response->assertJsonPath('no_supplier_reason', null);
+
+        $this->assertDatabaseHas('materials', [
+            'sku' => 'MAT-BOSS-NO-SUP',
+            'supplier_id' => null,
+        ]);
+    }
+
+    public function test_store_sustrato_with_no_supplier_reason_persists_without_supplier(): void
     {
         $user = User::factory()->create(['role' => 'admin']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $reason = 'Proveedor no disponible hoy; ingreso urgente desde otro almacén.';
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'MAT-SIN-PROV',
+                'name' => 'Sustrato sin proveedor',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'micras' => 20,
+                'ancho' => 610,
+                'unit' => 'kg',
+                'min_stock' => 1,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'no_supplier_reason' => $reason,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertCreated();
+        $response->assertJsonPath('supplier_id', null);
+        $response->assertJsonPath('no_supplier_reason', $reason);
+
+        $this->assertDatabaseHas('materials', [
+            'sku' => 'MAT-SIN-PROV',
+            'supplier_id' => null,
+            'no_supplier_reason' => $reason,
+        ]);
+    }
+
+    public function test_store_sustrato_with_supplier_and_reason_is_unprocessable(): void
+    {
+        $user = User::factory()->create(['role' => 'admin']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov Mixto',
+            'rif' => null,
+            'email' => null,
+            'phone' => null,
+            'address' => null,
+        ]);
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'MAT-BOTH',
+                'name' => 'Conflicto',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'micras' => 12,
+                'ancho' => 100,
+                'unit' => 'kg',
+                'min_stock' => 1,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'supplier_id' => $supplier->id,
+                'no_supplier_reason' => 'No debería venir con proveedor.',
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors(['no_supplier_reason']);
+    }
+
+    public function test_store_sustrato_short_no_supplier_reason_is_unprocessable_for_inventory_role(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'MAT-SHORT-R',
+                'name' => 'Sustrato',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'micras' => 12,
+                'ancho' => 100,
+                'unit' => 'kg',
+                'min_stock' => 1,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'no_supplier_reason' => 'cort',
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors(['no_supplier_reason']);
+    }
+
+    public function test_store_miscelaneos_without_supplier_or_reason_is_unprocessable_for_inventory_role(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory']);
         $token = $user->createToken('t')->plainTextToken;
 
         $response = $this->postJson(
@@ -131,7 +262,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'barcode' => null,
                 'inventory_area' => 'miscelaneos',
                 'unit' => 'unidad',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
             ],
@@ -161,7 +292,7 @@ class MaterialPreferredSupplierTest extends TestCase
             'barcode' => null,
             'inventory_area' => 'tintas',
             'unit' => 'kg',
-            'min_stock' => 0,
+            'min_stock' => 1,
             'notes' => null,
             'supplier_id' => $supplier->id,
         ]);
@@ -175,6 +306,7 @@ class MaterialPreferredSupplierTest extends TestCase
             [
                 'inventory_area' => 'miscelaneos',
                 'unit' => 'unidad',
+                'change_reason' => 'Prueba: mover a misceláneos conservando proveedor.',
             ],
             ['Authorization' => 'Bearer '.$token],
         );
@@ -186,9 +318,9 @@ class MaterialPreferredSupplierTest extends TestCase
         $this->assertSame($supplier->id, (int) $material->supplier_id);
     }
 
-    public function test_store_tintas_without_supplier_id_is_unprocessable(): void
+    public function test_store_tintas_without_supplier_or_reason_is_unprocessable_for_inventory_role(): void
     {
-        $user = User::factory()->create(['role' => 'admin']);
+        $user = User::factory()->create(['role' => 'inventory']);
         $token = $user->createToken('t')->plainTextToken;
 
         $response = $this->postJson(
@@ -200,7 +332,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'inventory_area' => 'tintas',
                 'tinta_subarea' => 'laminacion',
                 'unit' => 'kg',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
             ],
@@ -233,7 +365,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'inventory_area' => 'cementerio_tintas',
                 'tinta_subarea' => 'superficie',
                 'unit' => 'kg',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
                 'supplier_id' => $supplier->id,
@@ -267,7 +399,7 @@ class MaterialPreferredSupplierTest extends TestCase
                 'barcode' => null,
                 'inventory_area' => 'miscelaneos',
                 'unit' => 'unidad',
-                'min_stock' => 0,
+                'min_stock' => 1,
                 'quantity_on_hand' => 0,
                 'notes' => null,
                 'supplier_id' => $supplier->id,
@@ -277,6 +409,158 @@ class MaterialPreferredSupplierTest extends TestCase
 
         $response->assertCreated();
         $response->assertJsonPath('supplier_id', $supplier->id);
+    }
+
+    public function test_store_sustrato_persists_internal_code_and_created_by(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov Auto',
+            'rif' => null,
+            'email' => null,
+            'phone' => null,
+            'address' => null,
+        ]);
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'BOPP',
+                'name' => 'Sustrato BOPP',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'micras' => 18,
+                'ancho' => 520,
+                'unit' => 'kg',
+                'min_stock' => 1,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'supplier_id' => $supplier->id,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertCreated();
+
+        $material = Material::query()->where('sku', 'BOPP')->firstOrFail();
+        $this->assertNotEmpty($material->internal_code);
+        $this->assertStringStartsWith('BOPP-', (string) $material->internal_code);
+        $this->assertNotSame('BOPP', $material->internal_code);
+        $this->assertSame($user->id, (int) $material->created_by_user_id);
+    }
+
+    public function test_store_sustrato_accepts_missing_dimensions_for_inventory_role(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov Sin Dim',
+            'rif' => null,
+            'email' => null,
+            'phone' => null,
+            'address' => null,
+        ]);
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'MAT-NO-DIM',
+                'name' => 'Sustrato sin dimensiones',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'unit' => 'kg',
+                'min_stock' => 1,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'supplier_id' => $supplier->id,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertCreated();
+        $response->assertJsonPath('micras', null);
+        $response->assertJsonPath('ancho', null);
+    }
+
+    public function test_store_material_accepts_zero_min_stock(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov Min',
+            'rif' => null,
+            'email' => null,
+            'phone' => null,
+            'address' => null,
+        ]);
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'MAT-MIN-ZERO',
+                'name' => 'Sustrato min 0',
+                'barcode' => null,
+                'inventory_area' => 'material',
+                'micras' => 18,
+                'ancho' => 520,
+                'unit' => 'kg',
+                'min_stock' => 0,
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'supplier_id' => $supplier->id,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertCreated();
+        $response->assertJsonPath('min_stock', fn ($v) => (float) $v === 0.0);
+
+        $this->assertDatabaseHas('materials', [
+            'sku' => 'MAT-MIN-ZERO',
+            'min_stock' => '0.000',
+        ]);
+    }
+
+    public function test_store_tintas_defaults_missing_min_stock_to_zero(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov Tinta Min',
+            'rif' => null,
+            'email' => null,
+            'phone' => null,
+            'address' => null,
+        ]);
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'TIN-MIN-MISSING',
+                'name' => 'Tinta sin minimo',
+                'barcode' => null,
+                'inventory_area' => 'tintas',
+                'tinta_subarea' => 'laminacion',
+                'unit' => 'kg',
+                'quantity_on_hand' => 0,
+                'notes' => null,
+                'supplier_id' => $supplier->id,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertCreated();
+        $response->assertJsonPath('min_stock', fn ($v) => (float) $v === 0.0);
+
+        $this->assertDatabaseHas('materials', [
+            'sku' => 'TIN-MIN-MISSING',
+            'min_stock' => '0.000',
+        ]);
     }
 
     public function test_update_cementerio_tintas_preserves_supplier_when_patch_name_only(): void
@@ -298,7 +582,7 @@ class MaterialPreferredSupplierTest extends TestCase
             'barcode' => null,
             'inventory_area' => 'cementerio_tintas',
             'unit' => 'kg',
-            'min_stock' => 0,
+            'min_stock' => 1,
             'notes' => null,
             'supplier_id' => $supplier->id,
         ]);
@@ -309,7 +593,10 @@ class MaterialPreferredSupplierTest extends TestCase
 
         $response = $this->patchJson(
             '/api/materials/'.$material->id,
-            ['name' => 'Tinta cement (renombrada)'],
+            [
+                'name' => 'Tinta cement (renombrada)',
+                'change_reason' => 'Prueba: renombrar material en cementerio.',
+            ],
             ['Authorization' => 'Bearer '.$token],
         );
 

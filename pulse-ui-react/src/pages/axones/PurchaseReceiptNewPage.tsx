@@ -16,6 +16,7 @@ import type {
 } from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Command,
   CommandEmpty,
@@ -87,6 +88,7 @@ type NewMaterialDraft = {
 type NewSupplierDraft = {
   name: string
   rif: string
+  noRif: boolean
 }
 
 type NewProductDraft = {
@@ -280,6 +282,7 @@ export default function PurchaseReceiptNewPage() {
   const [newSupplierDraft, setNewSupplierDraft] = useState<NewSupplierDraft>({
     name: "",
     rif: "",
+    noRif: false,
   })
   const [newProductDraft, setNewProductDraft] = useState<NewProductDraft>({
     name: "",
@@ -434,9 +437,18 @@ export default function PurchaseReceiptNewPage() {
   )
   async function createSupplierQuickly() {
     const name = newSupplierDraft.name.trim()
+    const noRif = newSupplierDraft.noRif
     const rif = newSupplierDraft.rif.trim().toUpperCase()
     if (!name) {
       toast.error("Indique al menos el nombre del proveedor.")
+      return
+    }
+    if (name.length < 2) {
+      toast.error("Nombre: mínimo 2 caracteres.")
+      return
+    }
+    if (!noRif && !rif) {
+      toast.error("Indique el RIF o marque «Sin RIF».")
       return
     }
     setCreatingSupplier(true)
@@ -445,7 +457,8 @@ export default function PurchaseReceiptNewPage() {
         method: "POST",
         body: JSON.stringify({
           name,
-          rif: rif || null,
+          no_rif: noRif,
+          rif: noRif ? null : rif || null,
           email: null,
           phone: null,
           address: null,
@@ -455,7 +468,7 @@ export default function PurchaseReceiptNewPage() {
       setSupplierId(created.id)
       setSupplierError(false)
       setSupplierModalOpen(false)
-      setNewSupplierDraft({ name: "", rif: "" })
+      setNewSupplierDraft({ name: "", rif: "", noRif: false })
       toast.success("Proveedor creado y seleccionado.")
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -1540,14 +1553,15 @@ export default function PurchaseReceiptNewPage() {
         open={supplierModalOpen}
         onOpenChange={(open) => {
           setSupplierModalOpen(open)
-          if (!open && !creatingSupplier) setNewSupplierDraft({ name: "", rif: "" })
+          if (!open && !creatingSupplier) setNewSupplierDraft({ name: "", rif: "", noRif: false })
         }}
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Crear proveedor rápido</DialogTitle>
             <DialogDescription>
-              Agregue un proveedor sin salir de esta recepción. Nombre y RIF son suficientes para empezar.
+              Agregue un proveedor sin salir de esta recepción. Nombre (mín. 2 caracteres) y RIF, o marque «Sin RIF» si
+              aplica.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -1565,9 +1579,27 @@ export default function PurchaseReceiptNewPage() {
               <Input
                 id="new-supplier-rif"
                 value={newSupplierDraft.rif}
+                disabled={newSupplierDraft.noRif}
                 onChange={(ev) => setNewSupplierDraft((prev) => ({ ...prev, rif: ev.target.value.toUpperCase() }))}
                 placeholder="Ej: J-12345678-9"
               />
+            </div>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="new-supplier-no-rif"
+                checked={newSupplierDraft.noRif}
+                onCheckedChange={(v) => {
+                  const next = v === true
+                  setNewSupplierDraft((prev) => ({
+                    ...prev,
+                    noRif: next,
+                    rif: next ? "" : prev.rif,
+                  }))
+                }}
+              />
+              <Label htmlFor="new-supplier-no-rif" className="cursor-pointer text-sm font-normal leading-snug">
+                Sin RIF (proveedor informal)
+              </Label>
             </div>
           </div>
           <DialogFooter>

@@ -22,8 +22,15 @@ class StoreSupplierRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255', Rule::unique('suppliers', 'name')],
-            'rif' => ['nullable', 'string', 'max:32', Rule::unique('suppliers', 'rif')],
+            'name' => ['required', 'string', 'min:2', 'max:255', Rule::unique('suppliers', 'name')],
+            'no_rif' => ['sometimes', 'boolean'],
+            'rif' => [
+                Rule::requiredIf(fn () => ! $this->boolean('no_rif')),
+                'nullable',
+                'string',
+                'max:32',
+                Rule::unique('suppliers', 'rif'),
+            ],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:64'],
             'address' => ['nullable', 'string'],
@@ -32,17 +39,25 @@ class StoreSupplierRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if ($this->has('rif')) {
-            $this->merge([
-                'rif' => RifNormalizer::normalize($this->input('rif')),
-            ]);
+        $merge = [
+            'name' => trim((string) $this->input('name', '')),
+        ];
+
+        if ($this->boolean('no_rif')) {
+            $merge['rif'] = null;
+        } elseif ($this->exists('rif')) {
+            $merge['rif'] = RifNormalizer::normalize($this->input('rif'));
         }
+
+        $this->merge($merge);
     }
 
     public function messages(): array
     {
         return [
+            'name.min' => 'El nombre debe tener al menos 2 caracteres.',
             'name.unique' => 'Este proveedor ya existe (nombre).',
+            'rif.required' => 'El RIF es obligatorio. Marque «Sin RIF» si el proveedor no lo posee.',
             'rif.unique' => 'Este RIF ya existe.',
         ];
     }

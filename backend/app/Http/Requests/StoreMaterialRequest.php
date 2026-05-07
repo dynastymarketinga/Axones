@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\InventoryArea;
+use App\Support\MaterialNoSupplierPolicy;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -12,6 +13,14 @@ class StoreMaterialRequest extends FormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $raw = $this->input('min_stock');
+        if ($raw === null || $raw === '') {
+            $this->merge(['min_stock' => 0]);
+        }
     }
 
     /**
@@ -32,8 +41,20 @@ class StoreMaterialRequest extends FormRequest
             'quantity_on_hand' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
             'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id'],
+            'no_supplier_reason' => ['nullable', 'string', 'max:1000'],
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'min_stock.numeric' => 'Stock mínimo debe ser numérico.',
+            'min_stock.min' => 'Stock mínimo no puede ser negativo.',
         ];
     }
 
@@ -42,20 +63,6 @@ class StoreMaterialRequest extends FormRequest
         $validator->after(function (Validator $validator): void {
             $area = (string) $this->input('inventory_area', '');
             $unit = (string) $this->input('unit', 'kg');
-
-            $requiresDimensions = in_array($area, [
-                InventoryArea::Material->value,
-                InventoryArea::BobinasRechazadas->value,
-            ], true);
-
-            if ($requiresDimensions) {
-                if (! $this->filled('micras')) {
-                    $validator->errors()->add('micras', 'Micras es obligatorio para este tipo.');
-                }
-                if (! $this->filled('ancho')) {
-                    $validator->errors()->add('ancho', 'Ancho es obligatorio para este tipo.');
-                }
-            }
 
             if (in_array($area, [InventoryArea::Tintas->value, InventoryArea::CementerioTintas->value], true) && ! $this->filled('tinta_subarea')) {
                 $validator->errors()->add('tinta_subarea', 'Subárea es obligatoria para tintas.');
@@ -73,8 +80,21 @@ class StoreMaterialRequest extends FormRequest
                 InventoryArea::Quimicos->value,
                 InventoryArea::Miscelaneos->value,
             ];
-            if (in_array($area, $supplierRequiredAreas, true) && ! $this->filled('supplier_id')) {
-                $validator->errors()->add('supplier_id', 'El proveedor es obligatorio para sustratos, tintas, cementerio de tintas, químicos y misceláneos.');
+            if (in_array($area, $supplierRequiredAreas, true)) {
+                $hasSupplier = $this->filled('supplier_id');
+                $reason = trim((string) ($this->input('no_supplier_reason') ?? ''));
+                $hasReason = $reason !== '';
+                $mayOmitReason = MaterialNoSupplierPolicy::canOmitNoSupplierReason($this->user());
+
+                if ($hasSupplier && $hasReason) {
+                    $validator->errors()->add('no_supplier_reason', 'No puede indicar motivo si seleccionó un proveedor.');
+                }
+                if (! $hasSupplier && ! $hasReason && ! $mayOmitReason) {
+                    $validator->errors()->add('supplier_id', 'Debe seleccionar un proveedor o indicar el motivo por no tener proveedor.');
+                }
+                if (! $hasSupplier && $hasReason && mb_strlen($reason) < 5 && ! $mayOmitReason) {
+                    $validator->errors()->add('no_supplier_reason', 'El motivo debe tener al menos 5 caracteres.');
+                }
             }
 
             if ($this->filled('supplier_id')) {
@@ -99,7 +119,7 @@ class StoreMaterialRequest extends FormRequest
     {
         return match ($area) {
             InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
-            InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo'],
+            InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo', 'otros'],
             InventoryArea::Tintas->value,
             InventoryArea::CementerioTintas->value,
             InventoryArea::Quimicos->value => ['kg', 'unidad'],

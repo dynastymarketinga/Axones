@@ -19,7 +19,11 @@ class StorePurchaseReceiptRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'purchase_order_id' => ['required', 'integer', 'exists:purchase_orders,id'],
+            'purchase_order_id' => [
+                'required',
+                'integer',
+                Rule::exists('purchase_orders', 'id')->where(fn ($q) => $q->where('is_active', true)),
+            ],
             'supplier_id' => ['required', 'integer', 'exists:suppliers,id'],
             'without_purchase_order' => ['sometimes', 'boolean'],
             'exception_reason' => ['nullable', 'string'],
@@ -32,7 +36,7 @@ class StorePurchaseReceiptRequest extends FormRequest
             'lines.*.material_id' => ['required', 'integer', 'exists:materials,id'],
             'lines.*.item_type' => ['required', 'string', Rule::in(['sustrato', 'miscelaneo', 'consumible', 'tinta', 'quimico'])],
             'lines.*.quantity' => ['required', 'numeric', 'min:0.001'],
-            'lines.*.unit' => ['required', 'string', Rule::in(['kg', 'unidad', 'm', 'rollo'])],
+            'lines.*.unit' => ['required', 'string', Rule::in(['kg', 'unidad', 'm', 'rollo', 'otros'])],
             'lines.*.micras' => ['nullable', 'numeric', 'min:0.001'],
             'lines.*.ancho_mm' => ['nullable', 'numeric', 'min:0.001'],
             'lines.*.purchase_order_line_id' => ['required', 'integer', 'exists:purchase_order_lines,id'],
@@ -65,7 +69,8 @@ class StorePurchaseReceiptRequest extends FormRequest
 
                 $requiresDimensions = $itemType === 'sustrato';
                 $allowedUnits = match ($itemType) {
-                    'tinta', 'quimico', 'miscelaneo' => ['kg', 'unidad'],
+                    'tinta', 'quimico' => ['kg', 'unidad'],
+                    'miscelaneo' => ['kg', 'unidad', 'otros'],
                     default => ['kg', 'unidad', 'm', 'rollo'],
                 };
 

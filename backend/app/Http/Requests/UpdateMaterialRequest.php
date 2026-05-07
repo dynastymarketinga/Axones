@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Enums\InventoryArea;
 use App\Models\Material;
+use App\Support\MaterialNoSupplierPolicy;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -32,13 +33,25 @@ class UpdateMaterialRequest extends FormRequest
             'micras' => ['nullable', 'numeric', 'min:0'],
             'ancho' => ['nullable', 'numeric', 'min:0'],
             'unit' => ['nullable', 'string', 'max:16'],
-            'min_stock' => ['nullable', 'numeric', 'min:0'],
+            'min_stock' => ['sometimes', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
             'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id'],
+            'no_supplier_reason' => ['nullable', 'string', 'max:1000'],
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
             'change_reason' => ['nullable', 'string', 'min:5', 'max:500'],
             'request_approval' => ['nullable', 'boolean'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'min_stock.numeric' => 'Stock mínimo debe ser numérico.',
+            'min_stock.min' => 'Stock mínimo no puede ser negativo.',
         ];
     }
 
@@ -49,23 +62,6 @@ class UpdateMaterialRequest extends FormRequest
             $material = $this->route('material');
             $area = (string) ($this->input('inventory_area') ?? $material?->inventory_area ?? '');
             $unit = (string) ($this->input('unit') ?? $material?->unit ?? 'kg');
-
-            $requiresDimensions = in_array($area, [
-                InventoryArea::Material->value,
-                InventoryArea::BobinasRechazadas->value,
-            ], true);
-
-            if ($requiresDimensions) {
-                $hasMicras = $this->exists('micras') ? $this->filled('micras') : ! is_null($material?->micras);
-                $hasAncho = $this->exists('ancho') ? $this->filled('ancho') : ! is_null($material?->ancho);
-
-                if (! $hasMicras) {
-                    $validator->errors()->add('micras', 'Micras es obligatorio para este tipo.');
-                }
-                if (! $hasAncho) {
-                    $validator->errors()->add('ancho', 'Ancho es obligatorio para este tipo.');
-                }
-            }
 
             $hasSubarea = $this->exists('tinta_subarea')
                 ? $this->filled('tinta_subarea')
@@ -87,10 +83,38 @@ class UpdateMaterialRequest extends FormRequest
                 InventoryArea::Miscelaneos->value,
             ];
             if (in_array($area, $supplierRequiredAreas, true)) {
-                if ($this->exists('supplier_id') && ($this->input('supplier_id') === null || $this->input('supplier_id') === '')) {
-                    $validator->errors()->add('supplier_id', 'El proveedor es obligatorio para sustratos, tintas, cementerio de tintas, químicos y misceláneos.');
-                } elseif (! $this->exists('supplier_id') && (! $material?->supplier_id || (int) $material->supplier_id < 1)) {
-                    $validator->errors()->add('supplier_id', 'El proveedor es obligatorio para sustratos, tintas, cementerio de tintas, químicos y misceláneos.');
+                $supplierKeyExists = $this->exists('supplier_id');
+                $reasonKeyExists = $this->exists('no_supplier_reason');
+
+                $effectiveSupplierId = null;
+                if ($supplierKeyExists) {
+                    $raw = $this->input('supplier_id');
+                    if ($raw !== null && $raw !== '') {
+                        $effectiveSupplierId = (int) $raw;
+                    }
+                } elseif ($material) {
+                    $effectiveSupplierId = $material->supplier_id ? (int) $material->supplier_id : null;
+                }
+
+                $effectiveReason = '';
+                if ($reasonKeyExists) {
+                    $effectiveReason = trim((string) ($this->input('no_supplier_reason') ?? ''));
+                } elseif ($material) {
+                    $effectiveReason = trim((string) ($material->no_supplier_reason ?? ''));
+                }
+
+                $hasSupplier = $effectiveSupplierId !== null && $effectiveSupplierId > 0;
+                $hasReason = $effectiveReason !== '';
+                $mayOmitReason = MaterialNoSupplierPolicy::canOmitNoSupplierReason($this->user());
+
+                if ($hasSupplier && $hasReason) {
+                    $validator->errors()->add('no_supplier_reason', 'No puede indicar motivo si seleccionó un proveedor.');
+                }
+                if (! $hasSupplier && ! $hasReason && ! $mayOmitReason) {
+                    $validator->errors()->add('supplier_id', 'Debe seleccionar un proveedor o indicar el motivo por no tener proveedor.');
+                }
+                if (! $hasSupplier && $hasReason && mb_strlen($effectiveReason) < 5 && ! $mayOmitReason) {
+                    $validator->errors()->add('no_supplier_reason', 'El motivo debe tener al menos 5 caracteres.');
                 }
             }
 
@@ -130,6 +154,7 @@ class UpdateMaterialRequest extends FormRequest
             'min_stock',
             'notes',
             'supplier_id',
+            'no_supplier_reason',
             'product_ids',
         ];
 
@@ -146,6 +171,7 @@ class UpdateMaterialRequest extends FormRequest
                 if ($incomingSubarea !== $currentSubarea) {
                     return true;
                 }
+
                 continue;
             }
 
@@ -161,6 +187,17 @@ class UpdateMaterialRequest extends FormRequest
                 if ($incoming !== $current) {
                     return true;
                 }
+
+                continue;
+            }
+
+            if ($field === 'no_supplier_reason') {
+                $currentReason = trim((string) ($material->no_supplier_reason ?? ''));
+                $incomingReason = trim((string) ($this->input('no_supplier_reason') ?? ''));
+                if ($incomingReason !== $currentReason) {
+                    return true;
+                }
+
                 continue;
             }
 
@@ -181,7 +218,7 @@ class UpdateMaterialRequest extends FormRequest
     {
         return match ($area) {
             InventoryArea::Material->value, InventoryArea::BobinasRechazadas->value => ['kg', 'm', 'rollo'],
-            InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo'],
+            InventoryArea::Miscelaneos->value => ['kg', 'unidad', 'm', 'rollo', 'otros'],
             InventoryArea::Tintas->value,
             InventoryArea::CementerioTintas->value,
             InventoryArea::Quimicos->value => ['kg', 'unidad'],

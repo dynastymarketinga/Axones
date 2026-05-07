@@ -70,6 +70,35 @@ class MasterDataCrudApiTest extends TestCase
         ], $headers)->assertOk()->assertJsonPath('name', 'Proveedor API 2');
     }
 
+    public function test_suppliers_store_rejects_short_name_and_requires_rif_or_no_rif_flag(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+        $headers = ['Authorization' => 'Bearer '.$token];
+
+        $this->postJson('/api/suppliers', [
+            'name' => 'V',
+            'rif' => 'J-123456789',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors(['name']);
+
+        $this->postJson('/api/suppliers', [
+            'name' => 'Proveedor sin RIF',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors(['rif']);
+
+        $noRif = $this->postJson('/api/suppliers', [
+            'name' => 'Proveedor sin RIF',
+            'no_rif' => true,
+        ], $headers);
+
+        $noRif->assertCreated();
+        $this->assertNull($noRif->json('rif'));
+
+        $this->postJson('/api/suppliers', [
+            'name' => 'Otro sin RIF',
+            'no_rif' => true,
+        ], $headers)->assertCreated();
+    }
+
     public function test_products_store_show_update_requires_client(): void
     {
         $user = User::factory()->create();

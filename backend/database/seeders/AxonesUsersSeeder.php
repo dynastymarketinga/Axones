@@ -19,21 +19,24 @@ class AxonesUsersSeeder extends Seeder
 {
     public function run(): void
     {
-        $keepEmails = [
-            // Boss principal (usuario real)
-            'victorcarrillox2@gmail.com',
-            'admin@axones.local',
+        $keepEmails = array_values(array_unique(array_merge(
+            [
+                // Boss principal (usuario real)
+                'victorcarrillox2@gmail.com',
+                'admin@axones.local',
 
-            // Un usuario por rol (local)
-            'inventario@axones.local',
-            'impresion@axones.local',
-            'laminacion@axones.local',
-            'corte@axones.local',
-            'tintas@axones.local',
-            'calidad@axones.local',
-            'vigilancia@axones.local',
-            'solicitante@axones.local',
-        ];
+                // Un usuario por rol (local)
+                'inventario@axones.local',
+                'impresion@axones.local',
+                'laminacion@axones.local',
+                'corte@axones.local',
+                'tintas@axones.local',
+                'calidad@axones.local',
+                'vigilancia@axones.local',
+                'solicitante@axones.local',
+            ],
+            MillenniumProductionUsersSeeder::expectedEmails(),
+        )));
 
         // Boss principal
         User::query()->updateOrCreate(

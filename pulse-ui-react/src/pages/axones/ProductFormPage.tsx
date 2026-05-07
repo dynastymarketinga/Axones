@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
 import { InlineSpinner } from "@/components/axones/LoadingStates"
+import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,6 +32,11 @@ const PRODUCT_PRINT_TYPES = ["Trimilaminado", "Bilaminado", "Superficie"] as con
 
 /** Radix Select no admite value vacío; se usa como opción “sin tipo”. */
 const PRINT_TYPE_EMPTY = "__print_type_empty__"
+
+const PRODUCT_VALIDATION_TOAST_ORDER = [
+  { key: "client_id", label: "Cliente" },
+  { key: "name", label: "Nombre" },
+] as const
 
 function isStandardPrintType(value: string): value is (typeof PRODUCT_PRINT_TYPES)[number] {
   return (PRODUCT_PRINT_TYPES as readonly string[]).includes(value)
@@ -140,7 +146,7 @@ export default function ProductFormPage() {
     ev.preventDefault()
     const v = validate()
     if (Object.keys(v).length) {
-      toast.error("Revisa los campos marcados.")
+      toastFieldValidationErrors(v, PRODUCT_VALIDATION_TOAST_ORDER)
       return
     }
     setSaving(true)

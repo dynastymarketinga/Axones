@@ -21,6 +21,7 @@ class PurchaseReceiptService
 {
     public function __construct(
         private readonly InventoryLedgerService $ledger,
+        private readonly PurchaseOrderClosingService $purchaseOrderClosing,
     ) {}
 
     /**
@@ -81,6 +82,11 @@ class PurchaseReceiptService
             if (! $without) {
                 $po = PurchaseOrder::query()->whereKey((int) $data['purchase_order_id'])->lockForUpdate()->firstOrFail();
                 $po->load('lines');
+                if (! $po->is_active) {
+                    throw ValidationException::withMessages([
+                        'purchase_order_id' => ['La orden de compra está desactivada.'],
+                    ]);
+                }
                 if ($po->status === PurchaseOrderStatus::Completed->value) {
                     foreach ($po->lines as $line) {
                         if (bccomp((string) $line->quantity_received, (string) $line->quantity_ordered, 3) === -1) {
@@ -187,7 +193,7 @@ class PurchaseReceiptService
 
             if ($po) {
                 $po->refresh()->load('lines');
-                $this->syncPurchaseOrderStatus($po);
+                $this->purchaseOrderClosing->recompute($po);
             }
 
             return $receipt->fresh(['supplier', 'lines.material', 'purchaseOrder.supplier', 'user']);
@@ -274,37 +280,6 @@ class PurchaseReceiptService
         );
     }
 
-    private function syncPurchaseOrderStatus(PurchaseOrder $po): void
-    {
-        $lines = $po->lines;
-        if ($lines->isEmpty()) {
-            $po->status = PurchaseOrderStatus::Open->value;
-            $po->save();
-
-            return;
-        }
-
-        $allComplete = true;
-        foreach ($lines as $line) {
-            if (bccomp((string) $line->quantity_received, (string) $line->quantity_ordered, 3) === -1) {
-                $allComplete = false;
-                break;
-            }
-        }
-
-        $anyReceived = $lines->contains(fn ($l) => bccomp((string) $l->quantity_received, '0', 3) === 1);
-
-        if ($allComplete) {
-            $po->status = PurchaseOrderStatus::Completed->value;
-        } elseif ($anyReceived) {
-            $po->status = PurchaseOrderStatus::Partial->value;
-        } else {
-            $po->status = PurchaseOrderStatus::Open->value;
-        }
-
-        $po->save();
-    }
-
     private function defaultItemTypeFromMaterial(Material $material): string
     {
         return match ($material->inventory_area) {
@@ -321,7 +296,7 @@ class PurchaseReceiptService
     private function assertCanStoreReceipt(User $user): void
     {
         $role = mb_strtolower(trim((string) ($user->role ?? '')));
-        $allowed = ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario', 'boss', 'admin', 'jefe_supremo', 'superadmin'];
+        $allowed = ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario', 'jefe_almacen', 'boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones'];
         if (! in_array($role, $allowed, true)) {
             throw new AuthorizationException('No autorizado para registrar recepciones de compra.');
         }

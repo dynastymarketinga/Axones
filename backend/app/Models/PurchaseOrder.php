@@ -15,6 +15,13 @@ class PurchaseOrder extends Model
         'ordered_at',
         'notes',
         'tax_applies',
+        'manually_closed_at',
+        'manually_closed_by',
+        'manual_close_reason',
+        'is_active',
+        'deactivated_at',
+        'deactivation_reason',
+        'last_change_reason',
     ];
 
     protected function casts(): array
@@ -22,6 +29,9 @@ class PurchaseOrder extends Model
         return [
             'ordered_at' => 'date',
             'tax_applies' => 'boolean',
+            'manually_closed_at' => 'datetime',
+            'is_active' => 'boolean',
+            'deactivated_at' => 'datetime',
         ];
     }
 
@@ -38,5 +48,10 @@ class PurchaseOrder extends Model
     public function receipts(): HasMany
     {
         return $this->hasMany(PurchaseReceipt::class);
+    }
+
+    public function manuallyClosedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'manually_closed_by');
     }
 }

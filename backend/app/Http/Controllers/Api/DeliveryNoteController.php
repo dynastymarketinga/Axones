@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateDeliveryNoteRequest;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteLine;
 use App\Services\CorteDispatchService;
+use App\Services\PurchaseOrderClosingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,7 @@ class DeliveryNoteController extends Controller
 {
     public function __construct(
         private readonly CorteDispatchService $corteDispatch,
+        private readonly PurchaseOrderClosingService $purchaseOrderClosing,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -123,6 +125,10 @@ class DeliveryNoteController extends Controller
             'status' => DeliveryNoteStatus::Dispatched->value,
             'dispatched_at' => now(),
         ]);
+
+        if ($delivery_note->work_order_id) {
+            $this->purchaseOrderClosing->syncFromWorkOrder((int) $delivery_note->work_order_id);
+        }
 
         return response()->json($delivery_note->fresh()->load(['lines', 'workOrder.client', 'workOrder.product']));
     }

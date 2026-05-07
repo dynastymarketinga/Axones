@@ -9,10 +9,10 @@ use App\Http\Controllers\Api\CorteDispatchController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DeliveryNoteController;
 use App\Http\Controllers\Api\GateMovementController;
+use App\Http\Controllers\Api\InventoryChangeApprovalController;
 use App\Http\Controllers\Api\InventoryMovementController;
 use App\Http\Controllers\Api\InventoryMovementsController;
 use App\Http\Controllers\Api\InventoryReturnController;
-use App\Http\Controllers\Api\InventoryChangeApprovalController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\MaterialRequestController;
 use App\Http\Controllers\Api\MiscellaneousReceiptController;
@@ -124,6 +124,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
     Route::get('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'show']);
     Route::patch('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'update']);
+    Route::get('/purchase-orders/{purchase_order}/consuming-work-orders', [PurchaseOrderController::class, 'consumingWorkOrders']);
+    Route::post('/purchase-orders/{purchase_order}/manual-close', [PurchaseOrderController::class, 'manualClose']);
+    Route::post('/purchase-orders/{purchase_order}/reopen', [PurchaseOrderController::class, 'reopen']);
 
     Route::get('/purchase-receipts', [PurchaseReceiptController::class, 'index']);
     Route::post('/purchase-receipts', [PurchaseReceiptController::class, 'store'])

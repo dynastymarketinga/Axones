@@ -100,6 +100,6 @@ class BobinaController extends Controller
     {
         $normalized = mb_strtolower(trim($role));
 
-        return in_array($normalized, ['boss', 'admin', 'jefe_supremo', 'superadmin', 'inventory_chief', 'jefe_inventario'], true);
+        return in_array($normalized, ['boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones', 'inventory_chief', 'jefe_inventario', 'jefe_almacen', 'supervisor'], true);
     }
 }

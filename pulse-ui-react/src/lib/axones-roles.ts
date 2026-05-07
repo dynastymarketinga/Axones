@@ -5,7 +5,7 @@ export function normalizeRole(role?: string | null): string {
 
 import type { LucideIcon } from "lucide-react"
 
-const BOSS_ROLES = new Set(["boss", "admin", "jefe_supremo", "superadmin"])
+const BOSS_ROLES = new Set(["boss", "admin", "jefe_supremo", "superadmin", "jefe_operaciones"])
 
 /** Jefes / admin: ven todo el menú Axones. */
 export function isAxonesFullAccess(
@@ -140,13 +140,13 @@ export function isAxonesUrlAllowed(
   if (r === "gate" || r === "vigilancia") {
     return url === "vigilancia" || url === "vigilancia/nuevo"
   }
-  if (r === "inventory_chief" || r === "jefe_inventario") {
+  if (r === "inventory_chief" || r === "jefe_inventario" || r === "jefe_almacen") {
     return INVENTORY_CHIEF_URLS.has(url)
   }
   if (r === "inventory" || r === "inventario") {
     return INVENTORY_WITH_MASTERS_URLS.has(url)
   }
-  if (r === "quality" || r === "calidad") {
+  if (r === "quality" || r === "calidad" || r === "planificador" || r === "supervisor") {
     return !url.startsWith("vigilancia")
   }
   if (r === "printing" || r === "impresion") {
@@ -172,11 +172,11 @@ export function isAxonesUrlAllowed(
 
 export type AxonesMenuNode =
   | { title: string; url: string; icon?: LucideIcon }
-  | { title: string; url: "#"; items: AxonesMenuNode[]; icon?: LucideIcon }
+  | { title: string; url: string; items: AxonesMenuNode[]; icon?: LucideIcon }
 
 function isBranch(
   n: AxonesMenuNode,
-): n is { title: string; url: "#"; items: AxonesMenuNode[]; icon?: LucideIcon } {
+): n is { title: string; url: string; items: AxonesMenuNode[]; icon?: LucideIcon } {
   return "items" in n && Array.isArray(n.items)
 }
 
@@ -197,7 +197,7 @@ export function filterAxonesMenuTree(
       if (children.length > 0) {
         out.push({
           title: node.title,
-          url: "#",
+          url: node.url,
           icon: node.icon,
           items: children,
         })

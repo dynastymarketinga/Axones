@@ -109,7 +109,7 @@ class TintaMixtureService
     private function assertCanCreateMixture(User $user): void
     {
         $role = mb_strtolower(trim((string) ($user->role ?? '')));
-        $allowed = ['tintas', 'boss', 'admin', 'jefe_supremo', 'superadmin'];
+        $allowed = ['tintas', 'boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones', 'supervisor'];
         if (! in_array($role, $allowed, true)) {
             throw new AuthorizationException('No autorizado para registrar mezclas de tinta.');
         }

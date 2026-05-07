@@ -20,11 +20,12 @@ class VendorController extends Controller
             $query->where('active', filter_var($active, FILTER_VALIDATE_BOOLEAN));
         }
 
-        if ($q = $request->query('q')) {
-            $query->where(function ($w) use ($q) {
-                $w->where('name', 'like', '%'.$q.'%')
-                    ->orWhere('phone_primary', 'like', '%'.$q.'%')
-                    ->orWhere('phone_secondary', 'like', '%'.$q.'%');
+        if (($raw = trim((string) $request->query('q', ''))) !== '') {
+            $escaped = addcslashes($raw, '%_\\');
+            $query->where(function ($w) use ($escaped) {
+                $w->where('name', 'like', '%'.$escaped.'%')
+                    ->orWhere('phone_primary', 'like', '%'.$escaped.'%')
+                    ->orWhere('phone_secondary', 'like', '%'.$escaped.'%');
             });
         }
 
@@ -72,4 +73,3 @@ class VendorController extends Controller
         return response()->json($vendor->fresh());
     }
 }
-

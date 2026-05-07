@@ -8,22 +8,22 @@ use Symfony\Component\HttpFoundation\Response;
 
 class EnsureAreaRole
 {
-    private const FULL_ACCESS_ROLES = ['boss', 'admin', 'jefe_supremo', 'superadmin'];
+    private const FULL_ACCESS_ROLES = ['boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones'];
 
     private const ROLE_BY_AREA = [
-        'inventory' => ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario'],
-        'printing' => ['printing', 'impresion'],
-        'laminacion' => ['laminacion'],
-        'corte' => ['corte'],
-        'tintas' => ['tintas'],
+        'inventory' => ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario', 'jefe_almacen', 'planificador', 'supervisor'],
+        'printing' => ['printing', 'impresion', 'planificador', 'supervisor'],
+        'laminacion' => ['laminacion', 'planificador', 'supervisor'],
+        'corte' => ['corte', 'planificador', 'supervisor'],
+        'tintas' => ['tintas', 'planificador', 'supervisor'],
         // Montaje queda reservado a perfiles de planificación/jefatura por ahora.
         'montaje' => [],
         /** @deprecated Usar planilla_read / planilla_write; se mantiene por compatibilidad. */
-        'planilla' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad'],
+        'planilla' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad', 'planificador', 'supervisor'],
         /** Lectura de planilla técnica + resumen producción (incluye operadores de impresión). */
-        'planilla_read' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad', 'quality'],
+        'planilla_read' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad', 'quality', 'planificador', 'supervisor'],
         /** Escritura planilla completa y PATCH de OT; excluye operadores que solo usan control de impresión. */
-        'planilla_write' => ['laminacion', 'corte', 'tintas', 'calidad', 'quality'],
+        'planilla_write' => ['laminacion', 'corte', 'tintas', 'calidad', 'quality', 'planificador', 'supervisor'],
     ];
 
     public function handle(Request $request, Closure $next, string $area): Response

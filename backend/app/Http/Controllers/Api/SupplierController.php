@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateSupplierRequest;
 use App\Models\Supplier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 
 class SupplierController extends Controller
 {
@@ -27,7 +28,8 @@ class SupplierController extends Controller
 
     public function store(StoreSupplierRequest $request): JsonResponse
     {
-        $supplier = Supplier::query()->create($request->validated());
+        $data = Arr::except($request->validated(), ['no_rif']);
+        $supplier = Supplier::query()->create($data);
 
         return response()->json($supplier, 201);
     }
@@ -39,7 +41,7 @@ class SupplierController extends Controller
 
     public function update(UpdateSupplierRequest $request, Supplier $supplier): JsonResponse
     {
-        $supplier->update($request->validated());
+        $supplier->update(Arr::except($request->validated(), ['no_rif']));
 
         return response()->json($supplier->fresh());
     }

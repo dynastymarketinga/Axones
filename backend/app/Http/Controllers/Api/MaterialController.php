@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\InventoryArea;
 use App\Enums\InventoryMovementType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\MaterialIndexRequest;
@@ -17,8 +16,8 @@ use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 
 class MaterialController extends Controller
 {
@@ -291,7 +290,7 @@ class MaterialController extends Controller
     private function assertCanManageMaterials(Request $request): void
     {
         $role = mb_strtolower(trim((string) ($request->user()?->role ?? '')));
-        $allowed = ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario', 'boss', 'admin', 'jefe_supremo', 'superadmin'];
+        $allowed = ['inventory', 'inventario', 'inventory_chief', 'jefe_inventario', 'jefe_almacen', 'boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones'];
         if (! in_array($role, $allowed, true)) {
             throw new AuthorizationException('No autorizado para gestionar materiales.');
         }
@@ -304,6 +303,8 @@ class MaterialController extends Controller
     {
         return [
             'sku' => $material->sku,
+            'internal_code' => $material->internal_code,
+            'created_by_user_id' => $material->created_by_user_id,
             'name' => $material->name,
             'barcode' => $material->barcode,
             'inventory_area' => $material->inventory_area,
@@ -312,6 +313,7 @@ class MaterialController extends Controller
             'ancho' => $material->ancho,
             'min_stock' => (string) $material->min_stock,
             'supplier_id' => $material->supplier_id,
+            'no_supplier_reason' => $material->no_supplier_reason,
             'notes' => $material->notes,
             'tinta_subarea' => optional($material->tintaSubareas->first())->subarea,
             'product_ids' => $material->substrateProducts->pluck('id')->map(fn ($id) => (int) $id)->sort()->values()->all(),
@@ -383,6 +385,14 @@ class MaterialController extends Controller
             return true;
         }
 
+        if (array_key_exists('no_supplier_reason', $payload)) {
+            $beforeReason = trim((string) ($material->no_supplier_reason ?? ''));
+            $afterReason = trim((string) ($payload['no_supplier_reason'] ?? ''));
+            if ($beforeReason !== $afterReason) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -390,6 +400,6 @@ class MaterialController extends Controller
     {
         $normalized = mb_strtolower(trim($role));
 
-        return in_array($normalized, ['boss', 'admin', 'jefe_supremo', 'superadmin', 'inventory_chief', 'jefe_inventario'], true);
+        return in_array($normalized, ['boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones', 'inventory_chief', 'jefe_inventario', 'jefe_almacen', 'supervisor'], true);
     }
 }

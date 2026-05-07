@@ -9,7 +9,7 @@ use App\Models\User;
  */
 class BossAccess
 {
-    private const FULL_ACCESS_ROLES = ['boss', 'admin', 'jefe_supremo', 'superadmin'];
+    private const FULL_ACCESS_ROLES = ['boss', 'admin', 'jefe_supremo', 'superadmin', 'jefe_operaciones'];
 
     public static function allows(?User $user): bool
     {

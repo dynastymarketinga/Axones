@@ -21,9 +21,7 @@ import {
 const AREAS = [
   { value: "material", label: "Sustrato" },
   { value: "tintas", label: "Tintas" },
-  { value: "cementerio_tintas", label: "Cementerio tintas" },
   { value: "quimicos", label: "Químicos" },
-  { value: "bobinas_rechazadas", label: "Bobinas rechazadas" },
   { value: "miscelaneos", label: "Misceláneos" },
 ] as const
 
@@ -143,7 +141,7 @@ export default function MaterialsInventoryHubPage() {
           Inventario por área
         </h1>
         <p className="text-muted-foreground text-sm">
-          Las seis áreas de inventario en una sola pantalla (pestañas).
+          Las áreas de inventario principales en una sola pantalla (pestañas).
         </p>
       </div>
 

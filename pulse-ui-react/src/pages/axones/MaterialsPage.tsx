@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getMaterialAreaTheme, getMaterialsListTabTheme } from "@/lib/material-area-theme"
 import { cn } from "@/lib/utils"
 import {
   Table,
@@ -40,9 +41,7 @@ const AREAS = [
   { value: "all", label: "Todos" },
   { value: "material", label: "Sustrato" },
   { value: "tintas", label: "Tintas" },
-  { value: "cementerio_tintas", label: "Cementerio tintas" },
   { value: "quimicos", label: "Químicos" },
-  { value: "bobinas_rechazadas", label: "Bobinas rechazadas" },
   { value: "miscelaneos", label: "Misceláneos" },
 ] as const
 
@@ -108,9 +107,8 @@ export default function MaterialsPage() {
   const [rows, setRows] = useState<LaravelPaginated<MaterialRow> | null>(null)
   const loadAbortRef = useRef<AbortController | null>(null)
 
-  const showDimensions = activeArea === "material" || activeArea === "bobinas_rechazadas"
-  const showTintaSubareaFilter =
-    activeArea === "all" || activeArea === "tintas" || activeArea === "cementerio_tintas"
+  const showDimensions = activeArea === "material"
+  const showTintaSubareaFilter = activeArea === "all" || activeArea === "tintas"
 
   const { sortBy, sortDir } = SORT_PRESET_MAP[sortPreset]
 
@@ -183,7 +181,7 @@ export default function MaterialsPage() {
         value={activeArea}
         onValueChange={(value) => {
           setActiveArea(value as AreaValue)
-          if (value !== "all" && value !== "tintas" && value !== "cementerio_tintas") {
+          if (value !== "all" && value !== "tintas") {
             setTintaSubarea("all")
           }
           setPage(1)
@@ -192,7 +190,11 @@ export default function MaterialsPage() {
       >
         <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
           {AREAS.map((a) => (
-            <TabsTrigger key={a.value} value={a.value} className="text-xs sm:text-sm">
+            <TabsTrigger
+              key={a.value}
+              value={a.value}
+              className={cn("text-xs sm:text-sm", getMaterialsListTabTheme(a.value).tabTriggerClass)}
+            >
               {a.label}
             </TabsTrigger>
           ))}
@@ -286,7 +288,7 @@ export default function MaterialsPage() {
                   >
                     {showTintaSubareaFilter ? (
                       <div className="grid gap-2">
-                        <Label>Subárea (tintas / cementerio)</Label>
+                        <Label>Subárea (tintas)</Label>
                         <Select
                           value={tintaSubarea}
                           onValueChange={(value) => {
@@ -388,8 +390,10 @@ export default function MaterialsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.data.map((m) => (
-                    <TableRow key={m.id}>
+                  rows.data.map((m) => {
+                    const areaTheme = getMaterialAreaTheme(m.inventory_area)
+                    return (
+                    <TableRow key={m.id} className={cn(areaTheme.rowClass, "[&>td]:bg-inherit")}>
                       <TableCell className="font-mono text-sm">{m.sku}</TableCell>
                       <TableCell className="max-w-[14rem] font-medium">{m.name}</TableCell>
                       <TableCell
@@ -417,7 +421,8 @@ export default function MaterialsPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                    )
+                  })
                 )}
               </TableBody>
             </Table>

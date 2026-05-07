@@ -11,6 +11,7 @@ import { isAxonesFullAccess, normalizeRole } from "@/lib/axones-roles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -43,6 +44,23 @@ import {
 } from "lucide-react"
 
 const RIF_LETTERS = ["J", "V", "E", "G", "P", "C"] as const
+
+const DEFAULT_RIF_LETTER: (typeof RIF_LETTERS)[number] = "V"
+
+function normalizeRifLetterForSelect(raw: string): (typeof RIF_LETTERS)[number] {
+  const L = raw.trim().toUpperCase()
+  return RIF_LETTERS.includes(L as (typeof RIF_LETTERS)[number]) ? (L as (typeof RIF_LETTERS)[number]) : DEFAULT_RIF_LETTER
+}
+
+const CLIENT_VALIDATION_TOAST_ORDER = [
+  { key: "name", label: "Nombre" },
+  { key: "rif", label: "RIF" },
+  { key: "phone", label: "Teléfono" },
+  { key: "email", label: "Correo" },
+  { key: "state", label: "Estado" },
+  { key: "city", label: "Ciudad" },
+  { key: "address", label: "Dirección" },
+] as const
 
 const fieldLabelClass = "leading-snug"
 
@@ -125,7 +143,7 @@ export default function ClientFormPage() {
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState("")
-  const [rifLetter, setRifLetter] = useState("")
+  const [rifLetter, setRifLetter] = useState<(typeof RIF_LETTERS)[number]>(DEFAULT_RIF_LETTER)
   /** Dígitos del RIF en un solo campo: 8 + verificador (9), o legado 7 + verificador (8). */
   const [rifDigits, setRifDigits] = useState("")
   const [state, setState] = useState("")
@@ -277,7 +295,7 @@ export default function ClientFormPage() {
       const c = await apiFetch<ClientRecord>(`clients/${clientId}`)
       setName(clampStr(c.name ?? "", LIM.name))
       const parts = parseRifFromStored(c.rif)
-      setRifLetter(parts.letter)
+      setRifLetter(normalizeRifLetterForSelect(parts.letter))
       setRifDigits(parts.main + parts.dv)
       setState(clampStr(c.state ?? "", LIM.state))
       setCity(clampStr(c.city ?? "", LIM.city))
@@ -351,7 +369,7 @@ export default function ClientFormPage() {
     ev.preventDefault()
     const v = validate()
     if (Object.keys(v).length) {
-      toast.error("Revisa los campos marcados.")
+      toastFieldValidationErrors(v, CLIENT_VALIDATION_TOAST_ORDER)
       requestAnimationFrame(() => {
         if (v.name) {
           nameRef.current?.focus()
@@ -518,9 +536,9 @@ export default function ClientFormPage() {
                 )}
               >
                 <Select
-                  value={rifLetter || "__clear"}
+                  value={rifLetter}
                   onValueChange={(v) => {
-                    const L = v === "__clear" ? "" : v
+                    const L = normalizeRifLetterForSelect(v)
                     setRifLetter(L)
                     if (errors.rif)
                       validate({
@@ -533,14 +551,13 @@ export default function ClientFormPage() {
                       ref={rifLetterTriggerRef}
                       aria-label="Letra del RIF"
                       className={cn(
-                        "h-9 w-[3.25rem] shrink-0 self-stretch rounded-none border-0 border-r border-input bg-muted/50 px-2 shadow-none ring-offset-0 focus:ring-0 focus:ring-offset-0 data-[placeholder]:text-muted-foreground [&>svg]:h-3.5 [&>svg]:w-3.5",
+                        "h-9 w-[3.25rem] shrink-0 self-stretch rounded-none border-0 border-r border-input bg-muted/50 px-2 shadow-none ring-offset-0 focus:ring-0 focus:ring-offset-0 [&>svg]:h-3.5 [&>svg]:w-3.5",
                       )}
                       aria-invalid={Boolean(errors.rif)}
                     >
-                    <SelectValue placeholder="—" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__clear">—</SelectItem>
                     {RIF_LETTERS.map((letter) => (
                       <SelectItem key={letter} value={letter}>
                         {letter}
@@ -568,23 +585,25 @@ export default function ClientFormPage() {
                     value={rifDigits}
                     onChange={(ev) => {
                       const { letter: nextL, digits: nextD } = looseRifNumberInput(ev.target.value, rifLetter)
-                      if (nextL !== rifLetter) setRifLetter(nextL)
+                      const letterNorm = normalizeRifLetterForSelect(nextL)
+                      if (letterNorm !== rifLetter) setRifLetter(letterNorm)
                       setRifDigits(nextD)
                       if (errors.rif)
                         validate({
-                          rifLetter: nextL,
+                          rifLetter: letterNorm,
                           rifDigits: nextD,
                         })
                     }}
                     onBlur={() => {
                       const { letter: nextL, digits: nextD } = looseRifNumberInput(rifDigits, rifLetter)
-                      if (nextL !== rifLetter) setRifLetter(nextL)
+                      const letterNorm = normalizeRifLetterForSelect(nextL)
+                      if (letterNorm !== rifLetter) setRifLetter(letterNorm)
                       if (nextD !== rifDigits) setRifDigits(nextD)
                       validate({
-                        rifLetter: nextL,
+                        rifLetter: letterNorm,
                         rifDigits: nextD,
                       })
-                      const composed = normalizeRif(`${nextL}${nextD}`)
+                      const composed = normalizeRif(`${letterNorm}${nextD}`)
                       void checkDuplicateClient("rif", composed)
                     }}
                     aria-invalid={Boolean(errors.rif)}

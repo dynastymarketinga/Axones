@@ -115,15 +115,17 @@ class WorkOrderController extends Controller
         }
 
         if ($q = trim((string) $request->query('q', ''))) {
-            $query->where(function ($inner) use ($q) {
-                $inner->where('code', 'like', '%'.$q.'%')
-                    ->orWhere('client_order_reference', 'like', '%'.$q.'%')
-                    ->orWhereHas('client', function ($clientQ) use ($q) {
-                        $clientQ->where('name', 'like', '%'.$q.'%');
+            $escaped = addcslashes($q, '%_\\');
+            $query->where(function ($inner) use ($escaped) {
+                $inner->where('code', 'like', '%'.$escaped.'%')
+                    ->orWhere('client_order_reference', 'like', '%'.$escaped.'%')
+                    ->orWhereHas('client', function ($clientQ) use ($escaped) {
+                        $clientQ->where('name', 'like', '%'.$escaped.'%');
                     });
             });
-        } elseif ($q = $request->query('client_order_reference')) {
-            $query->where('client_order_reference', 'like', '%'.$q.'%');
+        } elseif (($cor = trim((string) $request->query('client_order_reference', ''))) !== '') {
+            $escapedCor = addcslashes($cor, '%_\\');
+            $query->where('client_order_reference', 'like', '%'.$escapedCor.'%');
         }
 
         if ($request->query('client_order_id')) {

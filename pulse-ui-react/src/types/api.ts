@@ -67,8 +67,14 @@ export type PurchaseOrderRow = {
   created_at?: string | null
   notes: string | null
   tax_applies?: boolean
+  is_active?: boolean
   supplier?: Pick<SupplierRecord, "id" | "name">
   lines_count?: number
+  /** Cuando no es null, la OC fue cerrada manualmente por jefatura. */
+  manually_closed_at?: string | null
+  manually_closed_by?: number | null
+  manual_close_reason?: string | null
+  manuallyClosedBy?: { id: number; name: string } | null
 }
 
 export type ClientOrderRow = {
@@ -91,6 +97,10 @@ export type ClientOrderRow = {
 export type MaterialRow = {
   id: number
   sku: string
+  /** Código interno autogenerado (uso técnico, no visible en UI). */
+  internal_code?: string | null
+  /** ID del usuario que creó el material (auditoría, no visible en UI). */
+  created_by_user_id?: number | null
   name: string
   barcode?: string | null
   inventory_area: string
@@ -103,6 +113,7 @@ export type MaterialRow = {
   substrate_products?: Array<Pick<ProductRecord, "id" | "name">>
   notes?: string | null
   supplier_id?: number | null
+  no_supplier_reason?: string | null
   supplier?: Pick<SupplierRecord, "id" | "name"> | null
   created_at?: string
   updated_at?: string

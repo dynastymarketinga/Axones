@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { cn } from "@/lib/utils"
 import { ArrowLeft, Phone, UserRound } from "lucide-react"
 
@@ -28,6 +29,12 @@ const fieldIconClass =
 const inputWithIconClass = "h-9 pl-10 leading-none md:text-sm"
 
 const PHONE_MAX_DIGITS = 15
+
+const VENDOR_VALIDATION_TOAST_ORDER = [
+  { key: "name", label: "Nombre" },
+  { key: "phonePrimary", label: "Teléfono principal" },
+  { key: "phoneSecondary", label: "Teléfono secundario" },
+] as const
 
 /** Límites alineados con ClientFormPage (teléfono); API vendors permite 64, UI igual que clientes. */
 const LIM = {
@@ -223,7 +230,7 @@ export default function VendorFormPage() {
     const v = validate()
     if (Object.keys(v).length) {
       focusFirstError(v)
-      toast.error("Revisa los campos marcados.")
+      toastFieldValidationErrors(v, VENDOR_VALIDATION_TOAST_ORDER)
       return
     }
 

@@ -53,7 +53,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
   },
   {
     title: "Datos maestros",
-    url: "#",
+    url: "datos-maestros",
     icon: Tags,
     items: [
       { title: "Vendedores", url: "vendedores", icon: Users },

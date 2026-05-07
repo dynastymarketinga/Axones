@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { Check, ChevronsUpDown } from "lucide-react"
 import { toast } from "sonner"
@@ -30,6 +30,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 type PoLineDraft = {
   description: string
@@ -39,13 +47,64 @@ type PoLineDraft = {
   unit_price: string
 }
 
-type OcTemplateMap = Record<string, PoLineDraft[]>
+const ADD_ARTICLE_TOOLTIP_LINES = [
+  "Las filas vacías se omiten si hay al menos una válida.",
+  "Si completa material, descripción o precio en una fila, indique cantidad ≥ 0,001.",
+  "Este botón añade otra fila al pedido.",
+] as const
 
 function parseDecimalInput(raw: string, emptyAsZero = false): number {
   const t = raw.trim().replace(/\s+/g, "").replace(",", ".")
   if (!t) return emptyAsZero ? 0 : Number.NaN
   const n = Number(t)
   return Number.isFinite(n) ? n : Number.NaN
+}
+
+/** Fecha local en formato `YYYY-MM-DD` para `<input type="date">`. */
+function toDateInputValue(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+/** Unidades alineadas con recepción de inventario (`StorePurchaseReceiptRequest`). */
+const PO_LINE_UNITS = ["kg", "unidad", "m", "rollo", "otros"] as const
+type PoLineUnit = (typeof PO_LINE_UNITS)[number]
+
+function isPoLineUnit(u: string): u is PoLineUnit {
+  return (PO_LINE_UNITS as readonly string[]).includes(u)
+}
+
+/** Si el material trae una unidad reconocida, úsala; si no, `kg`. */
+function coercePoLineUnit(materialUnit: string): PoLineUnit {
+  const t = materialUnit.trim().toLowerCase()
+  return isPoLineUnit(t) ? t : "kg"
+}
+
+/**
+ * Solo dígitos y un separador decimal (`.` o `,` → se guarda `.` en estado).
+ * Máximo `maxFracDigits` decimales tras el separador.
+ */
+function sanitizePositiveDecimalInput(raw: string, maxFracDigits: number): string {
+  let out = ""
+  let hasSep = false
+  let fracCount = 0
+  for (const ch of raw) {
+    if (ch >= "0" && ch <= "9") {
+      if (hasSep) {
+        if (fracCount >= maxFracDigits) continue
+        fracCount++
+      }
+      out += ch
+      continue
+    }
+    if ((ch === "." || ch === ",") && !hasSep) {
+      hasSep = true
+      out += "."
+    }
+  }
+  return out
 }
 
 function formatMoneyUsdEs(value: number): string {
@@ -59,7 +118,7 @@ const emptyLine = (): PoLineDraft => ({
   description: "",
   material_id: "",
   quantity_ordered: "",
-  unit: "kg",
+  unit: "kg" satisfies PoLineUnit,
   unit_price: "",
 })
 
@@ -120,17 +179,23 @@ export default function PurchaseOrderNewPage() {
   const [supplierOpen, setSupplierOpen] = useState(false)
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [saving, setSaving] = useState(false)
-  const [templatesBySupplier, setTemplatesBySupplier] = useState<OcTemplateMap>({})
+  const [supplierListReady, setSupplierListReady] = useState(false)
+  const [resolvingSupplier, setResolvingSupplier] = useState(false)
+  const supplierResolveFailedForRef = useRef<string | null>(null)
 
   const [supplierId, setSupplierId] = useState("")
   const [code, setCode] = useState("")
   const [codeTouched, setCodeTouched] = useState(false)
-  const [orderedAt, setOrderedAt] = useState("")
+  const [orderedAt, setOrderedAt] = useState(() => toDateInputValue(new Date()))
   const [notes, setNotes] = useState("")
   const [taxApplies, setTaxApplies] = useState(true)
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()])
   const [fieldErrors, setFieldErrors] = useState<PoFieldErrors>({})
   const [lineErrors, setLineErrors] = useState<Record<number, PoLineFieldErrors>>({})
+  /** Índice de línea cuyo combobox de material está abierto (`null` = ninguno). */
+  const [materialPopoverLineIndex, setMaterialPopoverLineIndex] = useState<number | null>(
+    null,
+  )
 
   const selectedSupplier = useMemo(
     () => suppliers.find((x) => String(x.id) === supplierId) ?? null,
@@ -147,6 +212,28 @@ export default function PurchaseOrderNewPage() {
     return { subtotal, tax, total: roundMoney2(subtotal + tax) }
   }, [lines, taxApplies])
 
+  const supplierTriggerDisplay = useMemo(() => {
+    if (!supplierId.trim()) return { text: "Seleccione…", muted: true }
+    if (selectedSupplier) {
+      const name = selectedSupplier.name?.trim() || "Sin nombre"
+      return {
+        text: `${name}${selectedSupplier.rif ? ` · ${selectedSupplier.rif}` : ""}`,
+        muted: false,
+      }
+    }
+    if (!supplierListReady) return { text: "Cargando…", muted: true }
+    if (resolvingSupplier) return { text: "Cargando proveedor…", muted: true }
+    return {
+      text: "Abra la lista y elija el proveedor de nuevo.",
+      muted: true,
+    }
+  }, [
+    supplierId,
+    selectedSupplier,
+    supplierListReady,
+    resolvingSupplier,
+  ])
+
   const returnTo = useMemo(() => {
     const st = location.state as { from?: string } | null
     const from = st?.from?.trim()
@@ -162,14 +249,10 @@ export default function PurchaseOrderNewPage() {
       return
     }
     try {
-      const prefs = JSON.parse(raw) as {
-        last_supplier_id?: string
-        templates_by_supplier?: OcTemplateMap
-      }
+      const prefs = JSON.parse(raw) as { last_supplier_id?: string }
       if (prefs.last_supplier_id) setSupplierId(prefs.last_supplier_id)
-      setTemplatesBySupplier(prefs.templates_by_supplier ?? {})
     } catch {
-      setTemplatesBySupplier({})
+      /* ignore corrupt prefs */
     }
     if (!codeTouched && !code.trim()) {
       setCode(buildAutoPoCode())
@@ -191,11 +274,13 @@ export default function PurchaseOrderNewPage() {
         if (!c) {
           setSuppliers(supRes.data)
           setMaterials(matRes.data)
+          setSupplierListReady(true)
         }
       } catch {
         if (!c) {
           setSuppliers([])
           setMaterials([])
+          setSupplierListReady(true)
         }
       }
     })()
@@ -205,12 +290,45 @@ export default function PurchaseOrderNewPage() {
   }, [])
 
   useEffect(() => {
-    const payload = {
-      last_supplier_id: supplierId || "",
-      templates_by_supplier: templatesBySupplier,
+    supplierResolveFailedForRef.current = null
+  }, [supplierId])
+
+  useEffect(() => {
+    if (!supplierListReady || !supplierId.trim()) return
+    const sid = Number(supplierId)
+    if (!Number.isFinite(sid) || sid < 1) return
+    if (suppliers.some((s) => String(s.id) === supplierId)) return
+    if (supplierResolveFailedForRef.current === supplierId) return
+
+    let cancelled = false
+    setResolvingSupplier(true)
+    void (async () => {
+      try {
+        const rec = await apiFetch<SupplierRecord>(`suppliers/${sid}`)
+        if (cancelled) return
+        setSuppliers((prev) =>
+          prev.some((p) => p.id === rec.id) ? prev : [...prev, rec],
+        )
+      } catch {
+        if (!cancelled) {
+          supplierResolveFailedForRef.current = supplierId
+          toast.error("No se pudo cargar el proveedor guardado. Elija otro en la lista.")
+        }
+      } finally {
+        if (!cancelled) setResolvingSupplier(false)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-    window.localStorage.setItem(OC_PREFS_KEY, JSON.stringify(payload))
-  }, [supplierId, templatesBySupplier])
+  }, [supplierListReady, supplierId, suppliers])
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      OC_PREFS_KEY,
+      JSON.stringify({ last_supplier_id: supplierId || "" }),
+    )
+  }, [supplierId])
 
   function addLine() {
     setLines((prev) => [...prev, emptyLine()])
@@ -229,6 +347,9 @@ export default function PurchaseOrderNewPage() {
   }
 
   function removeLine(i: number) {
+    setMaterialPopoverLineIndex((openIdx) =>
+      openIdx === null ? null : openIdx === i ? null : openIdx > i ? openIdx - 1 : openIdx,
+    )
     setLines((prev) => prev.filter((_, j) => j !== i))
     setLineErrors((prev) => {
       const next: Record<number, PoLineFieldErrors> = {}
@@ -242,61 +363,11 @@ export default function PurchaseOrderNewPage() {
     })
   }
 
-  const hasTemplateForSelectedSupplier = Boolean(
-    supplierId && templatesBySupplier[supplierId]?.length,
-  )
-  const hasDirtyLines = lines.some(lineHasAnyValue)
-
-  function saveSupplierTemplate() {
-    if (!supplierId) {
-      toast.error("Seleccione un proveedor para guardar plantilla.")
-      return
-    }
-    const cleanLines = lines
-      .filter(lineHasAnyValue)
-      .map((line) => ({
-        description: line.description.trim(),
-        material_id: line.material_id.trim(),
-        quantity_ordered: line.quantity_ordered.trim(),
-        unit: line.unit.trim() || "kg",
-        unit_price: line.unit_price.trim(),
-      }))
-    if (!cleanLines.length) {
-      toast.error("No hay líneas con datos para guardar como plantilla.")
-      return
-    }
-    setTemplatesBySupplier((prev) => ({ ...prev, [supplierId]: cleanLines }))
-    toast.success("Plantilla guardada para este proveedor.")
-  }
-
-  function applySupplierTemplate() {
-    if (!supplierId) {
-      toast.error("Seleccione un proveedor para aplicar plantilla.")
-      return
-    }
-    const template = templatesBySupplier[supplierId]
-    if (!template?.length) {
-      toast.error("Este proveedor no tiene plantilla guardada.")
-      return
-    }
-    if (hasDirtyLines) {
-      const ok = window.confirm(
-        "Ya hay líneas con datos. ¿Desea reemplazarlas por la plantilla del proveedor?",
-      )
-      if (!ok) return
-    }
-    setLineErrors({})
-    setFieldErrors((prev) => {
-      if (!prev.linesGeneral) return prev
-      const next = { ...prev }
-      delete next.linesGeneral
-      return next
-    })
-    setLines(template.map((line) => ({ ...emptyLine(), ...line, unit_price: line.unit_price ?? "" })))
-    toast.success("Plantilla aplicada.")
-  }
-
-  function validatePoForm(): boolean {
+  function computePurchaseOrderValidation(): {
+    ok: boolean
+    fieldErrors: PoFieldErrors
+    lineErrors: Record<number, PoLineFieldErrors>
+  } {
     const nextField: PoFieldErrors = {}
     const nextLine: Record<number, PoLineFieldErrors> = {}
 
@@ -337,8 +408,8 @@ export default function PurchaseOrderNewPage() {
         }
       }
       const unitTrim = L.unit.trim() || "kg"
-      if (unitTrim.length > 16) {
-        errs.unit = "Máximo 16 caracteres en unidad."
+      if (!isPoLineUnit(unitTrim)) {
+        errs.unit = "Seleccione una unidad válida."
       }
       if (Object.keys(errs).length) nextLine[i] = errs
     }
@@ -355,16 +426,13 @@ export default function PurchaseOrderNewPage() {
           L.quantity_ordered >= 0.001 &&
           Number.isFinite(L.unit_price) &&
           L.unit_price >= 0 &&
-          L.unit.length <= 16,
+          isPoLineUnit(L.unit.trim() || "kg"),
       )
 
     if (!nextField.linesGeneral && payloadCandidate.length === 0) {
       nextField.linesGeneral =
         "Ninguna línea tiene cantidad válida. Revise cantidad (≥ 0,001), precio y unidad."
     }
-
-    setFieldErrors(nextField)
-    setLineErrors(nextLine)
 
     const ok =
       !nextField.supplier &&
@@ -373,14 +441,37 @@ export default function PurchaseOrderNewPage() {
       Object.keys(nextLine).length === 0 &&
       payloadCandidate.length > 0
 
-    return ok
+    return { ok, fieldErrors: nextField, lineErrors: nextLine }
+  }
+
+  function toastPurchaseOrderValidationErrors(
+    field: PoFieldErrors,
+    lineErrs: Record<number, PoLineFieldErrors>,
+  ) {
+    if (field.supplier) toast.error(`Proveedor: ${field.supplier}`)
+    if (field.code) toast.error(`Código: ${field.code}`)
+    if (field.linesGeneral) toast.error(`Artículos: ${field.linesGeneral}`)
+    const rowIndexes = Object.keys(lineErrs)
+      .map(Number)
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b)
+    for (const i of rowIndexes) {
+      const row = lineErrs[i]
+      const n = i + 1
+      if (row.quantity) toast.error(`Ítem ${n} · Cantidad: ${row.quantity}`)
+      if (row.unit_price) toast.error(`Ítem ${n} · Precio: ${row.unit_price}`)
+      if (row.unit) toast.error(`Ítem ${n} · Unidad: ${row.unit}`)
+    }
   }
 
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
 
-    if (!validatePoForm()) {
-      toast.error("Revise los campos marcados en rojo antes de guardar.")
+    const validation = computePurchaseOrderValidation()
+    setFieldErrors(validation.fieldErrors)
+    setLineErrors(validation.lineErrors)
+    if (!validation.ok) {
+      toastPurchaseOrderValidationErrors(validation.fieldErrors, validation.lineErrors)
       return
     }
 
@@ -403,7 +494,7 @@ export default function PurchaseOrderNewPage() {
           L.quantity_ordered >= 0.001 &&
           Number.isFinite(L.unit_price) &&
           L.unit_price >= 0 &&
-          L.unit.length <= 16,
+          isPoLineUnit(L.unit.trim() || "kg"),
       )
 
     setSaving(true)
@@ -430,14 +521,15 @@ export default function PurchaseOrderNewPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
+    <>
+      <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
             Nueva orden de compra
           </h1>
           <p className="text-muted-foreground text-sm">
-            Indique proveedor, líneas y condiciones de la compra. La orden queda abierta; Parcial y Completada las marca el
+            Indique proveedor, artículos y condiciones de la compra. La orden queda abierta; Parcial y Completada las marca el
             inventario al recibir.
           </p>
         </div>
@@ -470,13 +562,13 @@ export default function PurchaseOrderNewPage() {
                     fieldErrors.supplier && "border-destructive ring-1 ring-destructive/40",
                   )}
                 >
-                  <span className={cn("truncate text-left", !supplierId && "text-muted-foreground")}>
-                    {supplierId
-                      ? (() => {
-                          const s = suppliers.find((x) => String(x.id) === supplierId)
-                          return s ? `${s.name}${s.rif ? ` · ${s.rif}` : ""}` : `#${supplierId}`
-                        })()
-                      : "Seleccione…"}
+                  <span
+                    className={cn(
+                      "truncate text-left",
+                      supplierTriggerDisplay.muted && "text-muted-foreground",
+                    )}
+                  >
+                    {supplierTriggerDisplay.text}
                   </span>
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -495,6 +587,7 @@ export default function PurchaseOrderNewPage() {
                           key={s.id}
                           value={`${s.name} ${s.rif ?? ""}`}
                           onSelect={() => {
+                            supplierResolveFailedForRef.current = null
                             setSupplierId(String(s.id))
                             setSupplierOpen(false)
                             setFieldErrors((prev) => {
@@ -539,9 +632,7 @@ export default function PurchaseOrderNewPage() {
               required
               maxLength={PO_CODE_MAX_LEN}
               aria-invalid={Boolean(fieldErrors.code)}
-              aria-describedby={
-                fieldErrors.code ? "po-code-error po-code-hint" : "po-code-hint"
-              }
+              aria-describedby={fieldErrors.code ? "po-code-error" : undefined}
               onChange={(ev) => {
                 setCodeTouched(true)
                 setCode(ev.target.value)
@@ -554,23 +645,34 @@ export default function PurchaseOrderNewPage() {
               }}
               placeholder="ej. OC-2026-001"
             />
-            <p id="po-code-hint" className="text-muted-foreground text-xs">
-              Máximo {PO_CODE_MAX_LEN} caracteres; debe ser único en el sistema.
-            </p>
             {fieldErrors.code ? (
               <p id="po-code-error" className="text-destructive text-xs font-medium">
                 {fieldErrors.code}
               </p>
             ) : null}
           </div>
-          <div className="grid gap-2">
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="grid w-full max-w-full gap-2 sm:w-auto sm:max-w-[11rem]">
             <Label htmlFor="po-date">Fecha pedido</Label>
             <Input
               id="po-date"
               type="date"
               value={orderedAt}
               onChange={(ev) => setOrderedAt(ev.target.value)}
+              className="min-w-0"
             />
+          </div>
+          <div className="flex items-center gap-2 pb-0.5 sm:pb-[2px]">
+            <Checkbox
+              id="po-tax-applies"
+              checked={taxApplies}
+              onCheckedChange={(v) => setTaxApplies(v === true)}
+            />
+            <Label htmlFor="po-tax-applies" className="cursor-pointer font-normal leading-snug">
+              Aplicar IVA (16&nbsp;%)
+            </Label>
           </div>
         </div>
 
@@ -592,17 +694,6 @@ export default function PurchaseOrderNewPage() {
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border p-4">
-          <Checkbox
-            id="po-tax-applies"
-            checked={taxApplies}
-            onCheckedChange={(v) => setTaxApplies(v === true)}
-          />
-          <Label htmlFor="po-tax-applies" className="cursor-pointer font-normal leading-snug">
-            Aplicar IVA (16&nbsp;%)
-          </Label>
-        </div>
-
         <div className="grid gap-2">
           <Label htmlFor="po-notes">Notas / observación (PDF)</Label>
           <Textarea
@@ -615,166 +706,294 @@ export default function PurchaseOrderNewPage() {
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="grid gap-1">
-              <h2 className="text-sm font-medium">Líneas</h2>
+            <div className="grid min-w-0 gap-1">
+              <h2 className="text-sm font-medium">Artículos del pedido</h2>
               {fieldErrors.linesGeneral ? (
                 <p className="text-destructive text-xs font-medium">{fieldErrors.linesGeneral}</p>
-              ) : (
-                <p className="text-muted-foreground text-xs">
-                  Las líneas vacías se ignoran si hay al menos una válida. Si completa una línea (material,
-                  descripción o precio), debe indicar cantidad ≥ 0,001.
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={saveSupplierTemplate}
-                disabled={!supplierId}
-              >
-                Guardar plantilla
-              </Button>
-              {hasTemplateForSelectedSupplier ? (
-                <Button type="button" size="sm" variant="outline" onClick={applySupplierTemplate}>
-                  Aplicar plantilla
-                </Button>
               ) : null}
-              <Button type="button" size="sm" variant="secondary" onClick={addLine}>
-                Añadir línea
-              </Button>
             </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={addLine}
+              title={ADD_ARTICLE_TOOLTIP_LINES.join(" ")}
+            >
+              Agregar ítem
+            </Button>
           </div>
-          <div className="space-y-4">
-            {lines.map((line, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "space-y-3 rounded-xl border p-4",
-                  lineErrors[i] && Object.keys(lineErrors[i]).length > 0 && "border-destructive/60 ring-1 ring-destructive/20",
-                )}
-              >
-                <p className="text-muted-foreground text-xs font-medium">Línea {i + 1}</p>
-                <div className="grid gap-3 md:grid-cols-12 md:items-end">
-                  <div className="md:col-span-4 grid gap-2">
-                    <Label className="text-xs">Material</Label>
-                    <Select
-                      value={line.material_id || "none"}
-                      onValueChange={(v) =>
-                        updateLine(i, { material_id: v === "none" ? "" : v })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Opcional" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin material vinculado</SelectItem>
-                        {materials.map((m) => (
-                          <SelectItem key={m.id} value={String(m.id)}>
-                            {m.sku} — {m.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="md:col-span-2 grid gap-2">
-                    <Label className="text-xs" htmlFor={`po-line-${i}-qty`}>
-                      Cantidad pedida *
-                    </Label>
-                    <Input
-                      id={`po-line-${i}-qty`}
-                      inputMode="decimal"
-                      autoComplete="off"
-                      aria-invalid={Boolean(lineErrors[i]?.quantity)}
-                      aria-describedby={
-                        lineErrors[i]?.quantity ? `po-line-${i}-qty-err` : undefined
-                      }
-                      value={line.quantity_ordered}
-                      onChange={(ev) =>
-                        updateLine(i, { quantity_ordered: ev.target.value })
-                      }
-                      className={cn(lineErrors[i]?.quantity && "border-destructive")}
-                    />
-                    {lineErrors[i]?.quantity ? (
-                      <p id={`po-line-${i}-qty-err`} className="text-destructive text-xs">
-                        {lineErrors[i].quantity}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="md:col-span-2 grid gap-2">
-                    <Label className="text-xs" htmlFor={`po-line-${i}-unit`}>
-                      Unidad
-                    </Label>
-                    <Input
-                      id={`po-line-${i}-unit`}
-                      maxLength={16}
-                      value={line.unit}
-                      onChange={(ev) => updateLine(i, { unit: ev.target.value })}
-                      aria-invalid={Boolean(lineErrors[i]?.unit)}
-                      aria-describedby={lineErrors[i]?.unit ? `po-line-${i}-unit-err` : undefined}
-                      className={cn(lineErrors[i]?.unit && "border-destructive")}
-                    />
-                    {lineErrors[i]?.unit ? (
-                      <p id={`po-line-${i}-unit-err`} className="text-destructive text-xs">
-                        {lineErrors[i].unit}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="md:col-span-2 grid gap-2">
-                    <Label className="text-xs" htmlFor={`po-line-${i}-price`}>
-                      Precio unitario (USD)
-                    </Label>
-                    <Input
-                      id={`po-line-${i}-price`}
-                      inputMode="decimal"
-                      placeholder="0"
-                      autoComplete="off"
-                      value={line.unit_price}
-                      onChange={(ev) =>
-                        updateLine(i, { unit_price: ev.target.value })
-                      }
-                      aria-invalid={Boolean(lineErrors[i]?.unit_price)}
-                      aria-describedby={
-                        lineErrors[i]?.unit_price ? `po-line-${i}-price-err` : undefined
-                      }
-                      className={cn(lineErrors[i]?.unit_price && "border-destructive")}
-                    />
-                    {lineErrors[i]?.unit_price ? (
-                      <p id={`po-line-${i}-price-err`} className="text-destructive text-xs">
-                        {lineErrors[i].unit_price}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="md:col-span-1 grid gap-2">
-                    <Label className="text-xs">Total línea</Label>
-                    <div className="flex h-10 items-center rounded-md border bg-muted/50 px-3 text-sm tabular-nums">
-                      {formatMoneyUsdEs(lineDraftTotal(line))}
-                    </div>
-                  </div>
-                  <div className="flex md:col-span-1 md:justify-end md:pb-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={lines.length <= 1}
-                      onClick={() => removeLine(i)}
-                    >
-                      Quitar
-                    </Button>
-                  </div>
-                  <div className="md:col-span-12 grid gap-2">
-                    <Label className="text-xs">Descripción</Label>
-                    <Input
-                      value={line.description}
-                      onChange={(ev) =>
-                        updateLine(i, { description: ev.target.value })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto rounded-xl border">
+            {/* Ítems: patrón visual como recepciones-nueva (tabla); sin Línea OC, tipo, micras/ancho ni + Nuevo material. */}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-14">N°</TableHead>
+                  <TableHead className="min-w-[220px]">Material</TableHead>
+                  <TableHead className="w-32">Cantidad pedida *</TableHead>
+                  <TableHead className="w-36">Unidad</TableHead>
+                  <TableHead className="w-36">Precio unitario (USD)</TableHead>
+                  <TableHead className="w-32">Total línea</TableHead>
+                  <TableHead className="w-20 text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lines.map((line, i) => {
+                  const rowErr = lineErrors[i]
+                  const rowHasError = Boolean(rowErr && Object.keys(rowErr).length > 0)
+                  return (
+                    <Fragment key={i}>
+                      <TableRow
+                        id={`po-line-row-${i}`}
+                        className={cn(rowHasError && "bg-red-50/40")}
+                      >
+                        <TableCell className="align-top">
+                          <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                            {i + 1}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="grid gap-1">
+                            <Popover
+                              open={materialPopoverLineIndex === i}
+                              onOpenChange={(open) => {
+                                if (open) setMaterialPopoverLineIndex(i)
+                                else {
+                                  setMaterialPopoverLineIndex((cur) =>
+                                    cur === i ? null : cur,
+                                  )
+                                }
+                              }}
+                            >
+                              <PopoverTrigger asChild>
+                                <Button
+                                  id={`po-line-${i}-material-trigger`}
+                                  type="button"
+                                  variant="outline"
+                                  role="combobox"
+                                  aria-expanded={materialPopoverLineIndex === i}
+                                  aria-label={`Material, fila ${i + 1}`}
+                                  className={cn(
+                                    "h-9 w-full min-w-[12rem] justify-between font-normal",
+                                    !line.material_id.trim() && "text-muted-foreground",
+                                  )}
+                                >
+                                  <span className="truncate text-left">
+                                    {!line.material_id.trim()
+                                      ? "Sin material vinculado"
+                                      : (() => {
+                                          const mat = materials.find(
+                                            (m) => String(m.id) === line.material_id,
+                                          )
+                                          return mat
+                                            ? `${mat.sku} — ${mat.name}`
+                                            : "Cargando material…"
+                                        })()}
+                                  </span>
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+                                align="start"
+                              >
+                                <Command shouldFilter>
+                                  <CommandInput placeholder="Buscar por SKU o nombre…" />
+                                  <CommandList className="max-h-60">
+                                    <CommandEmpty>Sin resultados.</CommandEmpty>
+                                    <CommandGroup>
+                                      <CommandItem
+                                        value="sin material vinculado ninguno opcional"
+                                        onSelect={() => {
+                                          updateLine(i, { material_id: "", unit: "kg" })
+                                          setMaterialPopoverLineIndex(null)
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4",
+                                            !line.material_id.trim()
+                                              ? "opacity-100"
+                                              : "opacity-0",
+                                          )}
+                                          aria-hidden
+                                        />
+                                        Sin material vinculado
+                                      </CommandItem>
+                                      {materials.map((m) => (
+                                        <CommandItem
+                                          key={m.id}
+                                          value={`${m.sku} ${m.name}`}
+                                          onSelect={() => {
+                                            updateLine(i, {
+                                              material_id: String(m.id),
+                                              unit: coercePoLineUnit(m.unit),
+                                            })
+                                            setMaterialPopoverLineIndex(null)
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              line.material_id === String(m.id)
+                                                ? "opacity-100"
+                                                : "opacity-0",
+                                            )}
+                                            aria-hidden
+                                          />
+                                          <span className="truncate">
+                                            {m.sku} — {m.name}
+                                          </span>
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="grid gap-1">
+                            <Input
+                              id={`po-line-${i}-qty`}
+                              inputMode="decimal"
+                              autoComplete="off"
+                              aria-label={`Cantidad pedida, fila ${i + 1}`}
+                              aria-invalid={Boolean(lineErrors[i]?.quantity)}
+                              aria-describedby={
+                                lineErrors[i]?.quantity ? `po-line-${i}-qty-err` : undefined
+                              }
+                              value={line.quantity_ordered}
+                              onChange={(ev) =>
+                                updateLine(i, {
+                                  quantity_ordered: sanitizePositiveDecimalInput(
+                                    ev.target.value,
+                                    6,
+                                  ),
+                                })
+                              }
+                              className={cn(lineErrors[i]?.quantity && "border-destructive")}
+                            />
+                            {lineErrors[i]?.quantity ? (
+                              <p id={`po-line-${i}-qty-err`} className="text-destructive text-xs">
+                                {lineErrors[i].quantity}
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="grid gap-1">
+                            <Select
+                              value={
+                                isPoLineUnit(line.unit.trim()) ? line.unit.trim() : "kg"
+                              }
+                              onValueChange={(v) =>
+                                updateLine(i, { unit: v as PoLineUnit })
+                              }
+                            >
+                              <SelectTrigger
+                                id={`po-line-${i}-unit`}
+                                className={cn(
+                                  "h-9",
+                                  lineErrors[i]?.unit && "border-destructive ring-1 ring-destructive/40",
+                                )}
+                                aria-label={`Unidad, fila ${i + 1}`}
+                                aria-invalid={Boolean(lineErrors[i]?.unit)}
+                                aria-describedby={
+                                  lineErrors[i]?.unit ? `po-line-${i}-unit-err` : undefined
+                                }
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="kg">kg</SelectItem>
+                                <SelectItem value="unidad">Unidad</SelectItem>
+                                <SelectItem value="m">m</SelectItem>
+                                <SelectItem value="rollo">Rollo</SelectItem>
+                                <SelectItem value="otros">Otros</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {lineErrors[i]?.unit ? (
+                              <p id={`po-line-${i}-unit-err`} className="text-destructive text-xs">
+                                {lineErrors[i].unit}
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="grid gap-1">
+                            <Input
+                              id={`po-line-${i}-price`}
+                              inputMode="decimal"
+                              placeholder="0"
+                              autoComplete="off"
+                              aria-label={`Precio unitario USD, fila ${i + 1}`}
+                              aria-invalid={Boolean(lineErrors[i]?.unit_price)}
+                              aria-describedby={
+                                lineErrors[i]?.unit_price ? `po-line-${i}-price-err` : undefined
+                              }
+                              value={line.unit_price}
+                              onChange={(ev) =>
+                                updateLine(i, {
+                                  unit_price: sanitizePositiveDecimalInput(
+                                    ev.target.value,
+                                    6,
+                                  ),
+                                })
+                              }
+                              className={cn(lineErrors[i]?.unit_price && "border-destructive")}
+                            />
+                            {lineErrors[i]?.unit_price ? (
+                              <p id={`po-line-${i}-price-err`} className="text-destructive text-xs">
+                                {lineErrors[i].unit_price}
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="flex h-9 items-center rounded-md border bg-muted/50 px-3 text-sm tabular-nums">
+                            {formatMoneyUsdEs(lineDraftTotal(line))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="flex items-start justify-end">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 text-base font-semibold leading-none text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              disabled={lines.length <= 1}
+                              onClick={() => removeLine(i)}
+                              aria-label={`Eliminar fila ${i + 1}`}
+                              title={`Eliminar fila ${i + 1}`}
+                            >
+                              ×
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      <TableRow className={cn(rowHasError && "bg-red-50/40")}>
+                        <TableCell colSpan={7} className="pt-0">
+                          <div className="grid gap-1 pb-2">
+                            <Label className="text-xs" htmlFor={`po-line-${i}-desc`}>
+                              Descripción
+                            </Label>
+                            <Input
+                              id={`po-line-${i}-desc`}
+                              value={line.description}
+                              onChange={(ev) =>
+                                updateLine(i, { description: ev.target.value })
+                              }
+                              aria-label={`Descripción, fila ${i + 1}`}
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    </Fragment>
+                  )
+                })}
+              </TableBody>
+            </Table>
           </div>
         </div>
 
@@ -798,10 +1017,17 @@ export default function PurchaseOrderNewPage() {
           </dl>
         </div>
 
-        <Button type="submit" disabled={saving}>
-          <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Crear orden" />
-        </Button>
+        <div className="flex w-full justify-center pt-1">
+          <Button type="submit" disabled={saving} className="min-w-[10rem]">
+            <LoadingButtonLabel
+              loading={saving}
+              loadingText="Guardando..."
+              idleText="Crear orden"
+            />
+          </Button>
+        </div>
       </form>
-    </div>
+      </div>
+    </>
   )
 }

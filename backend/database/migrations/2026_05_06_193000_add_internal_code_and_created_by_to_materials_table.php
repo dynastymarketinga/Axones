@@ -84,9 +84,12 @@ return new class extends Migration
     private function hasUniqueIndex(string $table, string $indexName): bool
     {
         try {
-            $rows = DB::select("SHOW INDEX FROM `{$table}` WHERE Key_name = ?", [$indexName]);
+            $rows = DB::select(
+                'SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1',
+                [$table, $indexName],
+            );
 
-            return count($rows) > 0;
+            return $rows !== [];
         } catch (Throwable) {
             return false;
         }

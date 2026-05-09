@@ -41,6 +41,33 @@ class User extends Authenticatable
     }
 
     /**
+     * Quién puede aceptar devoluciones (POST /inventory-returns/{id}/accept).
+     * Si `axones.inventory_returns.accept_roles` está vacío o ausente, cualquier usuario autenticado.
+     *
+     * @see config/axones.php
+     */
+    public function canAcceptInventoryReturns(): bool
+    {
+        $raw = config('axones.inventory_returns.accept_roles');
+        if ($raw === null || trim((string) $raw) === '') {
+            return true;
+        }
+
+        $allowed = array_values(array_filter(array_map(
+            static fn (string $s): string => strtolower(trim($s)),
+            explode(',', (string) $raw),
+        ), static fn (string $s): bool => $s !== ''));
+
+        if ($allowed === []) {
+            return true;
+        }
+
+        $role = strtolower(trim((string) ($this->role ?? '')));
+
+        return in_array($role, $allowed, true);
+    }
+
+    /**
      * The attributes that should be hidden for serialization.
      *
      * @var list<string>

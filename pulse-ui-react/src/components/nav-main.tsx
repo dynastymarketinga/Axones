@@ -1,7 +1,7 @@
 "use client"
 
 import { ChevronRight, type LucideIcon } from "lucide-react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 
 import {
   Collapsible,
@@ -35,7 +35,6 @@ export function NavMain({
   groupLabel?: string
 }) {
   const location = useLocation()
-  const navigate = useNavigate()
 
   const toHref = (url: string) => {
     if (!url || url === "#") return url
@@ -49,7 +48,7 @@ export function NavMain({
   }
 
   const renderMenuItems = (menuItems: MenuItem[]) => {
-    return menuItems.map((item) => {
+    return menuItems.map((item, index) => {
       const hasChildren = item.items && item.items.length > 0
 
       // Check if any child is active
@@ -65,7 +64,7 @@ export function NavMain({
 
       if (!hasChildren) {
         return (
-          <SidebarMenuItem key={item.title}>
+          <SidebarMenuItem key={item.title} style={{ zIndex: index + 1 }}>
             <SidebarMenuButton
               asChild
               isActive={isActiveRoute(item.url)}
@@ -91,17 +90,9 @@ export function NavMain({
           defaultOpen={isParentActive}
           className="group/collapsible"
         >
-          <SidebarMenuItem>
+          <SidebarMenuItem style={{ zIndex: index + 1 }}>
             <CollapsibleTrigger asChild>
-              <SidebarMenuButton
-                tooltip={item.title}
-                isActive={isParentActive}
-                onClick={() => {
-                  if (item.title === "Datos maestros") {
-                    navigate("/datos-maestros")
-                  }
-                }}
-              >
+              <SidebarMenuButton tooltip={item.title} isActive={isParentActive}>
                 {item.icon && <item.icon className="h-4 w-4" />}
                 <span>{item.title}</span>
                 <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
@@ -140,7 +131,10 @@ export function NavMain({
                                   asChild
                                   isActive={isActiveRoute(child.url)}
                                 >
-                                  <Link to={toHref(child.url)}>
+                                  <Link
+                                    to={toHref(child.url)}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                  >
                                     {child.icon && (
                                       <child.icon className="h-4 w-4" />
                                     )}
@@ -164,7 +158,10 @@ export function NavMain({
                         asChild
                         isActive={isActiveRoute(subItem.url)}
                       >
-                        <Link to={toHref(subItem.url)}>
+                        <Link
+                          to={toHref(subItem.url)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
                           {subItem.icon && <subItem.icon className="h-4 w-4" />}
                           <span className="min-w-0 truncate">{subItem.title}</span>
                           {subItem.badgeCount && subItem.badgeCount > 0 ? (

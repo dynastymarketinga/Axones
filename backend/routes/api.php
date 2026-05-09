@@ -87,9 +87,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/rejected-bobinas', [ReportController::class, 'rejectedBobinas']);
     Route::get('/reports/work-order-material-summary', [ReportController::class, 'workOrderMaterialSummary']);
     Route::get('/reports/production-time-by-area', [ReportController::class, 'productionTimeByArea']);
+    Route::get('/reports/production-time-by-area/preview', [ReportController::class, 'productionTimeByAreaPreview']);
+    Route::get('/reports/production-time-by-area.pdf', [ReportController::class, 'productionTimeByAreaPdf']);
+    Route::get('/reports/work-order-time-report/candidates', [ReportController::class, 'workOrderTimeReportCandidates']);
     Route::get('/reports/work-order-time-report', [ReportController::class, 'workOrderTimeReport']);
     Route::get('/reports/work-order-time-report/preview', [ReportController::class, 'workOrderTimeReportPreview']);
     Route::get('/reports/work-order-time-report.pdf', [ReportController::class, 'workOrderTimeReportPdf']);
+    Route::get('/reports/scrap-by-filters/preview', [ReportController::class, 'scrapByFiltersPreview']);
+    Route::get('/reports/scrap-by-filters.pdf', [ReportController::class, 'scrapByFiltersPdf']);
     Route::get('/reports/scrap-by-filters', [ReportController::class, 'scrapByFilters']);
     Route::get('/reports/tinta-consumption-by-client', [ReportController::class, 'tintaConsumptionByClient']);
 

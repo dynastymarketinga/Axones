@@ -9,6 +9,7 @@ use App\Models\Bobina;
 use App\Models\InventoryReturn;
 use App\Models\Material;
 use App\Services\InventoryLedgerService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -96,6 +97,11 @@ class InventoryReturnController extends Controller
             throw ValidationException::withMessages([
                 'status' => ['Esta devolución ya fue procesada.'],
             ]);
+        }
+
+        $user = $request->user();
+        if ($user === null || ! $user->canAcceptInventoryReturns()) {
+            throw new AuthorizationException('No autorizado para aceptar devoluciones a inventario.');
         }
 
         $reasonText = trim((string) $request->input('reason', ''));

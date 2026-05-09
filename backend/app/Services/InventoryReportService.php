@@ -5,15 +5,16 @@ namespace App\Services;
 use App\Enums\InventoryArea;
 use App\Models\Bobina;
 use App\Models\Client;
-use App\Models\InventoryReturn;
-use App\Models\Material;
 use App\Models\CorteBobinaUsage;
+use App\Models\InventoryReturn;
 use App\Models\LaminacionBobinaUsage;
+use App\Models\Material;
 use App\Models\MontajeMaterialUsage;
 use App\Models\PrintingBobinaUsage;
 use App\Models\Product;
 use App\Models\WorkOrder;
 use Carbon\Carbon;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -160,6 +161,7 @@ class InventoryReportService
                 $value = $row[$header] ?? null;
                 if (is_array($value) || is_object($value)) {
                     $line[] = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
                     continue;
                 }
                 $line[] = $value;
@@ -659,6 +661,7 @@ class InventoryReportService
             'corte' => 'corte_time_segments',
             'laminacion' => 'laminacion_time_segments',
             'montaje' => 'montaje_time_segments',
+            'tintas' => 'tintas_time_segments',
         ];
         $rows = [];
         foreach ($tables as $area => $table) {
@@ -707,8 +710,146 @@ class InventoryReportService
     }
 
     /**
+     * OT con al menos un segmento cerrado y duración &gt; 0 en el rango, por área productiva.
+     * Incluye totales de tiempo efectivo, muerto, montaje y desmontaje (todas las áreas) y nombre de producto.
+     *
+     * @return array{
+     *   from: string,
+     *   to: string,
+     *   work_orders: list<array{
+     *     work_order_id: int,
+     *     work_order_code: string,
+     *     client_name: string|null,
+     *     product_name: string|null,
+     *     areas: list<string>,
+     *     production_seconds: int,
+     *     downtime_seconds: int,
+     *     mount_seconds: int,
+     *     demount_seconds: int,
+     *     total_seconds: int,
+     *     effective_percent: string
+     *   }>
+     * }
+     */
+    public function workOrderTimeReportCandidates(Carbon $from, Carbon $to): array
+    {
+        $tables = [
+            'printing' => 'printing_time_segments',
+            'corte' => 'corte_time_segments',
+            'laminacion' => 'laminacion_time_segments',
+            'montaje' => 'montaje_time_segments',
+            'tintas' => 'tintas_time_segments',
+        ];
+        $areaOrder = array_keys($tables);
+        $driver = DB::connection()->getDriverName();
+
+        /** @var array<int, array{areas: array<string, true>, production_seconds: int, downtime_seconds: int, mount_seconds: int, demount_seconds: int}> */
+        $byWo = [];
+
+        foreach ($tables as $area => $table) {
+            $secondsExprAgg = $driver === 'sqlite'
+                ? "(CAST(strftime('%s', {$table}.ended_at) AS INTEGER) - CAST(strftime('%s', {$table}.started_at) AS INTEGER))"
+                : "TIMESTAMPDIFF(SECOND, {$table}.started_at, {$table}.ended_at)";
+
+            $rows = DB::table($table)
+                ->whereNotNull('ended_at')
+                ->whereBetween('started_at', [$from, $to])
+                ->select('work_order_id', 'segment_type')
+                ->selectRaw("SUM({$secondsExprAgg}) as total_seconds")
+                ->groupBy('work_order_id', 'segment_type')
+                ->havingRaw("SUM({$secondsExprAgg}) > 0")
+                ->get();
+
+            foreach ($rows as $row) {
+                $id = (int) $row->work_order_id;
+                if ($id < 1) {
+                    continue;
+                }
+                $type = (string) $row->segment_type;
+                if (! in_array($type, ['production', 'downtime', 'mount', 'demount'], true)) {
+                    continue;
+                }
+                if (! isset($byWo[$id])) {
+                    $byWo[$id] = [
+                        'areas' => [],
+                        'production_seconds' => 0,
+                        'downtime_seconds' => 0,
+                        'mount_seconds' => 0,
+                        'demount_seconds' => 0,
+                    ];
+                }
+                $byWo[$id]['areas'][$area] = true;
+                $sec = (int) $row->total_seconds;
+                if ($type === 'production') {
+                    $byWo[$id]['production_seconds'] += $sec;
+                } elseif ($type === 'downtime') {
+                    $byWo[$id]['downtime_seconds'] += $sec;
+                } elseif ($type === 'mount') {
+                    $byWo[$id]['mount_seconds'] += $sec;
+                } else {
+                    $byWo[$id]['demount_seconds'] += $sec;
+                }
+            }
+        }
+
+        if ($byWo === []) {
+            return [
+                'from' => $from->toIso8601String(),
+                'to' => $to->toIso8601String(),
+                'work_orders' => [],
+            ];
+        }
+
+        $workOrders = WorkOrder::query()
+            ->whereIn('id', array_keys($byWo))
+            ->with(['client:id,name', 'product:id,name'])
+            ->get(['id', 'code', 'client_id', 'product_id']);
+
+        $out = [];
+        foreach ($workOrders as $wo) {
+            $id = (int) $wo->getKey();
+            if (! isset($byWo[$id])) {
+                continue;
+            }
+            $bucket = $byWo[$id];
+            $areas = array_keys($bucket['areas']);
+            usort($areas, function (string $a, string $b) use ($areaOrder): int {
+                return array_search($a, $areaOrder, true) <=> array_search($b, $areaOrder, true);
+            });
+            $production = $bucket['production_seconds'];
+            $downtime = $bucket['downtime_seconds'];
+            $mount = $bucket['mount_seconds'];
+            $demount = $bucket['demount_seconds'];
+            $total = $production + $downtime + $mount + $demount;
+            $effectivePct = $total > 0 ? round(($production / $total) * 100, 2) : 0.0;
+
+            $out[] = [
+                'work_order_id' => $id,
+                'work_order_code' => (string) $wo->code,
+                'client_name' => $wo->client?->name,
+                'product_name' => $wo->product?->name,
+                'areas' => $areas,
+                'production_seconds' => $production,
+                'downtime_seconds' => $downtime,
+                'mount_seconds' => $mount,
+                'demount_seconds' => $demount,
+                'total_seconds' => $total,
+                'effective_percent' => number_format($effectivePct, 2, '.', ''),
+            ];
+        }
+
+        usort($out, fn (array $x, array $y): int => strcmp((string) $x['work_order_code'], (string) $y['work_order_code']));
+
+        return [
+            'from' => $from->toIso8601String(),
+            'to' => $to->toIso8601String(),
+            'work_orders' => $out,
+        ];
+    }
+
+    /**
      * Reporte detallado de tiempos por OT y/o rango de fechas.
-     * Agrega segmentos cerrados (efectivo / muerto / montaje) de las cinco áreas
+     * Agrega segmentos cerrados (efectivo / muerto / montaje / desmontaje) de las cinco áreas
      * y devuelve también el detalle de cada parada con el motivo.
      *
      * @return array{
@@ -740,6 +881,7 @@ class InventoryReportService
             'production_seconds' => 0,
             'downtime_seconds' => 0,
             'mount_seconds' => 0,
+            'demount_seconds' => 0,
             'total_seconds' => 0,
         ];
         $downtimes = [];
@@ -770,11 +912,13 @@ class InventoryReportService
                 'production' => 0,
                 'downtime' => 0,
                 'mount' => 0,
+                'demount' => 0,
             ];
             $countByType = [
                 'production' => 0,
                 'downtime' => 0,
                 'mount' => 0,
+                'demount' => 0,
             ];
             foreach ($aggQuery->get() as $g) {
                 $type = (string) $g->segment_type;
@@ -785,7 +929,7 @@ class InventoryReportService
                 $countByType[$type] = (int) $g->segment_count;
             }
 
-            $areaTotal = $byType['production'] + $byType['downtime'] + $byType['mount'];
+            $areaTotal = $byType['production'] + $byType['downtime'] + $byType['mount'] + $byType['demount'];
             $effectivePct = $areaTotal > 0
                 ? round(($byType['production'] / $areaTotal) * 100, 2)
                 : 0.0;
@@ -796,10 +940,12 @@ class InventoryReportService
                     'production_seconds' => $byType['production'],
                     'downtime_seconds' => $byType['downtime'],
                     'mount_seconds' => $byType['mount'],
+                    'demount_seconds' => $byType['demount'],
                     'total_seconds' => $areaTotal,
                     'production_count' => $countByType['production'],
                     'downtime_count' => $countByType['downtime'],
                     'mount_count' => $countByType['mount'],
+                    'demount_count' => $countByType['demount'],
                     'effective_percent' => number_format($effectivePct, 2, '.', ''),
                 ];
             }
@@ -807,6 +953,7 @@ class InventoryReportService
             $totals['production_seconds'] += $byType['production'];
             $totals['downtime_seconds'] += $byType['downtime'];
             $totals['mount_seconds'] += $byType['mount'];
+            $totals['demount_seconds'] += $byType['demount'];
             $totals['total_seconds'] += $areaTotal;
 
             $downQuery = DB::table($table.' as t')
@@ -853,6 +1000,7 @@ class InventoryReportService
                 'production_seconds' => $byType['production'],
                 'downtime_seconds' => $byType['downtime'],
                 'mount_seconds' => $byType['mount'],
+                'demount_seconds' => $byType['demount'],
                 'total_seconds' => $areaTotal,
                 'effective_percent' => number_format($effectivePct, 2, '.', ''),
             ];
@@ -909,25 +1057,54 @@ class InventoryReportService
     }
 
     /**
-     * Mermas registradas por OT y área (filtro por creación de OT).
+     * Desperdicio registrado por OT: % por área (layouts detail / by_work_order / by_area) o historial en kg desde la planilla (history_kg).
      *
-     * @return array{from: string, to: string, rows: list<array<string, mixed>>}
+     * @return array{from: string, to: string, substrate_group: string, layout: string, rows: list<array<string, mixed>>}
      */
-    public function scrapByFilters(Carbon $from, Carbon $to, ?int $clientId = null, ?int $productId = null): array
-    {
+    public function scrapByFilters(
+        Carbon $from,
+        Carbon $to,
+        ?int $clientId = null,
+        ?int $productId = null,
+        string $substrateGroup = 'all',
+        string $layout = 'detail',
+        ?int $workOrderId = null,
+    ): array {
+        $substrateGroup = in_array($substrateGroup, ['all', 'bopp', 'politerlero', 'transparente'], true) ? $substrateGroup : 'all';
+        $layout = in_array($layout, ['detail', 'by_work_order', 'by_area', 'history_kg'], true) ? $layout : 'detail';
+
+        if ($layout === 'history_kg') {
+            $rows = $this->scrapHistoryKgRows($from, $to, $clientId, $productId, $substrateGroup, $workOrderId);
+
+            return [
+                'from' => $from->toIso8601String(),
+                'to' => $to->toIso8601String(),
+                'substrate_group' => $substrateGroup,
+                'layout' => 'history_kg',
+                'rows' => $rows,
+            ];
+        }
+
         $defs = [
             ['area' => 'printing', 'table' => 'work_order_printing_summaries'],
             ['area' => 'corte', 'table' => 'work_order_corte_summaries'],
             ['area' => 'laminacion', 'table' => 'work_order_laminacion_summaries'],
             ['area' => 'montaje', 'table' => 'work_order_montaje_summaries'],
         ];
-        $rows = [];
+        $detailRows = [];
         foreach ($defs as $def) {
             $q = DB::table($def['table'].' as s')
                 ->join('work_orders as wo', 's.work_order_id', '=', 'wo.id')
                 ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id')
+                ->leftJoin('products as p', 'wo.product_id', '=', 'p.id')
                 ->whereNotNull('s.scrap_percent')
                 ->whereBetween('wo.created_at', [$from, $to]);
+            if ($workOrderId !== null) {
+                $q->where('wo.id', $workOrderId);
+            }
+            if ($substrateGroup !== 'all') {
+                $this->applyScrapSubstrateFilter($q, $substrateGroup);
+            }
             if ($clientId !== null) {
                 $q->where('wo.client_id', $clientId);
             }
@@ -938,28 +1115,486 @@ class InventoryReportService
             foreach ($q->get([
                 'wo.id as work_order_id',
                 'wo.code as work_order_code',
+                'wo.status as work_order_status',
                 'wo.client_id',
                 'c.name as client_name',
                 'wo.product_id',
+                'p.name as product_name',
                 's.scrap_percent',
             ]) as $r) {
-                $rows[] = [
+                $detailRows[] = [
                     'work_order_id' => (int) $r->work_order_id,
                     'work_order_code' => $r->work_order_code,
+                    'work_order_status' => $r->work_order_status !== null ? (string) $r->work_order_status : null,
                     'client_id' => $r->client_id !== null ? (int) $r->client_id : null,
                     'client_name' => $r->client_name,
                     'product_id' => $r->product_id !== null ? (int) $r->product_id : null,
+                    'product_name' => $r->product_name,
                     'area' => $area,
                     'scrap_percent' => number_format((float) $r->scrap_percent, 3, '.', ''),
                 ];
             }
         }
 
+        $rows = match ($layout) {
+            'by_work_order' => $this->scrapRowsPivotByWorkOrder($detailRows),
+            'by_area' => $this->scrapRowsAggregateByArea($detailRows),
+            default => $detailRows,
+        };
+
         return [
             'from' => $from->toIso8601String(),
             'to' => $to->toIso8601String(),
+            'substrate_group' => $substrateGroup,
+            'layout' => $layout,
             'rows' => $rows,
         ];
+    }
+
+    /**
+     * Historial de desperdicio en kg desde la planilla técnica (JSON) + % resumen por área.
+     * El filtro de sustrato usa `corDesperdicioSustrato` en el formulario si está definido; si no, la estructura del producto.
+     * Los kg se enmascaran por pestaña (BOPP / polietileno / transparente) según destinos de impreso y corte.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function scrapHistoryKgRows(
+        Carbon $from,
+        Carbon $to,
+        ?int $clientId,
+        ?int $productId,
+        string $substrateGroup,
+        ?int $workOrderId = null,
+    ): array {
+        $q = DB::table('work_orders as wo')
+            ->leftJoin('work_order_technical_documents as td', 'wo.id', '=', 'td.work_order_id')
+            ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id')
+            ->leftJoin('products as p', 'wo.product_id', '=', 'p.id')
+            ->leftJoin('work_order_printing_summaries as sp', 'wo.id', '=', 'sp.work_order_id')
+            ->leftJoin('work_order_laminacion_summaries as sl', 'wo.id', '=', 'sl.work_order_id')
+            ->leftJoin('work_order_corte_summaries as sc', 'wo.id', '=', 'sc.work_order_id')
+            ->leftJoin('work_order_montaje_summaries as sm', 'wo.id', '=', 'sm.work_order_id')
+            ->whereBetween('wo.created_at', [$from, $to]);
+
+        if ($workOrderId !== null) {
+            $q->where('wo.id', $workOrderId);
+        }
+        if ($clientId !== null) {
+            $q->where('wo.client_id', $clientId);
+        }
+        if ($productId !== null) {
+            $q->where('wo.product_id', $productId);
+        }
+
+        $results = $q->orderBy('wo.id')->get([
+            'wo.id as work_order_id',
+            'wo.code as work_order_code',
+            'wo.status as work_order_status',
+            'wo.client_id',
+            'c.name as client_name',
+            'wo.product_id',
+            'p.name as product_name',
+            'p.structure as product_structure',
+            'td.form as form_json',
+            'sp.scrap_percent as printing_scrap_percent',
+            'sl.scrap_percent as laminacion_scrap_percent',
+            'sc.scrap_percent as corte_scrap_percent',
+            'sm.scrap_percent as montaje_scrap_percent',
+        ]);
+
+        $parseKg = static function (?array $form, string $key): float {
+            if ($form === null || ! array_key_exists($key, $form)) {
+                return 0.0;
+            }
+            $v = $form[$key];
+            if ($v === null || $v === '') {
+                return 0.0;
+            }
+            if (is_numeric($v)) {
+                return round((float) $v, 3);
+            }
+
+            return round((float) str_replace(',', '.', (string) $v), 3);
+        };
+
+        $fmtPct = static function ($v): ?string {
+            if ($v === null) {
+                return null;
+            }
+
+            return number_format((float) $v, 3, '.', '');
+        };
+
+        $rows = [];
+        foreach ($results as $r) {
+            /** @var array<string, mixed>|null $form */
+            $form = null;
+            if ($r->form_json !== null) {
+                if (is_string($r->form_json)) {
+                    $decoded = json_decode($r->form_json, true);
+                    $form = is_array($decoded) ? $decoded : null;
+                } elseif (is_array($r->form_json)) {
+                    $form = $r->form_json;
+                }
+            }
+
+            if ($substrateGroup !== 'all' && ! $this->workOrderMatchesScrapSubstrateGroup($form, $r->product_structure, $substrateGroup, $parseKg)) {
+                continue;
+            }
+
+            $explicit = '';
+            if ($form !== null && isset($form['corDesperdicioSustrato'])) {
+                $explicit = strtolower(trim((string) $form['corDesperdicioSustrato']));
+            }
+
+            $impT = $parseKg($form, 'impScrapTransparenteKg');
+            $impI = $parseKg($form, 'impScrapImpresoKg');
+            $lamT = $parseKg($form, 'lamScrapTransparenteKg');
+            $lamI = $parseKg($form, 'lamScrapImpresoKg');
+            $lamL = $parseKg($form, 'lamScrapLaminadoKg');
+            $corR = $parseKg($form, 'corScrapRefileKg');
+            $corIkg = $parseKg($form, 'corScrapImpresoKg');
+            $corM = $parseKg($form, 'corScrapMalCorteKg');
+
+            $impDest = $this->resolveImpScrapImpresoDestino($form, $r->product_structure);
+
+            $refileResolved = $this->resolvedCorteBucketDestino($form, $r->product_structure, 'corScrapRefileDestino');
+            $corImpresoResolved = $this->resolvedCorteBucketDestino($form, $r->product_structure, 'corScrapImpresoDestino');
+            $globalSub = $this->resolvedGlobalCorteSubstrate($form, $r->product_structure);
+
+            if ($substrateGroup === 'transparente') {
+                $impT_out = $impT;
+                $impI_out = $impDest === 'transparente' ? $impI : 0.0;
+                $lamT_out = $lamT;
+                $lamI_out = 0.0;
+                $lamL_out = 0.0;
+                $corR_out = 0.0;
+                $corI_out = 0.0;
+                $corM_out = $globalSub === 'transparente' ? $corM : 0.0;
+            } elseif ($substrateGroup === 'bopp') {
+                $impT_out = 0.0;
+                $impI_out = $impDest === 'bopp' ? $impI : 0.0;
+                $lamT_out = 0.0;
+                $lamI_out = $lamI;
+                $lamL_out = $lamL;
+                $corR_out = $refileResolved === 'bopp' ? $corR : 0.0;
+                $corI_out = $corImpresoResolved === 'bopp' ? $corIkg : 0.0;
+                $corM_out = $globalSub === 'bopp' ? $corM : 0.0;
+            } elseif ($substrateGroup === 'politerlero') {
+                $impT_out = 0.0;
+                $impI_out = 0.0;
+                $lamT_out = 0.0;
+                $lamI_out = $lamI;
+                $lamL_out = $lamL;
+                $corR_out = $refileResolved === 'politerlero' ? $corR : 0.0;
+                $corI_out = $corImpresoResolved === 'politerlero' ? $corIkg : 0.0;
+                $corM_out = $globalSub === 'politerlero' ? $corM : 0.0;
+            } else {
+                $impT_out = $impT;
+                $impI_out = $impI;
+                $lamT_out = $lamT;
+                $lamI_out = $lamI;
+                $lamL_out = $lamL;
+                $corR_out = $corR;
+                $corI_out = $corIkg;
+                $corM_out = $corM;
+            }
+
+            $rows[] = [
+                'work_order_id' => (int) $r->work_order_id,
+                'work_order_code' => $r->work_order_code,
+                'work_order_status' => $r->work_order_status !== null ? (string) $r->work_order_status : null,
+                'client_id' => $r->client_id !== null ? (int) $r->client_id : null,
+                'client_name' => $r->client_name,
+                'product_id' => $r->product_id !== null ? (int) $r->product_id : null,
+                'product_name' => $r->product_name,
+                'product_structure' => $r->product_structure,
+                'corte_desperdicio_sustrato' => $explicit !== '' ? $explicit : null,
+                'imp_scrap_transparente_kg' => number_format($impT_out, 3, '.', ''),
+                'imp_scrap_impreso_kg' => number_format($impI_out, 3, '.', ''),
+                'lam_scrap_transparente_kg' => number_format($lamT_out, 3, '.', ''),
+                'lam_scrap_impreso_kg' => number_format($lamI_out, 3, '.', ''),
+                'lam_scrap_laminado_kg' => number_format($lamL_out, 3, '.', ''),
+                'cor_scrap_refile_kg' => number_format($corR_out, 3, '.', ''),
+                'cor_scrap_impreso_kg' => number_format($corI_out, 3, '.', ''),
+                'cor_scrap_mal_corte_kg' => number_format($corM_out, 3, '.', ''),
+                'printing_scrap_percent' => $fmtPct($r->printing_scrap_percent),
+                'laminacion_scrap_percent' => $fmtPct($r->laminacion_scrap_percent),
+                'corte_scrap_percent' => $fmtPct($r->corte_scrap_percent),
+                'montaje_scrap_percent' => $fmtPct($r->montaje_scrap_percent),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Destino del scrap impreso en impresión: explícito bopp/transparente, o automático según estructura del producto.
+     *
+     * @param  array<string, mixed>|null  $form
+     */
+    private function resolveImpScrapImpresoDestino(?array $form, ?string $productStructure): string
+    {
+        $raw = strtolower(trim((string) (($form ?? [])['impScrapImpresoDestino'] ?? '')));
+        if ($raw === 'transparente') {
+            return 'transparente';
+        }
+        if ($raw === 'bopp') {
+            return 'bopp';
+        }
+
+        return $this->productStructureMatchesScrapSubstrateGroup($productStructure, 'transparente') ? 'transparente' : 'bopp';
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $form
+     * @param  callable(array<string, mixed>|null, string): float  $parseKg
+     */
+    private function workOrderMatchesScrapSubstrateGroup(?array $form, ?string $productStructure, string $substrateGroup, callable $parseKg): bool
+    {
+        if ($substrateGroup === 'all') {
+            return true;
+        }
+
+        $explicit = strtolower(trim((string) (($form ?? [])['corDesperdicioSustrato'] ?? '')));
+
+        $resolvedImpDest = $this->resolveImpScrapImpresoDestino($form, $productStructure);
+
+        if ($substrateGroup === 'transparente') {
+            if ($explicit === 'transparente') {
+                return true;
+            }
+            if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'transparente')) {
+                return true;
+            }
+            if ($resolvedImpDest === 'transparente' && $parseKg($form, 'impScrapImpresoKg') > 0) {
+                return true;
+            }
+            if ($parseKg($form, 'impScrapTransparenteKg') > 0 || $parseKg($form, 'lamScrapTransparenteKg') > 0) {
+                return true;
+            }
+
+            return false;
+        }
+
+        if ($substrateGroup === 'bopp') {
+            if ($explicit === 'bopp') {
+                return true;
+            }
+            if ($explicit === '' && $this->productStructureMatchesScrapSubstrateGroup($productStructure, 'bopp')) {
+                return true;
+            }
+            if ($resolvedImpDest === 'bopp' && $parseKg($form, 'impScrapImpresoKg') > 0) {
+                return true;
+            }
+            if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino') === 'bopp') {
+                return true;
+            }
+            if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapImpresoDestino') === 'bopp') {
+                return true;
+            }
+            if ($this->resolvedGlobalCorteSubstrate($form, $productStructure) === 'bopp') {
+                return true;
+            }
+
+            return false;
+        }
+
+        if ($substrateGroup === 'politerlero') {
+            if ($explicit === 'politerlero') {
+                return true;
+            }
+            if ($explicit === '' && $this->productStructureMatchesScrapSubstrateGroup($productStructure, 'politerlero')) {
+                return true;
+            }
+            if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino') === 'politerlero') {
+                return true;
+            }
+            if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapImpresoDestino') === 'politerlero') {
+                return true;
+            }
+            if ($this->resolvedGlobalCorteSubstrate($form, $productStructure) === 'politerlero') {
+                return true;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Destino BOPP / polietileno para refile o impreso en corte (auto = explícito global o estructura).
+     *
+     * @param  array<string, mixed>|null  $form
+     */
+    private function resolvedCorteBucketDestino(?array $form, ?string $productStructure, string $bucketKey): ?string
+    {
+        $raw = strtolower(trim((string) (($form ?? [])[$bucketKey] ?? '')));
+        if ($raw === 'bopp' || $raw === 'politerlero') {
+            return $raw;
+        }
+
+        $explicit = strtolower(trim((string) (($form ?? [])['corDesperdicioSustrato'] ?? '')));
+        if ($explicit === 'bopp' || $explicit === 'politerlero') {
+            return $explicit;
+        }
+
+        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'bopp')) {
+            return 'bopp';
+        }
+        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'politerlero')) {
+            return 'politerlero';
+        }
+
+        return null;
+    }
+
+    /**
+     * Sustrato global para mal corte y auto en corte.
+     *
+     * @param  array<string, mixed>|null  $form
+     */
+    private function resolvedGlobalCorteSubstrate(?array $form, ?string $productStructure): ?string
+    {
+        $explicit = strtolower(trim((string) (($form ?? [])['corDesperdicioSustrato'] ?? '')));
+        if ($explicit === 'bopp' || $explicit === 'politerlero' || $explicit === 'transparente') {
+            return $explicit;
+        }
+
+        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'bopp')) {
+            return 'bopp';
+        }
+        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'politerlero')) {
+            return 'politerlero';
+        }
+        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'transparente')) {
+            return 'transparente';
+        }
+
+        return null;
+    }
+
+    private function productStructureMatchesScrapSubstrateGroup(?string $structure, string $substrateGroup): bool
+    {
+        $s = strtolower((string) ($structure ?? ''));
+        if ($substrateGroup === 'bopp') {
+            return str_contains($s, 'bopp');
+        }
+        if ($substrateGroup === 'politerlero') {
+            foreach (['politerlero', 'polietileno', 'politereño', 'pebd', 'ldpe', 'hdpe', 'lldpe', 'polyethylene'] as $pat) {
+                if (str_contains($s, $pat)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        if ($substrateGroup === 'transparente') {
+            foreach (['transparente', 'cpp', 'cast pp', 'opp transparente'] as $pat) {
+                if (str_contains($s, $pat)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  Builder  $query
+     */
+    private function applyScrapSubstrateFilter($query, string $substrateGroup): void
+    {
+        $col = 'LOWER(COALESCE(p.structure, \'\'))';
+        if ($substrateGroup === 'bopp') {
+            $query->whereRaw("{$col} LIKE ?", ['%bopp%']);
+
+            return;
+        }
+        if ($substrateGroup === 'politerlero') {
+            $patterns = ['%politerlero%', '%polietileno%', '%politereño%', '%pebd%', '%ldpe%', '%hdpe%', '%lldpe%', '%polyethylene%'];
+            $query->where(function ($q) use ($col, $patterns) {
+                foreach ($patterns as $pat) {
+                    $q->orWhereRaw("{$col} LIKE ?", [$pat]);
+                }
+            });
+
+            return;
+        }
+        if ($substrateGroup === 'transparente') {
+            $patterns = ['%transparente%', '%cpp%', '%cast pp%', '%opp transparente%'];
+            $query->where(function ($q) use ($col, $patterns) {
+                foreach ($patterns as $pat) {
+                    $q->orWhereRaw("{$col} LIKE ?", [$pat]);
+                }
+            });
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $detailRows
+     * @return list<array<string, mixed>>
+     */
+    private function scrapRowsPivotByWorkOrder(array $detailRows): array
+    {
+        $areaKeys = ['printing', 'corte', 'laminacion', 'montaje'];
+        $byWo = [];
+        foreach ($detailRows as $row) {
+            $id = $row['work_order_id'];
+            if (! isset($byWo[$id])) {
+                $base = [
+                    'work_order_id' => $id,
+                    'work_order_code' => $row['work_order_code'],
+                    'work_order_status' => $row['work_order_status'] ?? null,
+                    'client_id' => $row['client_id'],
+                    'client_name' => $row['client_name'],
+                    'product_id' => $row['product_id'],
+                    'product_name' => $row['product_name'] ?? null,
+                ];
+                foreach ($areaKeys as $a) {
+                    $base[$a.'_scrap_percent'] = null;
+                }
+                $byWo[$id] = $base;
+            }
+            $byWo[$id][$row['area'].'_scrap_percent'] = $row['scrap_percent'];
+        }
+        $list = array_values($byWo);
+        usort($list, fn (array $a, array $b): int => $a['work_order_id'] <=> $b['work_order_id']);
+
+        return $list;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $detailRows
+     * @return list<array<string, mixed>>
+     */
+    private function scrapRowsAggregateByArea(array $detailRows): array
+    {
+        $groups = [];
+        foreach ($detailRows as $row) {
+            $a = (string) $row['area'];
+            if (! isset($groups[$a])) {
+                $groups[$a] = [];
+            }
+            $groups[$a][] = (float) $row['scrap_percent'];
+        }
+        $out = [];
+        foreach ($groups as $area => $vals) {
+            $n = count($vals);
+            $out[] = [
+                'area' => $area,
+                'row_count' => $n,
+                'avg_scrap_percent' => number_format(array_sum($vals) / $n, 3, '.', ''),
+                'max_scrap_percent' => number_format(max($vals), 3, '.', ''),
+                'min_scrap_percent' => number_format(min($vals), 3, '.', ''),
+            ];
+        }
+        usort($out, fn (array $a, array $b): int => strcmp((string) $a['area'], (string) $b['area']));
+
+        return $out;
     }
 
     /**

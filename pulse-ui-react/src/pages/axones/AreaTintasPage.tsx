@@ -28,13 +28,17 @@ import {
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 
+type TintasBandejaTab = "cola" | "activas" | "historial"
+
 export default function AreaTintasPage() {
   const [mode, setMode] = useState<"list" | "consumo">("list")
-  const [activeTab, setActiveTab] = useState<"mias" | "historial">("mias")
+  const [activeTab, setActiveTab] = useState<TintasBandejaTab>("cola")
   const [q, setQ] = useState("")
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<string>("all")
   const [page, setPage] = useState(1)
+  const [onlyPendingArea, setOnlyPendingArea] = useState(false)
+  const [historialIncludePending, setHistorialIncludePending] = useState(false)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
 
   const [workOrders, setWorkOrders] = useState<WorkOrderListRow[]>([])
@@ -108,8 +112,20 @@ export default function AreaTintasPage() {
         status: status !== "all" ? status : undefined,
         client_order_reference: search || undefined,
       }
-      if (activeTab === "mias") query.mi_area = "tintas"
-      else query.historial_area = "tintas"
+      if (activeTab === "cola") {
+        query.mi_area = "tintas"
+        query.area_process_tag = "not_started"
+      } else if (activeTab === "activas") {
+        query.mi_area = "tintas"
+        query.area_process_tag = "in_progress"
+      } else {
+        query.historial_area = "tintas"
+        if (onlyPendingArea) {
+          query.only_pending_area = 1
+        } else if (!historialIncludePending) {
+          query.historial_exclude_pending = 1
+        }
+      }
 
       const data = await apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", { query })
       setRows(data)
@@ -122,7 +138,7 @@ export default function AreaTintasPage() {
     } finally {
       setLoading(false)
     }
-  }, [activeTab, page, search, status])
+  }, [activeTab, page, search, status, onlyPendingArea, historialIncludePending])
 
   const loadLists = useCallback(async () => {
     setLoading(true)
@@ -407,8 +423,8 @@ export default function AreaTintasPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Área: Tintas</h1>
           <p className="text-muted-foreground text-[13px]">
-            Órdenes con solicitud pendiente para tu área (sin depender del tablero).
-            Historial: todas las OT que tuvieron solicitud hacia esta área.
+            Por empezar / En curso: solicitudes pendientes de tintas según la etapa de la OT. Historial: solicitudes
+            cerradas; opcional incluir pendientes o solo pendientes.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -434,27 +450,34 @@ export default function AreaTintasPage() {
         <Tabs
           value={activeTab}
           onValueChange={(v) => {
-            setActiveTab(v as "mias" | "historial")
+            setActiveTab(v as TintasBandejaTab)
+            if (v !== "historial") {
+              setOnlyPendingArea(false)
+              setHistorialIncludePending(false)
+            }
             setPage(1)
           }}
         >
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
-            <TabsTrigger value="mias" className="text-xs">
-              En mi fase
+            <TabsTrigger value="cola" className="text-xs">
+              Por empezar
+            </TabsTrigger>
+            <TabsTrigger value="activas" className="text-xs">
+              En curso
             </TabsTrigger>
             <TabsTrigger value="historial" className="text-xs">
               Historial
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="mias" className="mt-4 space-y-4">
+          <TabsContent value="cola" className="mt-4 space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="grid flex-1 gap-2">
-                <Label htmlFor="tintas-q-mias" className="text-xs font-medium">
+                <Label htmlFor="tintas-q-cola" className="text-xs font-medium">
                   Ref. pedido cliente
                 </Label>
                 <Input
-                  id="tintas-q-mias"
+                  id="tintas-q-cola"
                   placeholder="Buscar por referencia..."
                   className="h-8 text-xs"
                   value={q}
@@ -507,21 +530,20 @@ export default function AreaTintasPage() {
                     <TableHead className="h-8 py-2 text-xs">Código</TableHead>
                     <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
                     <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Tablero</TableHead>
                     <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-muted-foreground">
+                      <TableCell colSpan={4} className="text-muted-foreground">
                         Cargando...
                       </TableCell>
                     </TableRow>
                   ) : !rows?.data.length ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-muted-foreground">
-                        Sin órdenes en esta fase.
+                      <TableCell colSpan={4} className="text-muted-foreground">
+                        Sin órdenes en cola para tintas.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -530,7 +552,111 @@ export default function AreaTintasPage() {
                         <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
                         <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
                         <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
-                        <TableCell className="py-2 text-xs">{stageLabel(o.board_stage)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => {
+                                setWoId(String(o.id))
+                                setMode("consumo")
+                              }}
+                            >
+                              Registrar consumo
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="activas" className="mt-4 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="grid flex-1 gap-2">
+                <Label htmlFor="tintas-q-act" className="text-xs font-medium">
+                  Ref. pedido cliente
+                </Label>
+                <Input
+                  id="tintas-q-act"
+                  placeholder="Buscar por referencia..."
+                  className="h-8 text-xs"
+                  value={q}
+                  onChange={(ev) => setQ(ev.target.value)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter") {
+                      setPage(1)
+                      setSearch(q.trim())
+                    }
+                  }}
+                />
+              </div>
+              <div className="grid w-48 gap-2">
+                <Label className="text-xs font-medium">Estado</Label>
+                <Select
+                  value={status}
+                  onValueChange={(v) => {
+                    setStatus(v)
+                    setPage(1)
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="open">Abierta</SelectItem>
+                    <SelectItem value="completed">Completada</SelectItem>
+                    <SelectItem value="cancelled">Cancelada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
+                onClick={() => {
+                  setPage(1)
+                  setSearch(q.trim())
+                }}
+              >
+                Buscar
+              </Button>
+            </div>
+
+            <div className="bg-card overflow-x-auto rounded-xl border shadow-sm">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-8 py-2 text-xs">Código</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
+                    <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-muted-foreground">
+                        Cargando...
+                      </TableCell>
+                    </TableRow>
+                  ) : !rows?.data.length ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-muted-foreground">
+                        Sin órdenes en curso para tintas.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.data.map((o) => (
+                      <TableRow key={o.id} className="h-9">
+                        <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
+                        <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-wrap justify-end gap-2">
                             <Button
@@ -555,6 +681,33 @@ export default function AreaTintasPage() {
           </TabsContent>
 
           <TabsContent value="historial" className="mt-4 space-y-4">
+            <div className="flex flex-wrap gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={onlyPendingArea}
+                  onChange={(ev) => {
+                    const on = ev.target.checked
+                    setOnlyPendingArea(on)
+                    if (on) setHistorialIncludePending(false)
+                    setPage(1)
+                  }}
+                />
+                Solo pendientes
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={historialIncludePending}
+                  disabled={onlyPendingArea}
+                  onChange={(ev) => {
+                    setHistorialIncludePending(ev.target.checked)
+                    setPage(1)
+                  }}
+                />
+                Ver también solicitudes abiertas
+              </label>
+            </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="grid flex-1 gap-2">
                 <Label htmlFor="tintas-q-historial" className="text-xs font-medium">
@@ -614,21 +767,20 @@ export default function AreaTintasPage() {
                     <TableHead className="h-8 py-2 text-xs">Código</TableHead>
                     <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
                     <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Tablero</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Estado</TableHead>
+                    <TableHead className="h-8 py-2 text-xs">Estado OT</TableHead>
                     <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-muted-foreground">
+                      <TableCell colSpan={5} className="text-muted-foreground">
                         Cargando...
                       </TableCell>
                     </TableRow>
                   ) : !rows?.data.length ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-muted-foreground">
+                      <TableCell colSpan={5} className="text-muted-foreground">
                         Sin resultados.
                       </TableCell>
                     </TableRow>
@@ -638,7 +790,6 @@ export default function AreaTintasPage() {
                         <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
                         <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
                         <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
-                        <TableCell className="py-2 text-xs">{stageLabel(o.board_stage)}</TableCell>
                         <TableCell className="py-2 text-xs">{o.status}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-wrap justify-end gap-2">
@@ -714,7 +865,7 @@ export default function AreaTintasPage() {
                       <Input value={selectedWo?.status ?? "Sin OT"} disabled className="h-8 text-xs" />
                     </div>
                     <div className="grid gap-2 md:col-span-3">
-                      <Label className="text-xs">Tablero</Label>
+                      <Label className="text-xs">Etapa en planta</Label>
                       <Input
                         value={selectedWo ? stageLabel(selectedWo.board_stage) : "—"}
                         disabled

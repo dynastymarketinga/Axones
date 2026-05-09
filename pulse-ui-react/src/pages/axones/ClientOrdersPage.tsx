@@ -34,6 +34,8 @@ import {
 } from "@/components/axones/CatalogTableHead"
 import {
   catalogActionButtonClass,
+  catalogPaginationOutlineButtonClass,
+  catalogPaginationSelectTriggerClass,
   catalogSelectTriggerClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
@@ -566,7 +568,10 @@ export default function ClientOrdersPage() {
                 >
                   <SelectTrigger
                     id="co-per-page"
-                    className="h-8 w-[4.5rem] text-sm"
+                    className={cn(
+                      "h-8 w-[4.5rem] text-sm",
+                      catalogPaginationSelectTriggerClass,
+                    )}
                     aria-label="Registros por página"
                   >
                     <SelectValue />
@@ -584,7 +589,7 @@ export default function ClientOrdersPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8"
+                  className={cn("h-8", catalogPaginationOutlineButtonClass)}
                   disabled={rows.current_page <= 1 || loading}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   type="button"
@@ -594,7 +599,7 @@ export default function ClientOrdersPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8"
+                  className={cn("h-8", catalogPaginationOutlineButtonClass)}
                   disabled={rows.current_page >= rows.last_page || loading}
                   onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
                   type="button"

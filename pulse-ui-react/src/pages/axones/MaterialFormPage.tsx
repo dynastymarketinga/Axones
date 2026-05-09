@@ -761,7 +761,7 @@ export default function MaterialFormPage() {
                   {supplierNoVendorBlock}
                 </div>
                 <div className="grid gap-2 md:col-span-3">
-                  <Label>Productos vinculados (opcional)</Label>
+                  <Label>Especificaciones vinculadas (opcional)</Label>
                   <div className="flex items-center gap-2">
                     <Popover open={productComboOpen} onOpenChange={setProductComboOpen}>
                       <PopoverTrigger asChild>

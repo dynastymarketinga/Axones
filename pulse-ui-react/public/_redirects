@@ -1,0 +1,3 @@
+# Cloudflare Pages: SPA bajo /axones/ (misma convención que Vite base + React Router basename)
+/ /axones/ 302
+/axones/* /axones/index.html 200

@@ -10,6 +10,7 @@ import type { LaravelPaginated } from "@/types/api"
 import {
   AXONES_INVENTORY_FILTER_INPUT_CLASS,
   AXONES_INVENTORY_PAGE_CLASS,
+  AxonesInventoryModuleNav,
   AxonesPageHeader,
   AxonesTableCard,
 } from "@/components/axones/inventory-page-layout"
@@ -292,6 +293,8 @@ export default function PurchaseReceiptsPage() {
           </Button>
         }
       />
+
+      <AxonesInventoryModuleNav active="recepciones-oc" />
 
       {showInitialSkeleton ? (
         <div className="space-y-4">

@@ -10,8 +10,10 @@ type CatalogPageShellProps = {
   subtitle: ReactNode
   icon: LucideIcon
   /** Botón principal (ej. Link como hijo de Button) */
-  action?: React.ReactNode
-  children: React.ReactNode
+  action?: ReactNode
+  /** Contenido bajo el subtítulo (p. ej. indicador de etapa del ciclo OT). */
+  headerExtras?: ReactNode
+  children: ReactNode
   className?: string
 }
 
@@ -20,18 +22,20 @@ export function CatalogPageShell({
   subtitle,
   icon: Icon,
   action,
+  headerExtras,
   children,
   className,
 }: CatalogPageShellProps) {
   return (
     <div className={cn("space-y-6 p-4 md:p-6", className)}>
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0 space-y-2">
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Icon className="h-7 w-7 shrink-0 text-primary" aria-hidden />
             {title}
           </h1>
           <p className="text-muted-foreground text-sm">{subtitle}</p>
+          {headerExtras}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>

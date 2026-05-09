@@ -17,4 +17,18 @@ return [
         'downtime_seconds_threshold' => (int) env('AXONES_DOWNTIME_ALERT_SECONDS', 1800),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Devoluciones a inventario
+    |--------------------------------------------------------------------------
+    |
+    | Lista separada por comas de roles (campo users.role) que pueden POST
+    | /api/inventory-returns/{id}/accept. Vacío o null = cualquier usuario autenticado
+    | con acceso a la ruta (compatibilidad con instalaciones existentes).
+    |
+    */
+    'inventory_returns' => [
+        'accept_roles' => env('AXONES_INVENTORY_RETURN_ACCEPT_ROLES'),
+    ],
+
 ];

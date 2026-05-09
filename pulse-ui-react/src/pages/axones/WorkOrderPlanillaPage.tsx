@@ -48,6 +48,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import WorkOrderPrintingInkTable from "./WorkOrderPrintingInkTable"
 import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
@@ -1531,6 +1532,7 @@ export default function WorkOrderPlanillaPage() {
               </>
             )}
           </p>
+          <WorkOrderStageBadge current="orden" className="pt-1" />
         </div>
         <TooltipProvider delayDuration={150}>
           <div className="flex flex-wrap gap-2">
@@ -1921,7 +1923,7 @@ export default function WorkOrderPlanillaPage() {
                                     {updatingProduct ? (
                                       <span className="text-muted-foreground">Actualizando…</span>
                                     ) : clientProducts.length === 0 ? (
-                                      <span className="text-muted-foreground">No hay productos de este cliente</span>
+                                      <span className="text-muted-foreground">No hay especificaciones para este cliente</span>
                                     ) : (
                                       productComboLabel
                                     )}
@@ -1943,8 +1945,8 @@ export default function WorkOrderPlanillaPage() {
                                   <CommandList>
                                     <CommandEmpty>
                                       {clientProducts.length === 0
-                                        ? "Cargue productos del cliente o intente otra búsqueda."
-                                        : "Ningún producto coincide."}
+                                        ? "Cargue especificaciones del cliente o intente otra búsqueda."
+                                        : "Ninguna especificación coincide."}
                                     </CommandEmpty>
                                     <CommandGroup>
                                       {clientProducts.map((p) => {
@@ -1985,6 +1987,9 @@ export default function WorkOrderPlanillaPage() {
                             </div>
                           </>
                         )}
+                        <p className="text-muted-foreground mt-1 text-[11px] leading-snug">
+                          Selecciona la especificación del cliente. No representa stock disponible.
+                        </p>
                       </div>
                       <div className="ot-field">
                         <label className="ot-label required">Tipo Impresion</label>
@@ -2620,20 +2625,23 @@ export default function WorkOrderPlanillaPage() {
                   </span>
                 </div>
                 <div className="section-body">
+                  <p className="text-muted-foreground text-xs mb-3">
+                    Campos de referencia (solo lectura).
+                  </p>
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
                       <label className="ot-label">Ancho corte (mm)</label>
-                      <input data-field="anchoCorteFinal" className="ot-input" value={readString(form.anchoCorteFinal)} onChange={(e) => setKey(setForm, "anchoCorteFinal", e.target.value)} placeholder="320±0" />
+                      <input data-field="anchoCorteFinal" className="ot-input" value={readString(form.anchoCorteFinal)} placeholder="320±0" readOnly disabled />
                       {renderError("anchoCorteFinal")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Peso bobina (Kg)</label>
-                      <input data-field="pesoBobina" className="ot-input" value={readString(form.pesoBobina)} onChange={(e) => setKey(setForm, "pesoBobina", e.target.value)} placeholder="19-20" />
+                      <input data-field="pesoBobina" className="ot-input" value={readString(form.pesoBobina)} placeholder="19-20" readOnly disabled />
                       {renderError("pesoBobina")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Metros/Bobina (m)</label>
-                      <input data-field="metrosBobina" className="ot-input" value={readString(form.metrosBobina)} onChange={(e) => setKey(setForm, "metrosBobina", e.target.value)} placeholder="1020 ± 20" />
+                      <input data-field="metrosBobina" className="ot-input" value={readString(form.metrosBobina)} placeholder="1020 ± 20" readOnly disabled />
                       {renderError("metrosBobina")}
                     </div>
                     <div className="ot-field sm:col-span-2">
@@ -2650,52 +2658,53 @@ export default function WorkOrderPlanillaPage() {
                       <WindingFigurePicker
                         value={readString(form.orientacionEmbalaje)}
                         onChange={(v) => setKey(setForm, "orientacionEmbalaje", v)}
+                        disabled
                       />
                       {renderError("orientacionEmbalaje")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Ubic. fotocelda</label>
-                      <input className="ot-input" value={readString(form.ubicFotoceldaCorte)} onChange={(e) => setKey(setForm, "ubicFotoceldaCorte", e.target.value)} />
+                      <input className="ot-input" value={readString(form.ubicFotoceldaCorte)} readOnly disabled />
                       {renderError("ubicFotoceldaCorte")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Dist. fotocelda al borde (mm)</label>
-                      <input data-field="distFotoceldaBorde" className="ot-input" value={readString(form.distFotoceldaBorde)} onChange={(e) => setKey(setForm, "distFotoceldaBorde", e.target.value)} placeholder="1±1" />
+                      <input data-field="distFotoceldaBorde" className="ot-input" value={readString(form.distFotoceldaBorde)} placeholder="1±1" readOnly disabled />
                       {renderError("distFotoceldaBorde")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Dist. figura lado contrario (mm)</label>
-                      <input data-field="distFiguraLadoContrario" className="ot-input" value={readString(form.distFiguraLadoContrario)} onChange={(e) => setKey(setForm, "distFiguraLadoContrario", e.target.value)} placeholder="20±1" />
+                      <input data-field="distFiguraLadoContrario" className="ot-input" value={readString(form.distFiguraLadoContrario)} placeholder="20±1" readOnly disabled />
                       {renderError("distFiguraLadoContrario")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Dist. figura lado fotocelda (mm)</label>
-                      <input data-field="distFiguraLadoFotocelda" className="ot-input" value={readString(form.distFiguraLadoFotocelda)} onChange={(e) => setKey(setForm, "distFiguraLadoFotocelda", e.target.value)} placeholder="30±1" />
+                      <input data-field="distFiguraLadoFotocelda" className="ot-input" value={readString(form.distFiguraLadoFotocelda)} placeholder="30±1" readOnly disabled />
                       {renderError("distFiguraLadoFotocelda")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Max. empates</label>
-                      <input data-field="maxEmpates" className="ot-input" value={readString(form.maxEmpates)} onChange={(e) => setKey(setForm, "maxEmpates", e.target.value)} placeholder="1" />
+                      <input data-field="maxEmpates" className="ot-input" value={readString(form.maxEmpates)} placeholder="1" readOnly disabled />
                       {renderError("maxEmpates")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Diam. bobina (mm)</label>
-                      <input data-field="diamBobina" className="ot-input" value={readString(form.diamBobina)} onChange={(e) => setKey(setForm, "diamBobina", e.target.value)} placeholder="400 ± 5" />
+                      <input data-field="diamBobina" className="ot-input" value={readString(form.diamBobina)} placeholder="400 ± 5" readOnly disabled />
                       {renderError("diamBobina")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Ancho core (mm)</label>
-                      <input data-field="anchoCore" className="ot-input" value={readString(form.anchoCore)} onChange={(e) => setKey(setForm, "anchoCore", e.target.value)} />
+                      <input data-field="anchoCore" className="ot-input" value={readString(form.anchoCore)} readOnly disabled />
                       {renderError("anchoCore")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Diam. core (Plg)</label>
-                      <input data-field="diamCorePlg" className="ot-input" value={readString(form.diamCorePlg)} onChange={(e) => setKey(setForm, "diamCorePlg", e.target.value)} />
+                      <input data-field="diamCorePlg" className="ot-input" value={readString(form.diamCorePlg)} readOnly disabled />
                       {renderError("diamCorePlg")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Cant. cores</label>
-                      <input data-field="cantCores" className="ot-input" value={readString(form.cantCores)} onChange={(e) => setKey(setForm, "cantCores", e.target.value)} />
+                      <input data-field="cantCores" className="ot-input" value={readString(form.cantCores)} readOnly disabled />
                       {renderError("cantCores")}
                     </div>
                   </div>
@@ -2703,22 +2712,22 @@ export default function WorkOrderPlanillaPage() {
                   <div className="ot-grid ot-metrics-before-nested ot-cols-4">
                     <div className="ot-field">
                       <label className="ot-label">Kg ingresados</label>
-                      <input data-field="kgIngresadosCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgIngresadosCorte)} onChange={(e) => setKey(setForm, "kgIngresadosCorte", e.target.value)} placeholder="kg ingresados" />
+                      <input data-field="kgIngresadosCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgIngresadosCorte)} placeholder="kg ingresados" readOnly disabled />
                       {renderError("kgIngresadosCorte")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Kg salida</label>
-                      <input data-field="kgSalidaCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgSalidaCorte)} onChange={(e) => setKey(setForm, "kgSalidaCorte", e.target.value)} />
+                      <input data-field="kgSalidaCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgSalidaCorte)} readOnly disabled />
                       {renderError("kgSalidaCorte")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Kg merma</label>
-                      <input data-field="kgMermaCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgMermaCorte)} onChange={(e) => setKey(setForm, "kgMermaCorte", e.target.value)} placeholder="Ej: 10.00" />
+                      <input data-field="kgMermaCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgMermaCorte)} placeholder="Ej: 10.00" readOnly disabled />
                       {renderError("kgMermaCorte")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label">Metraje</label>
-                      <input data-field="metrajeCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.metrajeCorte)} onChange={(e) => setKey(setForm, "metrajeCorte", e.target.value)} />
+                      <input data-field="metrajeCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.metrajeCorte)} readOnly disabled />
                       {renderError("metrajeCorte")}
                     </div>
                   </div>

@@ -6,13 +6,9 @@ import { Check, ChevronsUpDown } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
+import type { LaravelPaginated, SupplierRecord } from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command,
@@ -22,6 +18,10 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 import {
   Select,
   SelectContent,
@@ -42,6 +42,9 @@ import {
 type PoLineDraft = {
   description: string
   material_id: string
+  item_type: "sustrato" | "tinta" | "quimico" | "otros"
+  micras: string
+  ancho_mm: string
   quantity_ordered: string
   unit: string
   unit_price: string
@@ -74,12 +77,6 @@ type PoLineUnit = (typeof PO_LINE_UNITS)[number]
 
 function isPoLineUnit(u: string): u is PoLineUnit {
   return (PO_LINE_UNITS as readonly string[]).includes(u)
-}
-
-/** Si el material trae una unidad reconocida, úsala; si no, `kg`. */
-function coercePoLineUnit(materialUnit: string): PoLineUnit {
-  const t = materialUnit.trim().toLowerCase()
-  return isPoLineUnit(t) ? t : "kg"
 }
 
 /**
@@ -117,12 +114,41 @@ function formatMoneyUsdEs(value: number): string {
 const emptyLine = (): PoLineDraft => ({
   description: "",
   material_id: "",
+  item_type: "sustrato",
+  micras: "",
+  ancho_mm: "",
   quantity_ordered: "",
   unit: "kg" satisfies PoLineUnit,
   unit_price: "",
 })
 
-const OC_PREFS_KEY = "axones_oc_prefs_v1"
+const PO_ITEM_TYPES: { value: PoLineDraft["item_type"]; label: string; hideDims: boolean }[] = [
+  { value: "sustrato", label: "Sustrato", hideDims: false },
+  { value: "tinta", label: "Tinta", hideDims: true },
+  { value: "quimico", label: "Químico", hideDims: true },
+  { value: "otros", label: "Otros", hideDims: false },
+] as const
+
+function shouldHideDims(itemType: PoLineDraft["item_type"]) {
+  return itemType === "tinta" || itemType === "quimico"
+}
+
+function buildLineDescription(line: PoLineDraft): string | null {
+  const base = line.description.trim()
+  const micras = line.micras.trim()
+  const ancho = line.ancho_mm.trim()
+  const parts: string[] = []
+  if (base) parts.push(base)
+  // Guardar tipo y dimensiones como referencia para Recepción (sin tocar esquema BD).
+  parts.push(`Tipo: ${line.item_type}`)
+  if (!shouldHideDims(line.item_type)) {
+    if (micras) parts.push(`Micras: ${micras}`)
+    if (ancho) parts.push(`Ancho(mm): ${ancho}`)
+  }
+  const out = parts.join(" | ").trim()
+  return out ? out : null
+}
+
 const OC_CODE_SEQ_KEY = "axones_oc_code_seq_v1"
 
 /** Misma longitud máxima que `StorePurchaseOrderRequest` (`max:64`). */
@@ -155,6 +181,8 @@ function lineHasAnyValue(line: PoLineDraft): boolean {
   return Boolean(
     line.description.trim() ||
       line.material_id.trim() ||
+      line.micras.trim() ||
+      line.ancho_mm.trim() ||
       line.quantity_ordered.trim() ||
       line.unit.trim() !== "kg" ||
       (Number.isFinite(price) && price > 0),
@@ -177,7 +205,6 @@ export default function PurchaseOrderNewPage() {
   const navigate = useNavigate()
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
   const [supplierOpen, setSupplierOpen] = useState(false)
-  const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [saving, setSaving] = useState(false)
   const [supplierListReady, setSupplierListReady] = useState(false)
   const [resolvingSupplier, setResolvingSupplier] = useState(false)
@@ -192,10 +219,6 @@ export default function PurchaseOrderNewPage() {
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()])
   const [fieldErrors, setFieldErrors] = useState<PoFieldErrors>({})
   const [lineErrors, setLineErrors] = useState<Record<number, PoLineFieldErrors>>({})
-  /** Índice de línea cuyo combobox de material está abierto (`null` = ninguno). */
-  const [materialPopoverLineIndex, setMaterialPopoverLineIndex] = useState<number | null>(
-    null,
-  )
 
   const selectedSupplier = useMemo(
     () => suppliers.find((x) => String(x.id) === supplierId) ?? null,
@@ -241,19 +264,6 @@ export default function PurchaseOrderNewPage() {
   }, [location.state])
 
   useEffect(() => {
-    const raw = window.localStorage.getItem(OC_PREFS_KEY)
-    if (!raw) {
-      if (!codeTouched && !code.trim()) {
-        setCode(buildAutoPoCode())
-      }
-      return
-    }
-    try {
-      const prefs = JSON.parse(raw) as { last_supplier_id?: string }
-      if (prefs.last_supplier_id) setSupplierId(prefs.last_supplier_id)
-    } catch {
-      /* ignore corrupt prefs */
-    }
     if (!codeTouched && !code.trim()) {
       setCode(buildAutoPoCode())
     }
@@ -263,23 +273,16 @@ export default function PurchaseOrderNewPage() {
     let c = false
     void (async () => {
       try {
-        const [supRes, matRes] = await Promise.all([
-          apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
-            query: { per_page: 100, page: 1 },
-          }),
-          apiFetch<LaravelPaginated<MaterialRow>>("materials", {
-            query: { per_page: 200, page: 1 },
-          }),
-        ])
+        const supRes = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
+          query: { per_page: 100, page: 1 },
+        })
         if (!c) {
           setSuppliers(supRes.data)
-          setMaterials(matRes.data)
           setSupplierListReady(true)
         }
       } catch {
         if (!c) {
           setSuppliers([])
-          setMaterials([])
           setSupplierListReady(true)
         }
       }
@@ -323,13 +326,6 @@ export default function PurchaseOrderNewPage() {
     }
   }, [supplierListReady, supplierId, suppliers])
 
-  useEffect(() => {
-    window.localStorage.setItem(
-      OC_PREFS_KEY,
-      JSON.stringify({ last_supplier_id: supplierId || "" }),
-    )
-  }, [supplierId])
-
   function addLine() {
     setLines((prev) => [...prev, emptyLine()])
   }
@@ -347,9 +343,6 @@ export default function PurchaseOrderNewPage() {
   }
 
   function removeLine(i: number) {
-    setMaterialPopoverLineIndex((openIdx) =>
-      openIdx === null ? null : openIdx === i ? null : openIdx > i ? openIdx - 1 : openIdx,
-    )
     setLines((prev) => prev.filter((_, j) => j !== i))
     setLineErrors((prev) => {
       const next: Record<number, PoLineFieldErrors> = {}
@@ -479,11 +472,8 @@ export default function PurchaseOrderNewPage() {
 
     const payloadLines = lines
       .map((L) => ({
-        description: L.description.trim() || null,
-        material_id:
-          L.material_id && L.material_id !== "none"
-            ? Number(L.material_id)
-            : null,
+        description: buildLineDescription(L),
+        material_id: null,
         quantity_ordered: parseDecimalInput(L.quantity_ordered),
         unit: L.unit.trim() || "kg",
         unit_price: parseDecimalInput(L.unit_price, true),
@@ -723,12 +713,15 @@ export default function PurchaseOrderNewPage() {
             </Button>
           </div>
           <div className="overflow-x-auto rounded-xl border">
-            {/* Ítems: patrón visual como recepciones-nueva (tabla); sin Línea OC, tipo, micras/ancho ni + Nuevo material. */}
+            {/* Ítems: la OC es solicitud (texto); el alta real ocurre en Recepción. */}
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-14">N°</TableHead>
-                  <TableHead className="min-w-[220px]">Material</TableHead>
+                  <TableHead className="min-w-[260px]">Material solicitado</TableHead>
+                  <TableHead className="w-36">Tipo</TableHead>
+                  <TableHead className="w-24">Micras</TableHead>
+                  <TableHead className="w-24">Ancho</TableHead>
                   <TableHead className="w-32">Cantidad pedida *</TableHead>
                   <TableHead className="w-36">Unidad</TableHead>
                   <TableHead className="w-36">Precio unitario (USD)</TableHead>
@@ -753,104 +746,64 @@ export default function PurchaseOrderNewPage() {
                         </TableCell>
                         <TableCell className="align-top">
                           <div className="grid gap-1">
-                            <Popover
-                              open={materialPopoverLineIndex === i}
-                              onOpenChange={(open) => {
-                                if (open) setMaterialPopoverLineIndex(i)
-                                else {
-                                  setMaterialPopoverLineIndex((cur) =>
-                                    cur === i ? null : cur,
-                                  )
-                                }
+                            <Input
+                              id={`po-line-${i}-requested`}
+                              value={line.description}
+                              onChange={(ev) => {
+                                const next = ev.target.value
+                                updateLine(i, { description: next, material_id: "" })
                               }}
-                            >
-                              <PopoverTrigger asChild>
-                                <Button
-                                  id={`po-line-${i}-material-trigger`}
-                                  type="button"
-                                  variant="outline"
-                                  role="combobox"
-                                  aria-expanded={materialPopoverLineIndex === i}
-                                  aria-label={`Material, fila ${i + 1}`}
-                                  className={cn(
-                                    "h-9 w-full min-w-[12rem] justify-between font-normal",
-                                    !line.material_id.trim() && "text-muted-foreground",
-                                  )}
-                                >
-                                  <span className="truncate text-left">
-                                    {!line.material_id.trim()
-                                      ? "Sin material vinculado"
-                                      : (() => {
-                                          const mat = materials.find(
-                                            (m) => String(m.id) === line.material_id,
-                                          )
-                                          return mat
-                                            ? `${mat.sku} — ${mat.name}`
-                                            : "Cargando material…"
-                                        })()}
-                                  </span>
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent
-                                className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
-                                align="start"
-                              >
-                                <Command shouldFilter>
-                                  <CommandInput placeholder="Buscar por SKU o nombre…" />
-                                  <CommandList className="max-h-60">
-                                    <CommandEmpty>Sin resultados.</CommandEmpty>
-                                    <CommandGroup>
-                                      <CommandItem
-                                        value="sin material vinculado ninguno opcional"
-                                        onSelect={() => {
-                                          updateLine(i, { material_id: "", unit: "kg" })
-                                          setMaterialPopoverLineIndex(null)
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            "mr-2 h-4 w-4",
-                                            !line.material_id.trim()
-                                              ? "opacity-100"
-                                              : "opacity-0",
-                                          )}
-                                          aria-hidden
-                                        />
-                                        Sin material vinculado
-                                      </CommandItem>
-                                      {materials.map((m) => (
-                                        <CommandItem
-                                          key={m.id}
-                                          value={`${m.sku} ${m.name}`}
-                                          onSelect={() => {
-                                            updateLine(i, {
-                                              material_id: String(m.id),
-                                              unit: coercePoLineUnit(m.unit),
-                                            })
-                                            setMaterialPopoverLineIndex(null)
-                                          }}
-                                        >
-                                          <Check
-                                            className={cn(
-                                              "mr-2 h-4 w-4",
-                                              line.material_id === String(m.id)
-                                                ? "opacity-100"
-                                                : "opacity-0",
-                                            )}
-                                            aria-hidden
-                                          />
-                                          <span className="truncate">
-                                            {m.sku} — {m.name}
-                                          </span>
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  </CommandList>
-                                </Command>
-                              </PopoverContent>
-                            </Popover>
+                              placeholder="Ej: BOPP transparente 20 micras 520 mm"
+                              aria-label={`Material solicitado, fila ${i + 1}`}
+                              disabled={saving}
+                            />
+                            <p className="text-muted-foreground text-xs">
+                              Este texto describe lo que se pide. El material real se selecciona o crea en Recepción.
+                            </p>
                           </div>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <Select
+                            value={line.item_type}
+                            disabled={saving}
+                            onValueChange={(v) => {
+                              const next = v as PoLineDraft["item_type"]
+                              const hide = shouldHideDims(next)
+                              updateLine(i, {
+                                item_type: next,
+                                ...(hide ? { micras: "", ancho_mm: "" } : {}),
+                              })
+                            }}
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue placeholder="Tipo..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PO_ITEM_TYPES.map((t) => (
+                                <SelectItem key={t.value} value={t.value}>
+                                  {t.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <Input
+                            inputMode="numeric"
+                            value={line.micras}
+                            onChange={(ev) => updateLine(i, { micras: sanitizePositiveDecimalInput(ev.target.value, 3) })}
+                            placeholder="µ"
+                            disabled={saving || shouldHideDims(line.item_type)}
+                          />
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <Input
+                            inputMode="numeric"
+                            value={line.ancho_mm}
+                            onChange={(ev) => updateLine(i, { ancho_mm: sanitizePositiveDecimalInput(ev.target.value, 3) })}
+                            placeholder="mm"
+                            disabled={saving || shouldHideDims(line.item_type)}
+                          />
                         </TableCell>
                         <TableCell className="align-top">
                           <div className="grid gap-1">
@@ -969,23 +922,6 @@ export default function PurchaseOrderNewPage() {
                             >
                               ×
                             </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow className={cn(rowHasError && "bg-red-50/40")}>
-                        <TableCell colSpan={7} className="pt-0">
-                          <div className="grid gap-1 pb-2">
-                            <Label className="text-xs" htmlFor={`po-line-${i}-desc`}>
-                              Descripción
-                            </Label>
-                            <Input
-                              id={`po-line-${i}-desc`}
-                              value={line.description}
-                              onChange={(ev) =>
-                                updateLine(i, { description: ev.target.value })
-                              }
-                              aria-label={`Descripción, fila ${i + 1}`}
-                            />
                           </div>
                         </TableCell>
                       </TableRow>

@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { apiDownloadFile, apiFetch, ApiError } from "@/lib/api"
 import type { InventoryMovementRow, LaravelPaginated } from "@/types/api"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -197,6 +198,8 @@ export default function InventoryMovementsPage() {
           Historial general de inventario: recepciones, despachos y movimientos internos.
         </p>
       </div>
+
+      <AxonesInventoryModuleNav active="movimientos-inventario" />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         <div className="grid gap-2">

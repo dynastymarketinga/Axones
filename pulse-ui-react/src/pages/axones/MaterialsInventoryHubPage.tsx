@@ -141,7 +141,7 @@ export default function MaterialsInventoryHubPage() {
           Inventario por área
         </h1>
         <p className="text-muted-foreground text-sm">
-          Las áreas de inventario principales en una sola pantalla (pestañas).
+          Las áreas de inventario principales en una sola pantalla (pestañas). Solo insumos; el producto terminado no se gestiona aquí (sale de Corte hacia Despacho).
         </p>
       </div>
 

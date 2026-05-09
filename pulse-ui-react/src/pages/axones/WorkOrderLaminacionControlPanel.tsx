@@ -4,13 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Layers, Package } from "lucide-react"
 
+import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { WindingFigurePicker } from "./WindingFigurePicker"
-import WorkOrderLaminacionOpsSection, { type LamLabelEditorMode } from "./WorkOrderLaminacionOpsSection"
+import WorkOrderLaminacionOpsSection, {
+  type LamArchivedTurnEntry,
+  type LamLabelEditorMode,
+} from "./WorkOrderLaminacionOpsSection"
 import type { BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
 import "./work-order-planilla.css"
 
@@ -26,6 +30,51 @@ type SustratoRow = { material_id: string; kg: string }
 const MIN_SUSTRATO_ROWS = 1
 /** Casillas por rejilla (entrada impresa, virgen y salida laminada). */
 const LAM_BOBINAS_SLOTS = 30
+
+const LAM_TURNOS_HISTORIAL_KEY = "lamTurnosHistorial"
+
+function parseLamTurnosHistorial(form: Record<string, unknown>): LamArchivedTurnEntry[] {
+  const raw = form[LAM_TURNOS_HISTORIAL_KEY]
+  if (!Array.isArray(raw)) return []
+  const out: LamArchivedTurnEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const o = item as Record<string, unknown>
+    const pausesRaw = o.pauses
+    const pauses = Array.isArray(pausesRaw)
+      ? pausesRaw
+          .map((x) => x as Record<string, unknown>)
+          .map((x) => ({
+            at: readString(x.at),
+            reason: readString(x.reason),
+            obs: readString(x.obs),
+            duration_sec: readNumber(x.duration_sec),
+          }))
+          .filter((x) => x.reason !== "")
+      : []
+    out.push({
+      id: readString(o.id) || `lam_${out.length}`,
+      closed_at: readString(o.closed_at),
+      outcome: o.outcome === "orden_finalizada" ? "orden_finalizada" : "turno_cerrado",
+      turno: readString(o.turno),
+      grupo: readString(o.grupo),
+      operador: readString(o.operador),
+      ayudante: readString(o.ayudante),
+      supervisor: readString(o.supervisor),
+      effective_sec: readNumber(o.effective_sec),
+      dead_sec: readNumber(o.dead_sec),
+      total_salida_kg: readNumber(o.total_salida_kg),
+      pauses,
+    })
+  }
+  return out
+}
+
+function snapshotSalidaKgFromForm(prev: Record<string, unknown>): number {
+  const raw = prev.lamSalidaBobinasKg
+  if (!Array.isArray(raw)) return 0
+  return raw.reduce((acc: number, v) => acc + readNumber(v), 0)
+}
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
@@ -160,6 +209,25 @@ function getSustratosLamRows(form: Record<string, unknown>): SustratoRow[] {
   return ensureMinSustratoRows(out)
 }
 
+/** Si no hay pesos en la rejilla virgen, copia kg de cada fila de sustratosVirgenLam a casillas consecutivas. */
+function hydrateVirgenBobinasFromSustratos(form: Record<string, unknown>): Record<string, unknown> {
+  const series = getNumericSeries(form, "lamEntradaVirgenBobinasKg", LAM_BOBINAS_SLOTS)
+  const hasAnyBobina = series.some((v) => readNumber(v) > 0)
+  if (hasAnyBobina) return form
+
+  const rows = getSustratosLamRows(form).filter((r) => readNumber(r.kg) > 0)
+  if (rows.length === 0) return form
+
+  const next = [...series]
+  let slot = 0
+  for (const r of rows) {
+    if (slot >= LAM_BOBINAS_SLOTS) break
+    next[slot] = normalizeNumericString(r.kg)
+    slot += 1
+  }
+  return { ...form, lamEntradaVirgenBobinasKg: next }
+}
+
 function formatTimerHms(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds))
   const hh = String(Math.floor(s / 3600)).padStart(2, "0")
@@ -213,6 +281,8 @@ function hasLaminacionSavedData(form: Record<string, unknown> | null | undefined
     "lamScrapLaminadoKg",
     "lamObservaciones",
     "lamTimerState",
+    "lamEntradaVirgenRechazadasKg",
+    "lamEntradaVirgenMaterialesBuenosKg",
   ]
 
   for (const key of singleKeys) {
@@ -227,6 +297,9 @@ function hasLaminacionSavedData(form: Record<string, unknown> | null | undefined
     if (!Array.isArray(raw)) continue
     if (raw.some((v) => readNumber(v) > 0)) return true
   }
+
+  const hist = f[LAM_TURNOS_HISTORIAL_KEY]
+  if (Array.isArray(hist) && hist.length > 0) return true
 
   return false
 }
@@ -259,10 +332,11 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
       const basePrefill = payload.prefill ?? {}
       setPrefill(basePrefill)
       if (hasLaminacionSavedData(payload.form)) {
-        setForm(mergePrefill(basePrefill, payload.form))
+        setForm(hydrateVirgenBobinasFromSustratos(mergePrefill(basePrefill, payload.form)))
         setIsDemoPrefill(false)
       } else {
-        setForm(mergePrefill(basePrefill, buildLaminacionDemoForm(basePrefill)))
+        const withDemo = mergePrefill(basePrefill, buildLaminacionDemoForm(basePrefill))
+        setForm(hydrateVirgenBobinasFromSustratos(mergePrefill(withDemo, payload.form ?? {})))
         setIsDemoPrefill(true)
       }
     } catch (e) {
@@ -334,7 +408,11 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
   const pedidoTotalKg = readNumber(form.pedidoKg ?? prefill.pedidoKg)
   const producidoAcumuladoKg = readNumber(form.lamAcumuladoProducidoKg) || totalSalida
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
-  const turnosRegistrados = Math.max(0, Math.floor(readNumber(form.lamRegistrosTurnos)))
+  const lamArchivedTurns = useMemo(() => parseLamTurnosHistorial(form), [form])
+  const turnosRegistrados =
+    lamArchivedTurns.length > 0
+      ? lamArchivedTurns.length
+      : Math.max(0, Math.floor(readNumber(form.lamRegistrosTurnos)))
 
   const timerState = readString(form.lamTimerState) || "pending"
   const timerRunning = timerState === "running"
@@ -457,9 +535,59 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
       if (readString(prev.lamTimerState) === "paused" && readNumber(prev.lamTimerPauseAtMs) > 0) {
         dead += (now - readNumber(prev.lamTimerPauseAtMs)) / 1000
       }
+
+      const prevState = readString(prev.lamTimerState)
+      const pausesSnapshot = Array.isArray(prev.lamTimerPauses)
+        ? (prev.lamTimerPauses as LaminacionPauseEntry[]).map((p) => ({ ...p }))
+        : []
+      const shouldArchive =
+        effective + dead > 0.01 ||
+        pausesSnapshot.length > 0 ||
+        (prevState !== "pending" && prevState !== "")
+
+      let historial = parseLamTurnosHistorial(prev)
+      if (shouldArchive) {
+        historial = [
+          ...historial,
+          {
+            id: `lam_${now}_${historial.length}`,
+            closed_at: new Date(now).toISOString(),
+            outcome: nextState === "completed" ? "orden_finalizada" : "turno_cerrado",
+            turno: readString(prev.lamTurno),
+            grupo: readString(prev.lamGrupo),
+            operador: readString(prev.lamOperador),
+            ayudante: readString(prev.lamAyudante),
+            supervisor: readString(prev.lamSupervisor),
+            effective_sec: effective,
+            dead_sec: dead,
+            total_salida_kg: snapshotSalidaKgFromForm(prev),
+            pauses: pausesSnapshot,
+          },
+        ]
+      }
+
+      const registros = shouldArchive ? historial.length : Math.max(0, Math.floor(readNumber(prev.lamRegistrosTurnos)))
+
+      if (nextState === "stopped") {
+        return {
+          ...prev,
+          [LAM_TURNOS_HISTORIAL_KEY]: historial,
+          lamRegistrosTurnos: registros,
+          lamTimerState: "pending",
+          lamTimerEffectiveAccSec: 0,
+          lamTimerDeadAccSec: 0,
+          lamTimerStartedAtMs: 0,
+          lamTimerPauseAtMs: 0,
+          lamTimerLastResumeAtMs: 0,
+          lamTimerPauses: [],
+        }
+      }
+
       return {
         ...prev,
-        lamTimerState: nextState,
+        [LAM_TURNOS_HISTORIAL_KEY]: historial,
+        lamRegistrosTurnos: registros,
+        lamTimerState: "completed",
         lamTimerEffectiveAccSec: effective,
         lamTimerDeadAccSec: dead,
         lamTimerPauseAtMs: 0,
@@ -529,6 +657,8 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
       ...form,
       lamEntradaImpresaBobinasKg: entradaImpresaBobinas.map((v) => normalizeNumericString(v)),
       lamEntradaVirgenBobinasKg: entradaVirgenBobinas.map((v) => normalizeNumericString(v)),
+      lamEntradaVirgenRechazadasKg: normalizeNumericString(form.lamEntradaVirgenRechazadasKg),
+      lamEntradaVirgenMaterialesBuenosKg: normalizeNumericString(form.lamEntradaVirgenMaterialesBuenosKg),
       lamSalidaBobinasKg: salidaBobinas.map((v) => normalizeNumericString(v)),
       lamEntradaImpresaBobinasMeta: entradaImpresaBobinasMeta.map((m) => normalizeBobinaLabelMeta(m)),
       lamEntradaVirgenBobinasMeta: entradaVirgenBobinasMeta.map((m) => normalizeBobinaLabelMeta(m)),
@@ -557,6 +687,7 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
 
   return (
     <div className="space-y-4">
+      <WorkOrderStageBadge current="produccion" />
       <div className="ax-ot">
         <div className="ot-section">
           <div className="section-header">
@@ -726,6 +857,7 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
         pauseReason={pauseReason}
         pauseObs={pauseObs}
         pauseEntries={pauseEntries}
+        archivedTurns={lamArchivedTurns}
         turno={readString(form.lamTurno)}
         grupo={readString(form.lamGrupo)}
         operador={readString(form.lamOperador)}
@@ -836,6 +968,16 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
         onSetScrapLaminado={(v) => {
           markAsUserEdited()
           setKey(setForm, "lamScrapLaminadoKg", v)
+        }}
+        virgenRechazadasKgRaw={readNumberString(form.lamEntradaVirgenRechazadasKg)}
+        virgenMaterialesBuenosKgRaw={readNumberString(form.lamEntradaVirgenMaterialesBuenosKg)}
+        onSetVirgenRechazadasKg={(v) => {
+          markAsUserEdited()
+          setKey(setForm, "lamEntradaVirgenRechazadasKg", v)
+        }}
+        onSetVirgenMaterialesBuenosKg={(v) => {
+          markAsUserEdited()
+          setKey(setForm, "lamEntradaVirgenMaterialesBuenosKg", v)
         }}
         labelEditorOpen={labelEditorOpen}
         labelEditorMode={labelEditorMode}

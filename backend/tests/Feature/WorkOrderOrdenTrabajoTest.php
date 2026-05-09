@@ -515,4 +515,127 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertContains($wo->id, $ids);
     }
+
+    public function test_mi_area_area_process_tag_not_started_filters_before_target_stage(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+
+        $woBefore = WorkOrder::query()->create([
+            'code' => 'OT-TAG-NS-BEFORE',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Montaje->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'impresion',
+            'title' => 'Imp',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woBefore->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woAt = WorkOrder::query()->create([
+            'code' => 'OT-TAG-NS-AT',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'impresion',
+            'title' => 'Imp',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woAt->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=impresion&area_process_tag=not_started&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertContains($woBefore->id, $ids);
+        $this->assertNotContains($woAt->id, $ids);
+    }
+
+    public function test_mi_area_area_process_tag_in_progress_filters_at_target_stage(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+
+        $woBefore = WorkOrder::query()->create([
+            'code' => 'OT-TAG-IP-BEFORE',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Montaje->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'impresion',
+            'title' => 'Imp',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woBefore->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woAt = WorkOrder::query()->create([
+            'code' => 'OT-TAG-IP-AT',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'impresion',
+            'title' => 'Imp',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woAt->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=impresion&area_process_tag=in_progress&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertNotContains($woBefore->id, $ids);
+        $this->assertContains($woAt->id, $ids);
+    }
+
+    public function test_historial_area_exclude_pending_omits_pending_area_requests(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+
+        $woPending = WorkOrder::query()->create([
+            'code' => 'OT-HIST-PEND',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'tintas',
+            'title' => 'T',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woPending->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woDone = WorkOrder::query()->create([
+            'code' => 'OT-HIST-DONE',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'tintas',
+            'title' => 'T',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Done->value,
+            'work_order_id' => $woDone->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?historial_area=tintas&historial_exclude_pending=1&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertNotContains($woPending->id, $ids);
+        $this->assertContains($woDone->id, $ids);
+    }
 }

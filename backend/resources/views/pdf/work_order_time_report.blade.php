@@ -69,6 +69,7 @@
         <span class="kpi kpi-prod"><strong>Tiempo efectivo:</strong> {{ $fmtSec($totals['production_seconds'] ?? 0) }}</span>
         <span class="kpi kpi-down"><strong>Tiempo muerto:</strong> {{ $fmtSec($totals['downtime_seconds'] ?? 0) }}</span>
         <span class="kpi kpi-mount"><strong>Montaje:</strong> {{ $fmtSec($totals['mount_seconds'] ?? 0) }}</span>
+        <span class="kpi kpi-mount"><strong>Desmontaje:</strong> {{ $fmtSec($totals['demount_seconds'] ?? 0) }}</span>
         <span class="kpi"><strong>Total:</strong> {{ $fmtSec($totals['total_seconds'] ?? 0) }}</span>
         <span class="kpi"><strong>% efectivo:</strong> {{ $totals['effective_percent'] ?? '0.00' }}%</span>
     </div>
@@ -81,6 +82,7 @@
                 <th class="num">Tiempo efectivo</th>
                 <th class="num">Tiempo muerto</th>
                 <th class="num">Montaje</th>
+                <th class="num">Desmontaje</th>
                 <th class="num">Total</th>
                 <th class="num">% efectivo</th>
                 <th class="num">N° paradas</th>
@@ -94,13 +96,14 @@
                     <td class="num">{{ $fmtSec($row['production_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $fmtSec($row['downtime_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $fmtSec($row['mount_seconds'] ?? 0) }}</td>
+                    <td class="num">{{ $fmtSec($row['demount_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $fmtSec($row['total_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $row['effective_percent'] ?? '0.00' }}%</td>
                     <td class="num">{{ $row['downtime_count'] ?? 0 }}</td>
                     <td class="num">{{ $row['production_count'] ?? 0 }}</td>
                 </tr>
             @empty
-                <tr><td colspan="8" class="center">Sin tiempos registrados en el rango.</td></tr>
+                <tr><td colspan="9" class="center">Sin tiempos registrados en el rango.</td></tr>
             @endforelse
         </tbody>
         @if(! empty($summary))
@@ -110,6 +113,7 @@
                     <td class="num">{{ $fmtSec($totals['production_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $fmtSec($totals['downtime_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $fmtSec($totals['mount_seconds'] ?? 0) }}</td>
+                    <td class="num">{{ $fmtSec($totals['demount_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $fmtSec($totals['total_seconds'] ?? 0) }}</td>
                     <td class="num">{{ $totals['effective_percent'] ?? '0.00' }}%</td>
                     <td class="num">{{ count($downtimes) }}</td>
@@ -152,7 +156,7 @@
     </table>
 
     <p class="small">
-        Los tiempos efectivo y muerto provienen de los segmentos cerrados (con hora de inicio y fin)
+        Los tiempos efectivo, muerto, montaje y desmontaje provienen de los segmentos cerrados (con hora de inicio y fin)
         del temporizador de producción de cada área. Las observaciones de cada parada se capturan en el panel
         del operador al pausar el turno.
     </p>

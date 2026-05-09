@@ -214,6 +214,51 @@ function inferUiItemTypeFromInventoryArea(area: string): string {
   return "Sustrato"
 }
 
+function parseOcLineMeta(description: string | null | undefined): {
+  itemType: string
+  micras: string
+  ancho_mm: string
+  baseText: string
+} {
+  const raw = (description ?? "").trim()
+  if (!raw) return { itemType: "", micras: "", ancho_mm: "", baseText: "" }
+  const parts = raw.split("|").map((p) => p.trim()).filter(Boolean)
+  const baseText = parts[0] ?? raw
+  let itemType = ""
+  let micras = ""
+  let ancho_mm = ""
+  for (const p of parts) {
+    const [kRaw, ...rest] = p.split(":")
+    const k = normalizeKey(kRaw ?? "")
+    const v = rest.join(":").trim()
+    if (!v) continue
+    if (k === "tipo") {
+      const tv = normalizeKey(v)
+      if (tv === "tinta") itemType = "Tinta"
+      else if (tv === "quimico" || tv === "químico") itemType = "Químico"
+      else if (tv === "otros") itemType = "Misceláneo"
+      else itemType = "Sustrato"
+    } else if (k.startsWith("micra")) {
+      micras = v
+    } else if (k.startsWith("ancho")) {
+      ancho_mm = v.replace(/[^\d.,]/g, "").replace(",", ".")
+    }
+  }
+  return { itemType, micras, ancho_mm, baseText }
+}
+
+function formatPolLabel(pol: PurchaseOrderLineDetail): string {
+  const rem = polRemainingQty(pol)
+  const unit = pol.unit ?? "kg"
+  const desc = pol.description?.trim()
+  const meta = parseOcLineMeta(desc)
+  const head =
+    (pol.material?.sku && pol.material?.name)
+      ? `${pol.material.sku} — ${pol.material.name}`
+      : (meta.baseText || pol.material?.sku || "Ítem")
+  return `${head} · pend. ${rem.toLocaleString("es-VE", { minimumFractionDigits: 0, maximumFractionDigits: 3 })} ${unit}`
+}
+
 function polRemainingQty(line: PurchaseOrderLineDetail): number {
   const o = Number(line.quantity_ordered ?? 0)
   const r = Number(line.quantity_received ?? 0)
@@ -266,6 +311,8 @@ export default function PurchaseReceiptNewPage() {
   const [supplierModalOpen, setSupplierModalOpen] = useState(false)
   const [productModalOpen, setProductModalOpen] = useState(false)
   const [materialComboOpenRow, setMaterialComboOpenRow] = useState<number | null>(null)
+  /** Texto del buscador SKU del combo de material (solo una fila abierta a la vez). */
+  const [materialComboSearch, setMaterialComboSearch] = useState("")
   const [firstInvalidRowIndex, setFirstInvalidRowIndex] = useState<number | null>(null)
   const [supplierError, setSupplierError] = useState(false)
   const [invoiceNumberError, setInvoiceNumberError] = useState(false)
@@ -390,7 +437,6 @@ export default function PurchaseReceiptNewPage() {
       setPoDetailLoading(false)
       return
     }
-    setFreeLines([emptyLine()])
     let cancelled = false
     setPoDetailLoading(true)
     void (async () => {
@@ -404,6 +450,35 @@ export default function PurchaseReceiptNewPage() {
           return
         }
         setPurchaseOrderDetail(d)
+
+        const eligible = (d.lines ?? []).filter((pol) => polRemainingQty(pol) > 0)
+        if (eligible.length > MAX_RECEIPT_LINES) {
+          toast.warning(`La OC tiene ${eligible.length} líneas pendientes. Se cargaron las primeras ${MAX_RECEIPT_LINES}.`)
+        }
+        const limited = eligible.slice(0, MAX_RECEIPT_LINES)
+        const nextLines: FreeLine[] = limited.map((pol) => {
+          const rem = polRemainingQty(pol)
+          const parsed = parseOcLineMeta(pol.description)
+          const matId =
+            pol.material_id != null && pol.material_id !== undefined
+              ? String(pol.material_id)
+              : ""
+          const mat = matId ? materials.find((m) => String(m.id) === matId) : undefined
+          const inferredItemType = mat
+            ? inferUiItemTypeFromInventoryArea(mat.inventory_area)
+            : (parsed.itemType || "")
+          const unitRaw = (pol.unit || mat?.unit || "kg").trim()
+          return normalizeLineByBusinessRules({
+            purchase_order_line_id: String(pol.id),
+            item_type: inferredItemType,
+            material_id: matId,
+            micras: mat ? "" : parsed.micras,
+            ancho_mm: mat ? "" : parsed.ancho_mm,
+            quantity: String(rem),
+            unit: unitRaw || "kg",
+          })
+        })
+        setFreeLines(nextLines.length ? nextLines : [emptyLine()])
       } catch {
         if (!cancelled) {
           setPurchaseOrderDetail(null)
@@ -416,7 +491,7 @@ export default function PurchaseReceiptNewPage() {
     return () => {
       cancelled = true
     }
-  }, [purchaseOrderId, supplierId])
+  }, [purchaseOrderId, supplierId, materials])
 
   const supplierOptions = useMemo(
     () => [...suppliers].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
@@ -565,20 +640,24 @@ export default function PurchaseReceiptNewPage() {
     })
   }
 
-  function openQuickMaterialCreator(rowIndex: number, itemType: string) {
+  function openQuickMaterialCreator(
+    rowIndex: number,
+    itemType: string,
+    preset?: { sku?: string; name?: string },
+  ) {
     const row = freeLines[rowIndex]
     const selected = materials.find((m) => String(m.id) === row?.material_id)
-    const suggestedName = selected?.name ?? (
-      itemType
-        ? `${itemType} `
-        : ""
-    )
-    const suggestedSku = selected?.sku ?? ""
+    const presetSku = preset?.sku?.trim() ?? ""
+    const presetName = preset?.name?.trim() ?? ""
+    const suggestedName =
+      (presetName || presetSku || selected?.name) ??
+      (itemType ? `${itemType} ` : "")
+    const suggestedSku = presetSku || selected?.sku || ""
 
     setNewMaterialDraft({
       rowIndex,
       name: suggestedName,
-      sku: suggestedSku,
+      sku: suggestedSku.toUpperCase(),
       receivedOn: todayDate,
       unit: row?.unit || selected?.unit || "kg",
       productId: "",
@@ -900,34 +979,34 @@ export default function PurchaseReceiptNewPage() {
               <Popover open={supplierComboOpen} onOpenChange={setSupplierComboOpen}>
                 <PopoverTrigger asChild>
                   <div className="group/field relative flex-1">
-                  <Building2
-                    className={cn(
-                      "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                      supplierError
-                        ? "text-red-500"
-                        : saving
-                          ? "text-muted-foreground/50"
-                          : "text-muted-foreground group-focus-within/field:text-primary",
-                    )}
-                    aria-hidden
-                  />
-                  <Button
-                    id="supplier-name"
-                    type="button"
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={supplierComboOpen}
-                    disabled={saving}
-                    className={cn(
-                      "h-10 w-full justify-between pl-10 pr-3 font-normal",
-                      supplierError ? "border-red-500 focus-visible:ring-red-500" : "",
-                    )}
-                  >
-                    <span className={cn("truncate text-left", !selectedSupplier && "text-muted-foreground")}>
-                      {selectedSupplier?.name || "Escriba o seleccione proveedor..."}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
+                    <Building2
+                      className={cn(
+                        "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
+                        supplierError
+                          ? "text-red-500"
+                          : saving
+                            ? "text-muted-foreground/50"
+                            : "text-muted-foreground group-focus-within/field:text-primary",
+                      )}
+                      aria-hidden
+                    />
+                    <Button
+                      id="supplier-name"
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={supplierComboOpen}
+                      disabled={saving}
+                      className={cn(
+                        "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                        supplierError ? "border-red-500 focus-visible:ring-red-500" : "",
+                      )}
+                    >
+                      <span className={cn("truncate text-left", !selectedSupplier && "text-muted-foreground")}>
+                        {selectedSupplier?.name || "Escriba o seleccione proveedor..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
                   </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
@@ -1061,8 +1140,8 @@ export default function PurchaseReceiptNewPage() {
                           ? "Cargando órdenes…"
                           : purchaseOrderId
                             ? `${purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code ?? "…"} · ${purchaseOrderStatusHint(
-                                purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
-                              )}${poDetailLoading ? " (cargando…)" : ""}`
+                              purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
+                            )}${poDetailLoading ? " (cargando…)" : ""}`
                             : "Seleccione orden de compra…"}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1149,7 +1228,7 @@ export default function PurchaseReceiptNewPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-14">N°</TableHead>
-                  <TableHead className="min-w-[200px]">Línea OC *</TableHead>
+                  <TableHead className="min-w-[200px]">Ítem solicitado (OC)</TableHead>
                   <TableHead className="w-40">Tipo</TableHead>
                   <TableHead className="min-w-[260px]">Material / descripción *</TableHead>
                   <TableHead className="w-24">Micras</TableHead>
@@ -1172,54 +1251,23 @@ export default function PurchaseReceiptNewPage() {
                       </div>
                     </TableCell>
                     <TableCell className="align-top">
-                      <Select
-                        value={line.purchase_order_line_id || "none"}
-                        disabled={saving || !purchaseOrderDetail?.lines?.length}
-                        onValueChange={(v) => {
-                          if (v === "none") {
-                            updateFreeLine(i, { purchase_order_line_id: "" })
-                            return
-                          }
-                          const pol = purchaseOrderDetail?.lines?.find((ln) => String(ln.id) === v)
-                          if (!pol) return
-                          const matId =
-                            pol.material_id != null && pol.material_id !== undefined
-                              ? String(pol.material_id)
-                              : ""
-                          const mat = matId ? materials.find((m) => String(m.id) === matId) : undefined
-                          const itemType = mat
-                            ? inferUiItemTypeFromInventoryArea(mat.inventory_area)
-                            : line.item_type
-                          const unitRaw = (pol.unit || mat?.unit || line.unit || "kg").trim()
-                          updateFreeLine(i, {
-                            purchase_order_line_id: v,
-                            ...(matId ? { material_id: matId } : {}),
-                            ...(mat ? { item_type: itemType } : {}),
-                            unit: unitRaw || "kg",
-                          })
-                        }}
-                      >
-                        <SelectTrigger className="h-9">
-                          <SelectValue placeholder="Línea…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Seleccione línea…</SelectItem>
-                          {(purchaseOrderDetail?.lines ?? []).map((pol) => {
-                            const rem = polRemainingQty(pol)
-                            const sku = pol.material?.sku ?? "Sin SKU"
-                            const disabled = rem <= 0
-                            return (
-                              <SelectItem key={pol.id} value={String(pol.id)} disabled={disabled}>
-                                {sku} · pend. {rem.toLocaleString("es-VE", {
-                                  minimumFractionDigits: 0,
-                                  maximumFractionDigits: 3,
-                                })}{" "}
-                                {pol.unit ?? "kg"}
-                              </SelectItem>
-                            )
-                          })}
-                        </SelectContent>
-                      </Select>
+                      {line.purchase_order_line_id ? (
+                        (() => {
+                          const pol = purchaseOrderDetail?.lines?.find(
+                            (ln) => String(ln.id) === String(line.purchase_order_line_id),
+                          )
+                          if (!pol) return null
+                          return (
+                            <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                              {formatPolLabel(pol)}
+                            </div>
+                          )
+                        })()
+                      ) : (
+                        <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground">
+                          Seleccione OC arriba para cargar ítems…
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="align-top">
                       <Select
@@ -1254,7 +1302,10 @@ export default function PurchaseReceiptNewPage() {
                     <TableCell className="align-top">
                       <Popover
                         open={materialComboOpenRow === i}
-                        onOpenChange={(open) => setMaterialComboOpenRow(open ? i : null)}
+                        onOpenChange={(open) => {
+                          if (open) setMaterialComboSearch("")
+                          setMaterialComboOpenRow(open ? i : null)
+                        }}
                       >
                         <PopoverTrigger asChild>
                           <Button
@@ -1268,16 +1319,56 @@ export default function PurchaseReceiptNewPage() {
                             <span className={cn("truncate text-left", !line.material_id && "text-muted-foreground")}>
                               {line.material_id
                                 ? materials.find((m) => String(m.id) === line.material_id)?.sku || "Seleccione SKU..."
-                                : "Escribir o seleccionar SKU..."}
+                                : (() => {
+                                    const pol = line.purchase_order_line_id
+                                      ? purchaseOrderDetail?.lines?.find(
+                                          (ln) => String(ln.id) === String(line.purchase_order_line_id),
+                                        )
+                                      : null
+                                    const meta = parseOcLineMeta(pol?.description)
+                                    return meta.baseText || "Escribir o seleccionar SKU..."
+                                  })()}
                             </span>
                             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
                           <Command shouldFilter>
-                            <CommandInput placeholder="Buscar SKU..." />
+                            <CommandInput
+                              placeholder="Buscar SKU..."
+                              value={materialComboOpenRow === i ? materialComboSearch : ""}
+                              onValueChange={setMaterialComboSearch}
+                            />
                             <CommandList className="max-h-60">
-                              <CommandEmpty>No hay SKU disponibles.</CommandEmpty>
+                              <CommandEmpty>
+                                {materialComboSearch.trim() ? (
+                                  <div className="space-y-2 px-2">
+                                    <p className="text-muted-foreground">No hay coincidencias con la búsqueda.</p>
+                                    {line.item_type ? (
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        className="h-auto w-full whitespace-normal py-2 text-xs"
+                                        onClick={() => {
+                                          const q = materialComboSearch.trim()
+                                          openQuickMaterialCreator(i, line.item_type, { sku: q, name: q })
+                                          setMaterialComboOpenRow(null)
+                                          setMaterialComboSearch("")
+                                        }}
+                                      >
+                                        Crear material con código «{materialComboSearch.trim()}»
+                                      </Button>
+                                    ) : (
+                                      <p className="text-muted-foreground text-xs">
+                                        Seleccione primero el tipo de ítem en esta fila.
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  "No hay SKU disponibles."
+                                )}
+                              </CommandEmpty>
                               <CommandGroup>
                                 {materialsForItemType(line.item_type).map((m) => (
                                   <CommandItem
@@ -1286,6 +1377,7 @@ export default function PurchaseReceiptNewPage() {
                                     onSelect={() => {
                                       updateFreeLine(i, { material_id: String(m.id) })
                                       setMaterialComboOpenRow(null)
+                                      setMaterialComboSearch("")
                                     }}
                                   >
                                     <Check

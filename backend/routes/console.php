@@ -11,7 +11,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('axones:demo {--clean : Borra los datos demo} {--count=20 : Filas objetivo por tabla de dominio (5-200)}', function () {
+Artisan::command('axones:demo {--clean : Borra los datos demo} {--minimal : Pocas filas (comparación UI)} {--count=20 : Filas objetivo por tabla de dominio (5-200 sin --minimal; con --minimal 1–200)}', function () {
     /** @var AxonesDemoDataService $demo */
     $demo = app(AxonesDemoDataService::class);
 
@@ -23,8 +23,15 @@ Artisan::command('axones:demo {--clean : Borra los datos demo} {--count=20 : Fil
     }
 
     $count = (int) $this->option('count');
-    $result = $demo->seed($count > 0 ? $count : 20);
-    $this->info('Datos demo cargados.');
+    $minimal = (bool) $this->option('minimal');
+
+    if ($minimal) {
+        $result = $demo->seed($count > 0 ? max(1, min(200, $count)) : 1, true);
+        $this->info('Datos demo cargados (modo minimal).');
+    } else {
+        $result = $demo->seed($count > 0 ? $count : 20);
+        $this->info('Datos demo cargados.');
+    }
     $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 })->purpose('Cargar o limpiar datos demo Axones');
 

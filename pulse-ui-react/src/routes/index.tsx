@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom"
+import { createBrowserRouter, Navigate, Outlet } from "react-router-dom"
 import type { ReactElement } from "react"
 
 import AppLayout from "@/layouts/AppLayout"
@@ -93,15 +93,7 @@ function guardAxonesRoute({
 }
 
 function LegacyInventoryAreasRedirect(): ReactElement {
-  const location = useLocation()
-  const params = new URLSearchParams(location.search)
-  const area = params.get("area")
-  const date = params.get("date")
-  const target = new URLSearchParams()
-  if (area) target.set("area", area)
-  if (date) target.set("date", date)
-
-  return <Navigate to={`/materiales${target.toString() ? `?${target.toString()}` : ""}`} replace />
+  return <Navigate to="/recepciones-oc" replace />
 }
 
 export const router = createBrowserRouter(

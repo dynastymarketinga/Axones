@@ -25,6 +25,20 @@ class CorteDispatchService
     }
 
     /**
+     * Suma de kg ya reservados o despachados para toda la OT (notas no canceladas).
+     */
+    public function quantityAllocatedToWorkOrder(int $workOrderId): string
+    {
+        $sum = DeliveryNoteLine::query()
+            ->join('delivery_notes as dn', 'delivery_note_lines.delivery_note_id', '=', 'dn.id')
+            ->where('delivery_note_lines.work_order_id', $workOrderId)
+            ->where('dn.status', '!=', DeliveryNoteStatus::Cancelled->value)
+            ->sum('delivery_note_lines.quantity_kg');
+
+        return number_format((float) $sum, 3, '.', '');
+    }
+
+    /**
      * Remanente despachable = material terminado en corte − ya en notas (draft o despachadas).
      */
     public function quantityRemainingForCorteUsage(CorteBobinaUsage $usage): string
@@ -135,33 +149,64 @@ class CorteDispatchService
             $q->whereHas('workOrder', fn ($w) => $w->where('client_id', $clientId));
         }
 
+        $usages = $q->limit(500)->get();
+
+        // Agrupar por OT: una sola fila por OT con saldo acumulado.
+        $byWo = [];
+        foreach ($usages as $usage) {
+            $woId = (int) $usage->work_order_id;
+            if ($woId <= 0) {
+                continue;
+            }
+            if (! isset($byWo[$woId])) {
+                $wo = $usage->workOrder;
+                $byWo[$woId] = [
+                    'corte_bobina_usage_id' => (int) $usage->getKey(),
+                    'work_order_id' => $woId,
+                    'work_order_code' => $wo?->code,
+                    'client_id' => $wo?->client_id,
+                    'client_name' => $wo?->client?->name,
+                    'product_id' => $wo?->product_id,
+                    'product_name' => $wo?->product?->name,
+                    'product_cpe' => $wo?->product?->cpe,
+                    'material_id' => $usage->material_id,
+                    'material_sku' => $usage->material?->sku,
+                    'quantity_finished_kg' => '0.000',
+                    'quantity_dispatched_kg' => '0.000',
+                    'quantity_remaining_kg' => '0.000',
+                    // ya no hay granularidad por paleta/bobina en despacho por OT
+                    'bobina_id' => null,
+                    'bobina_code' => null,
+                    'pallet_code' => null,
+                    'bobbin_count' => null,
+                ];
+            }
+
+            // Mantener un id representativo (el más reciente) para crear líneas de nota.
+            if ((int) $usage->getKey() > (int) $byWo[$woId]['corte_bobina_usage_id']) {
+                $byWo[$woId]['corte_bobina_usage_id'] = (int) $usage->getKey();
+            }
+
+            $byWo[$woId]['quantity_finished_kg'] = bcadd(
+                (string) $byWo[$woId]['quantity_finished_kg'],
+                number_format((float) $usage->quantity_finished_kg, 3, '.', ''),
+                3,
+            );
+        }
+
         $out = [];
-        foreach ($q->limit(500)->get() as $usage) {
-            $remaining = $this->quantityRemainingForCorteUsage($usage);
+        foreach ($byWo as $woId => $row) {
+            $allocated = $this->quantityAllocatedToWorkOrder((int) $woId);
+            $remaining = bcsub((string) $row['quantity_finished_kg'], $allocated, 3);
             if (bccomp($remaining, '0', 3) <= 0) {
                 continue;
             }
-            $wo = $usage->workOrder;
-            $out[] = [
-                'corte_bobina_usage_id' => $usage->getKey(),
-                'work_order_id' => $usage->work_order_id,
-                'work_order_code' => $wo?->code,
-                'client_id' => $wo?->client_id,
-                'client_name' => $wo?->client?->name,
-                'product_id' => $wo?->product_id,
-                'product_name' => $wo?->product?->name,
-                'product_cpe' => $wo?->product?->cpe,
-                'material_id' => $usage->material_id,
-                'material_sku' => $usage->material?->sku,
-                'quantity_finished_kg' => number_format((float) $usage->quantity_finished_kg, 3, '.', ''),
-                'quantity_dispatched_kg' => $this->quantityAllocatedToCorteUsage((int) $usage->getKey()),
-                'quantity_remaining_kg' => $remaining,
-                'bobina_id' => $usage->bobina_id,
-                'bobina_code' => $usage->bobina?->code,
-                'pallet_code' => $usage->bobina?->code ?? ($usage->bobina_id ? 'BOB-'.$usage->bobina_id : null),
-                'bobbin_count' => 1,
-            ];
+            $row['quantity_dispatched_kg'] = $allocated;
+            $row['quantity_remaining_kg'] = $remaining;
+            $out[] = $row;
         }
+
+        usort($out, fn ($a, $b) => ((int) ($b['corte_bobina_usage_id'] ?? 0)) <=> ((int) ($a['corte_bobina_usage_id'] ?? 0)));
 
         return $out;
     }
@@ -174,6 +219,7 @@ class CorteDispatchService
      */
     public function groupAvailableByProduct(array $rows): array
     {
+        // Deprecated: Despacho por OT ya entrega una sola fila por OT.
         $groups = [];
         foreach ($rows as $row) {
             if (! is_array($row)) {

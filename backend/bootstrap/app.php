@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\AxonesDemoReseedCommand;
 use App\Http\Middleware\EnsureAreaRole;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -12,6 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        AxonesDemoReseedCommand::class,
+    ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'area.role' => EnsureAreaRole::class,

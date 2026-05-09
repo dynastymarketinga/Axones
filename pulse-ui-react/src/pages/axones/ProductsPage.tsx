@@ -21,13 +21,18 @@ import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
+  CatalogTableBodyCellContent,
+  CatalogTableBodyCellContentRight,
   CatalogTableHead,
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
 import {
   catalogActionButtonClass,
+  catalogPaginationOutlineButtonClass,
+  catalogPaginationSelectTriggerClass,
   catalogSelectTriggerClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
@@ -150,7 +155,7 @@ export default function ProductsPage() {
       if (e instanceof ApiError) {
         toast.error(e.message)
       } else {
-        toast.error("No se pudo cargar la lista de productos.")
+        toast.error("No se pudo cargar la lista de especificaciones.")
       }
       setRows(null)
     } finally {
@@ -192,7 +197,7 @@ export default function ProductsPage() {
       } catch (e) {
         if (!cancelled) {
           if (e instanceof ApiError) toast.error(e.message)
-          else toast.error("No se pudo cargar el producto.")
+          else toast.error("No se pudo cargar la especificación.")
           setDetailOpen(false)
           setDetailId(null)
           setDetailRowNumber(null)
@@ -247,13 +252,14 @@ export default function ProductsPage() {
 
   return (
     <CatalogPageShell
-      title="Productos"
-      subtitle="Nombre, CPE, MPS, tipo de impresión y estructura."
+      title="Especificaciones de producto"
+      subtitle="Plantilla técnico-comercial por cliente (CPE, MPS, tipo de impresión, estructura). Se elige al crear una orden de trabajo. No es inventario ni producto terminado."
       icon={Package}
+      headerExtras={<WorkOrderStageBadge current="especificacion" className="pt-1" />}
       action={
         <Button type="button" asChild>
           <Link to="/productos/form" state={{ from }}>
-            Nuevo producto
+            Nueva especificación
           </Link>
         </Button>
       }
@@ -275,8 +281,8 @@ export default function ProductsPage() {
                 setDetail(null)
               }
             }}
-            title="Detalle del producto"
-            description="Información completa del registro seleccionado."
+            title="Detalle de la especificación"
+            description="Información completa del registro seleccionado (referencia por cliente, no stock terminado)."
             loading={detailLoading}
             fields={detailFields}
             footer={
@@ -359,7 +365,7 @@ export default function ProductsPage() {
                 ) : !rows?.data.length ? (
                   <TableRow>
                     <TableCell colSpan={colSpan} className="text-muted-foreground">
-                      Sin productos.
+                      Sin especificaciones.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -373,17 +379,25 @@ export default function ProductsPage() {
                             catalogTableBodyCellClass,
                           )}
                         >
-                          {n}
+                          <CatalogTableBodyCellContent>{n}</CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={cn("font-medium", catalogTableBodyCellClass)}>
-                          {p.name}
+                          <CatalogTableBodyCellContent>{p.name}</CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
-                          {p.client?.name ?? "—"}
+                          <CatalogTableBodyCellContent>
+                            {p.client?.name ?? "—"}
+                          </CatalogTableBodyCellContent>
                         </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>{p.cpe ?? "—"}</TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>{p.mps ?? "—"}</TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>{p.print_type ?? "—"}</TableCell>
+                        <TableCell className={catalogTableBodyCellClass}>
+                          <CatalogTableBodyCellContent>{p.cpe ?? "—"}</CatalogTableBodyCellContent>
+                        </TableCell>
+                        <TableCell className={catalogTableBodyCellClass}>
+                          <CatalogTableBodyCellContent>{p.mps ?? "—"}</CatalogTableBodyCellContent>
+                        </TableCell>
+                        <TableCell className={catalogTableBodyCellClass}>
+                          <CatalogTableBodyCellContent>{p.print_type ?? "—"}</CatalogTableBodyCellContent>
+                        </TableCell>
                         <TableCell
                           className={cn(
                             "max-w-[240px] text-sm text-muted-foreground",
@@ -391,43 +405,49 @@ export default function ProductsPage() {
                           )}
                           title={p.structure ?? undefined}
                         >
-                          {truncate(p.structure, 80)}
+                          <CatalogTableBodyCellContent>
+                            {truncate(p.structure, 80)}
+                          </CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={cn("whitespace-nowrap", catalogTableBodyCellClass)}>
-                          {formatDateDMY(p.created_at)}
+                          <CatalogTableBodyCellContent>
+                            {formatDateDMY(p.created_at)}
+                          </CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
-                          <div className="inline-flex justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              className={catalogActionButtonClass}
-                              title="Ver detalle"
-                              aria-label="Ver detalle del producto"
-                              onClick={() => {
-                                setDetailRowNumber(n)
-                                setDetailId(p.id)
-                                setDetailOpen(true)
-                              }}
-                            >
-                              <Eye className="h-4 w-4" />
-                              <span className="sr-only">Ver detalle</span>
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className={catalogActionButtonClass}
-                              title="Editar producto"
-                              aria-label="Editar producto"
-                              asChild
-                            >
-                              <Link to={`/productos/form?id=${p.id}`} state={{ from }}>
-                                <Pencil className="h-4 w-4" />
-                                <span className="sr-only">Editar</span>
-                              </Link>
-                            </Button>
-                          </div>
+                          <CatalogTableBodyCellContentRight>
+                            <div className="inline-flex gap-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className={catalogActionButtonClass}
+                                title="Ver detalle"
+                                aria-label="Ver detalle de la especificación"
+                                onClick={() => {
+                                  setDetailRowNumber(n)
+                                  setDetailId(p.id)
+                                  setDetailOpen(true)
+                                }}
+                              >
+                                <Eye className="h-4 w-4" />
+                                <span className="sr-only">Ver detalle</span>
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className={catalogActionButtonClass}
+                                title="Editar especificación"
+                                aria-label="Editar especificación"
+                                asChild
+                              >
+                                <Link to={`/productos/form?id=${p.id}`} state={{ from }}>
+                                  <Pencil className="h-4 w-4" />
+                                  <span className="sr-only">Editar</span>
+                                </Link>
+                              </Button>
+                            </div>
+                          </CatalogTableBodyCellContentRight>
                         </TableCell>
                       </TableRow>
                     )
@@ -458,7 +478,10 @@ export default function ProductsPage() {
                   >
                     <SelectTrigger
                       id="products-per-page"
-                      className="h-8 w-[4.5rem] text-sm"
+                      className={cn(
+                        "h-8 w-[4.5rem] text-sm",
+                        catalogPaginationSelectTriggerClass,
+                      )}
                       aria-label="Registros por página"
                     >
                       <SelectValue />
@@ -476,7 +499,7 @@ export default function ProductsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8"
+                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
                     disabled={rows.current_page <= 1 || loading}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     type="button"
@@ -486,7 +509,7 @@ export default function ProductsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8"
+                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
                     disabled={rows.current_page >= rows.last_page || loading}
                     onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
                     type="button"

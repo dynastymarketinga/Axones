@@ -58,7 +58,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     items: [
       { title: "Vendedores", url: "vendedores", icon: Users },
       { title: "Clientes", url: "clientes", icon: ClipboardList },
-      { title: "Productos", url: "productos", icon: Package },
+      { title: "Especificaciones de producto", url: "productos", icon: Package },
       { title: "Proveedores", url: "proveedores", icon: Truck },
       { title: "Órdenes de compra", url: "ordenes-compra", icon: ShoppingCart },
     ],
@@ -134,7 +134,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
       { title: "Inventario", url: "reportes/inventario", icon: Boxes },
       { title: "Producción y tiempos", url: "reportes/produccion", icon: Activity },
       { title: "Reporte de tiempos", url: "reportes/tiempos", icon: ScrollText },
-      { title: "Mermas", url: "reportes/mermas", icon: PackageOpen },
+      { title: "Desperdicio", url: "reportes/mermas", icon: PackageOpen },
       { title: "Por orden de trabajo", url: "reportes/por-orden-trabajo", icon: ClipboardList },
     ],
   },

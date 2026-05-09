@@ -16,6 +16,23 @@ function defaultFrom(): string {
 
 export type ReportRangeQueryValue = string | number | undefined
 
+/** HH:MM:SS, coherente con las vistas PDF/HTML de reportes de tiempos. */
+export function formatDurationHms(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+}
+
+/** Mensaje de tabla vacía para listados de OT con temporizador (Reporte de tiempos). */
+export const REPORT_EMPTY_WORK_ORDER_TIMES =
+  "Sin órdenes con tiempos en este período."
+
+/** Mensaje de tabla vacía para agregado por área/máquina (Producción y tiempos). */
+export const REPORT_EMPTY_PRODUCTION_TIME_BY_AREA =
+  "Sin tiempos registrados en este período."
+
 /**
  * Hook compartido para todas las páginas de Reportes:
  * - Mantiene el rango global Desde/Hasta.
@@ -41,7 +58,7 @@ export function useReportRange() {
         toast.success("Descarga iniciada.")
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
-        else toast.error("No se pudo descargar el CSV.")
+        else toast.error("No se pudo descargar el archivo.")
       } finally {
         setLoading(false)
       }
@@ -59,6 +76,8 @@ type ReportPageShellProps = {
   to: string
   onFromChange: (v: string) => void
   onToChange: (v: string) => void
+  /** Título de la tarjeta Desde/Hasta (por defecto: «Rango de fechas global»). */
+  rangeCardTitle?: string
   /** Si es false, no renderiza la tarjeta de Desde/Hasta (útil para reportes que no la usan). */
   showRange?: boolean
   children: ReactNode
@@ -74,6 +93,7 @@ export function ReportPageShell({
   to,
   onFromChange,
   onToChange,
+  rangeCardTitle = "Rango de fechas global",
   showRange = true,
   children,
 }: ReportPageShellProps) {
@@ -89,7 +109,7 @@ export function ReportPageShell({
       {showRange ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Rango de fechas global</CardTitle>
+            <CardTitle className="text-base">{rangeCardTitle}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-4">
             <div className="grid gap-2">

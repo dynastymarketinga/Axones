@@ -21,6 +21,10 @@ function readNumber(v: unknown): number {
   return 0
 }
 
+function readObject(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+
 function formatTimerHms(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds))
   const hh = String(Math.floor(s / 3600)).padStart(2, "0")
@@ -46,23 +50,114 @@ type Props = {
 }
 
 const ROLLOS_PER_PALETA = 48
-const MIN_PALETAS = 4
+const MIN_PALETAS = 1
 
 function emptyPaleta(): string[] {
   return Array.from({ length: ROLLOS_PER_PALETA }, () => "")
 }
 
-function getPaletasSeries(form: Record<string, unknown>): string[][] {
-  const raw = form.corSalidaPaletasKg
-  if (!Array.isArray(raw)) return Array.from({ length: MIN_PALETAS }, () => emptyPaleta())
-  const out = raw.map((p) => {
-    if (!Array.isArray(p)) return emptyPaleta()
-    const row = p.slice(0, ROLLOS_PER_PALETA).map((v) => readString(v))
-    while (row.length < ROLLOS_PER_PALETA) row.push("")
-    return row
-  })
-  while (out.length < MIN_PALETAS) out.push(emptyPaleta())
+type CorPaleta = {
+  id: string
+  label: string
+  rollosKg: string[]
+  status?: "en_progreso" | "cerrada_opcional"
+}
+
+type CorTurno = {
+  id: string
+  closed_at: string
+  label?: string
+  turno?: string
+  grupo?: string
+  operador?: string
+  ayudante?: string
+  supervisor?: string
+  metrics?: {
+    entrada_bobinas_kg: string
+    salida_total_kg: string
+    merma_kg: string
+    metraje: string
+    scrap_total_kg: string
+    scrap_refile_kg?: string
+    scrap_impreso_kg?: string
+    scrap_mal_corte_kg?: string
+    rollos_salida: number
+    paletas: number
+  }
+  timer?: {
+    total_sec: number
+    effective_sec: number
+    dead_sec: number
+    pauses?: CortePauseEntry[]
+  }
+  obs?: string
+}
+
+function ensureStringArray(raw: unknown, size: number): string[] {
+  const out: string[] = []
+  if (Array.isArray(raw)) {
+    for (const v of raw.slice(0, size)) out.push(readString(v))
+  }
+  while (out.length < size) out.push("")
   return out
+}
+
+function toCorPaletasFromLegacy(form: Record<string, unknown>): CorPaleta[] {
+  const raw = form.corSalidaPaletasKg
+  if (!Array.isArray(raw)) return []
+  return raw.map((p, idx) => ({
+    id: `legacy-${idx + 1}`,
+    label: `Paleta #${String(idx + 1).padStart(2, "0")}`,
+    rollosKg: ensureStringArray(p, ROLLOS_PER_PALETA),
+    status: "en_progreso",
+  }))
+}
+
+function getCorPaletas(form: Record<string, unknown>): CorPaleta[] {
+  const raw = form.cor_paletas
+  const paletas: CorPaleta[] = []
+  if (Array.isArray(raw)) {
+    for (const p of raw) {
+      const o = readObject(p)
+      const id = readString(o.id)
+      const label = readString(o.label) || "Paleta"
+      if (!id) continue
+      paletas.push({
+        id,
+        label,
+        rollosKg: ensureStringArray(o.rollosKg, ROLLOS_PER_PALETA),
+        status: (readString(o.status) as CorPaleta["status"]) || "en_progreso",
+      })
+    }
+  }
+
+  const fromLegacy = paletas.length === 0 ? toCorPaletasFromLegacy(form) : []
+  const merged = paletas.length > 0 ? paletas : fromLegacy
+
+  if (merged.length === 0) {
+    return [
+      {
+        id: "p-01",
+        label: "Paleta #01",
+        rollosKg: emptyPaleta(),
+        status: "en_progreso",
+      },
+    ]
+  }
+
+  while (merged.length < MIN_PALETAS) {
+    merged.push({
+      id: `p-${String(merged.length + 1).padStart(2, "0")}`,
+      label: `Paleta #${String(merged.length + 1).padStart(2, "0")}`,
+      rollosKg: emptyPaleta(),
+      status: "en_progreso",
+    })
+  }
+  return merged
+}
+
+function newId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
 export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg }: Props) {
@@ -72,7 +167,8 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
   const entradaBobinas = useMemo(() => getNumericSeries(form, "corEntradaBobinasKg", 14), [form])
   const entradaBobinasCount = useMemo(() => entradaBobinas.filter((v) => Number(v) > 0).length, [entradaBobinas])
   const entradaBobinasTotal = useMemo(() => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaBobinas])
-  const salidaPaletas = useMemo(() => getPaletasSeries(form), [form])
+  const corPaletas = useMemo(() => getCorPaletas(form), [form])
+  const salidaPaletas = useMemo(() => corPaletas.map((p) => p.rollosKg), [corPaletas])
   const salidaPaletasTotales = useMemo(
     () => salidaPaletas.map((p) => p.reduce((acc, v) => acc + readNumber(v), 0)),
     [salidaPaletas],
@@ -99,8 +195,9 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
   const metraje = readNumber(form.metrajeCorte)
   const scrapRefile = readNumber(form.corScrapRefileKg)
   const scrapImpreso = readNumber(form.corScrapImpresoKg)
-  const scrapTotal = scrapRefile + scrapImpreso
-  const producidoAcumuladoKg = readNumber(form.corAcumuladoProducidoKg) || kgSalida
+  const scrapMalCorte = readNumber(form.corScrapMalCorteKg)
+  const scrapTotal = scrapRefile + scrapImpreso + scrapMalCorte
+  const producidoAcumuladoKg = kgSalida
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
   const turnosRegistrados = Math.max(0, Math.floor(readNumber(form.corRegistrosTurnos)))
   const ultimoTurnoLabel = readString(form.corUltimoTurnoLabel) || "Sin producción previa"
@@ -161,34 +258,72 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
     setForm((prev) => ({ ...prev, [key]: values }))
   }
 
-  function setPaletasSeries(nextPaletas: string[][]) {
+  function writePaletas(nextPaletas: CorPaleta[]) {
     const nextSalida = nextPaletas
+      .map((p) => p.rollosKg)
       .flat()
       .reduce((acc, v) => acc + readNumber(v), 0)
       .toFixed(2)
     setForm((prev) => ({
       ...prev,
-      corSalidaPaletasKg: nextPaletas,
+      cor_paletas: nextPaletas,
+      // compat: claves viejas para no romper reportes/otros cálculos existentes
+      corSalidaPaletasKg: nextPaletas.map((p) => p.rollosKg),
       kgSalidaCorte: nextSalida,
       corAcumuladoProducidoKg: Number(nextSalida),
     }))
   }
 
   function addPaleta() {
-    setPaletasSeries([...salidaPaletas, emptyPaleta()])
+    const nextIndex = corPaletas.length + 1
+    writePaletas([
+      ...corPaletas,
+      {
+        id: `p-${String(nextIndex).padStart(2, "0")}`,
+        label: `Paleta #${String(nextIndex).padStart(2, "0")}`,
+        rollosKg: emptyPaleta(),
+        status: "en_progreso",
+      },
+    ])
   }
 
   function removePaleta(index: number) {
-    const filtered = salidaPaletas.filter((_, i) => i !== index)
-    const normalized = filtered.length > 0 ? filtered : [emptyPaleta()]
-    while (normalized.length < MIN_PALETAS) normalized.push(emptyPaleta())
-    setPaletasSeries(normalized)
+    const target = corPaletas[index]
+    const hasAnyKg = (target?.rollosKg ?? []).some((v) => readNumber(v) > 0)
+    if (hasAnyKg) {
+      const ok = window.confirm(
+        "Esta paleta tiene pesos registrados. ¿Seguro que desea eliminarla?",
+      )
+      if (!ok) return
+    }
+
+    const filtered = corPaletas.filter((_, i) => i !== index)
+    if (filtered.length >= MIN_PALETAS) {
+      writePaletas(filtered)
+      return
+    }
+
+    writePaletas([
+      {
+        id: "p-01",
+        label: "Paleta #01",
+        rollosKg: emptyPaleta(),
+        status: "en_progreso",
+      },
+    ])
   }
 
   function startProductionTimer() {
     const now = Date.now()
     setForm((prev) => ({
       ...prev,
+      cor_turno_actual:
+        readString(readObject(prev.cor_turno_actual).id) !== ""
+          ? prev.cor_turno_actual
+          : {
+              id: newId("turno"),
+              opened_at: new Date(now).toISOString(),
+            },
       corTimerState: "running",
       corTimerStartedAtMs: readNumber(prev.corTimerStartedAtMs) || now,
       corTimerLastResumeAtMs: now,
@@ -248,16 +383,65 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
       if (readString(prev.corTimerState) === "paused" && readNumber(prev.corTimerPauseAtMs) > 0) {
         dead += (now - readNumber(prev.corTimerPauseAtMs)) / 1000
       }
+
+      const existingTurnos = Array.isArray(prev.cor_turnos) ? (prev.cor_turnos as unknown[]) : []
+      const scrapR = readNumber(prev.corScrapRefileKg)
+      const scrapI = readNumber(prev.corScrapImpresoKg)
+      const scrapM = readNumber(prev.corScrapMalCorteKg)
+      const scrapSum = scrapR + scrapI + scrapM
+      const turnoEntry: CorTurno = {
+        id: newId("turno"),
+        closed_at: new Date(now).toISOString(),
+        label: nextState === "completed" ? "Turno finalizado" : "Turno cerrado",
+        turno: readString(prev.corTurno) || undefined,
+        grupo: readString(prev.corGrupo) || undefined,
+        operador: readString(prev.corOperador) || undefined,
+        ayudante: readString(prev.corAyudante) || undefined,
+        supervisor: readString(prev.corSupervisor) || undefined,
+        metrics: {
+          entrada_bobinas_kg: entradaBobinasTotal.toFixed(3),
+          salida_total_kg: salidaTotalKg.toFixed(3),
+          merma_kg: kgMerma.toFixed(3),
+          metraje: metraje.toFixed(3),
+          scrap_total_kg: scrapSum.toFixed(3),
+          scrap_refile_kg: scrapR.toFixed(3),
+          scrap_impreso_kg: scrapI.toFixed(3),
+          scrap_mal_corte_kg: scrapM.toFixed(3),
+          rollos_salida: bobinasSalidaCount,
+          paletas: salidaPaletas.length,
+        },
+        timer: {
+          total_sec: Math.round(effective + dead),
+          effective_sec: Math.round(effective),
+          dead_sec: Math.round(dead),
+          pauses: pauseEntries,
+        },
+        obs: readString(prev.corObs) || undefined,
+      }
+      const nextTurnos = [...existingTurnos, turnoEntry]
       return {
         ...prev,
+        cor_turnos: nextTurnos,
+        cor_turno_actual: {
+          id: newId("turno"),
+          opened_at: new Date(now).toISOString(),
+        },
         corTimerState: nextState,
         corTimerEffectiveAccSec: effective,
         corTimerDeadAccSec: dead,
         corTimerPauseAtMs: 0,
         corTimerLastResumeAtMs: 0,
-        corRegistrosTurnos: Math.max(1, Math.floor(readNumber(prev.corRegistrosTurnos) + 1)),
+        corRegistrosTurnos: nextTurnos.length,
         corAcumuladoProducidoKg: readNumber(prev.kgSalidaCorte),
         corUltimoTurnoLabel: nextState === "completed" ? "Turno finalizado" : "Turno cerrado",
+
+        // Nuevo turno activo: limpiar datos del turno anterior
+        corTurno: "",
+        corGrupo: "",
+        corOperador: "",
+        corAyudante: "",
+        corSupervisor: "",
+        corObs: "",
       }
     })
   }
@@ -447,7 +631,7 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
           {salidaPaletas.map((paleta, paletaIdx) => (
             <div key={`paleta-${paletaIdx}`} className="rounded-lg border bg-background">
               <div className="flex items-center justify-between border-b px-2 py-1.5">
-                <strong className="text-sm">{`Paleta #${String(paletaIdx + 1).padStart(2, "0")}`}</strong>
+                <strong className="text-sm">{corPaletas[paletaIdx]?.label ?? `Paleta #${String(paletaIdx + 1).padStart(2, "0")}`}</strong>
                 <div className="inline-flex items-center gap-1">
                   <Badge variant="outline">{`${salidaPaletasRollos[paletaIdx]}/48`}</Badge>
                   <Button
@@ -492,9 +676,10 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
                         inputMode="decimal"
                         value={valor}
                         onChange={(e) => {
-                          const next = salidaPaletas.map((row) => [...row])
-                          next[paletaIdx][rolloIdx] = e.target.value
-                          setPaletasSeries(next)
+                          const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
+                          if (!next[paletaIdx]) return
+                          next[paletaIdx].rollosKg[rolloIdx] = e.target.value
+                          writePaletas(next)
                         }}
                         placeholder="0"
                       />
@@ -535,7 +720,99 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
         <div className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-900">
           Scrap / Refil
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="mb-3 space-y-2 rounded border bg-background/80 p-2">
+          <Label className="text-muted-foreground text-xs font-medium">Sustrato del desperdicio (reporte)</Label>
+          <p className="text-muted-foreground text-[11px] leading-snug">
+            Clasificación global de la OT en el reporte (mal corte y «auto» en refile/impreso). «Auto» usa la estructura
+            del producto. Transparente aplica cuando el sustrato es film transparente / CPP.
+          </p>
+          <ToggleGroup
+            type="single"
+            className="flex flex-wrap justify-start gap-1"
+            value={
+              (() => {
+                const s = readString(form.corDesperdicioSustrato).toLowerCase()
+                return s === "bopp" || s === "politerlero" || s === "transparente" ? s : "auto"
+              })()
+            }
+            onValueChange={(v) => {
+              if (!v) return
+              setKey("corDesperdicioSustrato", v === "auto" ? "" : v)
+            }}
+          >
+            <ToggleGroupItem value="auto" className="text-xs">
+              Auto
+            </ToggleGroupItem>
+            <ToggleGroupItem value="bopp" className="text-xs">
+              BOPP
+            </ToggleGroupItem>
+            <ToggleGroupItem value="politerlero" className="text-xs">
+              Polietileno
+            </ToggleGroupItem>
+            <ToggleGroupItem value="transparente" className="text-xs">
+              Transparente
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        <div className="mb-3 grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1 rounded border bg-background/80 p-2">
+            <Label className="text-muted-foreground text-xs font-medium">Destino refile (BOPP / PE)</Label>
+            <p className="text-muted-foreground text-[11px] leading-snug">«Auto» hereda el sustrato global o la estructura.</p>
+            <ToggleGroup
+              type="single"
+              className="flex flex-wrap justify-start gap-1"
+              value={
+                (() => {
+                  const s = readString(form.corScrapRefileDestino).toLowerCase()
+                  return s === "bopp" || s === "politerlero" ? s : "auto"
+                })()
+              }
+              onValueChange={(v) => {
+                if (!v) return
+                setKey("corScrapRefileDestino", v === "auto" ? "" : v)
+              }}
+            >
+              <ToggleGroupItem value="auto" className="text-xs">
+                Auto
+              </ToggleGroupItem>
+              <ToggleGroupItem value="bopp" className="text-xs">
+                BOPP
+              </ToggleGroupItem>
+              <ToggleGroupItem value="politerlero" className="text-xs">
+                Polietileno
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+          <div className="space-y-1 rounded border bg-background/80 p-2">
+            <Label className="text-muted-foreground text-xs font-medium">Destino impreso corte (BOPP / PE)</Label>
+            <p className="text-muted-foreground text-[11px] leading-snug">«Auto» hereda el sustrato global o la estructura.</p>
+            <ToggleGroup
+              type="single"
+              className="flex flex-wrap justify-start gap-1"
+              value={
+                (() => {
+                  const s = readString(form.corScrapImpresoDestino).toLowerCase()
+                  return s === "bopp" || s === "politerlero" ? s : "auto"
+                })()
+              }
+              onValueChange={(v) => {
+                if (!v) return
+                setKey("corScrapImpresoDestino", v === "auto" ? "" : v)
+              }}
+            >
+              <ToggleGroupItem value="auto" className="text-xs">
+                Auto
+              </ToggleGroupItem>
+              <ToggleGroupItem value="bopp" className="text-xs">
+                BOPP
+              </ToggleGroupItem>
+              <ToggleGroupItem value="politerlero" className="text-xs">
+                Polietileno
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded border bg-background p-2 text-sm">
             <span className="text-muted-foreground">Refile (Kg)</span>
             <Input
@@ -557,13 +834,23 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             />
           </div>
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Total Scrap</span>
+            <span className="text-muted-foreground">Mal corte (Kg)</span>
+            <Input
+              className="ot-input-unified mt-1 h-8"
+              inputMode="decimal"
+              value={readString(form.corScrapMalCorteKg)}
+              onChange={(e) => setKey("corScrapMalCorteKg", e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div className="rounded border bg-background p-2 text-sm">
+            <span className="text-muted-foreground">Total scrap</span>
             <p className="font-semibold">{scrapTotal.toFixed(2)}</p>
           </div>
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">% Refil</span>
+            <span className="text-muted-foreground">% scrap / ingreso</span>
             <p className="font-semibold">{refilPct}%</p>
           </div>
           <div className="rounded border bg-background p-2 text-sm">

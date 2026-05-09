@@ -247,9 +247,11 @@ export type WorkOrderListRow = {
   id: number
   code: string
   document_date?: string | null
+  created_at?: string | null
   status: string
   board_stage?: string
   scheduling_status?: string
+  priority?: string | null
   areaRequests?: Array<{
     id: number
     area: string

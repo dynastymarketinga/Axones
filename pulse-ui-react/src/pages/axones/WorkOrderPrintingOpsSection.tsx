@@ -96,6 +96,8 @@ type Props = {
   metrajeRaw: string
   scrapTransparenteRaw: string
   scrapImpresoRaw: string
+  scrapImpresoDestino: "auto" | "bopp" | "transparente"
+  onSetScrapImpresoDestino: (v: "auto" | "bopp" | "transparente") => void
   devolucionBuena: number
   devolucionRechazada: number
   materialConsumido: number
@@ -967,9 +969,35 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             <Label className="ot-label">Transparente</Label>
             <Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapTransparenteRaw} onChange={(e) => props.onSetScrapTransparente(e.target.value)} placeholder="0" disabled={inputDisabled} />
           </div>
-          <div>
+          <div className="space-y-2">
             <Label className="ot-label">Impreso</Label>
             <Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapImpresoRaw} onChange={(e) => props.onSetScrapImpreso(e.target.value)} placeholder="0" disabled={inputDisabled} />
+            <div className="space-y-1">
+              <p className="text-muted-foreground text-[11px] leading-snug">Inventario destino (reporte desperdicio)</p>
+              <ToggleGroup
+                type="single"
+                className="flex flex-wrap justify-start gap-1"
+                value={props.scrapImpresoDestino}
+                onValueChange={(v) => {
+                  if (!v) return
+                  props.onSetScrapImpresoDestino(v as "auto" | "bopp" | "transparente")
+                }}
+                disabled={inputDisabled}
+              >
+                <ToggleGroupItem value="auto" className="text-xs">
+                  Auto
+                </ToggleGroupItem>
+                <ToggleGroupItem value="bopp" className="text-xs">
+                  BOPP
+                </ToggleGroupItem>
+                <ToggleGroupItem value="transparente" className="text-xs">
+                  Transparente
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <p className="text-muted-foreground text-[11px] leading-snug">
+                Auto asigna el destino del impreso según la estructura del producto en la OT (reporte de desperdicio).
+              </p>
+            </div>
           </div>
           <div className="rounded border bg-background p-2 text-sm">
             <span className="text-muted-foreground">Total scrap</span>

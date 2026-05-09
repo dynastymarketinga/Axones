@@ -1,7 +1,12 @@
-import { ArrowUpRight, Flag, Pause, Play, ReceiptText, Square } from "lucide-react"
+import { ArrowUpRight, ChevronDown, Flag, Pause, Play, ReceiptText, Square } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -19,6 +24,22 @@ import type { BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
 export type LamLabelEditorMode = "impresa" | "virgen" | "salida"
 
 type LaminacionPauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
+
+/** Turno de laminación archivado al cerrar o finalizar (solo lectura). */
+export type LamArchivedTurnEntry = {
+  id: string
+  closed_at: string
+  outcome: "turno_cerrado" | "orden_finalizada"
+  turno: string
+  grupo: string
+  operador: string
+  ayudante: string
+  supervisor: string
+  effective_sec: number
+  dead_sec: number
+  total_salida_kg: number
+  pauses: LaminacionPauseEntry[]
+}
 
 function hasMeta(meta: BobinaLabelMeta | undefined): boolean {
   if (!meta) return false
@@ -61,6 +82,7 @@ type Props = {
   pauseReason: string
   pauseObs: string
   pauseEntries: LaminacionPauseEntry[]
+  archivedTurns: LamArchivedTurnEntry[]
   turno: string
   grupo: string
   operador: string
@@ -112,6 +134,10 @@ type Props = {
   onSetScrapTransparente: (v: string) => void
   onSetScrapImpreso: (v: string) => void
   onSetScrapLaminado: (v: string) => void
+  virgenRechazadasKgRaw: string
+  virgenMaterialesBuenosKgRaw: string
+  onSetVirgenRechazadasKg: (v: string) => void
+  onSetVirgenMaterialesBuenosKg: (v: string) => void
   labelEditorOpen: boolean
   labelEditorMode: LamLabelEditorMode
   labelEditorIndex: number
@@ -148,6 +174,47 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
           <div className="rounded border bg-background px-2 py-1.5">Último turno: <span className="font-semibold text-foreground">{props.ultimoTurnoLabel}</span></div>
         </div>
       </div>
+
+      {props.archivedTurns.length > 0 ? (
+        <Collapsible className="mt-3 rounded-lg border bg-muted/30">
+          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/50">
+            <span>Historial de turnos ({props.archivedTurns.length})</span>
+            <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="space-y-2 border-t px-3 pb-3 pt-1 text-xs">
+              {props.archivedTurns.map((t) => (
+                <li key={t.id} className="rounded border bg-background p-2">
+                  <div className="font-medium">
+                    {t.closed_at
+                      ? new Date(t.closed_at).toLocaleString("es-VE")
+                      : "—"}{" "}
+                    · {t.turno || "?"} / {t.grupo || "?"} · {t.operador || "—"}
+                    <span className="text-muted-foreground">
+                      {" "}
+                      (
+                      {t.outcome === "orden_finalizada"
+                        ? "orden finalizada"
+                        : "fin de turno"}
+                      )
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground mt-1">
+                    Salida {t.total_salida_kg.toFixed(2)} Kg · Tiempo efectivo{" "}
+                    {props.formatTimerHms(t.effective_sec)} · Tiempo muerto{" "}
+                    {props.formatTimerHms(t.dead_sec)}
+                  </div>
+                  {t.pauses.length > 0 ? (
+                    <div className="mt-1 text-muted-foreground">
+                      Paradas: {t.pauses.length}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
 
       <div className="mt-3 rounded-lg border border-sky-200/70 bg-sky-50/40 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -330,6 +397,30 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               />
             </div>
           ))}
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="ot-label">Bobinas rechazadas (Kg)</Label>
+            <Input
+              className="ot-input-unified h-9"
+              inputMode="decimal"
+              value={props.virgenRechazadasKgRaw}
+              onChange={(e) => props.onSetVirgenRechazadasKg(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-muted-foreground text-[11px]">Material no conforme o rechazo de bobina virgen.</p>
+          </div>
+          <div className="space-y-1">
+            <Label className="ot-label">Materiales buenos (Kg)</Label>
+            <Input
+              className="ot-input-unified h-9"
+              inputMode="decimal"
+              value={props.virgenMaterialesBuenosKgRaw}
+              onChange={(e) => props.onSetVirgenMaterialesBuenosKg(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-muted-foreground text-[11px]">Material apto para reingreso a inventario.</p>
+          </div>
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaVirgenCount}</p></div>

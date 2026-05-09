@@ -34,7 +34,7 @@ class PrintingProductionTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse('2026-04-20 08:00:00'));
 
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-P-2',
             'status' => WorkOrderStatus::Open->value,
@@ -66,13 +66,42 @@ class PrintingProductionTest extends TestCase
         $final = $this->getJson("/api/work-orders/{$wo->id}/printing", $h)->assertOk();
         $this->assertEquals('600', $final->json('time_totals_seconds.mount'));
         $this->assertEquals('900', $final->json('time_totals_seconds.production'));
+        $this->assertEquals('0', $final->json('time_totals_seconds.demount'));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_time_segment_demount_accumulates_in_totals(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-22 10:00:00'));
+
+        $user = User::factory()->create(['role' => 'boss']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-P-DEM',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $h = $this->auth($user);
+
+        $this->postJson("/api/work-orders/{$wo->id}/printing/time-segments/start", [
+            'segment_type' => 'demount',
+        ], $h)->assertCreated()->assertJsonPath('segment_type', 'demount');
+
+        Carbon::setTestNow(Carbon::parse('2026-04-22 10:03:00'));
+
+        $state = $this->getJson("/api/work-orders/{$wo->id}/printing", $h)->assertOk();
+        $openId = $state->json('open_time_segment.id');
+        $this->postJson("/api/work-orders/{$wo->id}/printing/time-segments/{$openId}/stop", [], $h)->assertOk();
+
+        $final = $this->getJson("/api/work-orders/{$wo->id}/printing", $h)->assertOk();
+        $this->assertEquals('180', $final->json('time_totals_seconds.demount'));
 
         Carbon::setTestNow();
     }
 
     public function test_rejects_segment_on_cancelled_work_order(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-P-3',
             'status' => WorkOrderStatus::Cancelled->value,
@@ -86,7 +115,7 @@ class PrintingProductionTest extends TestCase
 
     public function test_bobina_usage_and_summary(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-P-4',
             'status' => WorkOrderStatus::Open->value,
@@ -130,7 +159,7 @@ class PrintingProductionTest extends TestCase
 
     public function test_bobina_material_mismatch_is_rejected(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-P-5',
             'status' => WorkOrderStatus::Open->value,

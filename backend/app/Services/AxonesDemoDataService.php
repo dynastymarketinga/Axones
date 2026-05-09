@@ -37,7 +37,6 @@ use App\Models\Product;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderLine;
 use App\Models\PurchaseReceipt;
-use App\Models\PurchaseReceiptLine;
 use App\Models\Supplier;
 use App\Models\TintaMixture;
 use App\Models\TintaMixtureComponent;
@@ -63,6 +62,9 @@ class AxonesDemoDataService
 {
     private int $demoVolume = 20;
 
+    /** Solo datos mínimos para comparar especificación vs terminado (sin volumen demo masivo). */
+    private bool $minimalComparisonSeed = false;
+
     public function __construct(
         private readonly InventoryLedgerService $ledger,
         private readonly PurchaseReceiptService $purchaseReceipts,
@@ -70,12 +72,17 @@ class AxonesDemoDataService
     ) {}
 
     /**
-     * @param  int  $demoVolume  Filas objetivo por tabla de dominio (5–200). Tablas con UNIQUE por OT (resúmenes)
-     *                           usan como mínimo esta cantidad de órdenes de trabajo.
+     * @param  int  $demoVolume  Filas objetivo por tabla de dominio (1–200 en modo comparación; 5–200 en modo volumen).
+     * @param  bool  $minimalComparison  Si true: pocas filas, sin catálogo masivo de tintas ni grafo pesado (una sola línea típica en despacho tras OT-DEMO-FLUJO).
      */
-    public function seed(int $demoVolume = 20): array
+    public function seed(int $demoVolume = 20, bool $minimalComparison = false): array
     {
-        $this->demoVolume = max(5, min(200, $demoVolume));
+        $this->minimalComparisonSeed = $minimalComparison;
+        if ($minimalComparison) {
+            $this->demoVolume = max(1, min(200, $demoVolume > 0 ? $demoVolume : 1));
+        } else {
+            $this->demoVolume = max(5, min(200, $demoVolume));
+        }
         // TRUNCATE hace commit implícito en MySQL: no lo corremos dentro de transacción.
         $this->cleanDomainData(keepUsers: true);
 
@@ -86,31 +93,45 @@ class AxonesDemoDataService
             $inventoryUser = $users['inventory'];
             $printingUser = $users['printing'];
 
-            $clients = $this->seedClients();
+            $clients = $this->minimalComparisonSeed ? [] : $this->seedClients();
             $suppliers = $this->seedSuppliers();
 
-            $materials = $this->seedMaterials($inventoryUser);
-            $tintaCatalog = $this->seedTintaCatalogMaterials();
+            $materials = $this->minimalComparisonSeed
+                ? $this->seedMinimalMaterials($inventoryUser)
+                : $this->seedMaterials($inventoryUser);
+            $tintaCatalog = $this->minimalComparisonSeed ? [] : $this->seedTintaCatalogMaterials();
             $materials = array_merge($materials, $tintaCatalog);
-            $products = $this->seedProducts($clients);
-            $products = array_merge($products, $this->seedExtraProductsForFirstClient($clients[0]));
-            $this->seedProductInkMaterialForDemo($products, $tintaCatalog);
+            $products = $this->minimalComparisonSeed ? [] : $this->seedProducts($clients);
+            if (! $this->minimalComparisonSeed) {
+                $products = array_merge($products, $this->seedExtraProductsForFirstClient($clients[0]));
+                $this->seedProductInkMaterialForDemo($products, $tintaCatalog);
+            }
 
             $purchaseOrders = $this->seedPurchaseOrdersAndReceipts($suppliers, $materials, $inventoryUser);
             $this->seedMiscReceipts($materials, $inventoryUser);
             $this->seedGateMovements($boss);
 
-            $clientOrders = $this->seedClientOrders($clients, $products, $materials);
-            $bobinas = $this->seedBobinas($materials);
-            $workOrders = $this->seedWorkOrders($clientOrders, $clients, $products, $materials, $printingUser);
+            if ($this->minimalComparisonSeed) {
+                $clientOrders = [];
+                $bobinas = $this->seedBobinas($materials);
+                $workOrders = [];
+            } else {
+                $clientOrders = $this->seedClientOrders($clients, $products, $materials);
+                $bobinas = $this->seedBobinas($materials);
+                $workOrders = $this->seedWorkOrders($clientOrders, $clients, $products, $materials, $printingUser);
+            }
 
-            $this->seedRequestsAndDispatch($workOrders, $materials, $inventoryUser);
-            $this->seedQuality($workOrders, $boss);
-            $this->seedReturnsAndRejectedBobinas($workOrders, $materials);
+            if (count($workOrders) > 0) {
+                $this->seedRequestsAndDispatch($workOrders, $materials, $inventoryUser);
+                $this->seedQuality($workOrders, $boss);
+                $this->seedReturnsAndRejectedBobinas($workOrders, $materials);
+            }
             $this->seedAlerts($boss);
 
-            $this->seedHeavyDemoGraph($workOrders, $materials, $bobinas, $printingUser, $boss);
-            $this->seedAuxiliaryVolume($workOrders, $materials, $products, $suppliers, $printingUser, $inventoryUser, $boss);
+            if (! $this->minimalComparisonSeed) {
+                $this->seedHeavyDemoGraph($workOrders, $materials, $bobinas, $printingUser, $boss);
+                $this->seedAuxiliaryVolume($workOrders, $materials, $products, $suppliers, $printingUser, $inventoryUser, $boss);
+            }
 
             return [
                 'users' => array_map(fn (User $u) => $u->only(['id', 'name', 'email', 'role']), $users),
@@ -122,6 +143,7 @@ class AxonesDemoDataService
                 'work_orders' => count($workOrders),
                 'bobinas' => count($bobinas),
                 'demo_volume' => $this->demoVolume,
+                'minimal_comparison' => $this->minimalComparisonSeed,
             ];
         });
     }
@@ -131,6 +153,247 @@ class AxonesDemoDataService
         // TRUNCATE hace commit implícito en MySQL: no lo corremos dentro de transacción.
         $this->cleanDomainData(keepUsers: false);
         $this->deleteDemoUsers();
+    }
+
+    /**
+     * Vacía tablas de dominio (clients, materials, work_orders, etc.) y conserva la tabla users.
+     * Recrea solo usuarios demo conocidos (emails @axones.demo y @axones.local) con contraseña «password».
+     * No inserta proveedores, materiales, pedidos ni órdenes: sirve para recorrer el flujo completo en la UI.
+     *
+     * @return array{users: array<int, array{id: int, name: string, email: string, role: string}>}
+     */
+    public function resetDomainForManualProcedure(): array
+    {
+        $this->cleanDomainData(keepUsers: true);
+        $users = $this->seedUsers();
+
+        return [
+            'users' => array_values(array_map(
+                fn (User $u) => $u->only(['id', 'name', 'email', 'role']),
+                $users,
+            )),
+        ];
+    }
+
+    /**
+     * Escenario fijo para comparar en UI o hacer el flujo manual desde Corte.
+     * Idempotente si se ejecuta varias veces: elimina la OT y la OC de demo previas y las recrea.
+     *
+     * @return array{work_order_id: int, work_order_code: string, client_id: int, product_id: int, quantity_finished_kg: string, corte_bobina_usage_id: int|null}
+     */
+    public function seedHighlightedFlowScenario(User $printingUser, User $boss, bool $createFinishedUsage = true): array
+    {
+        return DB::transaction(function () use ($printingUser, $boss, $createFinishedUsage): array {
+            WorkOrder::query()->where('code', 'OT-DEMO-FLUJO')->delete();
+
+            $existingCo = ClientOrder::query()->where('code', 'OC-CLI-DEMO-FLUJO')->first();
+            if ($existingCo) {
+                $existingCo->lines()->delete();
+                $existingCo->delete();
+            }
+
+            $client = Client::query()->updateOrCreate(
+                ['rif' => 'J-90000000-9'],
+                [
+                    'name' => 'Cliente Flujo Demo',
+                    'state' => 'Portuguesa',
+                    'city' => 'Acarigua',
+                    'address' => 'Demo flujo OT-DEMO-FLUJO',
+                    'email' => 'cliente.flujo.demo@axones.demo',
+                    'phone' => '+58 412-0000000',
+                ],
+            );
+
+            $product = Product::query()->updateOrCreate(
+                [
+                    'client_id' => $client->getKey(),
+                    'cpe' => 'CPE-DEMO-FLUJO',
+                ],
+                [
+                    'name' => 'BOLSA HARINA 5KG (DEMO FLUJO)',
+                    'mps' => 'MPS-DEMO-FLUJO',
+                    'print_type' => 'Bilaminado',
+                    'structure' => 'BOPP NORMAL + LDPE (demo)',
+                ],
+            );
+
+            $clientOrder = ClientOrder::query()->create([
+                'client_id' => $client->getKey(),
+                'code' => 'OC-CLI-DEMO-FLUJO',
+                'status' => 'open',
+                'ordered_at' => now()->toDateString(),
+                'notes' => 'Pedido demo para OT-DEMO-FLUJO (comparar especificación vs terminado).',
+                'created_by' => $boss->getKey(),
+            ]);
+
+            ClientOrderLine::query()->create([
+                'client_order_id' => $clientOrder->getKey(),
+                'product_id' => $product->getKey(),
+                'description' => $product->name,
+                'quantity' => '100.000',
+                'unit' => 'kg',
+                'notes' => 'Línea demo flujo',
+                'position' => 0,
+            ]);
+
+            $matLine = Material::query()
+                ->where('inventory_area', InventoryArea::Material->value)
+                ->orderBy('id')
+                ->first();
+
+            if (! $matLine) {
+                throw new \RuntimeException('No hay material de área sustrato tras el seed; no se puede crear OT-DEMO-FLUJO.');
+            }
+
+            $bobina = Bobina::query()->orderBy('id')->first();
+            if (! $bobina) {
+                $bobina = Bobina::query()->create([
+                    'material_id' => $matLine->getKey(),
+                    'code' => 'BOB-DEMO-FLUJO',
+                    'weight_kg' => '500.000',
+                    'status' => 'available',
+                ]);
+            }
+
+            $wo = WorkOrder::query()->create([
+                'code' => 'OT-DEMO-FLUJO',
+                'document_number' => '001-26',
+                'document_date' => now()->toDateString(),
+                'client_order_reference' => $clientOrder->code,
+                'client_order_id' => $clientOrder->getKey(),
+                'client_id' => $client->getKey(),
+                'product_id' => $product->getKey(),
+                'status' => WorkOrderStatus::InProgress->value,
+                'scheduling_status' => WorkOrderSchedulingStatus::InProgramming->value,
+                'board_stage' => WorkOrderBoardStage::Corte->value,
+                'notes' => 'OT DEMO: especificación en maestro vs kg terminados aquí (Corte) y en Despacho.',
+                'created_by' => $printingUser->getKey(),
+            ]);
+
+            // Precarga de la "Orden de trabajo" (form web) para que /axones/ordenes-trabajo/1?tab=corte
+            // muestre la cabecera y el bloque de Corte completos desde el primer render.
+            WorkOrderTechnicalDocument::query()->updateOrCreate(
+                ['work_order_id' => $wo->getKey()],
+                ['form' => [
+                    // Cabecera
+                    'fechaOrden' => now()->toDateString(),
+                    'numeroOrden' => '001-26',
+                    'pedidoKg' => '100.000',
+                    'maquina' => 'COMEXI 1',
+                    'planchasReferencia' => '067',
+                    'metrosEstimados' => '-',
+
+                    // Datos que la UI muestra en "solo lectura" (merge prefill + form)
+                    'cliente' => $client->name,
+                    'producto' => $product->name,
+                    'cpe' => $product->cpe,
+                    'estructuraMaterial' => $product->structure,
+                    // Evita validación "Seleccione el tipo de impresión."
+                    'tipoImpresionEstructura' => 'superficie',
+                    // Evita validación "Cod. Barra es obligatorio."
+                    'codigoBarra' => '7590000000123',
+
+                    // Área de Corte / Embalaje
+                    'anchoCorteFinal' => '320±0',
+                    'pesoBobina' => '19-20',
+                    'metrosBobina' => '1020 ± 20',
+                    'orientacionEmbalaje' => '1',
+                    'figuraEmbobinadoCorte' => '1',
+                    'ubicFotoceldaCorte' => 'Borde líder',
+                    'distFotoceldaBorde' => '1±1',
+                    'distFiguraLadoContrario' => '20±1',
+                    'distFiguraLadoFotocelda' => '30±1',
+                    'maxEmpates' => '1',
+                    'diamBobina' => '400 ± 5',
+                    'anchoCore' => '460',
+                    'diamCorePlg' => '3',
+                    'cantCores' => '10',
+                    'kgIngresadosCorte' => '100.00',
+                    // Según tu ejemplo (puede ser cualquier número válido)
+                    'kgSalidaCorte' => '600.10',
+                    'kgMermaCorte' => '10.00',
+                    'metrajeCorte' => '1000',
+
+                    // Kg desperdicio — historial del reporte (planilla; no viene de inventario/bobinas)
+                    'impScrapTransparenteKg' => '3.250',
+                    'impScrapImpresoKg' => '20.000',
+                    'impScrapImpresoDestino' => 'bopp',
+                    'lamScrapTransparenteKg' => '1.000',
+                    'lamScrapImpresoKg' => '15.000',
+                    'lamScrapLaminadoKg' => '15.000',
+                    'corScrapRefileKg' => '10.000',
+                    'corScrapImpresoKg' => '10.000',
+                    'corScrapMalCorteKg' => '0.000',
+                ]],
+            );
+
+            WorkOrderLine::query()->create([
+                'work_order_id' => $wo->getKey(),
+                'material_id' => $matLine->getKey(),
+                'quantity' => '100.000',
+                'notes' => 'Consumo demo flujo',
+            ]);
+
+            WorkOrderProductionItem::query()->create([
+                'work_order_id' => $wo->getKey(),
+                'position' => 0,
+                'quantity' => '100.000',
+                'quantity_unit' => 'Kg',
+                'product_description' => $product->name.' — ítem producción demo flujo',
+                'technical_specs' => 'Demo: ver despacho producto terminado',
+            ]);
+
+            WorkOrderCorteSummary::query()->updateOrCreate(
+                ['work_order_id' => $wo->getKey()],
+                ['scrap_percent' => '0.500', 'notes' => 'Resumen corte (demo flujo)'],
+            );
+
+            WorkOrderPrintingSummary::query()->updateOrCreate(
+                ['work_order_id' => $wo->getKey()],
+                ['scrap_percent' => '1.250', 'notes' => 'Resumen impresión (demo flujo)'],
+            );
+
+            WorkOrderLaminacionSummary::query()->updateOrCreate(
+                ['work_order_id' => $wo->getKey()],
+                [
+                    'scrap_percent' => '2.100',
+                    'solvent_quantity_kg' => null,
+                    'notes' => 'Resumen laminación (demo flujo)',
+                ],
+            );
+
+            $usage = null;
+            if ($createFinishedUsage) {
+                $usage = CorteBobinaUsage::query()->create([
+                    'work_order_id' => $wo->getKey(),
+                    'bobina_id' => $bobina->getKey(),
+                    'material_id' => $matLine->getKey(),
+                    'quantity_used_kg' => '100.000',
+                    'quantity_finished_kg' => '92.000',
+                    'notes' => 'Kg terminados demo: saldo despachable 92 kg (sin nota de entrega).',
+                ]);
+            }
+
+            // Para que /axones/corte muestre la OT en "En mi fase" (mi_area=corte),
+            // la API requiere una solicitud de área pendiente.
+            AreaRequest::query()->create([
+                'area' => 'corte',
+                'title' => 'OT-DEMO-FLUJO · Pendiente en Corte',
+                'body' => 'Solicitud demo para validar que la OT aparece en /corte y el terminado cae en despacho.',
+                'status' => 'pending',
+                'work_order_id' => $wo->getKey(),
+                'requested_by' => $boss->getKey(),
+            ]);
+
+            return [
+                'work_order_id' => (int) $wo->getKey(),
+                'work_order_code' => 'OT-DEMO-FLUJO',
+                'client_id' => (int) $client->getKey(),
+                'product_id' => (int) $product->getKey(),
+                'quantity_finished_kg' => $createFinishedUsage ? '92.000' : '0.000',
+                'corte_bobina_usage_id' => $usage ? (int) $usage->getKey() : null,
+            ];
+        });
     }
 
     private function seedUsers(): array
@@ -218,6 +481,46 @@ class AxonesDemoDataService
         }
 
         return $out;
+    }
+
+    /**
+     * Materiales mínimos: dos sustratos (OC demo), una tinta, un químico y bobinas rechazadas (devoluciones demo).
+     *
+     * @return list<Material>
+     */
+    private function seedMinimalMaterials(User $inventoryUser): array
+    {
+        $make = function (string $sku, string $name, string $area, string $unit, string $min, string $initial) use ($inventoryUser): Material {
+            $m = Material::query()->create([
+                'sku' => $sku,
+                'name' => $name,
+                'inventory_area' => $area,
+                'unit' => $unit,
+                'min_stock' => $min,
+                'notes' => 'demo_minimal',
+            ]);
+            if (bccomp($initial, '0', 3) === 1) {
+                $this->ledger->apply(
+                    $m,
+                    InventoryMovementType::AdjustmentAdd,
+                    $initial,
+                    $inventoryUser,
+                    'demo_seed',
+                    (int) $m->getKey(),
+                    ['reason' => 'Stock inicial demo (minimal)'],
+                );
+            }
+
+            return $m;
+        };
+
+        return [
+            $make('AX-MIN-SUB-A', 'Sustrato demo minimal A (BOPP)', InventoryArea::Material->value, 'kg', '5.000', '200.000'),
+            $make('AX-MIN-SUB-B', 'Sustrato demo minimal B (PEBD)', InventoryArea::Material->value, 'kg', '5.000', '200.000'),
+            $make('AX-MIN-TINTA', 'Tinta demo minimal', InventoryArea::Tintas->value, 'kg', '2.000', '50.000'),
+            $make('AX-MIN-QUIM', 'Químico demo minimal', InventoryArea::Quimicos->value, 'kg', '1.000', '30.000'),
+            $make('AX-MIN-RECH', 'Bobinas rechazadas (minimal)', InventoryArea::BobinasRechazadas->value, 'kg', '0.000', '0.000'),
+        ];
     }
 
     private function seedMaterials(User $inventoryUser): array
@@ -515,7 +818,8 @@ class AxonesDemoDataService
         $ns = count($suppliers);
         $nm = count($materials);
 
-        for ($i = 2; $i <= $this->demoVolume; $i++) {
+        // $i=2 ya está ocupado por $po2 (OC-DEMO-00002); el volumen continúa desde 00003.
+        for ($i = 3; $i <= $this->demoVolume; $i++) {
             $po = PurchaseOrder::query()->create([
                 'supplier_id' => $suppliers[($i - 1) % $ns]->getKey(),
                 'code' => 'OC-DEMO-'.str_pad((string) $i, 5, '0', STR_PAD_LEFT),
@@ -800,7 +1104,8 @@ class AxonesDemoDataService
      */
     private function seedRequestsAndDispatch(array $workOrders, array $materials, User $inventoryUser): void
     {
-        $wo = $workOrders[1];
+        $woIdx = count($workOrders) > 1 ? 1 : 0;
+        $wo = $workOrders[$woIdx];
         $mat0 = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Material->value)
             ?? $materials[0];
         $tinta = collect($materials)->first(fn (Material $m) => $m->inventory_area === InventoryArea::Tintas->value);
@@ -838,8 +1143,9 @@ class AxonesDemoDataService
      */
     private function seedQuality(array $workOrders, User $boss): void
     {
+        $woIdx = count($workOrders) > 1 ? 1 : 0;
         WorkOrderQualityRecord::query()->updateOrCreate(
-            ['work_order_id' => $workOrders[1]->getKey()],
+            ['work_order_id' => $workOrders[$woIdx]->getKey()],
             [
                 'outcome' => 'approved',
                 'notes' => 'Calidad demo',

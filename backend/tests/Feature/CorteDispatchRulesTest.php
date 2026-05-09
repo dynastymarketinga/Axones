@@ -12,6 +12,7 @@ use App\Models\Material;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\WorkOrder;
+use App\Models\WorkOrderLine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -27,7 +28,11 @@ class CorteDispatchRulesTest extends TestCase
     private function createCorteUsageWithFinished(float $finished): CorteBobinaUsage
     {
         $user = User::factory()->create();
-        $client = Client::query()->create(['name' => 'C-D', 'rif' => 'J-700']);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-D-'.$uniq,
+            'rif' => 'J-7'.$uniq,
+        ]);
         $product = Product::query()->create(['client_id' => $client->id, 'name' => 'P-D', 'cpe' => 'CPE-D']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-D-'.uniqid(),
@@ -63,17 +68,9 @@ class CorteDispatchRulesTest extends TestCase
         $this->getJson('/api/corte-dispatch/available', $h)->assertOk();
         $rows = $this->getJson('/api/corte-dispatch/available', $h)->json('rows');
         $this->assertNotEmpty($rows);
-        $match = collect($rows)->firstWhere('corte_bobina_usage_id', $usage->id);
+        $match = collect($rows)->firstWhere('work_order_id', $usage->work_order_id);
+        $this->assertNotNull($match);
         $this->assertEquals('50.000', $match['quantity_remaining_kg']);
-        $this->assertArrayHasKey('pallet_code', $match);
-        $this->assertArrayHasKey('bobbin_count', $match);
-
-        $groups = $this->getJson('/api/corte-dispatch/available', $h)->json('groups');
-        $this->assertNotEmpty($groups);
-        $firstGroup = collect($groups)->first();
-        $this->assertArrayHasKey('total_remaining_kg', $firstGroup);
-        $this->assertArrayHasKey('rows', $firstGroup);
-        $this->assertNotEmpty($firstGroup['rows']);
 
         $this->postJson('/api/delivery-notes', [
             'lines' => [[
@@ -85,7 +82,7 @@ class CorteDispatchRulesTest extends TestCase
         ], $h)->assertCreated();
 
         $rows2 = $this->getJson('/api/corte-dispatch/available', $h)->json('rows');
-        $match2 = collect($rows2)->firstWhere('corte_bobina_usage_id', $usage->id);
+        $match2 = collect($rows2)->firstWhere('work_order_id', $usage->work_order_id);
         $this->assertNotNull($match2);
         $this->assertEquals('20.000', $match2['quantity_remaining_kg']);
     }
@@ -181,12 +178,78 @@ class CorteDispatchRulesTest extends TestCase
         ]);
 
         $rows = $this->getJson('/api/corte-dispatch/available', $h)->json('rows');
-        $this->assertEmpty(collect($rows)->where('corte_bobina_usage_id', $usage->id));
+        $this->assertEmpty(collect($rows)->where('work_order_id', $usage->work_order_id));
 
         $dn->update(['status' => DeliveryNoteStatus::Cancelled->value]);
 
         $rows2 = $this->getJson('/api/corte-dispatch/available', $h)->json('rows');
-        $this->assertNotEmpty(collect($rows2)->where('corte_bobina_usage_id', $usage->id));
+        $this->assertNotEmpty(collect($rows2)->where('work_order_id', $usage->work_order_id));
+    }
+
+    public function test_saving_corte_planilla_creates_dispatch_row_grouped_by_work_order(): void
+    {
+        $user = User::factory()->create();
+        $user->forceFill(['role' => 'corte'])->save();
+        $h = $this->auth($user);
+
+        $client = Client::query()->create([
+            'name' => 'C-PLAN-'.uniqid(),
+            'rif' => 'J-'.random_int(10000000, 99999999).'-'.random_int(0, 9),
+        ]);
+        $product = Product::query()->create(['client_id' => $client->id, 'name' => 'P-PLAN', 'cpe' => 'CPE-PLAN']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PLAN-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'board_stage' => 'corte',
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-PLAN-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        $payload = [
+            'form' => [
+                'pedidoKg' => '100.000',
+                'maquina' => 'COMEXI 1',
+                'tipoImpresionEstructura' => 'superficie',
+                'anchoCorteFinal' => '320±0',
+                'pesoBobina' => '19-20',
+                'metrosBobina' => '1020 ± 20',
+                'distFotoceldaBorde' => '1±1',
+                'distFiguraLadoContrario' => '20±1',
+                'distFiguraLadoFotocelda' => '30±1',
+                'diamBobina' => '400 ± 5',
+                'anchoCore' => '460',
+                'diamCorePlg' => '3',
+                'cantCores' => '10',
+                'maxEmpates' => '1',
+                'ubicFotoceldaCorte' => 'Borde líder',
+                'orientacionEmbalaje' => '1',
+                'kgIngresadosCorte' => '100.00',
+                'kgSalidaCorte' => '600.10',
+                'kgMermaCorte' => '10.00',
+                'metrajeCorte' => '1000',
+            ],
+        ];
+
+        $this->putJson('/api/work-orders/'.$wo->id.'/orden-trabajo', $payload, $h)->assertOk();
+
+        $rows = $this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows');
+        $match = collect($rows)->firstWhere('work_order_id', $wo->id);
+        $this->assertNotNull($match);
+        $this->assertEquals('600.100', $match['quantity_finished_kg']);
+        $this->assertEquals('600.100', $match['quantity_remaining_kg']);
     }
 
     public function test_store_from_multiple_work_orders_is_listed_in_delivery_history(): void

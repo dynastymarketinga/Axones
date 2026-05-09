@@ -11,6 +11,7 @@ type WindingFigurePickerProps = {
   onChange: (v: string) => void
   className?: string
   helpText?: string
+  disabled?: boolean
 }
 
 /**
@@ -21,6 +22,7 @@ export function WindingFigurePicker({
   onChange,
   className,
   helpText = "1–8 o libre",
+  disabled = false,
 }: WindingFigurePickerProps) {
   const v = (value || "").trim()
   const previewText =
@@ -40,6 +42,7 @@ export function WindingFigurePicker({
             variant={v === n ? "default" : "outline"}
             className="h-9 min-w-9 px-2.5 text-xs sm:h-8 sm:min-w-8 sm:px-2"
             aria-pressed={v === n}
+            disabled={disabled}
             onClick={() => onChange(n)}
           >
             {n}
@@ -52,6 +55,7 @@ export function WindingFigurePicker({
           value={v}
           inputMode="numeric"
           pattern="[0-9]*"
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 1))}
           placeholder={numericHelpText}
           aria-label="Figura de embobinado (1-8)"

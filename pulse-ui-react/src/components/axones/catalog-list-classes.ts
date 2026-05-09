@@ -16,3 +16,11 @@ export const catalogSelectTriggerClass =
 
 export const catalogSearchInputClass =
   "h-11 border-primary/30 bg-background/95 pl-9 text-base focus-visible:ring-primary/40 md:text-sm"
+
+/** Select «por página» en barras de paginación (superficie opaca sobre gradientes). */
+export const catalogPaginationSelectTriggerClass =
+  "border-input bg-card text-card-foreground shadow-sm"
+
+/** Botones Anterior/Siguiente en la misma barra (outline + fondo card; disabled legible). */
+export const catalogPaginationOutlineButtonClass =
+  "bg-card disabled:opacity-100 disabled:bg-muted disabled:text-muted-foreground"

@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Enums\WorkOrderStatus;
 use App\Models\Client;
+use App\Models\CorteTimeSegment;
+use App\Models\LaminacionTimeSegment;
 use App\Models\PrintingTimeSegment;
 use App\Models\Product;
 use App\Models\User;
@@ -73,6 +75,14 @@ class WorkOrderTimeReportTest extends TestCase
             'user_id' => $user->id,
             'notes' => null,
         ]);
+        PrintingTimeSegment::query()->create([
+            'work_order_id' => $wo->id,
+            'segment_type' => 'demount',
+            'started_at' => '2026-05-10 07:45:00',
+            'ended_at' => '2026-05-10 07:55:00',
+            'user_id' => $user->id,
+            'notes' => null,
+        ]);
 
         // Segmento abierto (no debe contar).
         PrintingTimeSegment::query()->create([
@@ -105,7 +115,7 @@ class WorkOrderTimeReportTest extends TestCase
                 'work_order_id',
                 'work_order',
                 'summary',
-                'totals' => ['production_seconds', 'downtime_seconds', 'mount_seconds', 'total_seconds', 'effective_percent'],
+                'totals' => ['production_seconds', 'downtime_seconds', 'mount_seconds', 'demount_seconds', 'total_seconds', 'effective_percent'],
                 'downtimes',
                 'rows_csv',
             ]);
@@ -114,7 +124,8 @@ class WorkOrderTimeReportTest extends TestCase
         $this->assertSame(3600, $resp->json('totals.production_seconds'));
         $this->assertSame(1800, $resp->json('totals.downtime_seconds'));
         $this->assertSame(900, $resp->json('totals.mount_seconds'));
-        $this->assertSame(6300, $resp->json('totals.total_seconds'));
+        $this->assertSame(600, $resp->json('totals.demount_seconds'));
+        $this->assertSame(6900, $resp->json('totals.total_seconds'));
 
         // Solo 1 parada de la OT objetivo (la otra es de "other").
         $downtimes = $resp->json('downtimes');
@@ -187,5 +198,100 @@ class WorkOrderTimeReportTest extends TestCase
     {
         $this->getJson('/api/reports/work-order-time-report?from=2026-05-01&to=2026-05-31')
             ->assertUnauthorized();
+    }
+
+    public function test_time_report_candidates_lists_work_orders_and_areas(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $woA = $this->makeWorkOrder($user, 'CA');
+        $woB = $this->makeWorkOrder($user, 'CB');
+
+        PrintingTimeSegment::query()->create([
+            'work_order_id' => $woA->id,
+            'segment_type' => 'production',
+            'started_at' => '2026-05-10 08:00:00',
+            'ended_at' => '2026-05-10 09:00:00',
+            'user_id' => $user->id,
+            'notes' => null,
+        ]);
+
+        LaminacionTimeSegment::query()->create([
+            'work_order_id' => $woA->id,
+            'segment_type' => 'production',
+            'started_at' => '2026-05-11 10:00:00',
+            'ended_at' => '2026-05-11 10:30:00',
+            'user_id' => $user->id,
+            'notes' => null,
+        ]);
+
+        CorteTimeSegment::query()->create([
+            'work_order_id' => $woB->id,
+            'segment_type' => 'mount',
+            'started_at' => '2026-05-12 14:00:00',
+            'ended_at' => '2026-05-12 14:20:00',
+            'user_id' => $user->id,
+            'notes' => null,
+        ]);
+
+        // Fuera de rango (no debe listar).
+        PrintingTimeSegment::query()->create([
+            'work_order_id' => $woB->id,
+            'segment_type' => 'production',
+            'started_at' => '2026-04-01 08:00:00',
+            'ended_at' => '2026-04-01 09:00:00',
+            'user_id' => $user->id,
+            'notes' => null,
+        ]);
+
+        $resp = $this->getJson(
+            '/api/reports/work-order-time-report/candidates?from=2026-05-01&to=2026-05-31',
+            $h,
+        );
+
+        $resp->assertOk()
+            ->assertJsonStructure([
+                'from',
+                'to',
+                'work_orders' => [
+                    '*' => [
+                        'work_order_id',
+                        'work_order_code',
+                        'client_name',
+                        'product_name',
+                        'areas',
+                        'production_seconds',
+                        'downtime_seconds',
+                        'mount_seconds',
+                        'demount_seconds',
+                        'total_seconds',
+                        'effective_percent',
+                    ],
+                ],
+            ]);
+
+        $rows = $resp->json('work_orders');
+        $this->assertCount(2, $rows);
+
+        $byId = collect($rows)->keyBy('work_order_id');
+        $this->assertSame(['printing', 'laminacion'], $byId[$woA->id]['areas']);
+        $this->assertSame(['corte'], $byId[$woB->id]['areas']);
+        $this->assertSame('OT-TR-CA', $byId[$woA->id]['work_order_code']);
+        $this->assertSame('OT-TR-CB', $byId[$woB->id]['work_order_code']);
+
+        $this->assertSame('Empaque CA', $byId[$woA->id]['product_name']);
+        $this->assertSame('Empaque CB', $byId[$woB->id]['product_name']);
+
+        // WO A: 1h printing production + 30min laminacion production = 5400 s efectivo
+        $this->assertSame(5400, (int) $byId[$woA->id]['production_seconds']);
+        $this->assertSame(0, (int) $byId[$woA->id]['downtime_seconds']);
+        $this->assertSame(5400, (int) $byId[$woA->id]['total_seconds']);
+        $this->assertSame('100.00', $byId[$woA->id]['effective_percent']);
+
+        // WO B: 20min mount on corte = 1200 s
+        $this->assertSame(1200, (int) $byId[$woB->id]['mount_seconds']);
+        $this->assertSame(0, (int) $byId[$woB->id]['production_seconds']);
+        $this->assertSame(1200, (int) $byId[$woB->id]['total_seconds']);
+        $this->assertSame('0.00', $byId[$woB->id]['effective_percent']);
     }
 }

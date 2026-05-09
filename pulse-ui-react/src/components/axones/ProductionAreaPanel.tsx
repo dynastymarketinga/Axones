@@ -27,13 +27,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-const SEGMENT_TYPES = ["mount", "production", "downtime"] as const
+const SEGMENT_TYPES = ["mount", "demount", "production", "downtime"] as const
 
 const MOUNT_OVER_SECONDS = 3600
 const SCRAP_WARN_PERCENT = 10
 
 function segmentLabel(t: string): string {
   if (t === "mount") return "Montaje"
+  if (t === "demount") return "Desmontaje"
   if (t === "production") return "Producción"
   if (t === "downtime") return "Tiempo muerto"
   return t
@@ -514,7 +515,7 @@ export function ProductionAreaPanel({
                 </div>
               ) : (
                 <p className="text-muted-foreground text-sm">
-                  No hay segmento abierto. Inicie montaje, producción o tiempo
+                  No hay segmento abierto. Inicie montaje, desmontaje, producción o tiempo
                   muerto.
                 </p>
               )}

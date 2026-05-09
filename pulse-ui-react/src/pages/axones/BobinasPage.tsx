@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -111,6 +112,8 @@ export default function BobinasPage() {
           </Button>
         </div>
       </div>
+
+      <AxonesInventoryModuleNav active="bobinas" />
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="grid w-56 gap-2">

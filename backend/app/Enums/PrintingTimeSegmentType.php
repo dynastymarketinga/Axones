@@ -5,6 +5,7 @@ namespace App\Enums;
 enum PrintingTimeSegmentType: string
 {
     case Mount = 'mount';
+    case Demount = 'demount';
     case Production = 'production';
     case Downtime = 'downtime';
 

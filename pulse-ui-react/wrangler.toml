@@ -1,0 +1,6 @@
+# Dev en el móvil (Quick Tunnel): en esta carpeta → npm run dev:share → abre la URL https://….trycloudflare.com/axones/
+# Despliegue: desde esta carpeta → npx wrangler pages deploy dist --project-name=axones-ui
+# O conecta el repo en Cloudflare Dashboard: directorio raíz "pulse-ui-react", build "npm ci && npm run build:cf", salida "dist".
+name = "axones-ui"
+compatibility_date = "2026-05-07"
+pages_build_output_dir = "dist"

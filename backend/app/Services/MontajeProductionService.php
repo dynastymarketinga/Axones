@@ -54,6 +54,7 @@ class MontajeProductionService
 
         $totals = [
             'mount' => '0',
+            'demount' => '0',
             'production' => '0',
             'downtime' => '0',
         ];
@@ -88,7 +89,7 @@ class MontajeProductionService
 
         if (! in_array($segmentType, PrintingTimeSegmentType::values(), true)) {
             throw ValidationException::withMessages([
-                'segment_type' => ['Tipo de segmento inválido. Use: mount, production, downtime.'],
+                'segment_type' => ['Tipo de segmento inválido. Use: mount, demount, production, downtime.'],
             ]);
         }
 

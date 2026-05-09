@@ -34,8 +34,8 @@ const CARDS: Card[] = [
     icon: ClipboardList,
   },
   {
-    title: "Productos",
-    description: "Productos por cliente (CPE/MPS/estructura).",
+    title: "Especificaciones de producto",
+    description: "Referencia por cliente (CPE/MPS/estructura) para pedidos y OT.",
     url: "productos",
     icon: Package,
   },

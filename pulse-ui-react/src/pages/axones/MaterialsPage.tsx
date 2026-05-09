@@ -10,6 +10,7 @@ import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import {
   AXONES_INVENTORY_FILTER_INPUT_CLASS,
   AXONES_INVENTORY_PAGE_CLASS,
+  AxonesInventoryModuleNav,
   AxonesPageHeader,
   AxonesTableCard,
 } from "@/components/axones/inventory-page-layout"
@@ -168,14 +169,16 @@ export default function MaterialsPage() {
   return (
     <div className={AXONES_INVENTORY_PAGE_CLASS}>
       <AxonesPageHeader
-        title="Materiales"
-        description="Pestañas por área; búsqueda al escribir; proveedor y stock en tabla."
+        title="Materiales (insumos)"
+        description="Sustratos, tintas, químicos y misceláneos con stock por área. No incluye producto terminado: el terminado se declara en Corte."
         actions={
           <Button asChild>
             <Link to="/materiales/nuevo">Nuevo material</Link>
           </Button>
         }
       />
+
+      <AxonesInventoryModuleNav active="materiales" />
 
       <Tabs
         value={activeArea}

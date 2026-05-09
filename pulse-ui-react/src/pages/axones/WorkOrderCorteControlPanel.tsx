@@ -5,6 +5,7 @@ import { Scissors } from "lucide-react"
 import { toast } from "sonner"
 
 import { ProductionAreaPanel } from "@/components/axones/ProductionAreaPanel"
+import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { apiFetch, ApiError } from "@/lib/api"
@@ -57,6 +58,7 @@ export default function WorkOrderCorteControlPanel({ workOrderId }: { workOrderI
 
   return (
     <div className="space-y-4">
+      <WorkOrderStageBadge current="corte" />
       <div className="ax-ot">
         <div className="ot-section">
           <div className="section-header">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { useNavigate } from "react-router-dom"
 
+import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
@@ -871,6 +872,12 @@ export default function WorkOrderPrintingControlPanel({
         impMetrajeProduccion: normalizeNumericString(src.impMetrajeProduccion),
         impScrapTransparenteKg: normalizeNumericString(src.impScrapTransparenteKg),
         impScrapImpresoKg: normalizeNumericString(src.impScrapImpresoKg),
+        impScrapImpresoDestino: (() => {
+          const d = readString(src.impScrapImpresoDestino).toLowerCase()
+          if (d === "transparente") return "transparente"
+          if (d === "bopp") return "bopp"
+          return ""
+        })(),
         impScrapAcumuladoKg: normalizeNumericString(accFromJson.scrapKg),
         impMermaKg: normalizeNumericString(src.impMermaKg),
         impTimerEffectiveAccSec: normalizeNumericString(src.impTimerEffectiveAccSec),
@@ -1393,6 +1400,7 @@ export default function WorkOrderPrintingControlPanel({
 
   return (
     <div className="space-y-4">
+      <WorkOrderStageBadge current="produccion" />
       {hasActiveTurno && !readOnlyOps && !canEditByControl ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1458,6 +1466,18 @@ export default function WorkOrderPrintingControlPanel({
         metrajeRaw={readNumberString(form.impMetrajeProduccion)}
         scrapTransparenteRaw={readNumberString(form.impScrapTransparenteKg)}
         scrapImpresoRaw={readNumberString(form.impScrapImpresoKg)}
+        scrapImpresoDestino={(() => {
+          const d = readString(form.impScrapImpresoDestino).toLowerCase()
+          if (d === "transparente") return "transparente"
+          if (d === "bopp") return "bopp"
+          return "auto"
+        })()}
+        onSetScrapImpresoDestino={(v) =>
+          setForm((prev) => ({
+            ...prev,
+            impScrapImpresoDestino: v === "auto" ? "" : v,
+          }))
+        }
         devolucionBuena={devolucionBuena}
         devolucionRechazada={devolucionRechazada}
         materialConsumido={materialConsumido}

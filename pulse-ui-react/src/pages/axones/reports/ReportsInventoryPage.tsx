@@ -15,50 +15,65 @@ export default function ReportsInventoryPage() {
       onFromChange={setFrom}
       onToChange={setTo}
     >
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          disabled={loading}
-          onClick={() =>
-            void downloadCsv("reports/inventory-daily", "inventory-daily.csv", {
-              from,
-              to,
-            })
-          }
-        >
-          Movimientos diarios (CSV)
-        </Button>
-        <div className="flex flex-col gap-1">
-          <Button
-            variant="outline"
-            disabled={loading}
-            onClick={() =>
-              void downloadCsv(
-                "reports/consumption-by-client-product",
-                "consumption-by-client-product.csv",
-                { from, to },
-              )
-            }
-          >
-            Consumo por cliente y producto (CSV)
-          </Button>
-          <p className="text-muted-foreground max-w-xl text-xs">
-            Agrega consumo de material vinculado a órdenes de trabajo en el rango
-            (cliente y producto).
-          </p>
+      <div className="bg-card space-y-4 rounded-2xl border p-4 shadow-sm">
+        <p className="text-muted-foreground text-sm">
+          Las descargas respetan el <strong>rango de fechas global</strong> de arriba. Cada archivo se genera al instante
+          desde el servidor.
+        </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start">
+          <div className="flex min-w-[11rem] flex-col gap-1">
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() =>
+                void downloadCsv("reports/inventory-daily", "inventory-daily.csv", {
+                  from,
+                  to,
+                })
+              }
+            >
+              Movimientos diarios
+            </Button>
+            <p className="text-muted-foreground max-w-xs text-xs">
+              Movimientos de inventario agrupados por día en el período seleccionado.
+            </p>
+          </div>
+          <div className="flex min-w-[11rem] flex-col gap-1">
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() =>
+                void downloadCsv(
+                  "reports/consumption-by-client-product",
+                  "consumption-by-client-product.csv",
+                  { from, to },
+                )
+              }
+            >
+              Consumo por cliente y producto
+            </Button>
+            <p className="text-muted-foreground max-w-xs text-xs">
+              Consumo de material vinculado a órdenes de trabajo en el rango (cliente y producto).
+            </p>
+          </div>
+          <div className="flex min-w-[11rem] flex-col gap-1">
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() =>
+                void downloadCsv("reports/rejected-bobinas", "rejected-bobinas.csv", {
+                  from,
+                  to,
+                })
+              }
+            >
+              Bobinas rechazadas
+            </Button>
+            <p className="text-muted-foreground max-w-xs text-xs">
+              Bobinas en estado rechazado registradas en inventario durante el período.
+            </p>
+          </div>
         </div>
-        <Button
-          variant="outline"
-          disabled={loading}
-          onClick={() =>
-            void downloadCsv("reports/rejected-bobinas", "rejected-bobinas.csv", {
-              from,
-              to,
-            })
-          }
-        >
-          Bobinas rechazadas (CSV)
-        </Button>
       </div>
     </ReportPageShell>
   )

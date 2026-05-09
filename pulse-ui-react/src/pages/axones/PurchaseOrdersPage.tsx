@@ -31,6 +31,8 @@ import {
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
 import {
+  catalogPaginationOutlineButtonClass,
+  catalogPaginationSelectTriggerClass,
   catalogSelectTriggerClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
@@ -96,6 +98,8 @@ function purchaseOrderStatusLabel(value: string | null | undefined): string {
   if (!value) return "—"
   return PURCHASE_ORDER_STATUS_LABELS[value] ?? value
 }
+
+const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
 /** Botones de acción en fila: colores distintos por función */
 const poActionIconBase =
@@ -303,7 +307,7 @@ export default function PurchaseOrdersPage() {
   const [reactivateReason, setReactivateReason] = useState("")
   const [reactivateSaving, setReactivateSaving] = useState(false)
 
-  const perPage = 20
+  const [perPage, setPerPage] = useState(20)
 
   const from = useMemo(() => {
     const params = new URLSearchParams()
@@ -1190,28 +1194,66 @@ export default function PurchaseOrdersPage() {
             </Table>
           </div>
 
-          {rows && rows.last_page > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Página {rows.current_page} de {rows.last_page} · {rows.total}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                >
-                  Siguiente
-                </Button>
+          {rows ? (
+            <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <p className="text-muted-foreground min-w-0">
+                {rows.total === 0
+                  ? "Sin resultados con los filtros actuales."
+                  : rows.last_page > 1
+                    ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
+                    : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
+              </p>
+              <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Por página</span>
+                  <Select
+                    value={String(perPage)}
+                    onValueChange={(v) => {
+                      setPerPage(Number(v))
+                      setPage(1)
+                    }}
+                  >
+                    <SelectTrigger
+                      id="purchase-orders-per-page"
+                      className={cn(
+                        "h-8 w-[4.5rem] text-sm",
+                        catalogPaginationSelectTriggerClass,
+                      )}
+                      aria-label="Registros por página"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PER_PAGE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt} value={String(opt)}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
+                    disabled={rows.current_page <= 1 || loading}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    type="button"
+                  >
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
+                    disabled={rows.current_page >= rows.last_page || loading}
+                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                    type="button"
+                  >
+                    Siguiente
+                  </Button>
+                </div>
               </div>
             </div>
           ) : null}

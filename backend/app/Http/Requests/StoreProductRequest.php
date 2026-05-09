@@ -31,7 +31,7 @@ class StoreProductRequest extends FormRequest
             'cpe' => ['nullable', 'string', 'max:255'],
             'mps' => ['nullable', 'string', 'max:255'],
             'print_type' => ['nullable', 'string', 'max:128'],
-            'structure' => ['nullable', 'string'],
+            'structure' => ['nullable', 'string', 'max:300'],
         ];
     }
 

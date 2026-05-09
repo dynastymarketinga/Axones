@@ -6,6 +6,7 @@ use App\Enums\AreaRequestStatus;
 use App\Enums\ClientOrderStatus;
 use App\Enums\MaterialRequestStatus;
 use App\Enums\WorkOrderBoardStage;
+use App\Enums\WorkOrderPriority;
 use App\Enums\WorkOrderSchedulingStatus;
 use App\Enums\WorkOrderStatus;
 use App\Http\Controllers\Controller;
@@ -25,6 +26,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\View;
 use Illuminate\Validation\ValidationException;
@@ -37,6 +39,55 @@ class WorkOrderController extends Controller
         private readonly ProductionNotificationService $productionNotifications,
         private readonly WorkOrderPlanillaReportService $planillaReport,
     ) {}
+
+    private function parseDateStart(?string $raw): ?Carbon
+    {
+        $v = trim((string) $raw);
+        if ($v === '') {
+            return null;
+        }
+        try {
+            return Carbon::parse($v)->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function parseDateEnd(?string $raw): ?Carbon
+    {
+        $v = trim((string) $raw);
+        if ($v === '') {
+            return null;
+        }
+        try {
+            return Carbon::parse($v)->endOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** Order index aligned with WorkOrderBoardStage declaration order. */
+    private function boardStageOrderIndex(string $stage): int
+    {
+        foreach (WorkOrderBoardStage::cases() as $i => $case) {
+            if ($case->value === $stage) {
+                return $i;
+            }
+        }
+
+        return -1;
+    }
+
+    /** Etapa del tablero que corresponde al área de solicitud (misma convención que el frontend). */
+    private function targetBoardStageForMiArea(string $miArea): string
+    {
+        return match ($miArea) {
+            'laminacion' => WorkOrderBoardStage::Laminacion->value,
+            'corte' => WorkOrderBoardStage::Corte->value,
+            'impresion', 'tintas' => WorkOrderBoardStage::Impresion->value,
+            default => WorkOrderBoardStage::Impresion->value,
+        };
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -61,21 +112,87 @@ class WorkOrderController extends Controller
             $query->where('scheduling_status', $request->query('scheduling_status'));
         }
 
+        $createdFrom = $this->parseDateStart($request->query('created_from'));
+        $createdTo = $this->parseDateEnd($request->query('created_to'));
+        if ($createdFrom !== null) {
+            $query->where('created_at', '>=', $createdFrom);
+        }
+        if ($createdTo !== null) {
+            $query->where('created_at', '<=', $createdTo);
+        }
+
+        $priority = strtolower(trim((string) $request->query('priority', '')));
+        if ($priority !== '' && in_array($priority, WorkOrderPriority::values(), true)) {
+            $query->where('priority', $priority);
+        }
+
         $allowedAreaKeys = ['impresion', 'laminacion', 'corte', 'tintas'];
         $miArea = strtolower(trim((string) $request->query('mi_area', '')));
         $historialArea = strtolower(trim((string) $request->query('historial_area', '')));
         $targetAreaForPayload = null;
+        $areaRequestedFrom = $this->parseDateStart($request->query('area_requested_from'));
+        $areaRequestedTo = $this->parseDateEnd($request->query('area_requested_to'));
+        $areaReqStatus = strtolower(trim((string) $request->query('area_request_status', '')));
+        $onlyPendingArea = $request->boolean('only_pending_area');
+        $historialExcludePending = $request->boolean('historial_exclude_pending');
+        $areaProcessTag = strtolower(trim((string) $request->query('area_process_tag', '')));
 
         if ($miArea !== '' && in_array($miArea, $allowedAreaKeys, true)) {
             $targetAreaForPayload = $miArea;
-            $query->whereHas('areaRequests', function ($q) use ($miArea) {
+            $query->whereHas('areaRequests', function ($q) use ($miArea, $areaRequestedFrom, $areaRequestedTo) {
                 $q->where('area', $miArea)
                     ->where('status', AreaRequestStatus::Pending->value);
+                if ($areaRequestedFrom !== null) {
+                    $q->where('created_at', '>=', $areaRequestedFrom);
+                }
+                if ($areaRequestedTo !== null) {
+                    $q->where('created_at', '<=', $areaRequestedTo);
+                }
             });
+
+            if (in_array($areaProcessTag, ['not_started', 'in_progress'], true)) {
+                $targetStage = $this->targetBoardStageForMiArea($miArea);
+                $targetIdx = $this->boardStageOrderIndex($targetStage);
+                if ($areaProcessTag === 'not_started') {
+                    $before = [];
+                    foreach (WorkOrderBoardStage::cases() as $i => $case) {
+                        if ($i < $targetIdx) {
+                            $before[] = $case->value;
+                        }
+                    }
+                    if ($before !== []) {
+                        $query->whereIn('board_stage', $before);
+                    } else {
+                        $query->whereRaw('1 = 0');
+                    }
+                } else {
+                    $query->where('board_stage', $targetStage);
+                }
+            }
         } elseif ($historialArea !== '' && in_array($historialArea, $allowedAreaKeys, true)) {
             $targetAreaForPayload = $historialArea;
-            $query->whereHas('areaRequests', function ($q) use ($historialArea) {
+            $query->whereHas('areaRequests', function ($q) use ($historialArea, $areaRequestedFrom, $areaRequestedTo, $areaReqStatus, $onlyPendingArea, $historialExcludePending) {
                 $q->where('area', $historialArea);
+                if ($onlyPendingArea) {
+                    $q->where('status', AreaRequestStatus::Pending->value);
+                } elseif ($historialExcludePending) {
+                    $q->where('status', '!=', AreaRequestStatus::Pending->value);
+                } elseif ($areaReqStatus !== '' && $areaReqStatus !== 'all') {
+                    $allowed = [
+                        AreaRequestStatus::Pending->value,
+                        AreaRequestStatus::Done->value,
+                        AreaRequestStatus::Cancelled->value,
+                    ];
+                    if (in_array($areaReqStatus, $allowed, true)) {
+                        $q->where('status', $areaReqStatus);
+                    }
+                }
+                if ($areaRequestedFrom !== null) {
+                    $q->where('created_at', '>=', $areaRequestedFrom);
+                }
+                if ($areaRequestedTo !== null) {
+                    $q->where('created_at', '<=', $areaRequestedTo);
+                }
             });
         } elseif (($rawIn = $request->query('board_stage_in')) !== null && $rawIn !== '') {
             $rawList = is_array($rawIn) ? $rawIn : explode(',', (string) $rawIn);
@@ -122,6 +239,10 @@ class WorkOrderController extends Controller
             $query->where(function ($inner) use ($escaped) {
                 $inner->where('code', 'like', '%'.$escaped.'%')
                     ->orWhere('client_order_reference', 'like', '%'.$escaped.'%')
+                    ->orWhereHas('product', function ($p) use ($escaped) {
+                        $p->where('name', 'like', '%'.$escaped.'%')
+                            ->orWhere('cpe', 'like', '%'.$escaped.'%');
+                    })
                     ->orWhereHas('client', function ($clientQ) use ($escaped) {
                         $clientQ->where('name', 'like', '%'.$escaped.'%');
                     });

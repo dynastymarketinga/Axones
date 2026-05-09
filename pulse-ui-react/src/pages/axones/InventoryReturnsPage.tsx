@@ -7,7 +7,6 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import {
-  AXONES_INVENTORY_FILTER_INPUT_CLASS,
   AXONES_INVENTORY_PAGE_CLASS,
   AxonesPageHeader,
   AxonesTableCard,
@@ -17,14 +16,7 @@ import { labelInventoryArea } from "@/lib/inventory-area-labels"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { ReasonModal } from "@/components/axones/ReasonModal"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -54,7 +46,8 @@ function returnStatusLabel(status: string): string {
 }
 
 export default function InventoryReturnsPage() {
-  const [retStatus, setRetStatus] = useState<string>("all")
+  /** Solo pendientes en la vista principal; aceptadas solo en «Historial». */
+  const [listTab, setListTab] = useState<"pending" | "history">("pending")
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ReturnRow> | null>(null)
@@ -65,13 +58,14 @@ export default function InventoryReturnsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      const statusFilter = listTab === "pending" ? "pending" : "accepted"
       const data = await apiFetch<LaravelPaginated<ReturnRow>>(
         "inventory-returns",
         {
           query: {
             page,
             per_page: 20,
-            status: retStatus !== "all" ? retStatus : undefined,
+            status: statusFilter,
           },
         },
       )
@@ -83,7 +77,7 @@ export default function InventoryReturnsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, retStatus])
+  }, [page, listTab])
 
   useEffect(() => {
     void load()
@@ -104,6 +98,7 @@ export default function InventoryReturnsPage() {
   }
 
   const showInitialSkeleton = loading && rows === null
+  const colCount = listTab === "history" ? 8 : 7
 
   return (
     <div className={AXONES_INVENTORY_PAGE_CLASS}>
@@ -125,7 +120,7 @@ export default function InventoryReturnsPage() {
       {showInitialSkeleton ? (
         <AxonesTableCard>
           <div className="border-b p-4">
-            <div className="h-9 w-44 animate-pulse rounded-md bg-muted" />
+            <div className="h-9 max-w-md animate-pulse rounded-md bg-muted" />
           </div>
           <div className="overflow-x-auto">
             <Table>
@@ -149,127 +144,160 @@ export default function InventoryReturnsPage() {
         </AxonesTableCard>
       ) : (
         <>
-          <AxonesTableCard>
-            <div className="border-b p-4">
-              <div className="flex flex-wrap items-end gap-4">
-                <div className="grid w-44 gap-2">
-                  <Label>Estado</Label>
-                  <Select
-                    value={retStatus}
-                    onValueChange={(v) => {
-                      setRetStatus(v)
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="pending">{returnStatusLabel("pending")}</SelectItem>
-                      <SelectItem value="accepted">{returnStatusLabel("accepted")}</SelectItem>
-                    </SelectContent>
-                  </Select>
+          <Tabs
+            value={listTab}
+            onValueChange={(v) => {
+              setListTab(v as "pending" | "history")
+              setPage(1)
+            }}
+            className="w-full"
+          >
+            <AxonesTableCard>
+              <div className="border-b p-4">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div className="space-y-2">
+                    <p className="text-muted-foreground text-xs font-medium">Vista</p>
+                    <TabsList className="h-auto min-h-10 w-full max-w-md flex-wrap justify-start gap-1">
+                      <TabsTrigger value="pending" className="text-xs sm:text-sm">
+                        Pendientes
+                      </TabsTrigger>
+                      <TabsTrigger value="history" className="text-xs sm:text-sm">
+                        Historial
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={() => void load()}>
+                    Actualizar
+                  </Button>
                 </div>
-                <Button type="button" variant="secondary" onClick={() => void load()}>
-                  Actualizar
-                </Button>
               </div>
-            </div>
 
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>OT</TableHead>
-                    <TableHead>Material</TableHead>
-                    <TableHead>Proveedor</TableHead>
-                    <TableHead>Cantidad</TableHead>
-                    <TableHead>Área destino</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    <LoadingTableRow colSpan={8} />
-                  ) : !rows?.data.length ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="p-0">
-                        <div className="flex flex-col items-center justify-center gap-4 px-4 py-16 text-center">
-                          <div className="bg-muted/70 text-muted-foreground rounded-full p-3">
-                            <PackageOpen className="h-8 w-8" aria-hidden />
-                          </div>
-                          <div className="max-w-sm space-y-2">
-                            <p className="text-foreground text-sm font-medium">Sin devoluciones</p>
-                            <p className="text-muted-foreground text-xs leading-relaxed">
-                              Cree una con{" "}
-                              <Link className="text-primary font-medium underline" to="/devoluciones/nueva">
-                                Nueva devolución
-                              </Link>{" "}
-                              o explore el formulario con{" "}
-                              <Link className="text-primary font-medium underline" to="/devoluciones/nueva?demo=1">
-                                datos de ejemplo
-                              </Link>
-                              .
-                            </p>
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    rows.data.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell>{r.id}</TableCell>
-                        <TableCell>
-                          {r.work_order?.code ?? r.work_order_id ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          {r.material
-                            ? `${r.material.sku} · ${r.material.name}`
-                            : "—"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground max-w-[10rem] truncate" title={r.material?.supplier?.name ?? undefined}>
-                          {r.material?.supplier?.name?.trim() ? r.material.supplier.name : "—"}
-                        </TableCell>
-                        <TableCell>{r.quantity}</TableCell>
-                        <TableCell>{labelInventoryArea(r.destination_area)}</TableCell>
-                        <TableCell>{returnStatusLabel(r.status)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
-                            {r.status === "pending" ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => {
-                                  setPendingAcceptId(r.id)
-                                  setReasonModalOpen(true)
-                                }}
-                              >
-                                Aceptar ingreso
-                              </Button>
-                            ) : null}
-                            {r.destination_area === "bobinas_rechazadas" ? (
-                              <Button type="button" size="sm" variant="outline" asChild>
-                                <Link
-                                  to={`/bobinas/registrar-rechazada?devolucion_id=${r.id}`}
-                                  title="Registrar bobina única vinculada a esta devolución"
-                                >
-                                  Bobina rechazada
-                                </Link>
-                              </Button>
-                            ) : null}
-                          </div>
-                        </TableCell>
+              <TabsContent value={listTab} className="m-0 border-0 p-0 shadow-none outline-none">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>ID</TableHead>
+                        <TableHead>OT</TableHead>
+                        <TableHead>Material</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead>Cantidad</TableHead>
+                        <TableHead>Área destino</TableHead>
+                        {listTab === "history" ? <TableHead>Estado</TableHead> : null}
+                        <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </AxonesTableCard>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        <LoadingTableRow colSpan={colCount} />
+                      ) : !rows?.data.length ? (
+                        <TableRow>
+                          <TableCell colSpan={colCount} className="p-0">
+                            <div className="flex flex-col items-center justify-center gap-4 px-4 py-16 text-center">
+                              <div className="bg-muted/70 text-muted-foreground rounded-full p-3">
+                                <PackageOpen className="h-8 w-8" aria-hidden />
+                              </div>
+                              <div className="max-w-sm space-y-2">
+                                <p className="text-foreground text-sm font-medium">
+                                  {listTab === "pending"
+                                    ? "Sin devoluciones pendientes"
+                                    : "Sin registros en el historial"}
+                                </p>
+                                <p className="text-muted-foreground text-xs leading-relaxed">
+                                  {listTab === "pending" ? (
+                                    <>
+                                      Cree una con{" "}
+                                      <Link className="text-primary font-medium underline" to="/devoluciones/nueva">
+                                        Nueva devolución
+                                      </Link>{" "}
+                                      o explore el formulario con{" "}
+                                      <Link className="text-primary font-medium underline" to="/devoluciones/nueva?demo=1">
+                                        datos de ejemplo
+                                      </Link>
+                                      .
+                                    </>
+                                  ) : (
+                                    <>
+                                      Las devoluciones aceptadas aparecen aquí. Las pendientes están en la pestaña{" "}
+                                      <button
+                                        type="button"
+                                        className="text-primary font-medium underline"
+                                        onClick={() => {
+                                          setListTab("pending")
+                                          setPage(1)
+                                        }}
+                                      >
+                                        Pendientes
+                                      </button>
+                                      .
+                                    </>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        rows.data.map((r) => (
+                          <TableRow key={r.id}>
+                            <TableCell>{r.id}</TableCell>
+                            <TableCell>
+                              {r.work_order?.code ?? r.work_order_id ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              {r.material
+                                ? `${r.material.sku} · ${r.material.name}`
+                                : "—"}
+                            </TableCell>
+                            <TableCell
+                              className="text-muted-foreground max-w-[10rem] truncate"
+                              title={r.material?.supplier?.name ?? undefined}
+                            >
+                              {r.material?.supplier?.name?.trim()
+                                ? r.material.supplier.name
+                                : "—"}
+                            </TableCell>
+                            <TableCell>{r.quantity}</TableCell>
+                            <TableCell>{labelInventoryArea(r.destination_area)}</TableCell>
+                            {listTab === "history" ? (
+                              <TableCell>{returnStatusLabel(r.status)}</TableCell>
+                            ) : null}
+                            <TableCell className="text-right">
+                              <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
+                                {listTab === "pending" && r.status === "pending" ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                      setPendingAcceptId(r.id)
+                                      setReasonModalOpen(true)
+                                    }}
+                                  >
+                                    Aceptar ingreso
+                                  </Button>
+                                ) : null}
+                                {r.destination_area === "bobinas_rechazadas" ? (
+                                  <Button type="button" size="sm" variant="outline" asChild>
+                                    <Link
+                                      to={`/bobinas/registrar-rechazada?devolucion_id=${r.id}`}
+                                      title="Registrar bobina única vinculada a esta devolución"
+                                    >
+                                      Bobina rechazada
+                                    </Link>
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TabsContent>
+            </AxonesTableCard>
+          </Tabs>
 
           {rows && rows.last_page > 1 ? (
             <div className="flex items-center justify-between text-sm">

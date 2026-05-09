@@ -2,19 +2,21 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Requests\ReportInventoryAreaDailyRequest;
-use App\Http\Requests\ReportInventoryMovementsRequest;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ReportDateRangeRequest;
+use App\Http\Requests\ReportInventoryAreaDailyRequest;
+use App\Http\Requests\ReportInventoryMovementsRequest;
 use App\Http\Requests\ReportWorkOrderMaterialSummaryRequest;
 use App\Http\Requests\ScrapReportRequest;
 use App\Http\Requests\WorkOrderTimeReportRequest;
+use App\Models\WorkOrder;
 use App\Services\InventoryReportService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\View;
+use Illuminate\Validation\ValidationException;
 
 class ReportController extends Controller
 {
@@ -238,30 +240,117 @@ class ReportController extends Controller
     }
 
     /**
-     * Mermas registradas por OT y área (filtro cliente/producto).
+     * Vista previa HTML del reporte general de tiempos por área.
+     */
+    public function productionTimeByAreaPreview(ReportDateRangeRequest $request): Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $payload = $this->reports->productionTimesByArea($from, $to);
+        $html = View::make('pdf.production_time_by_area', [
+            'report' => $payload,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ])->render();
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="production-time-by-area-preview-'.$from->format('Ymd').'-'.$to->format('Ymd').'.html"',
+        ]);
+    }
+
+    /**
+     * Descarga PDF del reporte general de tiempos por área.
+     */
+    public function productionTimeByAreaPdf(ReportDateRangeRequest $request): Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $payload = $this->reports->productionTimesByArea($from, $to);
+        $html = View::make('pdf.production_time_by_area', [
+            'report' => $payload,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ])->render();
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+
+        return $pdf->download('production-time-by-area-'.$from->format('Ymd').'-'.$to->format('Ymd').'.pdf');
+    }
+
+    /**
+     * Desperdicio (% scrap) por OT y área (filtro cliente/producto, sustrato y layout de exportación).
      */
     public function scrapByFilters(ScrapReportRequest $request): JsonResponse|Response
     {
         $validated = $request->validated();
         $from = Carbon::parse($validated['from'])->startOfDay();
         $to = Carbon::parse($validated['to'])->endOfDay();
+        $substrateGroup = (string) ($validated['substrate_group'] ?? 'all');
+        $layout = (string) ($validated['layout'] ?? 'detail');
+        $woFilterId = $this->resolveScrapWorkOrderFilterId($validated);
         $payload = $this->reports->scrapByFilters(
             $from,
             $to,
             isset($validated['client_id']) ? (int) $validated['client_id'] : null,
             isset($validated['product_id']) ? (int) $validated['product_id'] : null,
+            $substrateGroup,
+            $layout,
+            $woFilterId,
         );
 
         if (($validated['format'] ?? null) === 'csv') {
             $csv = $this->reports->rowsToCsv((array) ($payload['rows'] ?? []));
+            $fileBase = $this->scrapReportFileBase($layout, $substrateGroup);
 
             return new Response($csv, 200, [
                 'Content-Type' => 'text/csv; charset=UTF-8',
-                'Content-Disposition' => 'attachment; filename="scrap-by-filters-'.$from->format('Ymd').'-'.$to->format('Ymd').'.csv"',
+                'Content-Disposition' => 'attachment; filename="'.$fileBase.'-'.$from->format('Ymd').'-'.$to->format('Ymd').'.csv"',
             ]);
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Vista previa HTML del reporte de desperdicio (mismos filtros que scrap-by-filters; opcional foco en una OT).
+     */
+    public function scrapByFiltersPreview(ScrapReportRequest $request): Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $payload = $this->scrapDocumentPayload($request);
+        $html = View::make('pdf.scrap_desperdicio', [
+            'report' => $payload,
+        ])->render();
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="desperdicio-preview-'.$from->format('Ymd').'-'.$to->format('Ymd').'.html"',
+        ]);
+    }
+
+    /**
+     * PDF del reporte de desperdicio.
+     */
+    public function scrapByFiltersPdf(ScrapReportRequest $request): Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $substrateGroup = (string) ($validated['substrate_group'] ?? 'all');
+        $layout = (string) ($validated['layout'] ?? 'detail');
+        $payload = $this->scrapDocumentPayload($request);
+        $html = View::make('pdf.scrap_desperdicio', [
+            'report' => $payload,
+        ])->render();
+        $orientation = in_array($layout, ['by_work_order', 'history_kg'], true) ? 'landscape' : 'portrait';
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', $orientation);
+        $fileBase = $this->scrapReportFileBase($layout, $substrateGroup);
+
+        return $pdf->download($fileBase.'-'.$from->format('Ymd').'-'.$to->format('Ymd').'.pdf');
     }
 
     /**
@@ -284,6 +373,18 @@ class ReportController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Listado de OT con tiempo registrado en el rango (por área).
+     */
+    public function workOrderTimeReportCandidates(WorkOrderTimeReportRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+
+        return response()->json($this->reports->workOrderTimeReportCandidates($from, $to));
     }
 
     /**
@@ -406,5 +507,96 @@ class ReportController extends Controller
             'generatedBy' => $generatedBy,
             'generatedAt' => now(),
         ])->render();
+    }
+
+    private function scrapReportFileBase(string $layout, string $substrateGroup): string
+    {
+        return match ($layout) {
+            'by_area' => 'desperdicio-por-area',
+            'by_work_order' => 'desperdicio-por-ot',
+            'history_kg' => match ($substrateGroup) {
+                'bopp' => 'desperdicio-historial-kg-bopp',
+                'politerlero' => 'desperdicio-historial-kg-polietileno',
+                'transparente' => 'desperdicio-historial-kg-transparente',
+                default => 'desperdicio-historial-kg',
+            },
+            default => match ($substrateGroup) {
+                'bopp' => 'desperdicio-bopp',
+                'politerlero' => 'desperdicio-polietileno',
+                'transparente' => 'desperdicio-transparente',
+                default => 'desperdicio-detalle',
+            },
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function scrapDocumentPayload(ScrapReportRequest $request): array
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $substrateGroup = (string) ($validated['substrate_group'] ?? 'all');
+        $layout = (string) ($validated['layout'] ?? 'detail');
+        $woFilterId = $this->resolveScrapWorkOrderFilterId($validated);
+        $payload = $this->reports->scrapByFilters(
+            $from,
+            $to,
+            isset($validated['client_id']) ? (int) $validated['client_id'] : null,
+            isset($validated['product_id']) ? (int) $validated['product_id'] : null,
+            $substrateGroup,
+            $layout,
+            $woFilterId,
+        );
+
+        $focusWo = isset($validated['focus_work_order_id']) ? (int) $validated['focus_work_order_id'] : null;
+        $focusArea = isset($validated['focus_area']) ? (string) $validated['focus_area'] : null;
+
+        if ($focusWo !== null) {
+            $rows = (array) ($payload['rows'] ?? []);
+            $currentLayout = (string) ($payload['layout'] ?? 'detail');
+            $filtered = array_values(array_filter($rows, function (array $r) use ($focusWo, $focusArea, $currentLayout): bool {
+                if ((int) ($r['work_order_id'] ?? 0) !== $focusWo) {
+                    return false;
+                }
+                if ($currentLayout === 'detail' && $focusArea !== null && $focusArea !== '') {
+                    return (string) ($r['area'] ?? '') === $focusArea;
+                }
+                if ($currentLayout === 'by_area') {
+                    return false;
+                }
+
+                return true;
+            }));
+            $payload['rows'] = $filtered;
+        }
+
+        return array_merge($payload, [
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function resolveScrapWorkOrderFilterId(array $validated): ?int
+    {
+        if (isset($validated['work_order_id'])) {
+            return (int) $validated['work_order_id'];
+        }
+        $code = isset($validated['work_order_code']) ? trim((string) $validated['work_order_code']) : '';
+        if ($code === '') {
+            return null;
+        }
+        $id = WorkOrder::query()->where('code', $code)->value('id');
+        if ($id === null) {
+            throw ValidationException::withMessages([
+                'work_order_code' => ['No existe una orden de trabajo con ese código.'],
+            ]);
+        }
+
+        return (int) $id;
     }
 }

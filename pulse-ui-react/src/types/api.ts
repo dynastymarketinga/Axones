@@ -219,13 +219,21 @@ export type InventoryMovementRow = {
   user?: { id: number; name: string; email: string }
 }
 
+export type MaterialRequestLinePreview = {
+  id: number
+  description?: string | null
+  material?: { sku: string; name: string; unit: string } | null
+}
+
 export type MaterialRequestRow = {
   id: number
-  work_order_id: number
+  work_order_id?: number | null
   status: string
   created_at: string
   work_order?: { code: string; client?: Pick<ClientRecord, "name"> }
   lines_count?: number
+  /** Primeras líneas (listado) para mostrar materiales solicitados */
+  lines?: MaterialRequestLinePreview[]
 }
 
 export type DashboardSummary = {

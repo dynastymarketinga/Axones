@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\AreaRequestStatus;
 use App\Enums\InventoryArea;
 use App\Enums\InventoryMovementType;
 use App\Enums\MaterialRequestStatus;
 use App\Enums\WorkOrderStatus;
+use App\Models\AreaRequest;
 use App\Models\Bobina;
 use App\Models\Material;
 use App\Models\MaterialRequest;
@@ -13,6 +15,7 @@ use App\Models\MaterialRequestLine;
 use App\Models\User;
 use App\Models\WorkOrder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class MaterialRequestService
@@ -22,12 +25,12 @@ class MaterialRequestService
     ) {}
 
     /**
-     * Crea una solicitud pendiente ligada a la OT (formulario "Solicitud de materiales y repuestos").
+     * Crea una solicitud pendiente. Si hay OT, queda ligada; si no, es solicitud directa al inventario.
      *
      * @param  list<array{material_id?: int|null, description?: string|null, unit?: string|null, quantity_requested: string|float}>  $lines
      */
     public function storePendingRequest(
-        WorkOrder $workOrder,
+        ?WorkOrder $workOrder,
         User $user,
         array $lines,
         ?string $originatingArea = null,
@@ -36,7 +39,7 @@ class MaterialRequestService
         ?array $destinationAreas = null,
         ?string $machineCode = null,
     ): MaterialRequest {
-        if ($workOrder->status === WorkOrderStatus::Cancelled->value) {
+        if ($workOrder !== null && $workOrder->status === WorkOrderStatus::Cancelled->value) {
             throw ValidationException::withMessages([
                 'work_order_id' => ['No se pueden crear solicitudes sobre una OT cancelada.'],
             ]);
@@ -45,7 +48,7 @@ class MaterialRequestService
         $this->validateConsumptionLinesForWorkOrder($lines);
 
         $mr = MaterialRequest::query()->create([
-            'work_order_id' => $workOrder->getKey(),
+            'work_order_id' => $workOrder?->getKey(),
             'document_date' => $documentDate,
             'requested_by' => $user->getKey(),
             'originating_area' => $originatingArea,
@@ -66,7 +69,10 @@ class MaterialRequestService
             ]);
         }
 
-        return $mr->fresh()->load(['lines.material', 'workOrder']);
+        $mr = $mr->fresh()->load(['lines.material', 'workOrder']);
+        $this->syncShadowAreaRequestForMaterialRequest($mr);
+
+        return $mr;
     }
 
     /**
@@ -117,7 +123,7 @@ class MaterialRequestService
             }
 
             if ($mr->authorized_by !== null) {
-                return $mr->fresh()->load([
+                $out = $mr->fresh()->load([
                     'lines.material',
                     'workOrder.client',
                     'workOrder.product',
@@ -125,13 +131,16 @@ class MaterialRequestService
                     'authorizer',
                     'dispatcher',
                 ]);
+                $this->syncShadowAreaRequestForMaterialRequest($out);
+
+                return $out;
             }
 
             $mr->authorized_by = $user->getKey();
             $mr->authorized_at = now();
             $mr->save();
 
-            return $mr->fresh()->load([
+            $out = $mr->fresh()->load([
                 'lines.material',
                 'workOrder.client',
                 'workOrder.product',
@@ -139,6 +148,9 @@ class MaterialRequestService
                 'authorizer',
                 'dispatcher',
             ]);
+            $this->syncShadowAreaRequestForMaterialRequest($out);
+
+            return $out;
         });
     }
 
@@ -167,17 +179,14 @@ class MaterialRequestService
                 ]);
             }
 
-            if ($mr->authorized_by === null) {
-                throw ValidationException::withMessages([
-                    'material_request' => ['Debe autorizar la solicitud antes de despachar.'],
-                ]);
-            }
-
-            $wo = WorkOrder::query()->whereKey($mr->work_order_id)->lockForUpdate()->firstOrFail();
-            if ($wo->status === WorkOrderStatus::Cancelled->value) {
-                throw ValidationException::withMessages([
-                    'work_order' => ['La orden de trabajo está cancelada.'],
-                ]);
+            $wo = null;
+            if ($mr->work_order_id !== null) {
+                $wo = WorkOrder::query()->whereKey($mr->work_order_id)->lockForUpdate()->firstOrFail();
+                if ($wo->status === WorkOrderStatus::Cancelled->value) {
+                    throw ValidationException::withMessages([
+                        'work_order' => ['La orden de trabajo está cancelada.'],
+                    ]);
+                }
             }
 
             foreach ($lines as $idx => $lineInput) {
@@ -267,7 +276,7 @@ class MaterialRequestService
                             (int) $mr->getKey(),
                             [
                                 'material_request_line_id' => $mrl->getKey(),
-                                'work_order_id' => $wo->getKey(),
+                                'work_order_id' => $wo?->getKey(),
                                 'bobina_id' => $b->getKey(),
                                 'bobina_code' => $b->code,
                             ],
@@ -276,6 +285,7 @@ class MaterialRequestService
 
                     $mrl->quantity_dispatched = bcadd((string) $mrl->quantity_dispatched, $qty, 3);
                     $mrl->save();
+
                     continue;
                 }
 
@@ -288,7 +298,7 @@ class MaterialRequestService
                     (int) $mr->getKey(),
                     [
                         'material_request_line_id' => $mrl->getKey(),
-                        'work_order_id' => $wo->getKey(),
+                        'work_order_id' => $wo?->getKey(),
                     ],
                 );
 
@@ -317,7 +327,7 @@ class MaterialRequestService
 
             $mr->save();
 
-            return $mr->fresh()->load([
+            $out = $mr->fresh()->load([
                 'lines.material',
                 'workOrder.client',
                 'workOrder.product',
@@ -325,6 +335,9 @@ class MaterialRequestService
                 'authorizer',
                 'dispatcher',
             ]);
+            $this->syncShadowAreaRequestForMaterialRequest($out);
+
+            return $out;
         });
     }
 
@@ -351,6 +364,93 @@ class MaterialRequestService
 
             $mr->status = MaterialRequestStatus::Cancelled->value;
             $mr->save();
+
+            $this->syncShadowAreaRequestForMaterialRequest(
+                $mr->fresh()->load(['lines.material', 'workOrder']),
+            );
         });
+    }
+
+    /** Código de área para el tablero entre áreas (debe coincidir con opciones de la UI). */
+    private function shadowAreaCode(?string $originatingArea): string
+    {
+        $allowed = ['almacen', 'impresion', 'laminacion', 'corte', 'montaje', 'tintas'];
+        $o = strtolower(trim((string) $originatingArea));
+
+        return in_array($o, $allowed, true) ? $o : 'almacen';
+    }
+
+    private function shadowMaterialRequestBody(MaterialRequest $mr): string
+    {
+        $lines = [];
+        foreach ($mr->lines as $ln) {
+            if ($ln->material) {
+                $lines[] = sprintf(
+                    '- %s %s — %s %s',
+                    $ln->material->sku,
+                    $ln->material->name,
+                    $ln->quantity_requested,
+                    $ln->material->unit,
+                );
+            } else {
+                $lines[] = sprintf(
+                    '- (sin catálogo) %s — %s',
+                    $ln->description ?? '—',
+                    $ln->quantity_requested,
+                );
+            }
+        }
+
+        $parts = [
+            '[Origen: solicitud de insumos al almacén]',
+            'Estado en insumos: '.$mr->status.'.',
+            $mr->authorized_by ? 'Autorización de insumos: registrada.' : 'Autorización de insumos: pendiente.',
+            $mr->notes ? 'Observaciones: '.$mr->notes : null,
+            $mr->machine_code ? 'Máquina: '.$mr->machine_code : null,
+            $mr->destination_areas ? 'Destinos: '.json_encode($mr->destination_areas, JSON_UNESCAPED_UNICODE) : null,
+            'Líneas:',
+            implode("\n", $lines),
+            '',
+            'Entrega y rebaja de inventario: módulo «Solicitudes de insumos».',
+        ];
+
+        return Str::limit(implode("\n", array_filter($parts, static fn ($x) => $x !== null)), 10000);
+    }
+
+    private function shadowAreaRequestStatusFromMaterial(string $materialStatus): string
+    {
+        return match ($materialStatus) {
+            MaterialRequestStatus::Cancelled->value => AreaRequestStatus::Cancelled->value,
+            MaterialRequestStatus::Dispatched->value => AreaRequestStatus::Done->value,
+            default => AreaRequestStatus::Pending->value,
+        };
+    }
+
+    /**
+     * Fila espejo en solicitudes entre áreas para visibilidad; el stock solo cambia en insumos.
+     */
+    private function syncShadowAreaRequestForMaterialRequest(MaterialRequest $mr): void
+    {
+        $mr->loadMissing(['lines.material', 'workOrder']);
+
+        $exists = AreaRequest::query()->where('material_request_id', $mr->getKey())->exists();
+        if (! $exists && $mr->status === MaterialRequestStatus::Cancelled->value) {
+            return;
+        }
+
+        $payload = [
+            'material_request_id' => $mr->getKey(),
+            'area' => $this->shadowAreaCode($mr->originating_area),
+            'title' => 'Solicitud de insumos #'.$mr->getKey(),
+            'body' => $this->shadowMaterialRequestBody($mr),
+            'status' => $this->shadowAreaRequestStatusFromMaterial($mr->status),
+            'work_order_id' => $mr->work_order_id,
+            'requested_by' => $mr->requested_by,
+        ];
+
+        AreaRequest::query()->updateOrCreate(
+            ['material_request_id' => $mr->getKey()],
+            $payload,
+        );
     }
 }

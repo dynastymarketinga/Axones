@@ -13,12 +13,18 @@ class AreaRequest extends Model
         'body',
         'status',
         'work_order_id',
+        'material_request_id',
         'requested_by',
     ];
 
     public function workOrder(): BelongsTo
     {
         return $this->belongsTo(WorkOrder::class);
+    }
+
+    public function materialRequest(): BelongsTo
+    {
+        return $this->belongsTo(MaterialRequest::class);
     }
 
     public function requester(): BelongsTo

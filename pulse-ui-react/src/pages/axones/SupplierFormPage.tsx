@@ -363,12 +363,21 @@ export default function SupplierFormPage() {
         toast.success("Proveedor actualizado.")
         navigate(returnTo)
       } else {
-        await apiFetch<SupplierRecord>("suppliers", {
+        const created = await apiFetch<SupplierRecord>("suppliers", {
           method: "POST",
           body: JSON.stringify(body),
         })
         toast.success("Proveedor creado.")
-        navigate(returnTo)
+        const newId = Number(created?.id)
+        if (Number.isFinite(newId) && newId > 0) {
+          const q = returnTo.indexOf("?")
+          const pathOnly = q >= 0 ? returnTo.slice(0, q) : returnTo
+          const sp = new URLSearchParams(q >= 0 ? returnTo.slice(q + 1) : "")
+          sp.set("proveedor", String(newId))
+          navigate(`${pathOnly}?${sp.toString()}`, { replace: true })
+        } else {
+          navigate(returnTo, { replace: true })
+        }
       }
     } catch (e) {
       if (e instanceof ApiError) {

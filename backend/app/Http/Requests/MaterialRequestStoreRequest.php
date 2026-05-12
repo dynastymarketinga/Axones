@@ -19,7 +19,7 @@ class MaterialRequestStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'work_order_id' => ['required', 'integer', 'exists:work_orders,id'],
+            'work_order_id' => ['nullable', 'integer', 'exists:work_orders,id'],
             'document_date' => ['nullable', 'date'],
             'originating_area' => ['nullable', 'string', 'max:32'],
             'destination_areas' => ['nullable', 'array'],

@@ -257,11 +257,13 @@ export default function PurchaseOrderNewPage() {
     resolvingSupplier,
   ])
 
+  const navState = location.state as { from?: string; presetSupplierId?: number } | null
+  const presetSupplierConsumedRef = useRef(false)
+
   const returnTo = useMemo(() => {
-    const st = location.state as { from?: string } | null
-    const from = st?.from?.trim()
+    const from = navState?.from?.trim()
     return from && from.startsWith("/") ? from : "/ordenes-compra"
-  }, [location.state])
+  }, [navState?.from])
 
   useEffect(() => {
     if (!codeTouched && !code.trim()) {
@@ -291,6 +293,15 @@ export default function PurchaseOrderNewPage() {
       c = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!supplierListReady) return
+    if (presetSupplierConsumedRef.current) return
+    const pid = navState?.presetSupplierId
+    if (!Number.isFinite(pid) || (pid ?? 0) < 1) return
+    presetSupplierConsumedRef.current = true
+    setSupplierId(String(pid))
+  }, [supplierListReady, navState?.presetSupplierId])
 
   useEffect(() => {
     supplierResolveFailedForRef.current = null

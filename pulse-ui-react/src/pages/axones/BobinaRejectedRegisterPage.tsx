@@ -238,10 +238,10 @@ export default function BobinaRejectedRegisterPage() {
         <div className="mx-auto max-w-xl rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-sm">
           <p className="text-destructive">
             Esta devolución no es hacia <strong>bobinas rechazadas</strong> (área actual:{" "}
-            {detail.destination_area}). Use otra devolución o cree una nueva con destino correcto.
+            {detail.destination_area}). Elija otra devolución con destino correcto desde el listado.
           </p>
           <Button type="button" className="mt-4" variant="outline" asChild>
-            <Link to="/devoluciones/nueva">Nueva devolución</Link>
+            <Link to="/devoluciones">Ir a devoluciones</Link>
           </Button>
         </div>
       ) : (

@@ -84,6 +84,12 @@ class AreaRequestController extends Controller
 
     public function update(UpdateFacilityAreaRequest $request, AreaRequest $area_request): JsonResponse
     {
+        if ($area_request->material_request_id !== null) {
+            throw ValidationException::withMessages([
+                'area_request' => ['Esta fila proviene de una solicitud de insumos: cámbiela solo desde Solicitudes de insumos (autorizar, entregar o cancelar).'],
+            ]);
+        }
+
         $data = $request->validated();
 
         if (array_key_exists('title', $data) && $area_request->status !== AreaRequestStatus::Pending->value) {
@@ -99,6 +105,12 @@ class AreaRequestController extends Controller
 
     public function destroy(AreaRequest $area_request): Response
     {
+        if ($area_request->material_request_id !== null) {
+            throw ValidationException::withMessages([
+                'area_request' => ['No se puede eliminar: es el aviso ligado a una solicitud de insumos.'],
+            ]);
+        }
+
         if ($area_request->status === AreaRequestStatus::Done->value) {
             throw ValidationException::withMessages([
                 'area_request' => ['No se pueden eliminar solicitudes ya completadas.'],

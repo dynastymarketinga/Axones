@@ -70,7 +70,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     icon: Warehouse,
     items: [
       { title: "Materiales", url: "materiales", icon: Boxes },
-      { title: "Solicitudes de insumos", url: "solicitudes-material", icon: Package },
+      { title: "Solicitudes entre áreas", url: "solicitudes-area", icon: ClipboardList },
       {
         title: "Recepción",
         url: "recepciones-oc",
@@ -96,7 +96,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
       { title: "Mezclas y tintas", url: "mezclas-tinta", icon: Boxes },
     ],
   },
-  { title: "Solicitudes entre áreas", url: "solicitudes-area", icon: ClipboardList },
+  { title: "Solicitudes de insumos", url: "solicitudes-material", icon: Package },
   {
     title: "Calidad",
     url: "#",

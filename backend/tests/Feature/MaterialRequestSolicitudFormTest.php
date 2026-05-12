@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AreaRequestStatus;
 use App\Enums\MaterialRequestDestinationArea;
 use App\Enums\MaterialRequestStatus;
+use App\Models\AreaRequest;
 use App\Models\Material;
 use App\Models\User;
 use App\Models\WorkOrder;
@@ -67,6 +69,38 @@ class MaterialRequestSolicitudFormTest extends TestCase
         $this->assertCount(2, $r->json('lines'));
         $this->assertEquals('Trapos', $r->json('lines.1.description'));
         $this->assertNull($r->json('lines.1.material_id'));
+    }
+
+    public function test_store_solicitud_without_work_order(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $mat = Material::query()->create([
+            'sku' => 'M-SIN-OT',
+            'name' => 'Tornillo',
+            'inventory_area' => 'material',
+            'unit' => 'unidad',
+            'min_stock' => 0,
+        ]);
+
+        $r = $this->postJson('/api/material-requests', [
+            'notes' => 'Solicitud directa a inventario',
+            'lines' => [
+                ['material_id' => $mat->id, 'quantity_requested' => 3, 'unit' => 'unidad'],
+            ],
+        ], $h)->assertCreated();
+
+        $this->assertNull($r->json('work_order_id'));
+        $this->assertEquals($user->id, $r->json('requested_by'));
+        $this->assertEquals('Solicitud directa a inventario', $r->json('notes'));
+
+        $mrId = (int) $r->json('id');
+        $shadow = AreaRequest::query()->where('material_request_id', $mrId)->first();
+        $this->assertNotNull($shadow);
+        $this->assertSame('almacen', $shadow->area);
+        $this->assertSame(AreaRequestStatus::Pending->value, $shadow->status);
+        $this->assertStringContainsString('Solicitud directa a inventario', (string) $shadow->body);
     }
 
     public function test_authorize_sets_user_and_timestamp(): void
@@ -182,5 +216,76 @@ class MaterialRequestSolicitudFormTest extends TestCase
 
         $mat->refresh();
         $this->assertEquals('90.000', (string) $mat->quantity_on_hand);
+    }
+
+    public function test_dispatch_without_work_order_rebates_stock(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $mat = Material::query()->create([
+            'sku' => 'M-SIN-OT-D',
+            'name' => 'Directo',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 5])->save();
+
+        $mr = $this->postJson('/api/material-requests', [
+            'notes' => 'Sin OT',
+            'lines' => [
+                ['material_id' => $mat->id, 'quantity_requested' => 2, 'unit' => 'kg'],
+            ],
+        ], $h)->assertCreated();
+
+        $lineId = $mr->json('lines.0.id');
+        $mrId = $mr->json('id');
+
+        $this->assertSame(
+            AreaRequestStatus::Pending->value,
+            (string) AreaRequest::query()->where('material_request_id', $mrId)->value('status'),
+        );
+
+        $this->postJson("/api/material-requests/{$mrId}/authorize", [], $h)->assertOk();
+
+        $this->postJson("/api/material-requests/{$mrId}/dispatch", [
+            'lines' => [
+                ['material_request_line_id' => $lineId, 'quantity' => 2],
+            ],
+        ], $h)->assertOk()->assertJsonPath('status', MaterialRequestStatus::Dispatched->value)
+            ->assertJsonPath('work_order_id', null);
+
+        $mat->refresh();
+        $this->assertEquals('3.000', (string) $mat->quantity_on_hand);
+
+        $this->assertSame(
+            AreaRequestStatus::Done->value,
+            (string) AreaRequest::query()->where('material_request_id', $mrId)->value('status'),
+        );
+    }
+
+    public function test_area_request_mirror_cannot_be_patched_via_area_api(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $mat = Material::query()->create([
+            'sku' => 'M-AR-PATCH',
+            'name' => 'X',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+
+        $mrId = $this->postJson('/api/material-requests', [
+            'notes' => 'n',
+            'lines' => [['material_id' => $mat->id, 'quantity_requested' => 1]],
+        ], $h)->assertCreated()->json('id');
+
+        $arId = (int) AreaRequest::query()->where('material_request_id', $mrId)->value('id');
+        $this->assertGreaterThan(0, $arId);
+
+        $this->patchJson("/api/area-requests/{$arId}", ['title' => 'Hackeo'], $h)->assertUnprocessable();
     }
 }

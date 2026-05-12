@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { MoreHorizontal, Pencil, Plus } from "lucide-react"
+import { MoreHorizontal, Pencil } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -49,6 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 
 const AREA_OPTIONS = [
   { value: "almacen", label: "Almacén" },
@@ -73,6 +75,7 @@ type AreaReqRow = {
   title: string | null
   body?: string | null
   work_order_id: number | null
+  material_request_id?: number | null
   work_order?: { code: string }
   requester?: { name: string }
 }
@@ -83,13 +86,6 @@ export default function AreaRequestsPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<AreaReqRow> | null>(null)
-
-  const [createOpen, setCreateOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [newArea, setNewArea] = useState("impresion")
-  const [newTitle, setNewTitle] = useState("")
-  const [newBody, setNewBody] = useState("")
-  const [newWorkOrderId, setNewWorkOrderId] = useState("")
 
   const [editRow, setEditRow] = useState<AreaReqRow | null>(null)
   const [editTitle, setEditTitle] = useState("")
@@ -182,48 +178,6 @@ export default function AreaRequestsPage() {
     }
   }
 
-  async function submitCreate() {
-    const title = newTitle.trim()
-    if (!title) {
-      toast.error("Indique un título.")
-      return
-    }
-    const woRaw = newWorkOrderId.trim()
-    const payload: Record<string, unknown> = {
-      area: newArea,
-      title,
-      body: newBody.trim() || undefined,
-    }
-    if (woRaw) {
-      const n = Number(woRaw)
-      if (!Number.isFinite(n) || n < 1) {
-        toast.error("ID de orden de trabajo inválido.")
-        return
-      }
-      payload.work_order_id = n
-    }
-
-    setCreating(true)
-    try {
-      await apiFetch("area-requests", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      })
-      toast.success("Solicitud registrada.")
-      setCreateOpen(false)
-      setNewTitle("")
-      setNewBody("")
-      setNewWorkOrderId("")
-      setPage(1)
-      void load()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo crear la solicitud.")
-    } finally {
-      setCreating(false)
-    }
-  }
-
   function areaLabel(code: string) {
     return AREA_OPTIONS.find((o) => o.value === code)?.label ?? code
   }
@@ -232,6 +186,22 @@ export default function AreaRequestsPage() {
     return STATUS_OPTIONS.find((o) => o.value === code)?.label ?? code
   }
 
+  function areaRequestStatusBadgeClass(code: string) {
+    switch (code) {
+      case "pending":
+        return "border-amber-300/80 bg-amber-100 text-amber-950 shadow-sm dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-50"
+      case "done":
+        return "border-emerald-300/80 bg-emerald-100 text-emerald-950 shadow-sm dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-50"
+      case "cancelled":
+        return "border-border bg-muted text-muted-foreground"
+      default:
+        return "border-border bg-secondary text-secondary-foreground"
+    }
+  }
+
+  const filterTriggerClass =
+    "h-10 min-w-[10.5rem] border-zinc-200/90 bg-white font-medium text-foreground shadow-sm transition-colors hover:bg-zinc-50/90 focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800/80"
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="space-y-2">
@@ -239,166 +209,197 @@ export default function AreaRequestsPage() {
           Solicitudes entre áreas
         </h1>
         <p className="text-muted-foreground max-w-3xl text-sm">
-          Coordinación entre áreas de producción (pase de trabajo, avisos ligados a una OT).{" "}
-          <strong>No rebaja inventario.</strong> Para insumos con material del almacén, autorización y
-          rebaja automática use{" "}
-          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="solicitudes-material">
-            Solicitudes de insumos
+          Esta vista es para <strong>recibir</strong> y dar seguimiento a la coordinación entre áreas de producción
+          (pase de trabajo y avisos entre áreas). Las filas de{" "}
+          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/solicitudes-material">
+            solicitudes de insumos
           </Link>{" "}
-          y revise el historial en{" "}
-          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="movimientos-inventario">
+          aparecen aquí como aviso; desde <strong>Ver insumos</strong> el almacén puede{" "}
+          <strong>aprobar la salida</strong> y rebajar inventario. El historial queda en{" "}
+          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/movimientos-inventario">
             Movimientos
           </Link>
           .
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="grid w-44 gap-2">
-          <Label>Área</Label>
-          <Select
-            value={area}
-            onValueChange={(v) => {
-              setArea(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
-              {AREA_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="rounded-xl border border-zinc-200/90 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="grid min-w-[10.5rem] gap-2">
+            <Label className="text-foreground/90 text-sm font-semibold">Área</Label>
+            <Select
+              value={area}
+              onValueChange={(v) => {
+                setArea(v)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className={filterTriggerClass}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+                <SelectItem value="all">Todas</SelectItem>
+                {AREA_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid min-w-[10.5rem] gap-2">
+            <Label className="text-foreground/90 text-sm font-semibold">Estado</Label>
+            <Select
+              value={status}
+              onValueChange={(v) => {
+                setStatus(v)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className={filterTriggerClass}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+                {STATUS_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="grid w-44 gap-2">
-          <Label>Estado</Label>
-          <Select
-            value={status}
-            onValueChange={(v) => {
-              setStatus(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button type="button" variant="secondary" onClick={() => void load()}>
-          Actualizar
-        </Button>
-        <Button type="button" className="ml-auto sm:ml-0" onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Nueva solicitud
-        </Button>
       </div>
 
-      <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[72px]">ID</TableHead>
-              <TableHead>Área</TableHead>
-              <TableHead>OT</TableHead>
-              <TableHead>Título</TableHead>
-              <TableHead>Solicitante</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right w-[72px]">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
-                  Cargando…
-                </TableCell>
+      <div className="relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-card to-violet-500/[0.07] shadow-md shadow-primary/5">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/25 to-transparent" />
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                <TableHead className="w-[88px] pl-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  ID
+                </TableHead>
+                <TableHead className="min-w-[100px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Área
+                </TableHead>
+                <TableHead className="min-w-[160px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Título
+                </TableHead>
+                <TableHead className="min-w-[120px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Solicitante
+                </TableHead>
+                <TableHead className="min-w-[120px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Estado
+                </TableHead>
+                <TableHead className="min-w-[100px] pr-5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Acciones
+                </TableHead>
               </TableRow>
-            ) : !rows?.data.length ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
-                  Sin solicitudes.
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.data.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>{r.id}</TableCell>
-                  <TableCell>{areaLabel(r.area)}</TableCell>
-                  <TableCell>
-                    {r.work_order_id ? (
-                      <Link
-                        className="text-primary underline-offset-4 hover:underline"
-                        to={`ordenes-trabajo/${r.work_order_id}`}
-                      >
-                        {r.work_order?.code ?? r.work_order_id}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="max-w-[220px] truncate" title={r.title ?? undefined}>
-                    {r.title ?? "—"}
-                  </TableCell>
-                  <TableCell>{r.requester?.name ?? "—"}</TableCell>
-                  <TableCell>{statusLabel(r.status)}</TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                          <span className="sr-only">Menú</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {r.status === "pending" ? (
-                          <>
-                            <DropdownMenuItem onClick={() => openEdit(r)}>
-                              <Pencil className="mr-2 h-4 w-4" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => void patchStatus(r.id, "done")}>
-                              Marcar completada
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => void patchStatus(r.id, "cancelled")}>
-                              Cancelar
-                            </DropdownMenuItem>
-                          </>
-                        ) : null}
-                        {r.status !== "done" ? (
-                          <>
-                            {r.status === "pending" ? <DropdownMenuSeparator /> : null}
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => setDeleteRow(r)}
-                            >
-                              Eliminar
-                            </DropdownMenuItem>
-                          </>
-                        ) : null}
-                        {r.status === "done" ? (
-                          <DropdownMenuItem disabled>Solo lectura (completada)</DropdownMenuItem>
-                        ) : null}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow className="border-border/50 hover:bg-transparent">
+                  <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
+                    Cargando…
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : !rows?.data.length ? (
+                <TableRow className="border-border/50 hover:bg-transparent">
+                  <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
+                    Sin solicitudes.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.data.map((r, idx) => (
+                  <TableRow
+                    key={r.id}
+                    className={cn(
+                      "border-border/60 transition-colors",
+                      idx % 2 === 1 ? "bg-muted/25" : "bg-card/80",
+                      "hover:bg-violet-500/[0.06]",
+                    )}
+                  >
+                    <TableCell className="pl-5 align-middle">
+                      <span className="inline-flex min-w-[2.5rem] items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1 font-mono text-sm font-semibold text-primary tabular-nums ring-1 ring-primary/15">
+                        {r.id}
+                      </span>
+                    </TableCell>
+                    <TableCell className="align-middle">
+                      <span className="text-foreground text-sm font-medium">{areaLabel(r.area)}</span>
+                    </TableCell>
+                    <TableCell className="max-w-[240px] align-middle">
+                      <p className="text-foreground truncate text-sm font-medium" title={r.title ?? undefined}>
+                        {r.title ?? "—"}
+                      </p>
+                    </TableCell>
+                    <TableCell className="align-middle">
+                      <span className="text-muted-foreground text-sm">{r.requester?.name ?? "—"}</span>
+                    </TableCell>
+                    <TableCell className="align-middle">
+                      <Badge
+                        variant="outline"
+                        className={cn("font-medium shadow-none", areaRequestStatusBadgeClass(r.status))}
+                      >
+                        {statusLabel(r.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="pr-5 text-right align-middle">
+                      {r.material_request_id != null ? (
+                        <Button variant="outline" size="sm" className="h-9 border-primary/25 shadow-sm" asChild>
+                          <Link to={`/solicitudes-area/insumos/${r.material_request_id}`}>Ver insumos</Link>
+                        </Button>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-9 w-9 border-primary/20 shadow-sm"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Menú</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="rounded-xl">
+                            {r.status === "pending" ? (
+                              <>
+                                <DropdownMenuItem onClick={() => openEdit(r)}>
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => void patchStatus(r.id, "done")}>
+                                  Marcar completada
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => void patchStatus(r.id, "cancelled")}>
+                                  Cancelar
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                            {r.status !== "done" ? (
+                              <>
+                                {r.status === "pending" ? <DropdownMenuSeparator /> : null}
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => setDeleteRow(r)}
+                                >
+                                  Eliminar
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                            {r.status === "done" ? (
+                              <DropdownMenuItem disabled>Solo lectura (completada)</DropdownMenuItem>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {rows && rows.last_page > 1 ? (
@@ -426,66 +427,6 @@ export default function AreaRequestsPage() {
           </div>
         </div>
       ) : null}
-
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Nueva solicitud entre áreas</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label>Área destino</Label>
-              <Select value={newArea} onValueChange={setNewArea}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AREA_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nar-title">Título</Label>
-              <Input
-                id="nar-title"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="Ej. Pasar bobinas a laminación"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nar-body">Detalle (opcional)</Label>
-              <Textarea
-                id="nar-body"
-                rows={3}
-                value={newBody}
-                onChange={(e) => setNewBody(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="nar-wo">OT (ID numérico, opcional)</Label>
-              <Input
-                id="nar-wo"
-                inputMode="numeric"
-                value={newWorkOrderId}
-                onChange={(e) => setNewWorkOrderId(e.target.value.replace(/\D/g, ""))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-              Cerrar
-            </Button>
-            <Button type="button" disabled={creating} onClick={() => void submitCreate()}>
-              {creating ? "Guardando…" : "Registrar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={!!editRow} onOpenChange={(v) => !v && setEditRow(null)}>
         <DialogContent className="sm:max-w-md">

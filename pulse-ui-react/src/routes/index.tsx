@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, Outlet } from "react-router-dom"
+import { createBrowserRouter, Navigate, Outlet, useParams } from "react-router-dom"
 import type { ReactElement } from "react"
 
 import AppLayout from "@/layouts/AppLayout"
@@ -31,7 +31,6 @@ import BobinaDetailPage from "@/pages/axones/BobinaDetailPage"
 import BobinaFormPage from "@/pages/axones/BobinaFormPage"
 import BobinaRejectedRegisterPage from "@/pages/axones/BobinaRejectedRegisterPage"
 import InventoryReturnsPage from "@/pages/axones/InventoryReturnsPage"
-import InventoryReturnNewPage from "@/pages/axones/InventoryReturnNewPage"
 import ProgramacionBoardPage from "@/pages/axones/ProgramacionBoardPage"
 import WorkOrdersHubPage from "@/pages/axones/WorkOrdersHubPage"
 import WorkOrderDetailPage from "@/pages/axones/WorkOrderDetailPage"
@@ -44,6 +43,7 @@ import DeliveryNotesPage from "@/pages/axones/DeliveryNotesPage"
 import DeliveryNotePreviewPage from "@/pages/axones/DeliveryNotePreviewPage"
 import PrefillNotaEntregaPage from "@/pages/axones/PrefillNotaEntregaPage"
 import AreaRequestsPage from "@/pages/axones/AreaRequestsPage"
+import AreaRequestMaterialInsumosPage from "@/pages/axones/AreaRequestMaterialInsumosPage"
 import GateMovementsPage from "@/pages/axones/GateMovementsPage"
 import AxonesDashboardPage from "@/pages/axones/AxonesDashboardPage"
 import AxonesOperationalAlertsPage from "@/pages/axones/AxonesOperationalAlertsPage"
@@ -69,6 +69,7 @@ import PurchaseReceiptPreviewPage from "@/pages/axones/PurchaseReceiptPreviewPag
 import MiscellaneousReceiptNewPage from "@/pages/axones/MiscellaneousReceiptNewPage"
 import GateMovementNewPage from "@/pages/axones/GateMovementNewPage"
 import MaterialRequestDetailPage from "@/pages/axones/MaterialRequestDetailPage"
+import MaterialRequestNewPage from "@/pages/axones/MaterialRequestNewPage"
 import DeliveryNoteCreatePage from "@/pages/axones/DeliveryNoteCreatePage"
 import AxonesChatPage from "@/pages/axones/AxonesChatPage"
 import AreaPrintingPage from "@/pages/axones/AreaPrintingPage"
@@ -98,6 +99,12 @@ function LegacyInventoryAreasRedirect(): ReactElement {
 /** Compat: URLs antiguas `/ordenes-cliente/:id/edit` → `/ordenes-cliente/:id`. */
 function ClientOrderLegacyEditRedirect(): ReactElement {
   return <Navigate to=".." replace relative="path" />
+}
+
+/** Compat: enlace relativo erróneo `/solicitudes-area/solicitudes-material/:id` → vista de insumos en bandeja entre áreas. */
+function MaterialRequestFromAreaWrongPathRedirect(): ReactElement {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/solicitudes-area/insumos/${id ?? ""}`} replace />
 }
 
 export const router = createBrowserRouter(
@@ -208,11 +215,14 @@ export const router = createBrowserRouter(
         { path: "bobinas/:bobinaId/editar", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaFormPage /> }) },
         { path: "bobinas/:bobinaId", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaDetailPage /> }) },
         { path: "bobinas", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinasPage /> }) },
-        { path: "devoluciones/nueva", element: guardAxonesRoute({ routeKey: "devoluciones", element: <InventoryReturnNewPage /> }) },
         { path: "devoluciones", element: guardAxonesRoute({ routeKey: "devoluciones", element: <InventoryReturnsPage /> }) },
         {
           path: "solicitudes-material",
           element: guardAxonesRoute({ routeKey: "solicitudes-material", element: <MaterialRequestsPage /> }),
+        },
+        {
+          path: "solicitudes-material/nueva",
+          element: guardAxonesRoute({ routeKey: "solicitudes-material", element: <MaterialRequestNewPage /> }),
         },
         {
           path: "solicitudes-material/:id",
@@ -266,7 +276,21 @@ export const router = createBrowserRouter(
         },
         { path: "calidad", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityWorkOrderPage /> }) },
         { path: "calidad/vista-previa", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityCertificatePreviewPage /> }) },
+        {
+          path: "solicitudes-area/insumos/:id",
+          element: guardAxonesRoute({
+            routeKey: "solicitudes-area",
+            element: <AreaRequestMaterialInsumosPage />,
+          }),
+        },
         { path: "solicitudes-area", element: guardAxonesRoute({ routeKey: "solicitudes-area", element: <AreaRequestsPage /> }) },
+        {
+          path: "solicitudes-area/solicitudes-material/:id",
+          element: guardAxonesRoute({
+            routeKey: "solicitudes-area",
+            element: <MaterialRequestFromAreaWrongPathRedirect />,
+          }),
+        },
         { path: "vigilancia", element: guardAxonesRoute({ routeKey: "vigilancia", element: <GateMovementsPage /> }) },
         { path: "vigilancia/nuevo", element: guardAxonesRoute({ routeKey: "vigilancia/nuevo", element: <GateMovementNewPage /> }) },
         { path: "reportes/inventario", element: guardAxonesRoute({ routeKey: "reportes/inventario", element: <ReportsInventoryPage /> }) },

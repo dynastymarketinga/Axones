@@ -105,16 +105,6 @@ export default function InventoryReturnsPage() {
       <AxonesPageHeader
         title="Devoluciones a inventario"
         description="Pendiente hasta aceptar ingreso. Bobinas rechazadas: tras aceptar, use la acción en la fila."
-        actions={
-          <>
-            <Button type="button" size="sm" asChild>
-              <Link to="/devoluciones/nueva">Nueva devolución</Link>
-            </Button>
-            <Button type="button" size="sm" variant="outline" asChild>
-              <Link to="/devoluciones/nueva?demo=1">Ver ejemplo</Link>
-            </Button>
-          </>
-        }
       />
 
       {showInitialSkeleton ? (
@@ -205,17 +195,7 @@ export default function InventoryReturnsPage() {
                                 </p>
                                 <p className="text-muted-foreground text-xs leading-relaxed">
                                   {listTab === "pending" ? (
-                                    <>
-                                      Cree una con{" "}
-                                      <Link className="text-primary font-medium underline" to="/devoluciones/nueva">
-                                        Nueva devolución
-                                      </Link>{" "}
-                                      o explore el formulario con{" "}
-                                      <Link className="text-primary font-medium underline" to="/devoluciones/nueva?demo=1">
-                                        datos de ejemplo
-                                      </Link>
-                                      .
-                                    </>
+                                    "Las devoluciones registradas desde otros flujos aparecerán aquí hasta que se acepte el ingreso."
                                   ) : (
                                     <>
                                       Las devoluciones aceptadas aparecen aquí. Las pendientes están en la pestaña{" "}

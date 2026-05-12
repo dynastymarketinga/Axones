@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { CalendarDays, Eraser, Eye, FileText, Hash, ListOrdered, Search, Tags, Truck } from "lucide-react"
+import { CalendarDays, Eraser, Eye, FileText, Hash, ListOrdered, Search, Truck } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -114,12 +114,10 @@ export default function PurchaseReceiptsPage() {
   const [page, setPage] = useState(Number.isFinite(initialPage) && initialPage > 0 ? initialPage : 1)
   const [supplierInput, setSupplierInput] = useState(searchParams.get("supplier_name") || "")
   const [invoiceInput, setInvoiceInput] = useState(searchParams.get("invoice_number") || "")
-  const [materialInput, setMaterialInput] = useState(searchParams.get("material_term") || "")
   const [fromInput, setFromInput] = useState(searchParams.get("from") || "")
   const [toInput, setToInput] = useState(searchParams.get("to") || "")
   const [supplierFilter, setSupplierFilter] = useState(searchParams.get("supplier_name") || "")
   const [invoiceFilter, setInvoiceFilter] = useState(searchParams.get("invoice_number") || "")
-  const [materialFilter, setMaterialFilter] = useState(searchParams.get("material_term") || "")
   const [fromFilter, setFromFilter] = useState(searchParams.get("from") || "")
   const [toFilter, setToFilter] = useState(searchParams.get("to") || "")
   const [loading, setLoading] = useState(true)
@@ -132,7 +130,6 @@ export default function PurchaseReceiptsPage() {
     page: number
     supplier_name?: string
     invoice_number?: string
-    material_term?: string
     from?: string
     to?: string
   }) {
@@ -140,7 +137,6 @@ export default function PurchaseReceiptsPage() {
     if (next.page > 1) params.set("page", String(next.page))
     if (next.supplier_name) params.set("supplier_name", next.supplier_name)
     if (next.invoice_number) params.set("invoice_number", next.invoice_number)
-    if (next.material_term) params.set("material_term", next.material_term)
     if (next.from) params.set("from", next.from)
     if (next.to) params.set("to", next.to)
     setSearchParams(params)
@@ -152,7 +148,6 @@ export default function PurchaseReceiptsPage() {
       page: nextPage,
       supplier_name: supplierFilter || undefined,
       invoice_number: invoiceFilter || undefined,
-      material_term: materialFilter || undefined,
       from: fromFilter || undefined,
       to: toFilter || undefined,
     })
@@ -167,17 +162,14 @@ export default function PurchaseReceiptsPage() {
     setPage(1)
     const supplier = supplierInput.trim()
     const invoice = invoiceInput.trim()
-    const material = materialInput.trim()
     setSupplierFilter(supplier)
     setInvoiceFilter(invoice)
-    setMaterialFilter(material)
     setFromFilter(fromInput)
     setToFilter(toInput)
     syncQuery({
       page: 1,
       supplier_name: supplier || undefined,
       invoice_number: invoice || undefined,
-      material_term: material || undefined,
       from: fromInput || undefined,
       to: toInput || undefined,
     })
@@ -194,7 +186,6 @@ export default function PurchaseReceiptsPage() {
             per_page: 20,
             supplier_name: supplierFilter || undefined,
             invoice_number: invoiceFilter || undefined,
-            material_term: materialFilter || undefined,
             from: fromFilter || undefined,
             to: toFilter || undefined,
           },
@@ -208,12 +199,11 @@ export default function PurchaseReceiptsPage() {
     } finally {
       setLoading(false)
     }
-  }, [fromFilter, invoiceFilter, materialFilter, page, supplierFilter, toFilter])
+  }, [fromFilter, invoiceFilter, page, supplierFilter, toFilter])
 
   useEffect(() => {
     const nextSupplier = searchParams.get("supplier_name") || ""
     const nextInvoice = searchParams.get("invoice_number") || ""
-    const nextMaterial = searchParams.get("material_term") || ""
     const nextFrom = searchParams.get("from") || ""
     const nextTo = searchParams.get("to") || ""
     const nextPageRaw = Number(searchParams.get("page") || "1")
@@ -221,30 +211,29 @@ export default function PurchaseReceiptsPage() {
 
     setSupplierInput(nextSupplier)
     setInvoiceInput(nextInvoice)
-    setMaterialInput(nextMaterial)
     setFromInput(nextFrom)
     setToInput(nextTo)
     setSupplierFilter(nextSupplier)
     setInvoiceFilter(nextInvoice)
-    setMaterialFilter(nextMaterial)
     setFromFilter(nextFrom)
     setToFilter(nextTo)
     setPage(nextPage)
   }, [searchParams])
 
-  function receiptSkus(row: ReceiptRow) {
-    return Array.from(new Set((row.lines ?? [])
-      .map((line) => line.material)
-      .filter((material): material is NonNullable<typeof material> => Boolean(material))
-      .map((material) => {
-        const sku = (material.sku || "").trim()
-        return sku
-      })
-      .filter(Boolean)))
+  function receiptMaterialNames(row: ReceiptRow) {
+    return Array.from(
+      new Set(
+        (row.lines ?? [])
+          .map((line) => line.material)
+          .filter((material): material is NonNullable<typeof material> => Boolean(material))
+          .map((material) => (material.name || "").trim())
+          .filter(Boolean),
+      ),
+    )
   }
 
-  function receiptSkuSummary(row: ReceiptRow) {
-    const unique = receiptSkus(row)
+  function receiptMaterialNamesSummary(row: ReceiptRow) {
+    const unique = receiptMaterialNames(row)
     if (!unique.length) return "—"
     if (unique.length <= 2) return unique.join(" · ")
     return `${unique.slice(0, 2).join(" · ")} +${unique.length - 2} más`
@@ -305,7 +294,7 @@ export default function PurchaseReceiptsPage() {
         <>
           <AxonesTableCard>
           <div className="border-b p-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-10">
         <div className="grid gap-2 xl:col-span-2">
           <Label htmlFor="receipt-from" className="inline-flex items-center gap-2 font-semibold text-foreground">
             <CalendarDays className="h-4 w-4 text-primary" />
@@ -388,22 +377,6 @@ export default function PurchaseReceiptsPage() {
             }}
           />
         </div>
-        <div className="grid gap-2 xl:col-span-2">
-          <Label htmlFor="receipt-material" className="inline-flex items-center gap-2 font-semibold text-foreground">
-            <Tags className="h-4 w-4 text-primary" />
-            Código
-          </Label>
-          <Input
-            id="receipt-material"
-            placeholder="Código de material..."
-            value={materialInput}
-            className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
-            onChange={(ev) => setMaterialInput(ev.target.value)}
-            onKeyDown={(ev) => {
-              if (ev.key === "Enter") applyFilters()
-            }}
-          />
-        </div>
         <div className="flex w-full items-end gap-2 xl:col-span-2 xl:justify-end">
           <Button
             type="button"
@@ -426,12 +399,10 @@ export default function PurchaseReceiptsPage() {
                     setPage(1)
                     setSupplierInput("")
                     setInvoiceInput("")
-                    setMaterialInput("")
                     setFromInput("")
                     setToInput("")
                     setSupplierFilter("")
                     setInvoiceFilter("")
-                    setMaterialFilter("")
                     setFromFilter("")
                     setToFilter("")
                     setSearchParams(new URLSearchParams())
@@ -455,7 +426,7 @@ export default function PurchaseReceiptsPage() {
                 <ListOrdered className="h-4 w-4" />
               </TableHead>
               <TableHead className="font-bold text-foreground">Proveedor</TableHead>
-              <TableHead className="font-bold text-foreground">Código</TableHead>
+              <TableHead className="font-bold text-foreground">Material</TableHead>
               <TableHead className="font-bold text-foreground">N° Factura</TableHead>
               <TableHead className="font-bold text-foreground">N° OC (referencia)</TableHead>
               <TableHead className="font-bold text-foreground">Fecha recepción</TableHead>
@@ -479,8 +450,8 @@ export default function PurchaseReceiptsPage() {
                 >
                   <TableCell className="transition-colors group-hover:bg-muted/60">{formatReceiptCode(r.id)}</TableCell>
                   <TableCell className="transition-colors group-hover:bg-muted/60">{receiptSupplierLabel(r)}</TableCell>
-                  <TableCell className="max-w-[26rem] truncate transition-colors group-hover:bg-muted/60" title={receiptSkuSummary(r)}>
-                    {receiptSkuSummary(r)}
+                  <TableCell className="max-w-[26rem] truncate transition-colors group-hover:bg-muted/60" title={receiptMaterialNamesSummary(r)}>
+                    {receiptMaterialNamesSummary(r)}
                   </TableCell>
                   <TableCell className="transition-colors group-hover:bg-muted/60">{r.invoice_number || "—"}</TableCell>
                   <TableCell className="transition-colors group-hover:bg-muted/60">{r.purchase_order_reference || "—"}</TableCell>
@@ -643,16 +614,16 @@ export default function PurchaseReceiptsPage() {
                       <TableCell>{line.ancho_mm ?? "—"}</TableCell>
                     </TableRow>
                   ))
-                ) : selectedReceipt && receiptSkus(selectedReceipt).length ? (
-                  receiptSkus(selectedReceipt).map((sku) => (
-                    <TableRow key={sku}>
-                      <TableCell className="sticky left-0 z-10 bg-card">{sku}</TableCell>
-                      <TableCell className="sticky left-[12rem] z-10 bg-card">—</TableCell>
-                      <TableCell>—</TableCell>
-                      <TableCell>—</TableCell>
-                      <TableCell>—</TableCell>
-                      <TableCell>—</TableCell>
-                      <TableCell>—</TableCell>
+                ) : selectedReceipt?.lines?.length ? (
+                  selectedReceipt.lines.map((line, index) => (
+                    <TableRow key={`${selectedReceipt.id}-${index}-${line.material?.sku || "linea"}`}>
+                      <TableCell className="sticky left-0 z-10 bg-card">{line.material?.sku || "—"}</TableCell>
+                      <TableCell className="sticky left-[12rem] z-10 bg-card">{line.material?.name || "—"}</TableCell>
+                      <TableCell>{line.item_type || "—"}</TableCell>
+                      <TableCell>{line.quantity ?? "—"}</TableCell>
+                      <TableCell>{line.unit || "—"}</TableCell>
+                      <TableCell>{line.micras ?? "—"}</TableCell>
+                      <TableCell>{line.ancho_mm ?? "—"}</TableCell>
                     </TableRow>
                   ))
                 ) : (

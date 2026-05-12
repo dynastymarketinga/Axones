@@ -24,14 +24,22 @@ class MaterialRequestController extends Controller
         $query = MaterialRequest::query()
             ->with(['workOrder.client', 'requester'])
             ->withCount('lines')
+            ->with([
+                'lines' => static function ($q): void {
+                    $q->orderBy('id')->limit(8)->with('material');
+                },
+            ])
             ->orderByDesc('created_at');
 
         if ($request->query('work_order_id')) {
             $query->where('work_order_id', $request->query('work_order_id'));
         }
 
-        if ($request->query('status')) {
-            $query->where('status', $request->query('status'));
+        $status = $request->query('status');
+        if ($status === 'received') {
+            $query->whereIn('status', ['partial', 'dispatched']);
+        } elseif ($status) {
+            $query->where('status', $status);
         }
 
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
@@ -45,7 +53,10 @@ class MaterialRequestController extends Controller
         unset($data['lines']);
 
         $materialRequest = DB::transaction(function () use ($data, $lines, $request) {
-            $workOrder = WorkOrder::query()->findOrFail($data['work_order_id']);
+            $workOrderId = $data['work_order_id'] ?? null;
+            $workOrder = $workOrderId !== null
+                ? WorkOrder::query()->findOrFail($workOrderId)
+                : null;
 
             return $this->materialRequests->storePendingRequest(
                 $workOrder,

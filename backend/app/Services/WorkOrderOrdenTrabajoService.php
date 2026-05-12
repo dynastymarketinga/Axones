@@ -39,6 +39,9 @@ class WorkOrderOrdenTrabajoService
             $pedidoKg = number_format((float) $pedidoKg, 3, '.', '');
         }
 
+        $barcodeRaw = $workOrder->product?->barcode;
+        $codigoBarra = is_string($barcodeRaw) && trim($barcodeRaw) !== '' ? trim($barcodeRaw) : null;
+
         $printType = $workOrder->product?->print_type;
         $tipoImpresion = null;
         if ($printType !== null && $printType !== '') {
@@ -78,7 +81,7 @@ class WorkOrderOrdenTrabajoService
             'estructuraMaterial' => $workOrder->product?->structure,
             'cpe' => $workOrder->product?->cpe,
             'mpps' => $workOrder->product?->mps,
-            'codigoBarra' => null,
+            'codigoBarra' => $codigoBarra,
             'tipoImpresion' => $tipoImpresion,
             'client_order_code' => $workOrder->clientOrder?->code,
             'client_order_reference' => $workOrder->client_order_reference,

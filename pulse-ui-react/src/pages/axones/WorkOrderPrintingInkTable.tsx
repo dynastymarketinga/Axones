@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react"
+import { Gauge, Loader2, MessageSquare, Palette as LucidePaletteField, Timer } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { MaterialRow } from "@/types/api"
 import { Droplets, Palette } from "./ot-planilla-icons"
+import { OtPlanillaInputIcon } from "./OtPlanillaInputIcon"
 
 type Props = {
   form: Record<string, unknown>
@@ -39,8 +40,8 @@ export default function WorkOrderPrintingInkTable({
   const [tintaColorPickerRow, setTintaColorPickerRow] = useState<number | null>(null)
 
   return (
-    <div className="ot-section">
-      <div className="section-header">
+    <div className="ot-section ot-section--tintas">
+      <div className="section-header section-hdr-tintas">
         <span className="inline-flex items-center gap-2">
           <Palette className="h-4 w-4" />
           DESCRIPCION DE TINTAS
@@ -58,10 +59,10 @@ export default function WorkOrderPrintingInkTable({
             <thead>
               <tr>
                 <th>POSICION</th>
-                <th>COLOR</th>
-                <th>ANILOX</th>
-                <th>VISC (seg)</th>
-                <th>OBSERVACIONES</th>
+                <th className="required">COLOR</th>
+                <th className="required">ANILOX</th>
+                <th className="required">VISC (seg)</th>
+                <th className="required">OBSERVACIONES</th>
               </tr>
             </thead>
             <tbody>
@@ -73,13 +74,16 @@ export default function WorkOrderPrintingInkTable({
                     <td>{n}</td>
                     <td className="min-w-[11rem] align-top">
                       <div className="flex min-w-0 max-w-full gap-1 no-print">
-                        <Input
-                          data-field={kColor}
-                          className="h-8 min-w-0 flex-1 text-xs"
-                          value={readString(form[kColor])}
-                          onChange={(e) => onSetField(kColor, e.target.value)}
-                          placeholder="Escriba o elija con ▾"
-                        />
+                        <OtPlanillaInputIcon icon={LucidePaletteField} compact className="min-w-0 flex-1">
+                          <Input
+                            data-field={kColor}
+                            data-skip-blur="1"
+                            className="h-8 min-w-0 w-full flex-1 text-xs"
+                            value={readString(form[kColor])}
+                            onChange={(e) => onSetField(kColor, e.target.value)}
+                            placeholder="Negro proceso 9010"
+                          />
+                        </OtPlanillaInputIcon>
                         <Popover
                           open={tintaColorPickerRow === n}
                           onOpenChange={(o) => setTintaColorPickerRow(o ? n : null)}
@@ -150,29 +154,38 @@ export default function WorkOrderPrintingInkTable({
                       </div>
                     </td>
                     <td>
-                      <input
-                        className="ot-input-unified h-8 text-sm"
-                        value={readString(form[`tintaAnilox${n}`])}
-                        onChange={(e) => onSetField(`tintaAnilox${n}`, e.target.value)}
-                      />
+                      <OtPlanillaInputIcon icon={Gauge} compact>
+                        <input
+                          className="ot-input-unified h-8 text-sm"
+                          value={readString(form[`tintaAnilox${n}`])}
+                          onChange={(e) => onSetField(`tintaAnilox${n}`, e.target.value)}
+                          placeholder="380 L/cm"
+                        />
+                      </OtPlanillaInputIcon>
                     </td>
                     <td>
-                      <input
-                        className="ot-input-unified h-8 text-sm"
-                        value={readString(form[`tintaVisc${n}`])}
-                        onChange={(e) =>
-                          onSetField(`tintaVisc${n}`, e.target.value.replace(/\D/g, ""))
-                        }
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                      />
+                      <OtPlanillaInputIcon icon={Timer} compact>
+                        <input
+                          className="ot-input-unified h-8 text-sm"
+                          value={readString(form[`tintaVisc${n}`])}
+                          onChange={(e) =>
+                            onSetField(`tintaVisc${n}`, e.target.value.replace(/\D/g, ""))
+                          }
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          placeholder="18"
+                        />
+                      </OtPlanillaInputIcon>
                     </td>
                     <td>
-                      <input
-                        className="ot-input-unified h-8 text-sm"
-                        value={readString(form[`tintaObs${n}`])}
-                        onChange={(e) => onSetField(`tintaObs${n}`, e.target.value)}
-                      />
+                      <OtPlanillaInputIcon icon={MessageSquare} compact>
+                        <input
+                          className="ot-input-unified h-8 text-sm"
+                          value={readString(form[`tintaObs${n}`])}
+                          onChange={(e) => onSetField(`tintaObs${n}`, e.target.value)}
+                          placeholder="Sin arrastre"
+                        />
+                      </OtPlanillaInputIcon>
                     </td>
                   </tr>
                 )

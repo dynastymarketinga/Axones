@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Building2, Boxes, CircleHelp, Hash, Layers, Package2, Printer } from "lucide-react"
+import { ArrowLeft, Barcode, Building2, Boxes, CircleHelp, Hash, Layers, Package2, Printer } from "lucide-react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -68,6 +68,45 @@ function canonicalizeLoadedPrintType(raw: string): string {
   return t
 }
 
+/** Solo rutas relativas internas (evita redirección abierta vía ?returnTo=). */
+function sanitizeInternalReturnPath(raw: string | null | undefined): string | null {
+  if (raw == null) return null
+  let t = raw.trim()
+  try {
+    t = decodeURIComponent(t)
+  } catch {
+    return null
+  }
+  t = t.trim()
+  if (!t.startsWith("/")) return null
+  if (t.startsWith("//")) return null
+  if (t.includes("://")) return null
+  if (t.includes("\0")) return null
+  return t
+}
+
+const RETURN_PATH_NEW_CLIENT_ORDER = "/ordenes-cliente/nueva"
+
+/**
+ * Tras guardar especificación: si volvemos al alta de pedido cliente, conservamos cliente
+ * (y el producto recién creado) vía query para hidratar el formulario.
+ */
+function buildPostSaveNavigateTarget(
+  returnPathRaw: string,
+  opts: { clientId: number; newProductId?: number | null },
+): string | { pathname: string; search: string } {
+  const base = sanitizeInternalReturnPath(returnPathRaw)
+  if (!base) return "/productos"
+  if (base !== RETURN_PATH_NEW_CLIENT_ORDER) return base
+  const q = new URLSearchParams()
+  q.set("client_id", String(opts.clientId))
+  const np = opts.newProductId
+  if (np != null && Number.isFinite(np) && np > 0) {
+    q.set("select_product", String(np))
+  }
+  return { pathname: base, search: `?${q.toString()}` }
+}
+
 export default function ProductFormPage() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -84,6 +123,7 @@ export default function ProductFormPage() {
   const [name, setName] = useState("")
   const [cpe, setCpe] = useState("")
   const [mps, setMps] = useState("")
+  const [barcode, setBarcode] = useState("")
   const [printType, setPrintType] = useState("")
   const [structure, setStructure] = useState("")
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
@@ -91,10 +131,20 @@ export default function ProductFormPage() {
   const [errors, setErrors] = useState<{ client_id?: string; name?: string }>({})
 
   const returnTo = useMemo(() => {
+    const fromQuery = sanitizeInternalReturnPath(searchParams.get("returnTo"))
+    if (fromQuery) return fromQuery
     const st = location.state as { from?: string } | null
-    const from = st?.from?.trim()
-    return from && from.startsWith("/") ? from : "/productos"
-  }, [location.state])
+    const fromState = sanitizeInternalReturnPath(st?.from ?? null)
+    if (fromState) return fromState
+    return "/productos"
+  }, [location.state, searchParams])
+
+  /** Flecha atrás: mismo criterio que tras guardar (no perder cliente en pedido cliente nuevo). */
+  const returnLinkTarget = useMemo(() => {
+    const cid = Number(clientId)
+    if (!Number.isFinite(cid) || cid < 1) return returnTo
+    return buildPostSaveNavigateTarget(returnTo, { clientId: cid })
+  }, [returnTo, clientId])
 
   const trimmedPrintType = printType.trim()
   const printTypeSelectValue = trimmedPrintType === "" ? PRINT_TYPE_EMPTY : trimmedPrintType
@@ -142,6 +192,7 @@ export default function ProductFormPage() {
       setName(p.name ?? "")
       setCpe(p.cpe ?? "")
       setMps(p.mps ?? "")
+      setBarcode(p.barcode ?? "")
       setPrintType(canonicalizeLoadedPrintType(p.print_type ?? ""))
       setStructure((p.structure ?? "").slice(0, PRODUCT_STRUCTURE_MAX_LEN))
       setClientId(p.client_id ? String(p.client_id) : "")
@@ -156,6 +207,16 @@ export default function ProductFormPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  /** Alta desde otras pantallas (p. ej. nueva orden de cliente con cliente ya elegido). */
+  useEffect(() => {
+    if (isEdit) return
+    const raw = searchParams.get("client_id")
+    if (!raw) return
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n < 1) return
+    setClientId(String(n))
+  }, [isEdit, searchParams])
 
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
@@ -175,6 +236,7 @@ export default function ProductFormPage() {
       const body = {
         name: name.trim(),
         client_id: cid,
+        barcode: barcode.trim() || null,
         cpe: cpe.trim() || null,
         mps: mps.trim() || null,
         print_type: printType.trim() || null,
@@ -186,14 +248,19 @@ export default function ProductFormPage() {
           body: JSON.stringify(body),
         })
         toast.success("Especificación actualizada.")
-        navigate(returnTo)
+        navigate(buildPostSaveNavigateTarget(returnTo, { clientId: cid }))
       } else {
-        await apiFetch<ProductRecord>("products", {
+        const created = await apiFetch<ProductRecord>("products", {
           method: "POST",
           body: JSON.stringify(body),
         })
         toast.success("Especificación creada.")
-        navigate(returnTo)
+        navigate(
+          buildPostSaveNavigateTarget(returnTo, {
+            clientId: cid,
+            newProductId: created?.id,
+          }),
+        )
       }
     } catch (e) {
       if (e instanceof ApiError) {
@@ -232,7 +299,7 @@ export default function ProductFormPage() {
             <CircleHelp className="h-4 w-4" />
           </Button>
           <Button type="button" variant="outline" size="icon" asChild>
-            <Link to={returnTo} aria-label="Volver al listado">
+            <Link to={returnLinkTarget} aria-label="Volver al listado">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -402,6 +469,26 @@ export default function ProductFormPage() {
                     ) : null}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="p-barcode">Cod. Barra Maestro</Label>
+              <div className="group/field relative">
+                <Barcode
+                  className={cn(
+                    fieldIconClass,
+                    "text-muted-foreground group-focus-within/field:text-primary",
+                  )}
+                  aria-hidden
+                />
+                <Input
+                  id="p-barcode"
+                  className={cn("pl-10", FILTER_INPUT_CLASS)}
+                  value={barcode}
+                  onChange={(ev) => setBarcode(ev.target.value)}
+                  placeholder="Ej. 7590123456789"
+                />
               </div>
             </div>
 

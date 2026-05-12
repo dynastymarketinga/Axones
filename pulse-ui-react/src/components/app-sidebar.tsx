@@ -30,7 +30,6 @@ const data = {
   teams: [
     {
       name: "Axones",
-      plan: "Sistema operativo",
     },
   ],
 }

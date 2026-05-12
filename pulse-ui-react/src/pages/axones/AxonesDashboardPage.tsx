@@ -219,8 +219,8 @@ export default function AxonesDashboardPage() {
         iconClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
       },
       {
-        title: "Solicitudes por despachar",
-        hint: "Pendiente o con entrega parcial.",
+        title: "Solicitudes de insumos pendientes",
+        hint: "Pendiente o con entrega parcial en inventario.",
         value: data.material_requests_pending,
         href: "/solicitudes-material",
         icon: Inbox,
@@ -389,7 +389,7 @@ export default function AxonesDashboardPage() {
 
             <Card className="overflow-hidden">
               <CardHeader>
-                <CardTitle className="text-base">Solicitudes de material por situación</CardTitle>
+                <CardTitle className="text-base">Solicitudes de insumos por situación</CardTitle>
                 <CardDescription>
                   Distribución de las solicitudes según su avance. El total es la suma de todas
                   las solicitudes.
@@ -491,7 +491,7 @@ export default function AxonesDashboardPage() {
                     to="/solicitudes-material"
                     className="text-primary font-medium hover:underline"
                   >
-                    Abrir listado de solicitudes
+                    Abrir solicitudes de insumos
                   </Link>
                 </p>
               </CardContent>

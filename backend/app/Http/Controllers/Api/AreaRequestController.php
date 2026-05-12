@@ -9,6 +9,8 @@ use App\Http\Requests\UpdateFacilityAreaRequest;
 use App\Models\AreaRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response;
 
 class AreaRequestController extends Controller
 {
@@ -82,8 +84,29 @@ class AreaRequestController extends Controller
 
     public function update(UpdateFacilityAreaRequest $request, AreaRequest $area_request): JsonResponse
     {
-        $area_request->update($request->validated());
+        $data = $request->validated();
+
+        if (array_key_exists('title', $data) && $area_request->status !== AreaRequestStatus::Pending->value) {
+            throw ValidationException::withMessages([
+                'title' => ['Solo se puede editar el título mientras la solicitud está pendiente.'],
+            ]);
+        }
+
+        $area_request->update($data);
 
         return response()->json($area_request->fresh()->load(['workOrder:id,code', 'requester:id,name']));
+    }
+
+    public function destroy(AreaRequest $area_request): Response
+    {
+        if ($area_request->status === AreaRequestStatus::Done->value) {
+            throw ValidationException::withMessages([
+                'area_request' => ['No se pueden eliminar solicitudes ya completadas.'],
+            ]);
+        }
+
+        $area_request->delete();
+
+        return response()->noContent();
     }
 }

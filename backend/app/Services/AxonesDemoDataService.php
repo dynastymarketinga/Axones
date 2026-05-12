@@ -40,8 +40,10 @@ use App\Models\PurchaseReceipt;
 use App\Models\Supplier;
 use App\Models\TintaMixture;
 use App\Models\TintaMixtureComponent;
+use App\Models\TintasTimeSegment;
 use App\Models\TintaSubarea;
 use App\Models\User;
+use App\Models\Vendor;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderCorteSummary;
 use App\Models\WorkOrderLaminacionSummary;
@@ -51,11 +53,13 @@ use App\Models\WorkOrderPrintingSummary;
 use App\Models\WorkOrderProductionItem;
 use App\Models\WorkOrderQualityRecord;
 use App\Models\WorkOrderTechnicalDocument;
+use App\Models\WorkOrderTintasSummary;
 use App\Support\DemoTintaCatalogRows;
 use Carbon\Carbon;
 use Illuminate\Http\File;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class AxonesDemoDataService
@@ -64,6 +68,9 @@ class AxonesDemoDataService
 
     /** Solo datos mínimos para comparar especificación vs terminado (sin volumen demo masivo). */
     private bool $minimalComparisonSeed = false;
+
+    /** Una fila por bucle de volumen (volumen=1) pero con pedido/OT y grafo de producción para recorrer impresión/laminación/corte/tintas. */
+    private bool $microSeed = false;
 
     public function __construct(
         private readonly InventoryLedgerService $ledger,
@@ -74,15 +81,11 @@ class AxonesDemoDataService
     /**
      * @param  int  $demoVolume  Filas objetivo por tabla de dominio (1–200 en modo comparación; 5–200 en modo volumen).
      * @param  bool  $minimalComparison  Si true: pocas filas, sin catálogo masivo de tintas ni grafo pesado (una sola línea típica en despacho tras OT-DEMO-FLUJO).
+     * @param  bool  $micro  Si true: volumen 1 por tabla iterada, materiales «minimal», sí cliente/producto/OT y grafo (ideal para phpMyAdmin / pruebas rápidas).
      */
-    public function seed(int $demoVolume = 20, bool $minimalComparison = false): array
+    public function seed(int $demoVolume = 20, bool $minimalComparison = false, bool $micro = false): array
     {
-        $this->minimalComparisonSeed = $minimalComparison;
-        if ($minimalComparison) {
-            $this->demoVolume = max(1, min(200, $demoVolume > 0 ? $demoVolume : 1));
-        } else {
-            $this->demoVolume = max(5, min(200, $demoVolume));
-        }
+        $this->applyDemoVolumeSettings($demoVolume, $minimalComparison, $micro);
         // TRUNCATE hace commit implícito en MySQL: no lo corremos dentro de transacción.
         $this->cleanDomainData(keepUsers: true);
 
@@ -93,57 +96,41 @@ class AxonesDemoDataService
             $inventoryUser = $users['inventory'];
             $printingUser = $users['printing'];
 
-            $clients = $this->minimalComparisonSeed ? [] : $this->seedClients();
-            $suppliers = $this->seedSuppliers();
+            $ctx = $this->phaseMastersInternal($inventoryUser);
 
-            $materials = $this->minimalComparisonSeed
-                ? $this->seedMinimalMaterials($inventoryUser)
-                : $this->seedMaterials($inventoryUser);
-            $tintaCatalog = $this->minimalComparisonSeed ? [] : $this->seedTintaCatalogMaterials();
-            $materials = array_merge($materials, $tintaCatalog);
-            $products = $this->minimalComparisonSeed ? [] : $this->seedProducts($clients);
-            if (! $this->minimalComparisonSeed) {
-                $products = array_merge($products, $this->seedExtraProductsForFirstClient($clients[0]));
-                $this->seedProductInkMaterialForDemo($products, $tintaCatalog);
-            }
+            $purchaseOrders = $this->phaseComprasInternal($ctx['suppliers'], $ctx['materials'], $inventoryUser);
 
-            $purchaseOrders = $this->seedPurchaseOrdersAndReceipts($suppliers, $materials, $inventoryUser);
-            $this->seedMiscReceipts($materials, $inventoryUser);
-            $this->seedGateMovements($boss);
+            $invExtra = $this->phaseInventarioExtraInternal($ctx['materials'], $inventoryUser, $boss);
+            $bobinas = $invExtra['bobinas'];
 
             if ($this->minimalComparisonSeed) {
-                $clientOrders = [];
-                $bobinas = $this->seedBobinas($materials);
                 $workOrders = [];
             } else {
-                $clientOrders = $this->seedClientOrders($clients, $products, $materials);
-                $bobinas = $this->seedBobinas($materials);
-                $workOrders = $this->seedWorkOrders($clientOrders, $clients, $products, $materials, $printingUser);
+                $ventas = $this->phaseVentasOtInternal($ctx['clients'], $ctx['products'], $ctx['materials'], $printingUser);
+                $workOrders = $ventas['work_orders'];
             }
 
-            if (count($workOrders) > 0) {
-                $this->seedRequestsAndDispatch($workOrders, $materials, $inventoryUser);
-                $this->seedQuality($workOrders, $boss);
-                $this->seedReturnsAndRejectedBobinas($workOrders, $materials);
-            }
+            $this->phaseOperacionesInternal($workOrders, $ctx['materials'], $inventoryUser, $boss);
             $this->seedAlerts($boss);
 
             if (! $this->minimalComparisonSeed) {
-                $this->seedHeavyDemoGraph($workOrders, $materials, $bobinas, $printingUser, $boss);
-                $this->seedAuxiliaryVolume($workOrders, $materials, $products, $suppliers, $printingUser, $inventoryUser, $boss);
+                $this->phaseGrafoDemoInternal($workOrders, $ctx['materials'], $bobinas, $printingUser, $boss);
+                $this->phaseAuxiliaryVolumeInternal($workOrders, $ctx['materials'], $ctx['products'], $ctx['suppliers'], $printingUser, $inventoryUser, $boss);
             }
 
             return [
                 'users' => array_map(fn (User $u) => $u->only(['id', 'name', 'email', 'role']), $users),
-                'clients' => count($clients),
-                'suppliers' => count($suppliers),
-                'products' => count($products),
-                'materials' => count($materials),
+                'vendors' => count($ctx['vendors']),
+                'clients' => count($ctx['clients']),
+                'suppliers' => count($ctx['suppliers']),
+                'products' => count($ctx['products']),
+                'materials' => count($ctx['materials']),
                 'purchase_orders' => count($purchaseOrders),
                 'work_orders' => count($workOrders),
                 'bobinas' => count($bobinas),
                 'demo_volume' => $this->demoVolume,
                 'minimal_comparison' => $this->minimalComparisonSeed,
+                'micro_seed' => $this->microSeed,
             ];
         });
     }
@@ -173,6 +160,187 @@ class AxonesDemoDataService
                 $users,
             )),
         ];
+    }
+
+    /**
+     * Ajusta volumen y modo minimal antes de ejecutar fases o seed completo.
+     */
+    public function preparePhaseRun(int $demoVolume = 20, bool $minimalComparison = false, bool $micro = false): void
+    {
+        $this->applyDemoVolumeSettings($demoVolume, $minimalComparison, $micro);
+    }
+
+    /**
+     * @return array{phase: string, users: list<array{id: int, name: string, email: string, role: string}>}
+     */
+    public function runPhaseReset(bool $keepUsers = true): array
+    {
+        $this->cleanDomainData($keepUsers);
+        $users = $this->seedUsers();
+
+        return [
+            'phase' => 'reset',
+            'users' => array_values(array_map(
+                fn (User $u) => $u->only(['id', 'name', 'email', 'role']),
+                $users,
+            )),
+        ];
+    }
+
+    /**
+     * @return array{phase: string, vendors: int, clients: int, suppliers: int, products: int, materials: int}
+     */
+    public function runPhaseMasters(): array
+    {
+        return DB::transaction(function (): array {
+            $inventoryUser = $this->resolveDemoUsersForPhase()['inventory'];
+            $ctx = $this->phaseMastersInternal($inventoryUser);
+
+            return [
+                'phase' => 'masters',
+                'vendors' => count($ctx['vendors']),
+                'clients' => count($ctx['clients']),
+                'suppliers' => count($ctx['suppliers']),
+                'products' => count($ctx['products']),
+                'materials' => count($ctx['materials']),
+            ];
+        });
+    }
+
+    /**
+     * @return array{phase: string, purchase_entities: int}
+     */
+    public function runPhaseCompras(): array
+    {
+        return DB::transaction(function (): array {
+            $u = $this->resolveDemoUsersForPhase();
+            $suppliers = Supplier::query()->orderBy('id')->get()->all();
+            $materials = Material::query()->orderBy('id')->get()->all();
+            if ($suppliers === [] || $materials === []) {
+                throw new \RuntimeException('Fase compras: no hay proveedores o materiales. Ejecute primero la fase «masters».');
+            }
+
+            $purchaseEntities = $this->phaseComprasInternal($suppliers, $materials, $u['inventory']);
+
+            return [
+                'phase' => 'compras',
+                'purchase_entities' => count($purchaseEntities),
+            ];
+        });
+    }
+
+    /**
+     * @return array{phase: string, bobinas: int}
+     */
+    public function runPhaseInventarioExtra(): array
+    {
+        return DB::transaction(function (): array {
+            $u = $this->resolveDemoUsersForPhase();
+            $materials = Material::query()->orderBy('id')->get()->all();
+            if ($materials === []) {
+                throw new \RuntimeException('Fase inventario_extra: no hay materiales. Ejecute primero «masters».');
+            }
+            $inv = $this->phaseInventarioExtraInternal($materials, $u['inventory'], $u['boss']);
+
+            return [
+                'phase' => 'inventario_extra',
+                'bobinas' => count($inv['bobinas']),
+            ];
+        });
+    }
+
+    /**
+     * @return array{phase: string, client_orders: int, work_orders: int}
+     */
+    public function runPhaseVentasOt(): array
+    {
+        if ($this->minimalComparisonSeed) {
+            throw new \RuntimeException('La fase ventas_ot no aplica en modo --minimal.');
+        }
+
+        return DB::transaction(function (): array {
+            $u = $this->resolveDemoUsersForPhase();
+            $clients = Client::query()->orderBy('id')->get()->all();
+            $products = Product::query()->orderBy('id')->get()->all();
+            $materials = Material::query()->orderBy('id')->get()->all();
+            if ($clients === [] || $products === []) {
+                throw new \RuntimeException('Fase ventas_ot: faltan clientes o productos. Ejecute «masters» antes.');
+            }
+            $ventas = $this->phaseVentasOtInternal($clients, $products, $materials, $u['printing']);
+
+            return [
+                'phase' => 'ventas_ot',
+                'client_orders' => count($ventas['client_orders']),
+                'work_orders' => count($ventas['work_orders']),
+            ];
+        });
+    }
+
+    /**
+     * @return array{phase: string, work_orders: int}
+     */
+    public function runPhaseOperaciones(): array
+    {
+        return DB::transaction(function (): array {
+            $u = $this->resolveDemoUsersForPhase();
+            $workOrders = WorkOrder::query()->orderBy('id')->get()->all();
+            $materials = Material::query()->orderBy('id')->get()->all();
+            if ($materials === []) {
+                throw new \RuntimeException('Fase operaciones: no hay materiales. Ejecute «masters» antes.');
+            }
+
+            $this->phaseOperacionesInternal($workOrders, $materials, $u['inventory'], $u['boss']);
+            $this->seedAlerts($u['boss']);
+
+            return [
+                'phase' => 'operaciones',
+                'work_orders' => count($workOrders),
+            ];
+        });
+    }
+
+    /**
+     * @return array{phase: string, work_orders: int}
+     */
+    public function runPhaseGrafoDemo(): array
+    {
+        if ($this->minimalComparisonSeed) {
+            throw new \RuntimeException('La fase grafo_demo no aplica en modo --minimal.');
+        }
+
+        return DB::transaction(function (): array {
+            $u = $this->resolveDemoUsersForPhase();
+            $workOrders = WorkOrder::query()->orderBy('id')->get()->all();
+            $materials = Material::query()->orderBy('id')->get()->all();
+            $bobinas = Bobina::query()->orderBy('id')->get()->all();
+            if ($workOrders === []) {
+                throw new \RuntimeException('Fase grafo_demo: no hay órdenes de trabajo. Ejecute «ventas_ot» antes.');
+            }
+            if ($materials === []) {
+                throw new \RuntimeException('Fase grafo_demo: no hay materiales.');
+            }
+
+            $this->phaseGrafoDemoInternal($workOrders, $materials, $bobinas, $u['printing'], $u['boss']);
+            $suppliers = Supplier::query()->orderBy('id')->get()->all();
+            $products = Product::query()->orderBy('id')->get()->all();
+            $this->phaseAuxiliaryVolumeInternal($workOrders, $materials, $products, $suppliers, $u['printing'], $u['inventory'], $u['boss']);
+
+            return [
+                'phase' => 'grafo_demo',
+                'work_orders' => count($workOrders),
+            ];
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function runPhaseFlow(bool $createFinishedUsage = true): array
+    {
+        $u = $this->resolveDemoUsersForPhase();
+        $payload = $this->seedHighlightedFlowScenario($u['printing'], $u['boss'], $createFinishedUsage);
+
+        return array_merge(['phase' => 'flow'], $payload);
     }
 
     /**
@@ -211,6 +379,7 @@ class AxonesDemoDataService
                 ],
                 [
                     'name' => 'BOLSA HARINA 5KG (DEMO FLUJO)',
+                    'barcode' => '7590000000123',
                     'mps' => 'MPS-DEMO-FLUJO',
                     'print_type' => 'Bilaminado',
                     'structure' => 'BOPP NORMAL + LDPE (demo)',
@@ -255,9 +424,11 @@ class AxonesDemoDataService
                 ]);
             }
 
+            $flowDocNumber = WorkOrder::nextDocumentNumber();
+
             $wo = WorkOrder::query()->create([
                 'code' => 'OT-DEMO-FLUJO',
-                'document_number' => '001-26',
+                'document_number' => $flowDocNumber,
                 'document_date' => now()->toDateString(),
                 'client_order_reference' => $clientOrder->code,
                 'client_order_id' => $clientOrder->getKey(),
@@ -277,7 +448,7 @@ class AxonesDemoDataService
                 ['form' => [
                     // Cabecera
                     'fechaOrden' => now()->toDateString(),
-                    'numeroOrden' => '001-26',
+                    'numeroOrden' => $flowDocNumber,
                     'pedidoKg' => '100.000',
                     'maquina' => 'COMEXI 1',
                     'planchasReferencia' => '067',
@@ -396,6 +567,161 @@ class AxonesDemoDataService
         });
     }
 
+    private function applyDemoVolumeSettings(int $demoVolume, bool $minimalComparison, bool $micro = false): void
+    {
+        $this->microSeed = $micro;
+
+        if ($minimalComparison) {
+            $this->minimalComparisonSeed = true;
+            $effectiveVol = $micro ? 1 : ($demoVolume > 0 ? $demoVolume : 1);
+            $this->demoVolume = max(1, min(200, $effectiveVol));
+
+            return;
+        }
+
+        $this->minimalComparisonSeed = false;
+
+        if ($micro) {
+            $this->demoVolume = 1;
+
+            return;
+        }
+
+        $this->demoVolume = max(5, min(200, $demoVolume));
+    }
+
+    /**
+     * @return array{inventory: User, boss: User, printing: User}
+     */
+    private function resolveDemoUsersForPhase(): array
+    {
+        $inventory = User::query()->where('email', 'inventario@axones.local')->first()
+            ?? User::query()->where('email', 'inventario@axones.demo')->first();
+        $boss = User::query()->where('email', 'boss@axones.local')->first()
+            ?? User::query()->where('email', 'boss@axones.demo')->first();
+        $printing = User::query()->where('email', 'impresion@axones.local')->first()
+            ?? User::query()->where('email', 'impresion@axones.demo')->first();
+
+        if (! $inventory || ! $boss || ! $printing) {
+            throw new \RuntimeException('No se encontraron usuarios demo (inventario, jefe o impresión). Ejecute primero «php artisan axones:demo:phase reset».');
+        }
+
+        return ['inventory' => $inventory, 'boss' => $boss, 'printing' => $printing];
+    }
+
+    /**
+     * @return array{vendors: list<Vendor>, clients: list<Client>, suppliers: list<Supplier>, materials: list<Material>, products: list<Product>}
+     */
+    private function phaseMastersInternal(User $inventoryUser): array
+    {
+        $vendors = $this->seedVendors();
+        $clients = $this->minimalComparisonSeed ? [] : $this->seedClients($vendors);
+        $suppliers = $this->seedSuppliers();
+
+        $thinMaterials = $this->minimalComparisonSeed || $this->microSeed;
+        $materials = $thinMaterials
+            ? $this->seedMinimalMaterials($inventoryUser)
+            : $this->seedMaterials($inventoryUser);
+        $tintaCatalog = $thinMaterials ? [] : $this->seedTintaCatalogMaterials();
+        $materials = array_merge($materials, $tintaCatalog);
+        $products = $this->minimalComparisonSeed ? [] : $this->seedProducts($clients);
+        if (! $this->minimalComparisonSeed && $clients !== []) {
+            if (! $this->microSeed) {
+                $products = array_merge($products, $this->seedExtraProductsForFirstClient($clients[0]));
+            }
+            $this->seedProductInkMaterialForDemo($products, $tintaCatalog);
+        }
+
+        return compact('vendors', 'clients', 'suppliers', 'materials', 'products');
+    }
+
+    /**
+     * @param  array<int, Supplier>  $suppliers
+     * @param  array<int, Material>  $materials
+     * @return list<PurchaseOrder|PurchaseReceipt>
+     */
+    private function phaseComprasInternal(array $suppliers, array $materials, User $inventoryUser): array
+    {
+        return $this->seedPurchaseOrdersAndReceipts($suppliers, $materials, $inventoryUser);
+    }
+
+    /**
+     * @param  array<int, Material>  $materials
+     * @return array{bobinas: list<Bobina>}
+     */
+    private function phaseInventarioExtraInternal(array $materials, User $inventoryUser, User $boss): array
+    {
+        $this->seedMiscReceipts($materials, $inventoryUser);
+        $this->seedGateMovements($boss);
+        $bobinas = $this->seedBobinas($materials);
+
+        return ['bobinas' => $bobinas];
+    }
+
+    /**
+     * @param  array<int, Client>  $clients
+     * @param  array<int, Product>  $products
+     * @param  array<int, Material>  $materials
+     * @return array{client_orders: list<ClientOrder>, work_orders: list<WorkOrder>}
+     */
+    private function phaseVentasOtInternal(array $clients, array $products, array $materials, User $printingUser): array
+    {
+        $clientOrders = $this->seedClientOrders($clients, $products, $materials);
+        $workOrders = $this->seedWorkOrders($clientOrders, $clients, $products, $materials, $printingUser);
+
+        return [
+            'client_orders' => $clientOrders,
+            'work_orders' => $workOrders,
+        ];
+    }
+
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     */
+    private function phaseOperacionesInternal(array $workOrders, array $materials, User $inventoryUser, User $boss): void
+    {
+        if ($workOrders === []) {
+            return;
+        }
+        $this->seedRequestsAndDispatch($workOrders, $materials, $inventoryUser);
+        $this->seedQuality($workOrders, $boss);
+        $this->seedReturnsAndRejectedBobinas($workOrders, $materials);
+    }
+
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     * @param  array<int, Bobina>  $bobinas
+     */
+    private function phaseGrafoDemoInternal(
+        array $workOrders,
+        array $materials,
+        array $bobinas,
+        User $printingUser,
+        User $boss,
+    ): void {
+        $this->seedHeavyDemoGraph($workOrders, $materials, $bobinas, $printingUser, $boss);
+    }
+
+    /**
+     * @param  array<int, WorkOrder>  $workOrders
+     * @param  array<int, Material>  $materials
+     * @param  array<int, Product>  $products
+     * @param  array<int, Supplier>  $suppliers
+     */
+    private function phaseAuxiliaryVolumeInternal(
+        array $workOrders,
+        array $materials,
+        array $products,
+        array $suppliers,
+        User $printingUser,
+        User $inventoryUser,
+        User $boss,
+    ): void {
+        $this->seedAuxiliaryVolume($workOrders, $materials, $products, $suppliers, $printingUser, $inventoryUser, $boss);
+    }
+
     private function seedUsers(): array
     {
         $mk = function (string $email, string $name, string $role): User {
@@ -446,15 +772,46 @@ class AxonesDemoDataService
     /**
      * @return array<int, Client>
      */
-    private function seedClients(): array
+    /**
+     * @return list<Vendor>
+     */
+    private function seedVendors(): array
+    {
+        if (! Schema::hasTable('vendors')) {
+            return [];
+        }
+
+        $n = $this->minimalComparisonSeed
+            ? max(1, min($this->demoVolume, 5))
+            : $this->demoVolume;
+
+        $out = [];
+        for ($i = 1; $i <= $n; $i++) {
+            $out[] = Vendor::query()->create([
+                'name' => 'Vendedor demo '.$i,
+                'phone_primary' => '+58 416-'.str_pad((string) (3000000 + $i), 7, '0', STR_PAD_LEFT),
+                'active' => true,
+            ]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<int, Vendor>  $vendors
+     * @return array<int, Client>
+     */
+    private function seedClients(array $vendors): array
     {
         $out = [];
+        $nv = count($vendors);
         for ($i = 1; $i <= $this->demoVolume; $i++) {
             $out[] = Client::query()->create([
                 'name' => 'Cliente demo volumen '.$i,
                 'rif' => 'J-4'.str_pad((string) (100000 + $i), 7, '0', STR_PAD_LEFT).'-'.($i % 10),
                 'state' => 'Portuguesa',
                 'city' => 'Acarigua',
+                'vendor_id' => $nv > 0 ? $vendors[($i - 1) % $nv]->getKey() : null,
                 'address' => 'Zona demo '.$i.', Portuguesa',
                 'email' => 'cliente.demo'.$i.'@axones.demo',
                 'phone' => '+58 412-'.str_pad((string) (1000000 + $i), 7, '0', STR_PAD_LEFT),
@@ -596,6 +953,7 @@ class AxonesDemoDataService
             $out[] = Product::query()->create([
                 'client_id' => $clients[($i - 1) % $nc]->getKey(),
                 'name' => 'Producto demo '.$i,
+                'barcode' => '77099'.str_pad((string) $i, 8, '0', STR_PAD_LEFT),
                 'cpe' => 'CPE-DEMO-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
                 'mps' => 'MPS-DEMO-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
                 'print_type' => 'Flexografía',
@@ -617,16 +975,17 @@ class AxonesDemoDataService
         // Mismo `client_id` que «Cliente demo volumen 1» (primer cliente) para probar el desplegable:
         // ya existe «Producto demo 1» (seedProducts); aquí: Arroz / Salsa / Maripán y un extra.
         $rows = [
-            ['name' => 'Polar Tuca — Arroz 1kg', 'cpe' => 'CPE-PT-AR-001', 'mps' => 'MPS-PT-AR-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 25 + PEBD (arroz)'],
-            ['name' => 'Polar Tuca — Salsa 400g', 'cpe' => 'CPE-PT-SA-001', 'mps' => 'MPS-PT-SA-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 20 (salsa)'],
-            ['name' => 'Polar Tuca — Maripán 6u', 'cpe' => 'CPE-PT-MA-001', 'mps' => 'MPS-PT-MA-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 18 (maripán)'],
-            ['name' => 'Polar Tuca — Salchichas 500g', 'cpe' => 'CPE-PT-SS-001', 'mps' => 'MPS-PT-SS-001', 'print_type' => 'Flexografía', 'structure' => 'PE/PE 90 + impresión carnes'],
+            ['name' => 'Polar Tuca — Arroz 1kg', 'barcode' => '7590010000001', 'cpe' => 'CPE-PT-AR-001', 'mps' => 'MPS-PT-AR-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 25 + PEBD (arroz)'],
+            ['name' => 'Polar Tuca — Salsa 400g', 'barcode' => '7590010000002', 'cpe' => 'CPE-PT-SA-001', 'mps' => 'MPS-PT-SA-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 20 (salsa)'],
+            ['name' => 'Polar Tuca — Maripán 6u', 'barcode' => '7590010000003', 'cpe' => 'CPE-PT-MA-001', 'mps' => 'MPS-PT-MA-001', 'print_type' => 'Flexografía', 'structure' => 'BOPP 18 (maripán)'],
+            ['name' => 'Polar Tuca — Salchichas 500g', 'barcode' => '7590010000004', 'cpe' => 'CPE-PT-SS-001', 'mps' => 'MPS-PT-SS-001', 'print_type' => 'Flexografía', 'structure' => 'PE/PE 90 + impresión carnes'],
         ];
         $out = [];
         foreach ($rows as $r) {
             $out[] = Product::query()->create([
                 'client_id' => $firstClient->getKey(),
                 'name' => $r['name'],
+                'barcode' => $r['barcode'],
                 'cpe' => $r['cpe'],
                 'mps' => $r['mps'],
                 'print_type' => $r['print_type'],
@@ -1239,7 +1598,8 @@ class AxonesDemoDataService
                 ['scrap_percent' => '0.500', 'notes' => 'Resumen montaje (demo)'],
             );
 
-            if ($wid !== (int) $workOrders[1]->getKey()) {
+            $secondWoId = isset($workOrders[1]) ? (int) $workOrders[1]->getKey() : null;
+            if ($secondWoId === null || $wid !== $secondWoId) {
                 WorkOrderQualityRecord::query()->firstOrCreate(
                     ['work_order_id' => $wid],
                     [
@@ -1346,6 +1706,20 @@ class AxonesDemoDataService
                 'unit' => 'kg',
                 'notes' => 'Material montaje demo',
             ]);
+
+            TintasTimeSegment::query()->create([
+                'work_order_id' => $wid,
+                'machine_code' => 'TIN-01',
+                'segment_type' => 'production',
+                'started_at' => $t0,
+                'ended_at' => (clone $t0)->addMinutes(28),
+                'user_id' => $printingUser->getKey(),
+                'notes' => 'Tintas demo',
+            ]);
+            WorkOrderTintasSummary::query()->firstOrCreate(
+                ['work_order_id' => $wid],
+                ['scrap_percent' => '0.900', 'notes' => 'Resumen tintas (demo)'],
+            );
         }
     }
 
@@ -1499,6 +1873,8 @@ class AxonesDemoDataService
             'inventory_returns',
             'laminacion_bobina_usages',
             'laminacion_time_segments',
+            'montaje_material_usages',
+            'montaje_time_segments',
             'material_request_lines',
             'material_requests',
             'miscellaneous_receipt_attachments',
@@ -1508,6 +1884,7 @@ class AxonesDemoDataService
             'printing_chemical_usages',
             'printing_ink_control_lines',
             'printing_time_segments',
+            'tintas_time_segments',
             'purchase_receipt_lines',
             'purchase_receipts',
             'purchase_order_lines',
@@ -1516,6 +1893,7 @@ class AxonesDemoDataService
             'tinta_mixture_components',
             'tinta_mixtures',
             'work_order_quality_records',
+            'work_order_tintas_summaries',
             'work_order_corte_summaries',
             'work_order_laminacion_summaries',
             'work_order_montaje_summaries',
@@ -1528,6 +1906,7 @@ class AxonesDemoDataService
             'products',
             'suppliers',
             'clients',
+            'vendors',
         ];
 
         $driver = DB::connection()->getDriverName();
@@ -1538,6 +1917,9 @@ class AxonesDemoDataService
         }
 
         foreach ($tables as $t) {
+            if (! Schema::hasTable($t)) {
+                continue;
+            }
             DB::table($t)->truncate();
         }
 

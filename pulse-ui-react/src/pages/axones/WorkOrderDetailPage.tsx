@@ -99,6 +99,8 @@ export default function WorkOrderDetailPage() {
   const sustratoImp1Id = readString(
     sustratosImpRaw[0]?.material_id ?? form.sustratoVirgenImp1,
   )
+  const sustratoImp1Free = readString(sustratosImpRaw[0]?.material_free_text).trim()
+  const sustratoImp1Display = sustratoImp1Free || sustratoImp1Id || "—"
   const sustratoImp1Kg = readString(sustratosImpRaw[0]?.kg ?? form.kgUtilizarImp1)
   const tintaRows = Array.from({ length: 8 }, (_, idx) => {
     const n = idx + 1
@@ -177,8 +179,8 @@ export default function WorkOrderDetailPage() {
                   </div>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-muted-foreground text-xs">Sustrato 1 (inventario)</div>
-                  <div className="font-medium">{sustratoImp1Id || "—"}</div>
+                  <div className="text-muted-foreground text-xs">Sustrato 1</div>
+                  <div className="font-medium">{sustratoImp1Display}</div>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3 md:col-span-2">
                   <div className="text-muted-foreground text-xs">Kg a utilizar</div>

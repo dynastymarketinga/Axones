@@ -9,6 +9,7 @@ use App\Models\AreaRequest;
 use App\Models\Client;
 use App\Models\ClientOrder;
 use App\Models\ClientOrderLine;
+use App\Models\Material;
 use App\Models\OperationalAlert;
 use App\Models\Product;
 use App\Models\User;
@@ -38,6 +39,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $product = Product::query()->create([
             'client_id' => $client->id,
             'name' => 'ARROZ MARY PREMIUM',
+            'barcode' => '7590123456789',
             'cpe' => '0421496219',
             'mps' => 'A-40.323',
             'print_type' => 'reverso',
@@ -79,7 +81,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->assertEquals('PEBD 630 X 26 + PEBD 630 X 26', $r->json('prefill.estructuraMaterial'));
         $this->assertEquals('0421496219', $r->json('prefill.cpe'));
         $this->assertEquals('A-40.323', $r->json('prefill.mpps'));
-        $this->assertNull($r->json('prefill.codigoBarra'));
+        $this->assertSame('7590123456789', $r->json('prefill.codigoBarra'));
         $this->assertEquals('Reverso', $r->json('prefill.tipoImpresion'));
         $this->assertEquals('10000.000', $r->json('prefill.pedidoKg'));
         $this->assertEquals('065-MAR26', $r->json('prefill.numeroOrden'));
@@ -219,6 +221,15 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'created_by' => $user->id,
         ]);
 
+        $lamMat = Material::query()->create([
+            'sku' => 'OT-LAM-STOCK',
+            'name' => 'Sustrato lam stock test',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $lamMat->forceFill(['quantity_on_hand' => 500])->save();
+
         $payload = [
             'form' => [
                 'pedidoKg' => '112.000',
@@ -248,7 +259,75 @@ class WorkOrderOrdenTrabajoTest extends TestCase
                 'kgMermaCorte' => '10.5',
                 'metrajeCorte' => '1000',
                 'sustratosVirgenLam' => [
-                    ['material_id' => '1', 'kg' => '10.5'],
+                    ['material_id' => (string) $lamMat->id, 'kg' => '10.5', 'material_free_text' => ''],
+                ],
+            ],
+        ];
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
+    }
+
+    public function test_put_orden_trabajo_rejects_sustrato_kg_above_stock(): void
+    {
+        $user = User::factory()->create(['role' => 'calidad']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-OT-STOCK-1',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $mat = Material::query()->create([
+            'sku' => 'OT-LOW-STOCK',
+            'name' => 'Sustrato poco stock',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 5])->save();
+
+        $payload = [
+            'form' => [
+                'pedidoKg' => '100',
+                'maquina' => 'COMEXI 1',
+                'tipoImpresionEstructura' => 'reverso',
+                'sustratosVirgenImp' => [
+                    ['material_id' => (string) $mat->id, 'kg' => '99.000', 'material_free_text' => ''],
+                ],
+            ],
+        ];
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['form.sustratosVirgenImp.0.kg']);
+    }
+
+    public function test_put_orden_trabajo_accepts_sustrato_kg_within_stock(): void
+    {
+        $user = User::factory()->create(['role' => 'calidad']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-OT-STOCK-2',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $mat = Material::query()->create([
+            'sku' => 'OT-OK-STOCK',
+            'name' => 'Sustrato stock suficiente',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 100])->save();
+
+        $payload = [
+            'form' => [
+                'pedidoKg' => '50',
+                'maquina' => 'COMEXI 1',
+                'tipoImpresionEstructura' => 'superficie',
+                'sustratosVirgenImp' => [
+                    ['material_id' => (string) $mat->id, 'kg' => '42.5', 'material_free_text' => ''],
                 ],
             ],
         ];
@@ -596,6 +675,63 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertNotContains($woBefore->id, $ids);
         $this->assertContains($woAt->id, $ids);
+    }
+
+    public function test_mi_area_area_process_tag_active_includes_queue_and_at_stage(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+
+        $woQueued = WorkOrder::query()->create([
+            'code' => 'OT-TAG-ACT-QUEUE',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'laminacion',
+            'title' => 'Lam',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woQueued->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woAtStage = WorkOrder::query()->create([
+            'code' => 'OT-TAG-ACT-AT',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Laminacion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'laminacion',
+            'title' => 'Lam',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woAtStage->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woPast = WorkOrder::query()->create([
+            'code' => 'OT-TAG-ACT-PAST',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Corte->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'laminacion',
+            'title' => 'Lam',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woPast->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=laminacion&area_process_tag=active&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertContains($woQueued->id, $ids);
+        $this->assertContains($woAtStage->id, $ids);
+        $this->assertNotContains($woPast->id, $ids);
     }
 
     public function test_historial_area_exclude_pending_omits_pending_area_requests(): void

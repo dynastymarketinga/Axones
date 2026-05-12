@@ -26,7 +26,7 @@ type OrdenTrabajoPayload = {
 }
 
 type LaminacionPauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
-type SustratoRow = { material_id: string; kg: string }
+type SustratoRow = { material_id: string; kg: string; material_free_text?: string }
 const MIN_SUSTRATO_ROWS = 1
 /** Casillas por rejilla (entrada impresa, virgen y salida laminada). */
 const LAM_BOBINAS_SLOTS = 30
@@ -195,7 +195,7 @@ function setKey(
 
 function ensureMinSustratoRows(rows: SustratoRow[], minRows = MIN_SUSTRATO_ROWS): SustratoRow[] {
   const next = [...rows]
-  while (next.length < minRows) next.push({ material_id: "", kg: "" })
+  while (next.length < minRows) next.push({ material_id: "", kg: "", material_free_text: "" })
   return next
 }
 
@@ -204,7 +204,11 @@ function getSustratosLamRows(form: Record<string, unknown>): SustratoRow[] {
   if (!Array.isArray(raw)) return ensureMinSustratoRows([])
   const out: SustratoRow[] = raw.map((r) => {
     const o = r as Record<string, unknown>
-    return { material_id: readString(o.material_id), kg: readNumberString(o.kg) }
+    return {
+      material_id: readString(o.material_id),
+      kg: readNumberString(o.kg),
+      material_free_text: readString(o.material_free_text),
+    }
   })
   return ensureMinSustratoRows(out)
 }
@@ -745,7 +749,14 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
               <div className="section-body">
                 {sustratosLam.map((r, idx) => {
                   const material = materialById.get(r.material_id)
-                  const materialLabel = material ? `${material.sku} · ${material.name}` : ""
+                  const free = readString(r.material_free_text).trim()
+                  const materialLabel = free
+                    ? free
+                    : material
+                      ? `${material.sku} · ${material.name}`
+                      : readString(r.material_id).trim()
+                        ? readString(r.material_id)
+                        : ""
                   return (
                     <div key={idx} className="ot-grid ot-cols-2-asym ot-sustrato-lam">
                       <div className="ot-field">

@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { MaterialRequestNewDialog } from "@/components/axones/MaterialRequestNewDialog"
 
 export default function MaterialRequestsPage() {
   const [status, setStatus] = useState<string>("all")
@@ -75,11 +76,17 @@ export default function MaterialRequestsPage() {
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Solicitudes de material
+          Solicitudes de insumos
         </h1>
-        <p className="text-muted-foreground text-sm">
-          Bandeja de inventario: autorice solicitudes aquí. El despacho solo
-          aplica cuando la solicitud tiene líneas cargadas.
+        <p className="text-muted-foreground max-w-3xl text-sm">
+          Bandeja de inventario: las áreas cargan solicitudes y llegan aquí para
+          autorización y entrega de existencias cuando la solicitud tiene líneas.
+          Al <strong>entregar</strong> desde el detalle, las cantidades se registran como{" "}
+          <strong>salida</strong> y el stock disponible se actualiza automáticamente (véase{" "}
+          <Link className="text-primary underline-offset-4 hover:underline" to="movimientos-inventario">
+            Movimientos
+          </Link>
+          ).
         </p>
       </div>
 
@@ -98,16 +105,19 @@ export default function MaterialRequestsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="pending">pending</SelectItem>
-              <SelectItem value="partial">partial</SelectItem>
-              <SelectItem value="dispatched">dispatched</SelectItem>
-              <SelectItem value="cancelled">cancelled</SelectItem>
+              <SelectItem value="pending">Pendiente</SelectItem>
+              <SelectItem value="partial">Entrega parcial</SelectItem>
+              <SelectItem value="dispatched">Entregada</SelectItem>
+              <SelectItem value="cancelled">Cancelada</SelectItem>
             </SelectContent>
           </Select>
         </div>
-        <Button type="button" variant="secondary" onClick={() => void load()}>
-          Actualizar
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <MaterialRequestNewDialog onCreated={() => void load()} />
+          <Button type="button" variant="secondary" onClick={() => void load()}>
+            Actualizar
+          </Button>
+        </div>
       </div>
 
       <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
@@ -119,7 +129,7 @@ export default function MaterialRequestsPage() {
               <TableHead>Cliente</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead>Líneas</TableHead>
-              <TableHead className="text-right">Detalle / despacho</TableHead>
+              <TableHead className="text-right">Detalle / entrega</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -162,9 +172,9 @@ export default function MaterialRequestsPage() {
                       </Button>
                       {(r.status === "pending" || r.status === "partial") ? (
                         <Button variant="default" size="sm" className="h-8" asChild>
-                          <Link to={`/solicitudes-material/${r.id}?despacho=1`} title="Ir a inventario y despachar">
+                          <Link to={`/solicitudes-material/${r.id}?despacho=1`} title="Abrir detalle en inventario para registrar la entrega">
                             <Truck className="mr-1 h-3.5 w-3.5" />
-                            Despachar
+                            Entregar
                           </Link>
                         </Button>
                       ) : null}

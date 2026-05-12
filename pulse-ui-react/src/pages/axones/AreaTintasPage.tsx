@@ -5,7 +5,19 @@ import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import {
+  BANDEJA_COLLECT_MAX_PAGES,
+  collectBandejaWorkOrderIds,
+  countUnseenActivasInIds,
+  fetchBandejaTotal,
+  loadSeenActivasIds,
+  mergeIdsIntoSeenActivas,
+  type BandejaListFilters,
+  type MiAreaApi,
+} from "@/lib/axones-area-bandeja"
+import { getStoredUser } from "@/lib/auth-storage"
 import type { LaravelPaginated, MaterialRow, WorkOrderListRow } from "@/types/api"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -28,11 +40,14 @@ import {
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 
-type TintasBandejaTab = "cola" | "activas" | "historial"
+type TintasBandejaTab = "activas" | "historial"
+
+const MI_AREA_TINTAS: MiAreaApi = "tintas"
 
 export default function AreaTintasPage() {
+  const session = getStoredUser()
   const [mode, setMode] = useState<"list" | "consumo">("list")
-  const [activeTab, setActiveTab] = useState<TintasBandejaTab>("cola")
+  const [activeTab, setActiveTab] = useState<TintasBandejaTab>("activas")
   const [q, setQ] = useState("")
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<string>("all")
@@ -40,6 +55,8 @@ export default function AreaTintasPage() {
   const [onlyPendingArea, setOnlyPendingArea] = useState(false)
   const [historialIncludePending, setHistorialIncludePending] = useState(false)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
+  const [totalActivas, setTotalActivas] = useState(0)
+  const [unseenActivas, setUnseenActivas] = useState(0)
 
   const [workOrders, setWorkOrders] = useState<WorkOrderListRow[]>([])
   const [woId, setWoId] = useState<string>("")
@@ -103,6 +120,71 @@ export default function AreaTintasPage() {
     [workOrders, woNum],
   )
 
+  const bandejaListFilters = useMemo((): BandejaListFilters => {
+    return {
+      status: status !== "all" ? status : undefined,
+      client_order_reference: search || undefined,
+    }
+  }, [status, search])
+
+  const refreshBandejaMeta = useCallback(async () => {
+    if (mode !== "list") return
+    const base = bandejaListFilters
+    const uid = session?.id
+    try {
+      const [activas, ids] = await Promise.all([
+        fetchBandejaTotal(MI_AREA_TINTAS, "active", base),
+        collectBandejaWorkOrderIds(
+          MI_AREA_TINTAS,
+          "active",
+          base,
+          BANDEJA_COLLECT_MAX_PAGES,
+        ),
+      ])
+      setTotalActivas(activas)
+      const seen = loadSeenActivasIds(uid, MI_AREA_TINTAS)
+      setUnseenActivas(countUnseenActivasInIds(ids, seen))
+    } catch {
+      /* silencioso */
+    }
+  }, [bandejaListFilters, mode, session?.id])
+
+  const markActivasBandejaSeen = useCallback(async () => {
+    const uid = session?.id
+    try {
+      const ids = await collectBandejaWorkOrderIds(
+        MI_AREA_TINTAS,
+        "active",
+        bandejaListFilters,
+        BANDEJA_COLLECT_MAX_PAGES,
+      )
+      mergeIdsIntoSeenActivas(uid, MI_AREA_TINTAS, ids)
+      const seen = loadSeenActivasIds(uid, MI_AREA_TINTAS)
+      setUnseenActivas(countUnseenActivasInIds(ids, seen))
+    } catch {
+      /* ignore */
+    }
+  }, [bandejaListFilters, session?.id])
+
+  useEffect(() => {
+    if (mode !== "list") return
+    void refreshBandejaMeta()
+  }, [mode, refreshBandejaMeta])
+
+  useEffect(() => {
+    if (mode !== "list") return
+    const fn = () => {
+      if (document.visibilityState === "visible") void refreshBandejaMeta()
+    }
+    document.addEventListener("visibilitychange", fn)
+    return () => document.removeEventListener("visibilitychange", fn)
+  }, [mode, refreshBandejaMeta])
+
+  useEffect(() => {
+    if (mode !== "list" || activeTab !== "activas" || loading || rows === null) return
+    void markActivasBandejaSeen()
+  }, [mode, activeTab, loading, rows, markActivasBandejaSeen])
+
   const loadAreaRows = useCallback(async () => {
     setLoading(true)
     try {
@@ -112,12 +194,9 @@ export default function AreaTintasPage() {
         status: status !== "all" ? status : undefined,
         client_order_reference: search || undefined,
       }
-      if (activeTab === "cola") {
+      if (activeTab === "activas") {
         query.mi_area = "tintas"
-        query.area_process_tag = "not_started"
-      } else if (activeTab === "activas") {
-        query.mi_area = "tintas"
-        query.area_process_tag = "in_progress"
+        query.area_process_tag = "active"
       } else {
         query.historial_area = "tintas"
         if (onlyPendingArea) {
@@ -423,8 +502,8 @@ export default function AreaTintasPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Área: Tintas</h1>
           <p className="text-muted-foreground text-[13px]">
-            Por empezar / En curso: solicitudes pendientes de tintas según la etapa de la OT. Historial: solicitudes
-            cerradas; opcional incluir pendientes o solo pendientes.
+            En curso: solicitudes pendientes de tintas con la OT en etapa de impresión. Historial: solicitudes cerradas;
+            opcional incluir pendientes o solo pendientes.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -434,6 +513,7 @@ export default function AreaTintasPage() {
             onClick={() => {
               if (mode === "list") {
                 void loadAreaRows()
+                void refreshBandejaMeta()
                 return
               }
               void loadLists()
@@ -459,121 +539,27 @@ export default function AreaTintasPage() {
           }}
         >
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
-            <TabsTrigger value="cola" className="text-xs">
-              Por empezar
-            </TabsTrigger>
-            <TabsTrigger value="activas" className="text-xs">
-              En curso
+            <TabsTrigger
+              value="activas"
+              className="inline-flex max-w-full flex-wrap items-center gap-1 text-xs"
+            >
+              <span>En curso</span>
+              <span className="text-muted-foreground font-normal tabular-nums">
+                ({totalActivas})
+              </span>
+              {unseenActivas > 0 ? (
+                <Badge
+                  variant="destructive"
+                  className="h-5 min-w-5 justify-center rounded-full px-1.5 py-0 text-[10px] font-semibold leading-none"
+                >
+                  {unseenActivas}
+                </Badge>
+              ) : null}
             </TabsTrigger>
             <TabsTrigger value="historial" className="text-xs">
               Historial
             </TabsTrigger>
           </TabsList>
-
-          <TabsContent value="cola" className="mt-4 space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="grid flex-1 gap-2">
-                <Label htmlFor="tintas-q-cola" className="text-xs font-medium">
-                  Ref. pedido cliente
-                </Label>
-                <Input
-                  id="tintas-q-cola"
-                  placeholder="Buscar por referencia..."
-                  className="h-8 text-xs"
-                  value={q}
-                  onChange={(ev) => setQ(ev.target.value)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter") {
-                      setPage(1)
-                      setSearch(q.trim())
-                    }
-                  }}
-                />
-              </div>
-              <div className="grid w-48 gap-2">
-                <Label className="text-xs font-medium">Estado</Label>
-                <Select
-                  value={status}
-                  onValueChange={(v) => {
-                    setStatus(v)
-                    setPage(1)
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="open">Abierta</SelectItem>
-                    <SelectItem value="completed">Completada</SelectItem>
-                    <SelectItem value="cancelled">Cancelada</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
-                onClick={() => {
-                  setPage(1)
-                  setSearch(q.trim())
-                }}
-              >
-                Buscar
-              </Button>
-            </div>
-
-            <div className="bg-card border rounded-xl shadow-sm overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="h-8 py-2 text-xs">Código</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
-                    <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-muted-foreground">
-                        Cargando...
-                      </TableCell>
-                    </TableRow>
-                  ) : !rows?.data.length ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-muted-foreground">
-                        Sin órdenes en cola para tintas.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    rows.data.map((o) => (
-                      <TableRow key={o.id} className="h-9">
-                        <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="link"
-                              className="h-auto p-0 text-xs"
-                              onClick={() => {
-                                setWoId(String(o.id))
-                                setMode("consumo")
-                              }}
-                            >
-                              Registrar consumo
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
 
           <TabsContent value="activas" className="mt-4 space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">

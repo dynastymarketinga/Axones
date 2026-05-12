@@ -10,6 +10,21 @@
   --ax-ot-green: #a8d08d;
   --ax-ot-border: #c9c9c9;
   --ax-ot-text: #111;
+
+  /* Laminación: carril más profundo que “Datos del producto” (FAB + header + sub-bloques) */
+  --ax-ot-lam-from: #5b21b6; /* violet-800 */
+  --ax-ot-lam-to: #4c1d95; /* violet-900 */
+  --ax-ot-lam-fab: #5b21b6;
+  --ax-ot-lam-border-strong: #4c1d95;
+  --ax-ot-lam-sublam-from: #f3e8ff;
+  --ax-ot-lam-sublam-to: #e9d5ff;
+  --ax-ot-lam-sublam-fore: #4c1d95;
+  --ax-ot-lam-sublam-border: #7e22ce;
+
+  /* Impresión: acentos suaves para caja sustratos (alineado con section-hdr-impresión) */
+  --ax-ot-imp-surface: #f0f9ff;
+  --ax-ot-imp-border: #bae6fd;
+  --ax-ot-imp-accent: #0ea5e9;
 }
 
 .ax-ot .ax-card {
@@ -173,6 +188,92 @@
   margin-bottom: 0.75rem;
 }
 
+/* Sustratos virgen (impresión): caja fija, ritmo vertical y aire antes de Kg ingresado / FAB */
+.ax-ot .ot-sustratos-virgen-block {
+  margin-top: 6px;
+  margin-bottom: 4px;
+  padding: 14px 14px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ax-ot-border) 78%, var(--ax-ot-header-mid) 22%);
+  background: color-mix(in srgb, var(--ax-ot-sublam-bg) 26%, #fff 74%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  min-width: 0;
+}
+
+.ax-ot .ot-sustratos-virgen-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ax-ot-header-mid) 16%, var(--ax-ot-border) 84%);
+}
+
+.ax-ot .ot-sustratos-virgen-head .ot-label {
+  margin: 0;
+}
+
+.ax-ot .ot-sustratos-virgen-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ax-ot .ot-sustratos-virgen-toolbar {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--ax-ot-border) 85%, transparent);
+}
+
+.ax-ot .ot-sustratos-virgen-metrics-gap.ot-metrics-before-nested {
+  margin-top: 1.35rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid color-mix(in srgb, var(--ax-ot-border) 72%, transparent);
+}
+
+/* Sustratos virgen: variantes por área (la base sigue sirviendo como fallback neutro) */
+.ax-ot .ot-sustratos-virgen-block--impresion {
+  border: 1px solid color-mix(in srgb, var(--ax-ot-imp-border) 58%, var(--ax-ot-border) 42%);
+  background: color-mix(in srgb, var(--ax-ot-imp-surface) 42%, #fff 58%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+.ax-ot .ot-sustratos-virgen-block--impresion .ot-sustratos-virgen-head {
+  border-bottom-color: color-mix(in srgb, var(--ax-ot-imp-accent) 22%, var(--ax-ot-border) 78%);
+}
+.ax-ot .ot-sustratos-virgen-block--impresion .ot-sustratos-virgen-toolbar {
+  border-top-color: color-mix(in srgb, var(--ax-ot-imp-border) 35%, var(--ax-ot-border) 65%);
+}
+
+.ax-ot .ot-sustratos-virgen-block--laminacion {
+  border: 1px solid color-mix(in srgb, var(--ax-ot-border) 68%, var(--ax-ot-lam-fab) 32%);
+  background: color-mix(in srgb, var(--ax-ot-lam-sublam-from) 38%, #fff 62%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+.ax-ot .ot-sustratos-virgen-block--laminacion .ot-sustratos-virgen-head {
+  border-bottom-color: color-mix(in srgb, var(--ax-ot-lam-fab) 16%, var(--ax-ot-border) 84%);
+}
+.ax-ot .ot-sustratos-virgen-block--laminacion .ot-sustratos-virgen-toolbar {
+  border-top-color: color-mix(in srgb, var(--ax-ot-border) 82%, var(--ax-ot-lam-fab) 18%);
+}
+
+.ax-ot .ot-sustratos-virgen-badge--impresion {
+  border-color: #7dd3fc;
+  background-color: #e0f2fe;
+  color: #0c4a6e;
+}
+.ax-ot .ot-sustratos-virgen-badge--laminacion {
+  border-color: color-mix(in srgb, var(--ax-ot-lam-sublam-border) 70%, var(--ax-ot-border) 30%);
+  background-color: color-mix(in srgb, var(--ax-ot-lam-sublam-to) 55%, #fff 45%);
+  color: var(--ax-ot-lam-sublam-fore);
+}
+
+.ax-ot button.ot-fab-laminacion {
+  background-color: var(--ax-ot-lam-fab);
+  color: #fff;
+}
+
 .ax-ot .section-header {
   background: linear-gradient(
     180deg,
@@ -194,6 +295,64 @@
 .ax-ot .section-header svg {
   color: var(--ax-ot-header-fore);
   opacity: 0.95;
+}
+
+/* Encabezados por área (misma paleta que los FAB de acceso rápido en borrador) */
+.ax-ot .section-header.section-hdr-cabecera {
+  background: linear-gradient(180deg, #4f46e5 0%, #3730a3 100%);
+  color: #fafafa;
+  border-color: #312e81;
+}
+.ax-ot .section-header.section-hdr-producto {
+  background: linear-gradient(180deg, var(--ax-ot-header-mid) 0%, var(--ax-ot-header) 100%);
+  color: var(--ax-ot-header-fore);
+  border-color: color-mix(in srgb, var(--ax-ot-header) 70%, #000 30%);
+}
+.ax-ot .section-header.section-hdr-montaje {
+  background: linear-gradient(180deg, #475569 0%, #334155 100%);
+  color: #f8fafc;
+  border-color: #1e293b;
+}
+.ax-ot .section-header.section-hdr-impresion {
+  background: linear-gradient(180deg, #0ea5e9 0%, #0369a1 100%);
+  color: #f0f9ff;
+  border-color: #075985;
+}
+.ax-ot .section-header.section-hdr-tintas {
+  background: linear-gradient(180deg, #d946ef 0%, #86198f 100%);
+  color: #fdf4ff;
+  border-color: #701a75;
+}
+.ax-ot .section-header.section-hdr-laminacion {
+  background: linear-gradient(180deg, var(--ax-ot-lam-from) 0%, var(--ax-ot-lam-to) 100%);
+  color: #faf5ff;
+  border-color: var(--ax-ot-lam-border-strong);
+}
+.ax-ot .section-header.section-hdr-corte {
+  background: linear-gradient(180deg, #059669 0%, #065f46 100%);
+  color: #ecfdf5;
+  border-color: #064e3b;
+}
+.ax-ot .section-header.section-hdr-obs {
+  background: linear-gradient(180deg, #57534e 0%, #44403c 100%);
+  color: #fafaf9;
+  border-color: #292524;
+}
+.ax-ot .section-header.section-hdr-prog {
+  background: linear-gradient(180deg, #bae6fd 0%, #38bdf8 100%);
+  color: #0c4a6e;
+  border-color: #0284c7;
+  font-weight: 900;
+}
+.ax-ot .section-header.section-hdr-prog svg {
+  color: #0c4a6e;
+  opacity: 1;
+}
+
+.ax-ot .ot-section--tintas .table-tintas th {
+  background: linear-gradient(180deg, #c026d3 0%, #86198f 100%);
+  color: #fdf4ff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .ax-ot .section-header.header-blue {
@@ -285,6 +444,53 @@
   margin-bottom: 0.3rem;
 }
 
+/*
+ * "Datos del producto": una sola grilla 6 columnas (4+2 = 2+2+2) para que los bordes
+ * verticales coincidan entre filas 2+1 y filas de 3 campos (evita desalineación por
+ * breakpoints distintos de ot-cols-2-asym vs ot-cols-3).
+ */
+.ax-ot .ot-datos-producto-master {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-2 {
+  grid-column: span 2;
+}
+
+.ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-4 {
+  grid-column: span 4;
+}
+
+.ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-6 {
+  grid-column: span 6;
+}
+
+@media (max-width: 639px) {
+  .ax-ot .ot-datos-producto-master {
+    grid-template-columns: 1fr;
+  }
+
+  .ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-2,
+  .ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-4,
+  .ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-6 {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Misma altura visual de fila de etiqueta (con/sin badge Maestro) */
+.ax-ot .ot-datos-producto-master .ot-field > .flex.flex-nowrap.items-center {
+  min-height: 24px;
+}
+
+.ax-ot .ot-datos-producto-master .ot-field > .ot-label:first-child {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .ax-ot .ot-field {
   display: grid;
   gap: 6px;
@@ -357,9 +563,129 @@
   font-weight: 800;
 }
 
+/* Validación: mismo criterio visual que pedido cliente (Notas) — borde, fondo y anillo al foco */
+.ax-ot .ot-input[aria-invalid="true"],
+.ax-ot .ot-input[readonly][aria-invalid="true"],
+.ax-ot .ot-select[aria-invalid="true"] {
+  border-color: hsl(var(--destructive)) !important;
+  background-color: hsl(var(--destructive) / 0.06) !important;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.22);
+}
+
+.ax-ot .ot-input[aria-invalid="true"]:focus,
+.ax-ot .ot-input[aria-invalid="true"]:focus-visible,
+.ax-ot .ot-input[readonly][aria-invalid="true"]:focus,
+.ax-ot .ot-input[readonly][aria-invalid="true"]:focus-visible,
+.ax-ot .ot-select[aria-invalid="true"]:focus,
+.ax-ot .ot-select[aria-invalid="true"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.35);
+}
+
+.ax-ot .ot-input-unified[aria-invalid="true"] {
+  border-color: hsl(var(--destructive)) !important;
+  background-color: hsl(var(--destructive) / 0.06) !important;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.22) !important;
+}
+
+.ax-ot .ot-input-unified[aria-invalid="true"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.35) !important;
+}
+
+.ax-ot .table-tintas input[aria-invalid="true"] {
+  border-color: hsl(var(--destructive)) !important;
+  background-color: hsl(var(--destructive) / 0.06) !important;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.22);
+}
+
+/* Figura embobinado: error solo en el input (no en todo el bloque con botones 1–8). */
+.ax-ot input.ax-winding-figure-input[aria-invalid="true"] {
+  border-color: hsl(var(--destructive)) !important;
+  background-color: hsl(var(--destructive) / 0.06) !important;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.22);
+}
+
+.ax-ot input.ax-winding-figure-input[aria-invalid="true"]:focus,
+.ax-ot input.ax-winding-figure-input[aria-invalid="true"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.35);
+}
+
 .ax-ot .required::after {
   content: " *";
   color: #b42318;
+}
+
+/*
+ * Icono a la izquierda (OtPlanillaInputIcon).
+ * Los .ot-field en grid estiran la fila: el wrap debe align-self:start para que la altura
+ * sea la del control; el icono usa top fijo (36px / 32px) en vez de 50% del contenedor estirado.
+ */
+.ax-ot .ot-field > .ot-input-icon-wrap {
+  align-self: start;
+  width: 100%;
+}
+
+.ot-input-icon-wrap .ot-input-icon {
+  position: absolute;
+  left: 8px;
+  z-index: 1;
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  top: 11px;
+  color: hsl(var(--muted-foreground) / 0.85);
+  transition: color 0.15s ease;
+}
+
+.ot-input-icon-wrap:focus-within .ot-input-icon {
+  color: hsl(var(--foreground) / 0.75);
+}
+
+.ot-input-icon-wrap--compact .ot-input-icon {
+  left: 7px;
+  width: 12px;
+  height: 12px;
+  top: 10px;
+}
+
+/* Textarea: icono arriba */
+.ot-input-icon-wrap--icon-top .ot-input-icon {
+  top: 10px;
+}
+
+/* Campo figura shadcn: altura variable → centrar respecto al wrap (= alto del input) */
+.ot-input-icon-wrap--winding .ot-input-icon {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Padding con icono */
+.ot-input-icon-wrap input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.ot-input-icon-wrap select,
+.ot-input-icon-wrap textarea {
+  padding-left: 30px;
+}
+
+.ot-input-icon-wrap--compact input:not([type="checkbox"]):not([type="radio"]),
+.ot-input-icon-wrap--compact select,
+.ot-input-icon-wrap--compact textarea {
+  padding-left: 26px;
+}
+
+.ax-ot .ot-input-icon-wrap select {
+  padding-left: 30px !important;
+}
+
+.ax-ot .ot-input-icon-wrap--compact select {
+  padding-left: 26px !important;
+}
+
+/* Figura embobinado: Input shadcn trae padding horizontal propio */
+.ot-input-icon-wrap input.ax-winding-figure-input {
+  padding-left: 2.25rem !important;
 }
 
 .ax-ot .table-tintas {
@@ -383,9 +709,13 @@
 }
 
 .ax-ot .section-header.section-sublam {
-  background: linear-gradient(180deg, #ddd6fe 0%, #c4b5fd 100%);
-  color: var(--ax-ot-sublam-fore);
-  border-color: #a78bfa;
+  background: linear-gradient(180deg, var(--ax-ot-lam-sublam-from) 0%, var(--ax-ot-lam-sublam-to) 100%);
+  color: var(--ax-ot-lam-sublam-fore);
+  border-color: var(--ax-ot-lam-sublam-border);
+}
+.ax-ot .section-header.section-sublam svg {
+  color: var(--ax-ot-lam-sublam-fore);
+  opacity: 1;
 }
 
 .ax-ot .table-tintas td {

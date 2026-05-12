@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
 import { createSearchParams, Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
@@ -9,6 +9,8 @@ import {
   Barcode,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleDot,
   ClipboardList,
   Eye,
@@ -25,6 +27,7 @@ import {
 } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { groupWorkOrdersForHub, latestRowInGroup, sumPedidoKgDisplay } from "@/lib/axones-work-order-grouping"
 import { CLIENT_ORDER_MODULE_LIST_FOCUS } from "@/pages/axones/client-order-i18n"
 import type {
   ClientOrderDetailRecord,
@@ -159,7 +162,7 @@ type SupervisorFilter =
 function statusLabel(value: string | null | undefined): string {
   const statuses: Record<string, string> = {
     open: "Abierta",
-    in_progress: "En proceso",
+    in_progress: "En curso",
     completed: "Completada",
     cancelled: "Cancelada",
   }
@@ -250,7 +253,7 @@ const SUPERVISOR_BUCKET_STYLES: Record<
     rowBg: "bg-amber-500/[0.06]",
     badgeClass:
       "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-amber-950 dark:text-amber-100 border-amber-500/30 bg-amber-500/10",
-    badgeLabel: "En proceso",
+    badgeLabel: "En curso",
     BadgeIcon: Factory,
   },
   completed: {
@@ -286,7 +289,7 @@ const SUPERVISOR_TAB_DEFS: Array<{
   { filter: "all", label: "Todas", Icon: Layers },
   { filter: "created", label: "Registradas", Icon: FilePenLine },
   { filter: "scheduling", label: "Programación", Icon: CalendarDays },
-  { filter: "in_progress", label: "En proceso", Icon: Factory },
+  { filter: "in_progress", label: "En curso", Icon: Factory },
   { filter: "completed", label: "Cerradas", Icon: CheckCircle2 },
 ]
 
@@ -322,6 +325,136 @@ function workOrderRowAccent(row: WorkOrderListRow): {
   }
 }
 
+type HubWorkOrderTableRowProps = {
+  row: WorkOrderListRow
+  numCell: ReactNode
+  accent: {
+    rowClass: string
+    badgeClass: string
+    badgeLabel: string
+    BadgeIcon: LucideIcon
+  }
+  nested?: boolean
+  canDeactivate: boolean
+  onDeactivateClick: (row: WorkOrderListRow) => void
+}
+
+function HubWorkOrderTableRow({
+  row: o,
+  numCell,
+  accent,
+  nested,
+  canDeactivate,
+  onDeactivateClick,
+}: HubWorkOrderTableRowProps) {
+  const RowBadgeIcon = accent.BadgeIcon
+  return (
+    <TableRow
+      className={cn(
+        "text-sm",
+        catalogTableBodyRowClass,
+        accent.rowClass,
+        nested && "bg-muted/25",
+      )}
+    >
+      <TableCell className={cn("min-w-[9rem] align-top", catalogTableBodyCellClass)}>
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+          {numCell}
+          <Badge
+            variant="outline"
+            className={cn("w-fit shrink-0 font-normal tabular-nums", accent.badgeClass)}
+          >
+            <RowBadgeIcon className="h-3 w-3 shrink-0" aria-hidden />
+            {accent.badgeLabel}
+          </Badge>
+        </div>
+      </TableCell>
+      <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>{o.code}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass)}>{formatDate(o.document_date)}</TableCell>
+      <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.client?.name ?? "—"}</TableCell>
+      <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.product?.name ?? "—"}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass)}>{formMachine(o)}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass)}>{boardStageLabel(o.board_stage)}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass)}>{statusLabel(o.status)}</TableCell>
+      <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.creator?.name ?? "—"}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass)}>{formPedidoKg(o)}</TableCell>
+      <TableCell className={cn("whitespace-nowrap text-right", catalogTableBodyCellClass)}>
+        <div className="inline-flex flex-wrap justify-end gap-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className={cn("shrink-0", catalogActionButtonClass)}
+                aria-label="Editar OT"
+                asChild
+              >
+                <Link to={`/ordenes-trabajo/${o.id}`}>
+                  <FilePenLine className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Editar OT (abrir formulario para completar o ajustar datos).
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className={cn("shrink-0", catalogActionButtonClass)}
+                aria-label="Desactivar OT"
+                disabled={
+                  !canDeactivate ||
+                  (o.status ?? "").toLowerCase().trim() === "cancelled" ||
+                  (o.status ?? "").toLowerCase().trim() === "completed"
+                }
+                onClick={() => {
+                  if (!canDeactivate) return
+                  onDeactivateClick(o)
+                }}
+              >
+                <Ban className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {(o.status ?? "").toLowerCase().trim() === "cancelled"
+                ? "Ya está desactivada (cancelada)."
+                : (o.status ?? "").toLowerCase().trim() === "completed"
+                  ? "No se puede desactivar una OT completada."
+                  : !canDeactivate
+                    ? "Solo admin o jefatura (boss) puede desactivar OT."
+                    : "Desactivar (admin/boss)"}
+            </TooltipContent>
+          </Tooltip>
+          {canPreviewPlanillaReport(o) ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className={cn("shrink-0", catalogActionButtonClass)}
+                  aria-label="Vista previa del reporte"
+                  asChild
+                >
+                  <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
+                    <Eye className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Vista previa del reporte de esta OT.</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
 export default function WorkOrdersHubPage() {
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
@@ -348,6 +481,7 @@ export default function WorkOrdersHubPage() {
   const [deactivateOpen, setDeactivateOpen] = useState(false)
   const [deactivateTarget, setDeactivateTarget] = useState<WorkOrderListRow | null>(null)
   const [deactivateSaving, setDeactivateSaving] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   const canImportMaterialFromCo = useMemo(() => {
     if (!coDetail?.lines?.length) return false
@@ -447,6 +581,8 @@ export default function WorkOrdersHubPage() {
     return all.filter((r) => supervisorBucket(r) === supervisorFilter)
   }, [rows?.data, supervisorFilter])
 
+  const groupedVisible = useMemo(() => groupWorkOrdersForHub(visibleRows), [visibleRows])
+
   const supervisorCounts = useMemo(() => {
     const all = rows?.data ?? []
     const created = all.filter((r) => supervisorBucket(r) === "created").length
@@ -472,7 +608,7 @@ export default function WorkOrdersHubPage() {
   function createOt() {
     const coId = clientOrderId.trim() ? Number(clientOrderId) : null
     if (!coId || !Number.isFinite(coId) || coId < 1) {
-      toast.error("Seleccione una orden de producción (Pedido del cliente, OC) ya registrada.")
+      toast.error("Seleccione un pedido cliente (OC) ya registrado.")
       return
     }
     const importMaterial = canImportMaterialFromCo
@@ -511,7 +647,7 @@ export default function WorkOrdersHubPage() {
     <TooltipProvider delayDuration={150}>
       <CatalogPageShell
         title="Órdenes de trabajo"
-        subtitle="Lista, creación desde orden de producción (Pedido del cliente) y acceso a planillas."
+        subtitle="Lista, creación desde pedido cliente (OC) y acceso a planillas."
         icon={ClipboardList}
       >
         <Dialog
@@ -569,15 +705,15 @@ export default function WorkOrdersHubPage() {
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-3">
               <p className="md:col-span-3 text-sm text-muted-foreground">
-                Elija la{" "}
-                <span className="font-medium text-foreground">orden de producción (Pedido del cliente)</span> y, si ya lo sabe, la{" "}
+                Elija el{" "}
+                <span className="font-medium text-foreground">pedido cliente (OC)</span> y, si ya lo sabe, la{" "}
                 <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
                 <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
                 <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
                 <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
               </p>
-              <div className="grid gap-2 md:col-span-2">
-                <Label>Orden de producción (Pedido del cliente, OC) a vincular *</Label>
+              <div className="grid min-w-0 gap-2 md:col-span-2">
+                <Label>Pedido cliente (OC) a vincular *</Label>
                 <Select
                   value={clientOrderId || undefined}
                   onValueChange={(v) => setClientOrderId(v)}
@@ -598,24 +734,22 @@ export default function WorkOrdersHubPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {clientOrderId && coDetailLoading ? (
+                  <p className="text-sm text-muted-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      <InlineSpinner />
+                      Cargando...
+                    </span>
+                  </p>
+                ) : null}
+                {clientOrderId && !coDetailLoading && !coDetail ? (
+                  <p className="text-sm text-destructive">
+                    No se pudo cargar la información del pedido cliente (OC). Intente otra vez en unos segundos.
+                  </p>
+                ) : null}
               </div>
 
-              {clientOrderId && coDetailLoading ? (
-                <p className="md:col-span-3 text-sm text-muted-foreground">
-                  <span className="inline-flex items-center gap-2">
-                    <InlineSpinner />
-                    Cargando...
-                  </span>
-                </p>
-              ) : null}
-              {clientOrderId && !coDetailLoading && !coDetail ? (
-                <p className="md:col-span-3 text-sm text-destructive">
-                  No se pudo cargar la información de la orden de producción (Pedido del cliente). Intente otra vez en unos
-                  segundos.
-                </p>
-              ) : null}
-
-              <div className="grid gap-2">
+              <div className="grid min-w-0 gap-2 self-start">
                 <Label>Máquina</Label>
                 <select
                   className={cn(
@@ -763,7 +897,7 @@ export default function WorkOrdersHubPage() {
                 <TableBody>
                   {loading ? (
                     <LoadingTableRow colSpan={11} />
-                  ) : !visibleRows.length ? (
+                  ) : !groupedVisible.length ? (
                     <TableRow className={catalogTableBodyRowClass}>
                       <TableCell
                         colSpan={11}
@@ -773,147 +907,162 @@ export default function WorkOrdersHubPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    visibleRows.map((o, vidx) => {
-                      const idxOnPage = rows?.data.findIndex((r) => r.id === o.id) ?? -1
-                      const n =
-                        idxOnPage >= 0 ? rowPageBase + idxOnPage + 1 : rowPageBase + vidx + 1
-                      const accent = workOrderRowAccent(o)
-                      const RowBadgeIcon = accent.BadgeIcon
-                      return (
+                    groupedVisible.flatMap((g) => {
+                      const idxs = g.rows
+                        .map((r) => rows?.data?.findIndex((x) => x.id === r.id) ?? -1)
+                        .filter((i) => i >= 0)
+                      const minIdx = idxs.length ? Math.min(...idxs) : 0
+                      const baseN = rowPageBase + minIdx + 1
+
+                      if (g.rows.length === 1) {
+                        const o = g.rows[0]!
+                        const accent = workOrderRowAccent(o)
+                        const idxOnPage = rows?.data?.findIndex((r) => r.id === o.id) ?? -1
+                        const n =
+                          idxOnPage >= 0 ? rowPageBase + idxOnPage + 1 : rowPageBase + minIdx + 1
+                        return (
+                          <HubWorkOrderTableRow
+                            key={o.id}
+                            row={o}
+                            accent={accent}
+                            canDeactivate={canDeactivate}
+                            onDeactivateClick={(row) => {
+                              setDeactivateTarget(row)
+                              setDeactivateOpen(true)
+                            }}
+                            numCell={
+                              <span className="tabular-nums text-muted-foreground text-sm">{n}</span>
+                            }
+                          />
+                        )
+                      }
+
+                      const latest = latestRowInGroup(g.rows)
+                      const accentHeader = workOrderRowAccent(latest)
+                      const open = expandedGroups[g.key] ?? false
+                      const ocCode = latest.client_order?.code ?? "—"
+                      const out: ReactElement[] = []
+
+                      out.push(
                         <TableRow
-                          key={o.id}
-                          className={cn("text-sm", catalogTableBodyRowClass, accent.rowClass)}
+                          key={`${g.key}-header`}
+                          className={cn(
+                            "text-sm",
+                            catalogTableBodyRowClass,
+                            accentHeader.rowClass,
+                          )}
                         >
                           <TableCell
-                            className={cn(
-                              "min-w-[9rem] align-top",
-                              catalogTableBodyCellClass,
-                            )}
+                            className={cn("min-w-[9rem] align-top", catalogTableBodyCellClass)}
                           >
                             <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
-                              <span className="tabular-nums text-muted-foreground text-sm">
-                                {n}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
+                                  aria-expanded={open}
+                                  aria-label={open ? "Contraer detalle de OT" : "Expandir detalle de OT"}
+                                  onClick={() =>
+                                    setExpandedGroups((prev) => ({
+                                      ...prev,
+                                      [g.key]: !open,
+                                    }))
+                                  }
+                                >
+                                  {open ? (
+                                    <ChevronDown className="h-4 w-4" aria-hidden />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" aria-hidden />
+                                  )}
+                                </Button>
+                                <span className="tabular-nums text-muted-foreground text-sm">
+                                  {baseN}
+                                </span>
+                              </div>
                               <Badge
                                 variant="outline"
                                 className={cn(
                                   "w-fit shrink-0 font-normal tabular-nums",
-                                  accent.badgeClass,
+                                  accentHeader.badgeClass,
                                 )}
                               >
-                                <RowBadgeIcon className="h-3 w-3 shrink-0" aria-hidden />
-                                {accent.badgeLabel}
+                                <Layers className="h-3 w-3 shrink-0" aria-hidden />
+                                {g.rows.length} OT
                               </Badge>
                             </div>
                           </TableCell>
-                          <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
-                            {o.code}
+                          <TableCell
+                            className={cn("min-w-0 font-mono text-sm", catalogTableBodyCellClass)}
+                          >
+                            {g.rows.length} OT · {ocCode}
                           </TableCell>
                           <TableCell className={cn(catalogTableBodyCellClass)}>
-                            {formatDate(o.document_date)}
+                            {formatDate(latest.document_date)}
                           </TableCell>
                           <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
-                            {o.client?.name ?? "—"}
+                            {latest.client?.name ?? "—"}
                           </TableCell>
                           <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
-                            {o.product?.name ?? "—"}
+                            {latest.product?.name ?? "—"}
+                          </TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>Varias</TableCell>
+                          <TableCell className={cn(catalogTableBodyCellClass)}>
+                            {boardStageLabel(latest.board_stage)}
                           </TableCell>
                           <TableCell className={cn(catalogTableBodyCellClass)}>
-                            {formMachine(o)}
+                            {statusLabel(latest.status)}
+                          </TableCell>
+                          <TableCell className={cn("min-w-0 text-muted-foreground", catalogTableBodyCellClass)}>
+                            —
                           </TableCell>
                           <TableCell className={cn(catalogTableBodyCellClass)}>
-                            {boardStageLabel(o.board_stage)}
+                            {sumPedidoKgDisplay(g.rows)}
                           </TableCell>
-                          <TableCell className={cn(catalogTableBodyCellClass)}>
-                            {statusLabel(o.status)}
+                          <TableCell
+                            className={cn("whitespace-nowrap text-right", catalogTableBodyCellClass)}
+                          >
+                            <span className="text-muted-foreground text-xs">Expandir acciones</span>
                           </TableCell>
-                          <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
-                            {o.creator?.name ?? "—"}
-                          </TableCell>
-                          <TableCell className={cn(catalogTableBodyCellClass)}>
-                            {formPedidoKg(o)}
-                          </TableCell>
-                          <TableCell className={cn("whitespace-nowrap text-right", catalogTableBodyCellClass)}>
-                            <div className="inline-flex flex-wrap justify-end gap-1.5">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    size="icon"
-                                    variant="outline"
-                                    className={cn("shrink-0", catalogActionButtonClass)}
-                                    aria-label="Editar OT"
-                                    asChild
-                                  >
-                                    <Link to={`/ordenes-trabajo/${o.id}`}>
-                                      <FilePenLine className="h-4 w-4" />
-                                    </Link>
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  Editar OT (abrir formulario para completar o ajustar datos).
-                                </TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    size="icon"
-                                    variant="outline"
-                                    className={cn("shrink-0", catalogActionButtonClass)}
-                                    aria-label="Desactivar OT"
-                                    disabled={
-                                      !canDeactivate ||
-                                      (o.status ?? "").toLowerCase().trim() === "cancelled" ||
-                                      (o.status ?? "").toLowerCase().trim() === "completed"
-                                    }
-                                    onClick={() => {
-                                      if (!canDeactivate) return
-                                      setDeactivateTarget(o)
-                                      setDeactivateOpen(true)
-                                    }}
-                                  >
-                                    <Ban className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  {(o.status ?? "").toLowerCase().trim() === "cancelled"
-                                    ? "Ya está desactivada (cancelada)."
-                                    : (o.status ?? "").toLowerCase().trim() === "completed"
-                                      ? "No se puede desactivar una OT completada."
-                                      : !canDeactivate
-                                        ? "Solo admin o jefatura (boss) puede desactivar OT."
-                                        : "Desactivar (admin/boss)"}
-                                </TooltipContent>
-                              </Tooltip>
-                              {canPreviewPlanillaReport(o) ? (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      type="button"
-                                      size="icon"
-                                      variant="outline"
-                                      className={cn("shrink-0", catalogActionButtonClass)}
-                                      aria-label="Vista previa del reporte"
-                                      asChild
-                                    >
-                                      <Link to={`/ordenes-trabajo/${o.id}/vista-previa`}>
-                                        <Eye className="h-4 w-4" />
-                                      </Link>
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Vista previa del reporte de esta OT.</TooltipContent>
-                                </Tooltip>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        </TableRow>
+                        </TableRow>,
                       )
+
+                      if (open) {
+                        g.rows.forEach((o, j) => {
+                          const accent = workOrderRowAccent(o)
+                          out.push(
+                            <HubWorkOrderTableRow
+                              key={o.id}
+                              row={o}
+                              nested
+                              accent={accent}
+                              canDeactivate={canDeactivate}
+                              onDeactivateClick={(row) => {
+                                setDeactivateTarget(row)
+                                setDeactivateOpen(true)
+                              }}
+                              numCell={
+                                <span className="tabular-nums text-muted-foreground text-sm">
+                                  {baseN}.{j + 1}
+                                </span>
+                              }
+                            />,
+                          )
+                        })
+                      }
+
+                      return out
                     })
                   )}
                 </TableBody>
               </Table>
             </div>
+
+            <p className="text-muted-foreground text-xs">
+              Varias OT del mismo pedido cliente y producto aparecen agrupadas; use la flecha para ver cada
+              código OT y sus acciones.
+            </p>
 
             {rows && rows.last_page > 1 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 text-sm">

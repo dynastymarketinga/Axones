@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\AxonesDemoPhaseCommand;
 use App\Console\Commands\AxonesDemoReseedCommand;
 use App\Http\Middleware\EnsureAreaRole;
 use Illuminate\Foundation\Application;
@@ -14,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withCommands([
+        AxonesDemoPhaseCommand::class,
         AxonesDemoReseedCommand::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {

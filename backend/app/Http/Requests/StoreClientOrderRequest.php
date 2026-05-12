@@ -27,7 +27,9 @@ class StoreClientOrderRequest extends FormRequest
             'ordered_at' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
             'lines' => ['nullable', 'array'],
-            'lines.*.product_id' => ['required_with:lines', 'integer', 'exists:products,id'],
+            'lines.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
+            'lines.*.material_id' => ['nullable', 'integer', 'exists:materials,id'],
+            'lines.*.description' => ['nullable', 'string', 'max:512'],
             'lines.*.quantity' => ['required_with:lines', 'numeric', 'min:0.001'],
             'lines.*.unit' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:2000'],
@@ -46,21 +48,35 @@ class StoreClientOrderRequest extends FormRequest
                 if (! is_array($line)) {
                     continue;
                 }
-                $pid = isset($line['product_id']) ? (int) $line['product_id'] : null;
-                if ($pid === null || $pid < 1) {
+                $pid = isset($line['product_id']) && $line['product_id'] !== '' && $line['product_id'] !== null
+                    ? (int) $line['product_id']
+                    : null;
+                $mid = isset($line['material_id']) && $line['material_id'] !== '' && $line['material_id'] !== null
+                    ? (int) $line['material_id']
+                    : null;
+                $desc = trim((string) ($line['description'] ?? ''));
+
+                $hasProduct = $pid !== null && $pid > 0;
+                $hasMaterial = $mid !== null && $mid > 0;
+                $hasDescription = $desc !== '';
+
+                if (! $hasProduct && ! $hasMaterial && ! $hasDescription) {
                     $validator->errors()->add(
-                        'lines.'.$i.'.product_id',
-                        'Cada línea debe incluir un producto válido.',
+                        'lines.'.$i,
+                        'Cada línea debe incluir un producto, un material o una descripción.',
                     );
 
                     continue;
                 }
-                $product = Product::query()->find($pid);
-                if ($product && $product->client_id !== null && (int) $product->client_id !== $clientId) {
-                    $validator->errors()->add(
-                        'lines.'.$i.'.product_id',
-                        'El producto no pertenece al cliente del pedido.',
-                    );
+
+                if ($hasProduct) {
+                    $product = Product::query()->find($pid);
+                    if ($product && $product->client_id !== null && (int) $product->client_id !== $clientId) {
+                        $validator->errors()->add(
+                            'lines.'.$i.'.product_id',
+                            'El producto no pertenece al cliente del pedido.',
+                        );
+                    }
                 }
             }
         });

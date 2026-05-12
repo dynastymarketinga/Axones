@@ -77,6 +77,7 @@ export type PurchaseOrderRow = {
   manuallyClosedBy?: { id: number; name: string } | null
 }
 
+/** PATCH /client-orders/:id: notes, status, lines, client_id (client_id con reglas: orden abierta, líneas y OT en API). */
 export type ClientOrderRow = {
   id: number
   client_id: number

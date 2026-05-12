@@ -1,7 +1,58 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
+import {
+  Activity,
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpFromLine,
+  Barcode,
+  Calendar,
+  CalendarClock,
+  CalendarDays,
+  Circle,
+  CircleDot,
+  ClipboardList as LucideClipboardList,
+  Columns,
+  Cog,
+  Crop,
+  Disc,
+  Factory,
+  FileText,
+  Flag,
+  FlaskConical,
+  GripHorizontal,
+  Hash,
+  IdCard,
+  Layers as LucideLayers,
+  LayoutGrid,
+  Link2,
+  Loader2,
+  Minus,
+  MapPin,
+  MessageSquare,
+  Package as LucidePackage,
+  PackagePlus,
+  Paintbrush,
+  Palette,
+  Percent,
+  Plus,
+  Printer,
+  Repeat,
+  Ruler,
+  Scale,
+  StickyNote,
+  Tag,
+  Tags,
+  Trash2,
+  TrendingDown,
+  User,
+  Warehouse,
+  Weight,
+  Check,
+  ChevronsUpDown,
+  X,
+} from "lucide-react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
@@ -20,11 +71,18 @@ import {
 } from "./ot-planilla-icons"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { latestRowInGroup } from "@/lib/axones-work-order-grouping"
 import { getStoredUser } from "@/lib/auth-storage"
 import { cn } from "@/lib/utils"
-import type { ClientOrderDetailRecord, LaravelPaginated, MaterialRow, ProductRecord } from "@/types/api"
+import type {
+  ClientOrderDetailRecord,
+  LaravelPaginated,
+  MaterialRow,
+  ProductRecord,
+  WorkOrderListRow,
+} from "@/types/api"
 import { Badge } from "@/components/ui/badge"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import {
   Command,
   CommandEmpty,
@@ -38,17 +96,16 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
+import { OtPlanillaInputIcon } from "./OtPlanillaInputIcon"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import WorkOrderPrintingInkTable from "./WorkOrderPrintingInkTable"
 import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
@@ -130,14 +187,19 @@ type SaveOrdenTrabajoResponse = {
   } | null
 }
 
-type SustratoRow = { material_id: string; kg: string }
+type SustratoRow = { material_id: string; kg: string; material_free_text?: string }
 
 const MIN_SUSTRATO_ROWS = 1
 const MAX_SUSTRATO_ROWS = 4
 
+/** Toast al fallar validación al guardar (Sonner usa ~4s por defecto en errores). */
+const OT_VALIDATION_ERROR_TOAST_MS = 2600
+/** Oculta sombreado y mensajes de error de envío; puede pulsar Guardar de nuevo para revisarlos. */
+const OT_FIELD_ERRORS_AUTO_CLEAR_MS = 8000
+
 function ensureMinSustratoRows(rows: SustratoRow[], minRows = MIN_SUSTRATO_ROWS): SustratoRow[] {
   const next = [...rows]
-  while (next.length < minRows) next.push({ material_id: "", kg: "" })
+  while (next.length < minRows) next.push({ material_id: "", kg: "", material_free_text: "" })
   return next
 }
 
@@ -151,8 +213,25 @@ function readNumberString(v: unknown): string {
   return ""
 }
 
+/** Metros est.: el guion solo era “vacío” en UI; vacío real para que funcione `placeholder`. */
+function metrosEstimadosDisplay(v: unknown): string {
+  const m = readNumberString(v).trim()
+  return m === "-" ? "" : m
+}
+
 function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, unknown> | null) {
-  return { ...prefill, ...(form ?? {}) }
+  const merged = { ...prefill, ...(form ?? {}) }
+  if (readNumberString(merged.metrosEstimados).trim() === "-") {
+    merged.metrosEstimados = ""
+  }
+  return merged
+}
+
+/** Misma lógica que el backend (`WorkOrderOrdenTrabajoService::buildPrefill`) para `codigoBarra`. */
+function trimBarcodeForPrefill(barcode: string | null | undefined): string | null {
+  if (barcode == null) return null
+  const t = String(barcode).trim()
+  return t !== "" ? t : null
 }
 
 /** Alineado con `WorkOrderOrdenTrabajoService::buildPrefill()` (tipo de impresión según `print_type`). */
@@ -161,7 +240,7 @@ function prefillFromProduct(p: ProductRecord): Record<string, unknown> {
     producto: p.name,
     cpe: p.cpe ?? null,
     mpps: p.mps ?? null,
-    codigoBarra: null,
+    codigoBarra: trimBarcodeForPrefill(p.barcode),
     estructuraMaterial: p.structure ?? null,
   }
   const raw = p.print_type
@@ -258,10 +337,11 @@ function sanitizePositiveIntInput(v: string): string {
 
 function sanitizeMetrosEstimadosInput(v: string): string {
   const trimmed = v.trim()
+  if (trimmed === "") return ""
   if (trimmed === "-") return "-"
   const hasMinus = trimmed.startsWith("-")
   const digits = v.replace(/\D/g, "")
-  if (!digits) return "-"
+  if (!digits) return ""
   return hasMinus ? `-${digits}` : digits
 }
 
@@ -270,6 +350,128 @@ function normalizeYesNo(v: unknown): "" | "si" | "no" {
   if (s === "si" || s === "sí") return "si"
   if (s === "no") return "no"
   return ""
+}
+
+function lineaCorteComboLabel(v: unknown): string {
+  const n = normalizeYesNo(v)
+  if (n === "si") return "Si"
+  if (n === "no") return "No"
+  return "Elegir…"
+}
+
+function priorityComboLabel(v: unknown): string {
+  const p = readString(v).toLowerCase().trim()
+  if (p === "urgente") return "Urgente"
+  if (p === "alta") return "Alta"
+  return "Normal"
+}
+
+function normalizedPriorityValue(v: unknown): "normal" | "alta" | "urgente" {
+  const p = readString(v).toLowerCase().trim()
+  if (p === "urgente") return "urgente"
+  if (p === "alta") return "alta"
+  return "normal"
+}
+
+function materialInventoryComboLabel(materials: MaterialRow[], materialId: unknown): string {
+  const id = readString(materialId).trim()
+  if (!id) return "Elegir material del inventario…"
+  const m = materials.find((row) => String(row.id) === id)
+  return m ? `${m.sku} · ${m.name}` : id
+}
+
+/** Texto mostrado en el campo: texto libre, o etiqueta de inventario si hay `material_id`. */
+function sustratoVirgenDisplayValue(materials: MaterialRow[], row: SustratoRow): string {
+  const free = readString(row.material_free_text).trim()
+  if (free) return free
+  const id = readString(row.material_id).trim()
+  if (!id) return ""
+  return materialInventoryComboLabel(materials, id)
+}
+
+/** Hay referencia de material si hay ID de inventario válido o descripción manual. */
+function sustratoRowHasMaterialChoice(row: SustratoRow): boolean {
+  const free = readString(row.material_free_text).trim()
+  if (free) return true
+  const mid = readString(row.material_id).trim()
+  if (!mid) return false
+  return /^\d+$/.test(mid) && Number(mid) > 0
+}
+
+function sustratoMaterialIdDigits(row: SustratoRow): string {
+  const raw = row.material_id
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return String(Math.trunc(raw))
+  const s = readString(raw).trim()
+  return /^\d+$/.test(s) ? s : ""
+}
+
+/** Stock / kg: solo filas de catálogo (id numérico y sin texto libre). */
+function sustratoRowUsesCatalogMaterial(row: SustratoRow): boolean {
+  if (readString(row.material_free_text).trim()) return false
+  return sustratoMaterialIdDigits(row) !== ""
+}
+
+function parseDecimalKgString(s: unknown): number | null {
+  const t = readNumberString(s).trim().replace(",", ".")
+  if (!t || !isDecimalLike(t)) return null
+  const n = Number(t)
+  return Number.isFinite(n) ? n : null
+}
+
+function materialRowById(materials: MaterialRow[], materialId: string): MaterialRow | null {
+  if (!materialId) return null
+  return materials.find((m) => String(m.id) === materialId) ?? null
+}
+
+function formatKgForOtHint(n: number): string {
+  if (!Number.isFinite(n)) return "—"
+  return n.toLocaleString("es-VE", { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+}
+
+/** Compara cantidades como decimales con hasta 3 fracciones (alineado con backend `bccomp(..., 3)`). */
+function decimalKgExceedsStock(requestedStr: string, stockStr: string): boolean {
+  const req = parseDecimalKgString(requestedStr)
+  const stock = parseDecimalKgString(stockStr)
+  if (req === null || stock === null) return false
+  return Math.round(req * 1000) > Math.round(stock * 1000)
+}
+
+function sustratoCatalogStockLabel(materials: MaterialRow[], row: SustratoRow): string | null {
+  if (!sustratoRowUsesCatalogMaterial(row)) return null
+  const m = materialRowById(materials, sustratoMaterialIdDigits(row))
+  if (!m) return null
+  const q = parseDecimalKgString(m.quantity_on_hand)
+  if (q === null) return null
+  return formatKgForOtHint(q)
+}
+
+function SustratoKgStockFooter({ row, materials }: { row: SustratoRow; materials: MaterialRow[] }) {
+  if (!sustratoRowUsesCatalogMaterial(row)) return null
+  const id = sustratoMaterialIdDigits(row)
+  const m = materialRowById(materials, id)
+  if (!m) {
+    return (
+      <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+        Material no encontrado en el listado cargado. Recargue la página o vuelva a elegir del catálogo.
+      </p>
+    )
+  }
+  const availLabel = sustratoCatalogStockLabel(materials, row)
+  const kgStr = readNumberString(row.kg).trim()
+  const exceeds = kgStr ? decimalKgExceedsStock(kgStr, m.quantity_on_hand) : false
+  return (
+    <div className="mt-1 space-y-0.5">
+      {availLabel != null ? (
+        <p className="text-xs text-muted-foreground">Disponible: {availLabel} kg</p>
+      ) : null}
+      {exceeds ? (
+        <p className="text-xs font-medium text-destructive">
+          Supera el stock disponible
+          {availLabel != null ? ` (${availLabel} kg)` : "."}
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 function statusOtLabel(v: unknown): string {
@@ -356,7 +558,11 @@ function getSustratosLam(form: Record<string, unknown>): SustratoRow[] {
   const out: SustratoRow[] = raw
     .map((r) => {
       const o = r as Record<string, unknown>
-      return { material_id: readString(o.material_id), kg: readNumberString(o.kg) }
+      return {
+        material_id: readString(o.material_id),
+        kg: readNumberString(o.kg),
+        material_free_text: readString(o.material_free_text),
+      }
     })
   return ensureMinSustratoRows(out)
 }
@@ -375,13 +581,17 @@ function getSustratosImp(form: Record<string, unknown>): SustratoRow[] {
     const out: SustratoRow[] = raw
       .map((r) => {
         const o = r as Record<string, unknown>
-        return { material_id: readString(o.material_id), kg: readNumberString(o.kg) }
+        return {
+          material_id: readString(o.material_id),
+          kg: readNumberString(o.kg),
+          material_free_text: readString(o.material_free_text),
+        }
       })
     return ensureMinSustratoRows(out)
   }
   const mid = readString(form.sustratoVirgenImp1)
   const kg = readNumberString(form.kgUtilizarImp1)
-  if (mid || kg) return ensureMinSustratoRows([{ material_id: mid, kg }])
+  if (mid || kg) return ensureMinSustratoRows([{ material_id: mid, kg, material_free_text: "" }])
   return ensureMinSustratoRows([])
 }
 
@@ -392,27 +602,190 @@ function setSustratosImp(
   setForm((prev) => ({ ...prev, sustratosVirgenImp: rows.slice(0, MAX_SUSTRATO_ROWS) }))
 }
 
+const OT_BLUR_REQUIRED_MSG = "Este campo es obligatorio."
+/** Cuánto tiempo se muestra el aviso por blur antes de ocultarlo solo (los errores de “Guardar orden” no caducan). */
+const OT_BLUR_TIP_MS = 4000
+
+type OtBlurCtx = {
+  form: Record<string, unknown>
+  prefill: Record<string, unknown>
+  tipoImpresion: ReturnType<typeof normalizeTipoImpresion>
+  canEditShared: boolean
+  canViewMontaje: boolean
+  canViewImpresion: boolean
+  canViewLaminacion: boolean
+  canViewCorte: boolean
+}
+
+function sustratosImpBlockEmpty(form: Record<string, unknown>): boolean {
+  const rows = getSustratosImp(form)
+  return !rows.some((r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim())
+}
+
+function sustratosLamBlockEmpty(form: Record<string, unknown>): boolean {
+  const rows = getSustratosLam(form)
+  return !rows.some((r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim())
+}
+
+function lam2BlockAny(form: Record<string, unknown>): boolean {
+  return Boolean(
+    readNumberString(form.kgEntradaLam2).trim() ||
+      readNumberString(form.kgSalidaLam2).trim() ||
+      readNumberString(form.metrajeLam2).trim() ||
+      readNumberString(form.mermaLam2).trim(),
+  )
+}
+
+/** Vacío según criterio “obligatorio al guardar” (solo texto vacío / sin selección; no valida formatos). */
+function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
+  const { form, prefill, tipoImpresion, canEditShared, canViewMontaje, canViewImpresion, canViewLaminacion, canViewCorte } =
+    ctx
+
+  const shared = new Set([
+    "pedidoKg",
+    "maquina",
+    "metrosEstimados",
+    "tipoImpresionEstructura",
+    "cpe",
+    "mpps",
+    "codigoBarra",
+  ])
+  if (shared.has(key)) {
+    if (!canEditShared) return false
+    switch (key) {
+      case "pedidoKg":
+        return !(readNumberString(form.pedidoKg).trim() || readNumberString(prefill.pedidoKg).trim())
+      case "maquina":
+        return !readString(form.maquina).trim()
+      case "metrosEstimados": {
+        const m = readNumberString(form.metrosEstimados).trim()
+        return !m || m === "-"
+      }
+      case "tipoImpresionEstructura":
+        return !tipoImpresion
+      case "cpe":
+      case "mpps":
+      case "codigoBarra":
+        return !readString(form[key]).trim()
+      default:
+        return false
+    }
+  }
+
+  const montaje = new Set([
+    "frecuencia",
+    "numBandas",
+    "anchoCorteMontaje",
+    "numRepeticion",
+    "desarrollo",
+    "anchoMontaje",
+    "numColores",
+  ])
+  if (montaje.has(key)) {
+    if (!canEditShared || !canViewMontaje) return false
+    return !readString(form[key]).trim()
+  }
+
+  const imp = new Set([
+    "pinonImp",
+    "lineaCorte",
+    "figEmbImpDisplay",
+    "sustratosImp",
+    "kgIngresadoImp",
+    "kgSalidaImp",
+    "mermaImp",
+    "metrosImp",
+  ])
+  if (imp.has(key)) {
+    if (!canViewImpresion) return false
+    if (key === "lineaCorte") return !normalizeYesNo(form.lineaCorte)
+    if (key === "sustratosImp") return sustratosImpBlockEmpty(form)
+    if (key === "figEmbImpDisplay" || key === "pinonImp") return !readString(form[key]).trim()
+    return !readNumberString(form[key]).trim()
+  }
+
+  const lamCore = new Set([
+    "figuraEmbobinadoLam",
+    "gramajeAdhesivo",
+    "relacionMezcla",
+    "sustratosLam",
+    "kgEntradaLam",
+    "kgSalidaLam",
+    "metrajeLam",
+    "mermaLam",
+  ])
+  const lam2 = new Set(["kgEntradaLam2", "kgSalidaLam2", "metrajeLam2", "mermaLam2"])
+  if (lamCore.has(key) || lam2.has(key)) {
+    if (!canViewLaminacion) return false
+    if (key === "sustratosLam") return sustratosLamBlockEmpty(form)
+    if (key === "figuraEmbobinadoLam") return !readString(form.figuraEmbobinadoLam).trim()
+    if (key === "gramajeAdhesivo" || key === "relacionMezcla") return !readString(form[key]).trim()
+    if (lam2.has(key)) {
+      if (!lam2BlockAny(form)) return false
+      return !readNumberString(form[key]).trim()
+    }
+    return !readNumberString(form[key]).trim()
+  }
+
+  const corteMetric = new Set([
+    "anchoCorteFinal",
+    "pesoBobina",
+    "metrosBobina",
+    "distFotoceldaBorde",
+    "distFiguraLadoContrario",
+    "distFiguraLadoFotocelda",
+    "diamBobina",
+    "anchoCore",
+    "diamCorePlg",
+  ])
+  if (corteMetric.has(key)) {
+    if (!canViewCorte) return false
+    return !readString(form[key]).trim()
+  }
+  if (key === "orientacionEmbalaje") {
+    if (!canViewCorte) return false
+    return !readString(form.orientacionEmbalaje).trim()
+  }
+  if (key === "ubicFotoceldaCorte") {
+    if (!canViewCorte) return false
+    return !readString(form.ubicFotoceldaCorte).trim()
+  }
+  const corteInt = new Set(["maxEmpates", "cantCores"])
+  if (corteInt.has(key)) {
+    if (!canViewCorte) return false
+    return !readString(form[key]).trim()
+  }
+  const corteDec = new Set(["kgIngresadosCorte", "kgSalidaCorte", "kgMermaCorte", "metrajeCorte"])
+  if (corteDec.has(key)) {
+    if (!canViewCorte) return false
+    return !readNumberString(form[key]).trim()
+  }
+
+  return false
+}
+
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+function randomMachineValue(): Exclude<MachineValue, ""> {
+  const flat = MACHINE_OPTIONS.flatMap((g) => g.options.map((o) => o.value))
+  return flat[randomInt(0, flat.length - 1)]!
+}
+
 /**
- * Cabecera (orden de cliente) + datos del producto: solo criterio del usuario;
- * el relleno al azar no modifica estas claves aunque estén vacías.
+ * Cabecera / maestro que no debe pisarse con valores demo (identidad del pedido, cliente, producto).
+ * Máquina, ref. planchas, metros est. y sustratos sí se rellenan al azar si vienen vacíos.
  */
 const USER_ONLY_RANDOM_SKIP = new Set<string>([
   "fechaOrden",
   "numeroOrden",
   "document_number",
   "pedidoKg",
-  "maquina",
-  "planchasReferencia",
-  "metrosEstimados",
   "cliente",
   "clienteRif",
   "producto",
   "tipoImpresion",
-  "tipoImpresionEstructura",
   "cpe",
   "mpps",
   "codigoBarra",
@@ -451,7 +824,10 @@ function isEmptyForRandomFill(key: string, value: unknown): boolean {
     if (value.length === 0) return true
     if (key === "sustratosVirgenImp" || key === "sustratosVirgenLam") {
       return (value as Array<Record<string, unknown>>).every(
-        (row) => !readString(row.material_id).trim() && !readNumberString(row.kg).trim(),
+        (row) =>
+          !readString(row.material_id).trim() &&
+          !readString(row.material_free_text ?? "").trim() &&
+          !readNumberString(row.kg).trim(),
       )
     }
     return false
@@ -468,13 +844,32 @@ function isBlockedFromRandomByPrefill(key: string, prefill: Record<string, unkno
 function buildRandomPlanillaPatch(prev: Record<string, unknown>): Record<string, unknown> {
   const sImp = getSustratosImp(prev)
   const sLam = getSustratosLam(prev)
-  const tipM = randomInt(0, 1) === 0 ? "Reverso" : "Superficie"
-  const sustratosVirgenImp = [
-    { material_id: readString(sImp[0]?.material_id), kg: String(randomInt(15, 120)) },
-  ]
-  const sustratosVirgenLam = [
-    { material_id: readString(sLam[0]?.material_id), kg: String(randomInt(200, 520)) },
-  ]
+  const patchSustratoRow = (
+    row: SustratoRow | undefined,
+    kgMin: number,
+    kgMax: number,
+    demoPrefix: string,
+  ) => {
+    const material_id = readString(row?.material_id)
+    const material_free_text = readString(row?.material_free_text)
+    const kg = String(randomInt(kgMin, kgMax))
+    const cur: SustratoRow = {
+      material_id,
+      kg: readNumberString(row?.kg),
+      material_free_text,
+    }
+    if (sustratoRowHasMaterialChoice(cur)) {
+      return { material_id, kg, material_free_text }
+    }
+    return {
+      material_id,
+      kg,
+      material_free_text:
+        material_free_text.trim() || `${demoPrefix}-${randomInt(1000, 9999)}`,
+    }
+  }
+  const sustratosVirgenImp = [patchSustratoRow(sImp[0], 15, 120, "DEMO-IMP")]
+  const sustratosVirgenLam = [patchSustratoRow(sLam[0], 200, 520, "DEMO-LAM")]
 
   const tintas: Record<string, unknown> = {}
   const demoColors = [
@@ -495,7 +890,10 @@ function buildRandomPlanillaPatch(prev: Record<string, unknown>): Record<string,
   }
 
   return {
-    tipoImpresionMontaje: tipM,
+    maquina: randomMachineValue(),
+    planchasReferencia: String(randomInt(1, 999)).padStart(3, "0"),
+    metrosEstimados: String(randomInt(5000, 28000)),
+    tipoImpresionEstructura: randomInt(0, 1) === 0 ? "superficie" : "reverso",
     frecuencia: `${randomInt(200, 360)}±${randomInt(1, 5)}`,
     numBandas: String(randomInt(1, 6)),
     anchoCorteMontaje: `${randomInt(300, 450)}±${randomInt(1, 4)}`,
@@ -632,6 +1030,19 @@ function getHeaderConfirmCopy(action: PendingHeaderAction, isDraftRoute: boolean
   }
 }
 
+function pendingHeaderConfirmIcon(action: PendingHeaderAction, iconClass = "h-6 w-6 shrink-0") {
+  switch (action) {
+    case "view":
+      return <LucideClipboardList className={iconClass} aria-hidden />
+    case "random":
+      return <Shuffle className={iconClass} aria-hidden />
+    case "clear":
+      return <Eraser className={iconClass} aria-hidden />
+    case "save":
+      return <Save className={iconClass} aria-hidden />
+  }
+}
+
 export default function WorkOrderPlanillaPage() {
   const nav = useNavigate()
   const { woId } = useParams<{ woId: string }>()
@@ -688,17 +1099,33 @@ export default function WorkOrderPlanillaPage() {
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [duplicateOtMatches, setDuplicateOtMatches] = useState<WorkOrderListRow[] | null>(null)
   const [rellenoAzarDialogOpen, setRellenoAzarDialogOpen] = useState(false)
   const [rellenoAzarCount, setRellenoAzarCount] = useState(0)
   const [pendingHeaderAction, setPendingHeaderAction] = useState<PendingHeaderAction | null>(null)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [blurFieldMessages, setBlurFieldMessages] = useState<Record<string, string>>({})
+  const fieldErrorsClearTimerRef = useRef<number | null>(null)
+
+  const cancelFieldErrorsAutoClear = useCallback(() => {
+    if (fieldErrorsClearTimerRef.current) {
+      clearTimeout(fieldErrorsClearTimerRef.current)
+      fieldErrorsClearTimerRef.current = null
+    }
+  }, [])
 
   const [woClientId, setWoClientId] = useState<number | null>(null)
   const [woProductId, setWoProductId] = useState<number | null>(null)
   const [clientProducts, setClientProducts] = useState<ProductRecord[]>([])
   const [productPickerOpen, setProductPickerOpen] = useState(false)
+  const [maquinaPickerOpen, setMaquinaPickerOpen] = useState(false)
+  const [tipoImpresionPickerOpen, setTipoImpresionPickerOpen] = useState(false)
+  const [lineaCortePickerOpen, setLineaCortePickerOpen] = useState(false)
+  const [priorityPickerOpen, setPriorityPickerOpen] = useState(false)
+  const [sustratoImpPickerIdx, setSustratoImpPickerIdx] = useState<number | null>(null)
+  const [sustratoLamPickerIdx, setSustratoLamPickerIdx] = useState<number | null>(null)
   const [updatingProduct, setUpdatingProduct] = useState(false)
 
   const [tintaMateriales, setTintaMateriales] = useState<MaterialRow[]>([])
@@ -710,6 +1137,47 @@ export default function WorkOrderPlanillaPage() {
   prefillRef.current = prefill
   formRef.current = form
   woProductIdRef.current = woProductId
+
+  const planillaFormRef = useRef<HTMLFormElement>(null)
+  const blurDismissTimersRef = useRef(new Map<string, number>())
+  const blurCtxRef = useRef<OtBlurCtx>({
+    form: {},
+    prefill: {},
+    tipoImpresion: "",
+    canEditShared: false,
+    canViewMontaje: false,
+    canViewImpresion: false,
+    canViewLaminacion: false,
+    canViewCorte: false,
+  })
+
+  const clearAllBlurDismissTimers = () => {
+    for (const t of blurDismissTimersRef.current.values()) clearTimeout(t)
+    blurDismissTimersRef.current.clear()
+  }
+
+  const scheduleBlurTipDismiss = (key: string) => {
+    const existing = blurDismissTimersRef.current.get(key)
+    if (existing) clearTimeout(existing)
+    const tid = window.setTimeout(() => {
+      blurDismissTimersRef.current.delete(key)
+      setBlurFieldMessages((prev) => {
+        if (!(key in prev)) return prev
+        const n = { ...prev }
+        delete n[key]
+        return n
+      })
+    }, OT_BLUR_TIP_MS) as unknown as number
+    blurDismissTimersRef.current.set(key, tid)
+  }
+
+  const cancelBlurTipDismiss = (key: string) => {
+    const t = blurDismissTimersRef.current.get(key)
+    if (t) {
+      clearTimeout(t)
+      blurDismissTimersRef.current.delete(key)
+    }
+  }
 
   const draftImportMaterialRef = useRef(draftImportMaterialFromCo)
   draftImportMaterialRef.current = draftImportMaterialFromCo
@@ -754,7 +1222,7 @@ export default function WorkOrderPlanillaPage() {
       if (!Array.isArray(merged.sustratosVirgenImp)) {
         const mid = readString(merged.sustratoVirgenImp1)
         const kg = readNumberString(merged.kgUtilizarImp1)
-        if (mid || kg) merged.sustratosVirgenImp = [{ material_id: mid, kg }]
+        if (mid || kg) merged.sustratosVirgenImp = [{ material_id: mid, kg, material_free_text: "" }]
       }
       // Maestro: nombres de cliente/producto vienen del servidor, no de un borrador antiguo.
       if (readString(p.cliente)) merged.cliente = p.cliente
@@ -774,6 +1242,8 @@ export default function WorkOrderPlanillaPage() {
         }
       }
       setForm(merged)
+      clearAllBlurDismissTimers()
+      setBlurFieldMessages({})
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar la orden de trabajo.")
@@ -781,6 +1251,8 @@ export default function WorkOrderPlanillaPage() {
       setForm({})
       setWoClientId(null)
       setWoProductId(null)
+      clearAllBlurDismissTimers()
+      setBlurFieldMessages({})
     } finally {
       setLoading(false)
     }
@@ -856,20 +1328,24 @@ export default function WorkOrderPlanillaPage() {
       if (!Array.isArray(merged.sustratosVirgenImp)) {
         const mid = readString(merged.sustratoVirgenImp1)
         const kg = readNumberString(merged.kgUtilizarImp1)
-        if (mid || kg) merged.sustratosVirgenImp = [{ material_id: mid, kg }]
+        if (mid || kg) merged.sustratosVirgenImp = [{ material_id: mid, kg, material_free_text: "" }]
       }
 
       setPrefill(p)
       setWoClientId(Number.isFinite(Number(co.client_id)) ? Number(co.client_id) : null)
       setWoProductId(productId)
       setForm(merged)
+      clearAllBlurDismissTimers()
+      setBlurFieldMessages({})
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar la orden de producción (Pedido del cliente) para el borrador.")
+      else toast.error("No se pudo cargar el pedido cliente (OC) para el borrador.")
       setPrefill({})
       setForm({})
       setWoClientId(null)
       setWoProductId(null)
+      clearAllBlurDismissTimers()
+      setBlurFieldMessages({})
     } finally {
       setLoading(false)
     }
@@ -936,9 +1412,28 @@ export default function WorkOrderPlanillaPage() {
   }, [woProductId])
 
   const tipoImpresion = useMemo(
-    () => normalizeTipoImpresion(form.tipoImpresionEstructura ?? form.tipoImpresion),
+    () =>
+      normalizeTipoImpresion(
+        readString(form.tipoImpresionEstructura) || readString(form.tipoImpresion),
+      ),
     [form.tipoImpresionEstructura, form.tipoImpresion],
   )
+
+  const tipoImpresionComboLabel = useMemo(() => {
+    if (tipoImpresion === "superficie") return "Superficie"
+    if (tipoImpresion === "reverso") return "Reverso"
+    return "Elegir…"
+  }, [tipoImpresion])
+
+  /** Montaje copia el tipo de la especificación (datos del producto); el select de montaje queda deshabilitado. */
+  useEffect(() => {
+    const montajeLabel =
+      tipoImpresion === "superficie" ? "Superficie" : tipoImpresion === "reverso" ? "Reverso" : ""
+    setForm((f) => {
+      if (readString(f.tipoImpresionMontaje) === montajeLabel) return f
+      return { ...f, tipoImpresionMontaje: montajeLabel }
+    })
+  }, [tipoImpresion])
 
   const productComboLabel = useMemo(() => {
     const n = readString(form.producto) || readString(prefill.producto)
@@ -962,6 +1457,9 @@ export default function WorkOrderPlanillaPage() {
       setPrefill((prev) => ({ ...prev, ...delta }))
       setForm((f) => {
         const n: Record<string, unknown> = { ...f, producto: p.name }
+        n.cpe = readString(p.cpe)
+        n.mpps = readString(p.mps)
+        n.codigoBarra = trimBarcodeForPrefill(p.barcode) ?? ""
         const s = p.structure
         if (typeof s === "string" && s !== "") n.estructuraCapa1 = s
         if (delta.tipoImpresion === "Reverso") n.tipoImpresionEstructura = "reverso"
@@ -999,9 +1497,35 @@ export default function WorkOrderPlanillaPage() {
 
   const maquina = readString(form.maquina) as MachineValue
 
+  const maquinaComboLabel = useMemo(() => {
+    const v = readString(form.maquina).trim()
+    if (!v) return "Elegir…"
+    for (const g of MACHINE_OPTIONS) {
+      const hit = g.options.find((o) => o.value === v)
+      if (hit) return hit.label
+    }
+    return v
+  }, [form.maquina])
+
   const sustratosLam = useMemo(() => getSustratosLam(form), [form])
   const sustratosImp = useMemo(() => getSustratosImp(form), [form])
-  const errorFor = (key: string) => fieldErrors[key]
+
+  blurCtxRef.current = {
+    form,
+    prefill,
+    tipoImpresion,
+    canEditShared,
+    canViewMontaje,
+    canViewImpresion,
+    canViewLaminacion,
+    canViewCorte,
+  }
+
+  const errorFor = (key: string) => {
+    const submit = fieldErrors[key]
+    if (submit) return submit
+    return blurFieldMessages[key]
+  }
   const renderError = (key: string) => {
     const message = errorFor(key)
     if (!message) return null
@@ -1011,6 +1535,8 @@ export default function WorkOrderPlanillaPage() {
       </p>
     )
   }
+  /** `aria-invalid` + estilos en `work-order-planilla.css` (mismo criterio que Notas en pedido cliente). */
+  const otInvalid = (key: string) => Boolean(errorFor(key))
   const focusFieldSoft = useCallback((key: string) => {
     if (typeof document === "undefined") return
     const field = document.querySelector<HTMLElement>(`[data-field="${key}"]`)
@@ -1025,12 +1551,109 @@ export default function WorkOrderPlanillaPage() {
     }, prefersReducedMotion ? 0 : 140)
   }, [])
 
-  async function guardar() {
+  const jumpToArea = useCallback(
+    (fieldKey: string) => {
+      if (loading) return
+      focusFieldSoft(fieldKey)
+    },
+    [focusFieldSoft, loading],
+  )
+
+  useEffect(
+    () => () => {
+      cancelFieldErrorsAutoClear()
+    },
+    [cancelFieldErrorsAutoClear],
+  )
+
+  useEffect(() => {
+    setBlurFieldMessages((prev) => {
+      const ctx = blurCtxRef.current
+      let changed = false
+      const next = { ...prev }
+      for (const k of Object.keys(prev)) {
+        if (!isOtBlurRequiredEmpty(k, ctx)) {
+          const t = blurDismissTimersRef.current.get(k)
+          if (t) {
+            clearTimeout(t)
+            blurDismissTimersRef.current.delete(k)
+          }
+          delete next[k]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [
+    form,
+    prefill,
+    tipoImpresion,
+    canEditShared,
+    canViewMontaje,
+    canViewImpresion,
+    canViewLaminacion,
+    canViewCorte,
+  ])
+
+  useEffect(() => {
+    if (loading) return
+    const el = planillaFormRef.current
+    if (!el) return
+
+    const onFocusOut = (e: FocusEvent) => {
+      const target = e.target
+      if (!(target instanceof Element)) return
+      if (!el.contains(target)) return
+
+      const related = e.relatedTarget
+      if (target.closest('[data-skip-blur="1"],[data-skip-blur="true"]')) return
+
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        if (target.disabled || target.readOnly) return
+      } else if (target instanceof HTMLSelectElement) {
+        if (target.disabled) return
+      } else if (target instanceof HTMLButtonElement && target.disabled) {
+        return
+      }
+
+      const host = target.closest("[data-field]")
+      if (!host) return
+      if (host.getAttribute("data-skip-blur") === "1" || host.getAttribute("data-skip-blur") === "true") return
+
+      if (related instanceof Node && host.contains(related)) return
+
+      const key = host.getAttribute("data-field")
+      if (!key) return
+
+      const ctx = blurCtxRef.current
+      const empty = isOtBlurRequiredEmpty(key, ctx)
+      if (empty) {
+        setBlurFieldMessages((prev) => ({ ...prev, [key]: OT_BLUR_REQUIRED_MSG }))
+        scheduleBlurTipDismiss(key)
+      } else {
+        cancelBlurTipDismiss(key)
+        setBlurFieldMessages((prev) => {
+          const n = { ...prev }
+          delete n[key]
+          return n
+        })
+      }
+    }
+
+    el.addEventListener("focusout", onFocusOut, true)
+    return () => el.removeEventListener("focusout", onFocusOut, true)
+  }, [loading])
+
+  useEffect(() => {
+    return () => {
+      clearAllBlurDismissTimers()
+    }
+  }, [])
+
+  async function guardar(opts?: { forceNewOt?: boolean }) {
     if (isDraftRoute) {
       if (!draftCoId) {
-        toast.error(
-          "Falta la orden de producción (Pedido del cliente, OC) en la URL. Vuelva a la lista e inténtelo otra vez.",
-        )
+        toast.error("Falta el pedido cliente (OC) en la URL. Vuelva a la lista e inténtelo otra vez.")
         return
       }
     } else if (!Number.isFinite(id) || id < 1) {
@@ -1054,11 +1677,9 @@ export default function WorkOrderPlanillaPage() {
       addError("planchasReferencia", "Ref. planchas debe contener solo números.")
     }
     const metrosEstimados = readNumberString(form.metrosEstimados).trim()
-    // Regla: permitir "-" como valor explícito (sin estimar / no aplica).
-    // También permitir negativo tipo "-343355" si se requiere registrar como tal.
-    if (metrosEstimados !== "-" && !metrosEstimados) {
+    if (!metrosEstimados || metrosEstimados === "-") {
       addError("metrosEstimados", "Metros Est. es obligatorio.")
-    } else if (metrosEstimados !== "-" && !/^-?\d+$/.test(metrosEstimados)) {
+    } else if (!/^-?\d+$/.test(metrosEstimados)) {
       addError("metrosEstimados", "Metros Est. debe ser numérico (puede ser negativo).")
     }
     if (!tipoImpresion) {
@@ -1126,17 +1747,21 @@ export default function WorkOrderPlanillaPage() {
 
       const sImpRows = getSustratosImp(form)
       const anySustratoFilled = sImpRows.some(
-        (r) => readString(r.material_id).trim() || readNumberString(r.kg).trim(),
+        (r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim(),
       )
       if (!anySustratoFilled) {
         addError("sustratosImp", "Debe seleccionar al menos un sustrato y su Kg a utilizar.")
       } else {
         for (let i = 0; i < sImpRows.length; i += 1) {
-          const mid = readString(sImpRows[i]?.material_id).trim()
-          const kg = readNumberString(sImpRows[i]?.kg).trim()
-          if (!mid && !kg) continue
-          if (!mid) {
-            addError("sustratosImp", `Seleccione el material del sustrato ${i + 1}.`)
+          const row = sImpRows[i]
+          if (!row) continue
+          const kg = readNumberString(row.kg).trim()
+          if (!sustratoRowHasMaterialChoice(row) && !kg) continue
+          if (!sustratoRowHasMaterialChoice(row)) {
+            addError(
+              "sustratosImp",
+              `Indique el material del sustrato ${i + 1} (texto libre o inventario).`,
+            )
             break
           }
           if (!kg) {
@@ -1146,6 +1771,26 @@ export default function WorkOrderPlanillaPage() {
           if (!isDecimalLike(kg) || Number(kg.replace(",", ".")) <= 0) {
             addError("sustratosImp", `Kg a utilizar del sustrato ${i + 1} debe ser numérico y mayor a 0.`)
             break
+          }
+          if (sustratoRowUsesCatalogMaterial(row)) {
+            const mid = sustratoMaterialIdDigits(row)
+            const mat = materialRowById(materials, mid)
+            if (!mat) {
+              addError(
+                "sustratosImp",
+                `Impresión: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
+              )
+              break
+            }
+            if (decimalKgExceedsStock(kg, mat.quantity_on_hand)) {
+              const stockNum = parseDecimalKgString(mat.quantity_on_hand)
+              const disp = stockNum !== null ? formatKgForOtHint(stockNum) : readString(mat.quantity_on_hand)
+              addError(
+                "sustratosImp",
+                `Impresión: Kg a utilizar del sustrato ${i + 1} supera el stock disponible (${disp} kg).`,
+              )
+              break
+            }
           }
         }
       }
@@ -1185,17 +1830,21 @@ export default function WorkOrderPlanillaPage() {
 
       const sLamRows = getSustratosLam(form)
       const anySustratoFilled = sLamRows.some(
-        (r) => readString(r.material_id).trim() || readNumberString(r.kg).trim(),
+        (r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim(),
       )
       if (!anySustratoFilled) {
         addError("sustratosLam", "Debe seleccionar al menos un sustrato y su Kg a utilizar.")
       } else {
         for (let i = 0; i < sLamRows.length; i += 1) {
-          const mid = readString(sLamRows[i]?.material_id).trim()
-          const kg = readNumberString(sLamRows[i]?.kg).trim()
-          if (!mid && !kg) continue
-          if (!mid) {
-            addError("sustratosLam", `Seleccione el material del sustrato ${i + 1}.`)
+          const row = sLamRows[i]
+          if (!row) continue
+          const kg = readNumberString(row.kg).trim()
+          if (!sustratoRowHasMaterialChoice(row) && !kg) continue
+          if (!sustratoRowHasMaterialChoice(row)) {
+            addError(
+              "sustratosLam",
+              `Indique el material del sustrato ${i + 1} (texto libre o inventario).`,
+            )
             break
           }
           if (!kg) {
@@ -1205,6 +1854,26 @@ export default function WorkOrderPlanillaPage() {
           if (!isDecimalLike(kg) || Number(kg.replace(",", ".")) <= 0) {
             addError("sustratosLam", `Kg a utilizar del sustrato ${i + 1} debe ser numérico y mayor a 0.`)
             break
+          }
+          if (sustratoRowUsesCatalogMaterial(row)) {
+            const mid = sustratoMaterialIdDigits(row)
+            const mat = materialRowById(materials, mid)
+            if (!mat) {
+              addError(
+                "sustratosLam",
+                `Laminación: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
+              )
+              break
+            }
+            if (decimalKgExceedsStock(kg, mat.quantity_on_hand)) {
+              const stockNum = parseDecimalKgString(mat.quantity_on_hand)
+              const disp = stockNum !== null ? formatKgForOtHint(stockNum) : readString(mat.quantity_on_hand)
+              addError(
+                "sustratosLam",
+                `Laminación: Kg a utilizar del sustrato ${i + 1} supera el stock disponible (${disp} kg).`,
+              )
+              break
+            }
           }
         }
       }
@@ -1344,17 +2013,49 @@ export default function WorkOrderPlanillaPage() {
     const programacionMotivo = readString(form.programacionMotivo).trim()
 
     if (Object.keys(errors).length > 0) {
+      cancelFieldErrorsAutoClear()
       setFieldErrors(errors)
+      fieldErrorsClearTimerRef.current = window.setTimeout(() => {
+        fieldErrorsClearTimerRef.current = null
+        setFieldErrors({})
+      }, OT_FIELD_ERRORS_AUTO_CLEAR_MS) as unknown as number
       const first = Object.entries(errors)[0]
-      toast.error(first?.[1] ?? "Revise los campos del formulario.")
+      toast.error(first?.[1] ?? "Revise los campos del formulario.", {
+        duration: OT_VALIDATION_ERROR_TOAST_MS,
+      })
       if (first?.[0]) focusFieldSoft(first[0])
       return
     }
 
+    cancelFieldErrorsAutoClear()
     setFieldErrors({})
+    clearAllBlurDismissTimers()
+    setBlurFieldMessages({})
     setSaving(true)
     try {
       let workOrderId = id
+      if (isDraftRoute && !opts?.forceNewOt && draftCoId && woProductId) {
+        let list: LaravelPaginated<WorkOrderListRow>
+        try {
+          list = await apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", {
+            query: { client_order_id: draftCoId, per_page: 100, page: 1 },
+          })
+        } catch (e) {
+          if (e instanceof ApiError) toast.error(e.message)
+          else toast.error("No se pudo comprobar si ya existen OT para este pedido y producto.")
+          return
+        }
+        const matches = (list.data ?? []).filter(
+          (w) =>
+            (w.status ?? "").toLowerCase().trim() !== "cancelled" &&
+            w.product?.id === woProductId,
+        )
+        if (matches.length > 0) {
+          setDuplicateOtMatches(matches)
+          return
+        }
+      }
+
       if (isDraftRoute) {
         const importMaterial = draftImportMaterialRef.current
         const created = await apiFetch<{ id: number }>("work-orders", {
@@ -1458,23 +2159,29 @@ export default function WorkOrderPlanillaPage() {
     base.priority = readString(p.priority) || "normal"
     base.programacionMotivo = ""
     setForm(base)
+    cancelFieldErrorsAutoClear()
     setFieldErrors({})
+    clearAllBlurDismissTimers()
+    setBlurFieldMessages({})
     toast.message("Formulario limpiado.")
   }
 
   const rellenarDatosAlAzar = useCallback(() => {
     const { next, filled } = computeRandomFill(formRef.current, prefillRef.current)
     setForm(next)
+    cancelFieldErrorsAutoClear()
     setFieldErrors({})
+    clearAllBlurDismissTimers()
+    setBlurFieldMessages({})
     setRellenoAzarCount(filled)
     setRellenoAzarDialogOpen(true)
-  }, [])
+  }, [cancelFieldErrorsAutoClear])
 
   if (isDraftRoute && !draftCoId) {
     return (
       <div className="p-6">
         <p className="text-destructive">
-          No se indicó una orden de producción (Pedido del cliente, OC) para esta nueva orden.
+          No se indicó un pedido cliente (OC) para esta nueva orden.
         </p>
         <Link to="/ordenes-trabajo" className="underline">
           Volver a la lista
@@ -1499,43 +2206,61 @@ export default function WorkOrderPlanillaPage() {
       ? getHeaderConfirmCopy(pendingHeaderAction, isDraftRoute)
       : null
 
-  const jumpToArea = useCallback(
-    (fieldKey: string) => {
-      if (loading) return
-      focusFieldSoft(fieldKey)
-    },
-    [focusFieldSoft, loading],
-  )
+  const numeroOrdenVisible =
+    readString(form.numeroOrden) ||
+    readString(prefill.numeroOrden) ||
+    readString(form.document_number) ||
+    ""
+
+  const clienteVisible = readString(form.cliente) || readString(prefill.cliente) || ""
 
   return (
     <div className="ax-ot p-2 sm:p-4 md:p-6">
+      {/* Mismo carril horizontal que el <form>: en borrador el padding derecho reserva los FAB flotantes */}
+      <div
+        className={cn(
+          "min-w-0",
+          isDraftRoute && "pr-14 sm:pr-20 print:pr-0",
+        )}
+      >
       {/* Header (Ver órdenes / Rellenar al azar / Limpiar / Guardar) */}
-      <div className="no-print mb-4 ax-card flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <div className="no-print mb-4 ax-card flex w-full min-w-0 flex-col gap-5 px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <ClipboardCheck className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold">Orden de trabajo</h2>
           </div>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold leading-snug text-foreground">
             {isDraftRoute ? (
               <>
-                Esta pantalla prepara una <span className="font-medium text-foreground">nueva</span> orden a partir de la orden de
-                producción (Pedido del cliente); aún no hay
-                fila en base de datos. Al pulsar <span className="font-medium text-foreground">Guardar orden</span> se crea la OT, se revisan los
-                obligatorios y la verá en la lista de órdenes de trabajo.
+                <span className="text-primary">Borrador:</span> la OT aún no existe en base de datos.{" "}
+                <span className="text-primary">Guardar orden</span> la crea, valida obligatorios y la deja en la lista.
               </>
             ) : (
               <>
-                Esta pantalla es la planilla digital de <span className="font-medium text-foreground">esta</span> orden. Edita los campos que
-                correspondan y, cuando quieras guardar los cambios en el servidor, pulsa{" "}
-                <span className="font-medium text-foreground">Guardar orden</span>.
+                <span className="text-primary">Edición:</span> planilla de esta OT en servidor. Pulse{" "}
+                <span className="text-primary">Guardar orden</span> para aplicar cambios.
               </>
             )}
-          </p>
-          <WorkOrderStageBadge current="orden" className="pt-1" />
+          </div>
+          {numeroOrdenVisible.trim() !== "" || clienteVisible.trim() !== "" ? (
+            <div className="mt-3 text-center">
+              {numeroOrdenVisible.trim() !== "" ? (
+                <h3 className="text-xl font-normal leading-tight sm:text-2xl md:text-3xl">
+                  <strong className="font-semibold tracking-tight text-primary">{numeroOrdenVisible}</strong>
+                </h3>
+              ) : null}
+              {clienteVisible.trim() !== "" ? (
+                <p className="mt-1.5 text-sm font-medium text-muted-foreground sm:text-base">
+                  {clienteVisible}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <WorkOrderStageBadge current="orden" className="mt-4" />
         </div>
         <TooltipProvider delayDuration={150}>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap items-center justify-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1543,6 +2268,7 @@ export default function WorkOrderPlanillaPage() {
                   variant="outline"
                   size="icon"
                   aria-label="Ver órdenes"
+                  className="border-sky-300 bg-sky-50 text-sky-800 shadow-sm hover:bg-sky-100 hover:text-sky-900"
                   onClick={() => setPendingHeaderAction("view")}
                 >
                   <ClipboardList className="h-4 w-4" />
@@ -1558,6 +2284,7 @@ export default function WorkOrderPlanillaPage() {
                   variant="outline"
                   size="icon"
                   aria-label="Rellenar datos con datos al azar"
+                  className="border-amber-300 bg-amber-50 text-amber-900 shadow-sm hover:bg-amber-100 hover:text-amber-950"
                   onClick={() => setPendingHeaderAction("random")}
                   disabled={loading || isRestrictedAreaView}
                 >
@@ -1574,6 +2301,7 @@ export default function WorkOrderPlanillaPage() {
                   variant="outline"
                   size="icon"
                   aria-label="Limpiar formulario"
+                  className="border-rose-300 bg-rose-50 text-rose-800 shadow-sm hover:bg-rose-100 hover:text-rose-950"
                   onClick={() => setPendingHeaderAction("clear")}
                   disabled={loading || isRestrictedAreaView}
                 >
@@ -1612,7 +2340,7 @@ export default function WorkOrderPlanillaPage() {
                   disabled={loading}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform duration-200",
-                    "bg-primary text-primary-foreground hover:scale-110",
+                    "bg-slate-700 text-white hover:scale-110 hover:brightness-110",
                     "disabled:opacity-50 disabled:hover:scale-100",
                   )}
                 >
@@ -1631,7 +2359,7 @@ export default function WorkOrderPlanillaPage() {
                   disabled={loading}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform duration-200",
-                    "bg-primary text-primary-foreground hover:scale-110",
+                    "bg-sky-600 text-white hover:scale-110 hover:brightness-110",
                     "disabled:opacity-50 disabled:hover:scale-100",
                   )}
                 >
@@ -1650,7 +2378,7 @@ export default function WorkOrderPlanillaPage() {
                   disabled={loading}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform duration-200",
-                    "bg-primary text-primary-foreground hover:scale-110",
+                    "bg-fuchsia-600 text-white hover:scale-110 hover:brightness-110",
                     "disabled:opacity-50 disabled:hover:scale-100",
                   )}
                 >
@@ -1668,8 +2396,8 @@ export default function WorkOrderPlanillaPage() {
                   onClick={() => jumpToArea("gramajeAdhesivo")}
                   disabled={loading}
                   className={cn(
-                    "flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform duration-200",
-                    "bg-primary text-primary-foreground hover:scale-110",
+                    "ot-fab-laminacion flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform duration-200",
+                    "text-white hover:scale-110 hover:brightness-110",
                     "disabled:opacity-50 disabled:hover:scale-100",
                   )}
                 >
@@ -1688,7 +2416,7 @@ export default function WorkOrderPlanillaPage() {
                   disabled={loading}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform duration-200",
-                    "bg-primary text-primary-foreground hover:scale-110",
+                    "bg-emerald-600 text-white hover:scale-110 hover:brightness-110",
                     "disabled:opacity-50 disabled:hover:scale-100",
                   )}
                 >
@@ -1706,6 +2434,7 @@ export default function WorkOrderPlanillaPage() {
       ) : (
         <>
           <form
+            ref={planillaFormRef}
             onSubmit={(e) => {
               e.preventDefault()
               void guardar()
@@ -1715,7 +2444,11 @@ export default function WorkOrderPlanillaPage() {
                 e.preventDefault()
               }
             }}
-            className="pb-16"
+            className={cn(
+              "min-w-0 w-full",
+              /* Espacio inferior para FAB en borrador (el padding derecho va en el contenedor padre) */
+              isDraftRoute ? "pb-[19rem] print:pb-16" : "pb-16",
+            )}
           >
             {isRestrictedAreaView ? (
               <div className="no-print mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -1743,52 +2476,59 @@ export default function WorkOrderPlanillaPage() {
             {/* Row: Cabecera OC + datos producto */}
             <div className="ot-section">
               <div className="ot-two-col">
-                {/* Cabecera vinculada a la orden de producción (Pedido del cliente) */}
+                {/* Cabecera vinculada al pedido cliente (OC) */}
                 <div>
-                  <div className="section-header">
+                  <div className="section-header section-hdr-cabecera">
                     <span className="inline-flex items-center gap-2">
                       <ReceiptText className="h-4 w-4" />
                       CABECERA (ORDEN DE CLIENTE)
                     </span>
                   </div>
                   <div className="section-body">
-                    <p className="text-muted-foreground mb-3 text-xs leading-relaxed">
-                      <span className="font-medium text-foreground">Maestro</span> = datos de cliente o producto del sistema.{" "}
-                      <span className="font-medium text-foreground">Inventario</span> = elige material en bodega. En figura de embobinado, los
-                      botones 1–8 son atajos; el cuadrito es solo una vista previa.
+                    <p className="mb-3 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-xs font-semibold leading-snug text-foreground">
+                      <span className="text-primary">Catálogo</span> — cliente y producto del sistema.{" "}
+                      <span className="text-primary">Inventario</span> — elija material en bodega.{" "}
+                      <span className="text-primary">Figura</span> — botones 1–8 fijan el valor del campo.
                     </p>
                     <div className="ot-grid ot-cols-3">
                       <div className="ot-field">
                         <label className="ot-label required">Fecha</label>
-                        <input
-                          type="date"
-                          className="ot-input"
-                          value={readString(form.fechaOrden) || readString(prefill.fechaOrden)}
-                          onChange={(ev) => setKey(setForm, "fechaOrden", ev.target.value)}
-                          disabled={!canEditShared}
-                        />
+                        <OtPlanillaInputIcon icon={Calendar}>
+                          <input
+                            type="date"
+                            className="ot-input"
+                            value={readString(form.fechaOrden) || readString(prefill.fechaOrden)}
+                            onChange={(ev) => setKey(setForm, "fechaOrden", ev.target.value)}
+                            disabled={!canEditShared}
+                          />
+                        </OtPlanillaInputIcon>
                       </div>
                       <div className="ot-field">
                         <label className="ot-label required">N° Orden</label>
-                        <input
-                          className="ot-input"
-                          readOnly
-                          value={readString(form.numeroOrden) || readString(prefill.numeroOrden) || readString(form.document_number) || ""}
-                          onChange={() => { }}
-                        />
+                        <OtPlanillaInputIcon icon={Hash}>
+                          <input
+                            className="ot-input"
+                            readOnly
+                            value={readString(form.numeroOrden) || readString(prefill.numeroOrden) || readString(form.document_number) || ""}
+                            onChange={() => { }}
+                          />
+                        </OtPlanillaInputIcon>
                       </div>
                       <div className="ot-field">
                         <label className="ot-label required">Cantidad solicitada (Kg)</label>
-                        <input
-                          type="number"
-                          data-field="pedidoKg"
-                          className="ot-input"
-                          step="0.01"
-                          min="0"
-                          value={readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg)}
-                          onChange={(ev) => setKey(setForm, "pedidoKg", ev.target.value)}
-                          disabled={!canEditShared}
-                        />
+                        <OtPlanillaInputIcon icon={Scale}>
+                          <input
+                            type="number"
+                            data-field="pedidoKg"
+                            className="ot-input"
+                            step="0.01"
+                            min="0"
+                            value={readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg)}
+                            onChange={(ev) => setKey(setForm, "pedidoKg", ev.target.value)}
+                            disabled={!canEditShared}
+                            aria-invalid={otInvalid("pedidoKg")}
+                          />
+                        </OtPlanillaInputIcon>
                         {renderError("pedidoKg")}
                       </div>
                     </div>
@@ -1796,40 +2536,100 @@ export default function WorkOrderPlanillaPage() {
                     <div className="ot-grid ot-cols-2">
                       <div className="ot-field">
                         <label className="ot-label required">Maquina</label>
-                        <select
-                          data-field="maquina"
-                          className="ot-select"
-                          value={maquina}
-                          onChange={(ev) => setKey(setForm, "maquina", ev.target.value)}
-                          disabled={!canEditShared}
-                        >
-                          <option value="">Seleccionar...</option>
-                          {MACHINE_OPTIONS.map((g) => (
-                            <optgroup key={g.group} label={g.group}>
-                              {g.options.map((o) => (
-                                <option key={o.value} value={o.value}>
-                                  {o.label}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
+                        <Popover open={maquinaPickerOpen} onOpenChange={setMaquinaPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              role="combobox"
+                              data-field="maquina"
+                              disabled={!canEditShared}
+                              aria-expanded={maquinaPickerOpen}
+                              aria-invalid={otInvalid("maquina")}
+                              className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                            >
+                              <span className="flex min-w-0 flex-1 items-center gap-2">
+                                <Factory className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                <span className="min-w-0 flex-1 truncate text-left text-sm">{maquinaComboLabel}</span>
+                              </span>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="p-0 no-print w-[min(100vw-2rem,22rem)] min-w-[var(--radix-popover-trigger-width)]"
+                            align="start"
+                            side="bottom"
+                          >
+                            <Command shouldFilter>
+                              <CommandInput placeholder="Buscar máquina…" />
+                              <CommandList>
+                                <CommandEmpty>Ninguna coincide.</CommandEmpty>
+                                <CommandGroup heading="Selección">
+                                  <CommandItem
+                                    value="elegir maquina ninguna"
+                                    onSelect={() => {
+                                      setKey(setForm, "maquina", "")
+                                      setMaquinaPickerOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn("mr-2 h-4 w-4", !maquina ? "opacity-100" : "opacity-0")}
+                                      aria-hidden
+                                    />
+                                    Elegir…
+                                  </CommandItem>
+                                </CommandGroup>
+                                {MACHINE_OPTIONS.map((g) => (
+                                  <CommandGroup key={g.group} heading={g.group}>
+                                    {g.options.map((o) => (
+                                      <CommandItem
+                                        key={o.value}
+                                        value={`${g.group} ${o.label} ${o.value}`}
+                                        onSelect={() => {
+                                          setKey(setForm, "maquina", o.value)
+                                          setMaquinaPickerOpen(false)
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4",
+                                            maquina === o.value ? "opacity-100" : "opacity-0",
+                                          )}
+                                          aria-hidden
+                                        />
+                                        {o.label}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                ))}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
+                          <Factory className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{maquinaComboLabel}</span>
+                        </div>
                         {renderError("maquina")}
                       </div>
                       <div className="ot-field">
                         <label className="ot-label">Ref. planchas (opcional)</label>
-                        <input
-                          className="ot-input"
-                          data-field="planchasReferencia"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={readString(form.planchasReferencia)}
-                          onChange={(ev) =>
-                            setKey(setForm, "planchasReferencia", sanitizePositiveIntInput(ev.target.value))
-                          }
-                          placeholder="Ej: 067"
-                          disabled={!canEditShared}
-                        />
+                        <OtPlanillaInputIcon icon={LayoutGrid}>
+                          <input
+                            className="ot-input"
+                            data-skip-blur="1"
+                            data-field="planchasReferencia"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={readString(form.planchasReferencia)}
+                            onChange={(ev) =>
+                              setKey(setForm, "planchasReferencia", sanitizePositiveIntInput(ev.target.value))
+                            }
+                            placeholder="067"
+                            disabled={!canEditShared}
+                            aria-invalid={otInvalid("planchasReferencia")}
+                          />
+                        </OtPlanillaInputIcon>
                         {renderError("planchasReferencia")}
                       </div>
                     </div>
@@ -1837,18 +2637,22 @@ export default function WorkOrderPlanillaPage() {
                     <div className="ot-grid ot-cols-2">
                       <div className="ot-field md:col-span-2">
                         <label className="ot-label required">Metros Est.</label>
-                        <input
-                          data-field="metrosEstimados"
-                          className="ot-input"
-                          type="text"
-                          inputMode="text"
-                          pattern="-?[0-9]*"
-                          value={readNumberString(form.metrosEstimados) || "-"}
-                          onChange={(ev) => {
-                            setKey(setForm, "metrosEstimados", sanitizeMetrosEstimadosInput(ev.target.value))
-                          }}
-                          disabled={!canEditShared}
-                        />
+                        <OtPlanillaInputIcon icon={Ruler}>
+                          <input
+                            data-field="metrosEstimados"
+                            className="ot-input"
+                            type="text"
+                            inputMode="text"
+                            pattern="-?[0-9]*"
+                            aria-invalid={otInvalid("metrosEstimados")}
+                            value={metrosEstimadosDisplay(form.metrosEstimados)}
+                            placeholder="12850"
+                            onChange={(ev) => {
+                              setKey(setForm, "metrosEstimados", sanitizeMetrosEstimadosInput(ev.target.value))
+                            }}
+                            disabled={!canEditShared}
+                          />
+                        </OtPlanillaInputIcon>
                         {renderError("metrosEstimados")}
                       </div>
                     </div>
@@ -1858,56 +2662,45 @@ export default function WorkOrderPlanillaPage() {
 
                 {/* Datos del producto */}
                 <div>
-                  <div className="section-header">
+                  <div className="section-header section-hdr-producto">
                     <span className="inline-flex items-center gap-2">
                       <Package className="h-4 w-4" />
                       DATOS DEL PRODUCTO
                     </span>
                   </div>
                   <div className="section-body">
-                    <div className="ot-grid ot-cols-2-asym">
-                      <div className="ot-field">
-                        <div className="flex flex-nowrap items-center gap-1.5">
-                          <Label className="ot-label !font-black required">Cliente</Label>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Maestro
-                          </Badge>
-                        </div>
-                        <Input
-                          readOnly
-                          className="ot-input-unified h-9 bg-muted/50 text-sm"
-                          value={readString(form.cliente) || readString(prefill.cliente)}
-                        />
-                      </div>
-                      <div className="ot-field">
-                        <div className="flex flex-nowrap items-center gap-1.5">
-                          <Label className="ot-label !font-black">RIF</Label>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Maestro
-                          </Badge>
-                        </div>
-                        <Input
-                          readOnly
-                          className="ot-input-unified h-9 bg-muted/50 text-sm"
-                          value={readString(form.clienteRif) || readString(prefill.clienteRif)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="ot-grid ot-cols-2-asym">
-                      <div className="ot-field">
-                        <div className="flex flex-nowrap items-center gap-1.5">
-                          <Label className="ot-label !font-black required">Producto</Label>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Maestro
-                          </Badge>
-                        </div>
-                        {!woClientId ? (
+                    <div className="ot-datos-producto-master">
+                      <div className="ot-field ot-dpm-span-4">
+                        <Label className="ot-label !font-black required">Cliente</Label>
+                        <OtPlanillaInputIcon icon={User}>
                           <Input
                             readOnly
                             className="ot-input-unified h-9 bg-muted/50 text-sm"
-                            value={readString(form.producto) || readString(prefill.producto)}
+                            value={readString(form.cliente) || readString(prefill.cliente)}
                           />
+                        </OtPlanillaInputIcon>
+                      </div>
+                      <div className="ot-field ot-dpm-span-2">
+                        <Label className="ot-label !font-black required">RIF</Label>
+                        <OtPlanillaInputIcon icon={IdCard}>
+                          <Input
+                            readOnly
+                            className="ot-input-unified h-9 bg-muted/50 text-sm"
+                            value={readString(form.clienteRif) || readString(prefill.clienteRif)}
+                          />
+                        </OtPlanillaInputIcon>
+                      </div>
+
+                      <div className="ot-field ot-dpm-span-4">
+                        <Label className="ot-label !font-black required">Producto</Label>
+                        {!woClientId ? (
+                          <OtPlanillaInputIcon icon={LucidePackage}>
+                            <Input
+                              readOnly
+                              className="ot-input-unified h-9 bg-muted/50 text-sm"
+                              value={readString(form.producto) || readString(prefill.producto)}
+                            />
+                          </OtPlanillaInputIcon>
                         ) : (
                           <>
                             <Popover open={productPickerOpen} onOpenChange={setProductPickerOpen}>
@@ -1917,9 +2710,11 @@ export default function WorkOrderPlanillaPage() {
                                   variant="outline"
                                   role="combobox"
                                   disabled={!canEditShared || updatingProduct || clientProducts.length === 0}
-                                  className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between px-2 font-normal print:hidden"
+                                  className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
                                 >
-                                  <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                                    <LucidePackage className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                    <span className="min-w-0 flex-1 truncate text-left text-sm">
                                     {updatingProduct ? (
                                       <span className="text-muted-foreground">Actualizando…</span>
                                     ) : clientProducts.length === 0 ? (
@@ -1927,6 +2722,7 @@ export default function WorkOrderPlanillaPage() {
                                     ) : (
                                       productComboLabel
                                     )}
+                                    </span>
                                   </span>
                                   {updatingProduct ? (
                                     <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-60" />
@@ -1987,134 +2783,197 @@ export default function WorkOrderPlanillaPage() {
                             </div>
                           </>
                         )}
-                        <p className="text-muted-foreground mt-1 text-[11px] leading-snug">
-                          Selecciona la especificación del cliente. No representa stock disponible.
-                        </p>
                       </div>
-                      <div className="ot-field">
-                        <label className="ot-label required">Tipo Impresion</label>
-                        <select
-                          data-field="tipoImpresionEstructura"
-                          className="ot-select"
-                          value={tipoImpresion}
-                          onChange={(ev) => {
-                            const next = ev.target.value
-                            setKey(setForm, "tipoImpresionEstructura", next)
-                            if (next === "superficie") {
-                              setKey(setForm, "tipoImpresionMontaje", "Superficie")
-                            } else if (next === "reverso") {
-                              setKey(setForm, "tipoImpresionMontaje", "Reverso")
-                            } else {
-                              setKey(setForm, "tipoImpresionMontaje", "")
-                            }
-                          }}
-                          disabled={!canEditShared}
-                        >
-                          <option value="">Seleccionar...</option>
-                          <option value="superficie">Superficie</option>
-                          <option value="reverso">Reverso</option>
-                        </select>
+                      <div className="ot-field ot-dpm-span-2">
+                        <label className="ot-label required">Tipo impresión (especificación)</label>
+                        <Popover open={tipoImpresionPickerOpen} onOpenChange={setTipoImpresionPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              role="combobox"
+                              data-field="tipoImpresionEstructura"
+                              disabled={!canEditShared}
+                              aria-expanded={tipoImpresionPickerOpen}
+                              aria-invalid={otInvalid("tipoImpresionEstructura")}
+                              className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                            >
+                              <span className="flex min-w-0 flex-1 items-center gap-2">
+                                <Paintbrush className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                  {tipoImpresionComboLabel}
+                                </span>
+                              </span>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="p-0 no-print w-[min(100vw-2rem,20rem)] min-w-[var(--radix-popover-trigger-width)]"
+                            align="start"
+                            side="bottom"
+                          >
+                            <Command>
+                              <CommandList>
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="elegir tipo impresion vacio"
+                                    onSelect={() => {
+                                      setKey(setForm, "tipoImpresionEstructura", "")
+                                      setTipoImpresionPickerOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        tipoImpresion === "" ? "opacity-100" : "opacity-0",
+                                      )}
+                                      aria-hidden
+                                    />
+                                    Elegir…
+                                  </CommandItem>
+                                  <CommandItem
+                                    value="superficie tipo impresion"
+                                    onSelect={() => {
+                                      setKey(setForm, "tipoImpresionEstructura", "superficie")
+                                      setTipoImpresionPickerOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        tipoImpresion === "superficie" ? "opacity-100" : "opacity-0",
+                                      )}
+                                      aria-hidden
+                                    />
+                                    Superficie
+                                  </CommandItem>
+                                  <CommandItem
+                                    value="reverso tipo impresion"
+                                    onSelect={() => {
+                                      setKey(setForm, "tipoImpresionEstructura", "reverso")
+                                      setTipoImpresionPickerOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        tipoImpresion === "reverso" ? "opacity-100" : "opacity-0",
+                                      )}
+                                      aria-hidden
+                                    />
+                                    Reverso
+                                  </CommandItem>
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
+                          <Paintbrush className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{tipoImpresionComboLabel}</span>
+                        </div>
                         {renderError("tipoImpresionEstructura")}
                       </div>
-                    </div>
 
-                    {tipoImpresion === "superficie" ? (
-                      <div className="ot-grid ot-cols-1">
-                        <div className="ot-field">
-                          <label className="ot-label">Estructura (1 capa)</label>
-                          <input
-                            className="ot-input"
-                            value={readString(form.estructuraCapa1) || readString(prefill.estructuraMaterial)}
-                            onChange={(ev) => setKey(setForm, "estructuraCapa1", ev.target.value)}
-                            placeholder="Ej: BOPP NORMAL"
-                            disabled={!canEditShared}
-                          />
+                      {tipoImpresion === "superficie" ? (
+                        <div className="ot-field ot-dpm-span-6">
+                          <label className="ot-label required">Estructura (1 capa)</label>
+                          <OtPlanillaInputIcon icon={LucideLayers}>
+                            <input
+                              className="ot-input"
+                              value={readString(form.estructuraCapa1) || readString(prefill.estructuraMaterial)}
+                              onChange={(ev) => setKey(setForm, "estructuraCapa1", ev.target.value)}
+                              placeholder="BOPP transparente 40 µm"
+                              disabled={!canEditShared}
+                            />
+                          </OtPlanillaInputIcon>
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
 
-                    {tipoImpresion === "reverso" ? (
-                      <div className="ot-grid ot-cols-3">
-                        <div className="ot-field">
-                          <label className="ot-label">Capa 1</label>
-                          <input
-                            className="ot-input"
-                            value={readString(form.estructuraCapa1Rev)}
-                            onChange={(ev) => setKey(setForm, "estructuraCapa1Rev", ev.target.value)}
-                            placeholder="Ej: BOPP NORMAL"
-                            disabled={!canEditShared}
-                          />
-                        </div>
-                        <div className="ot-field">
-                          <label className="ot-label">Capa 2</label>
-                          <input
-                            className="ot-input"
-                            value={readString(form.estructuraCapa2Rev)}
-                            onChange={(ev) => setKey(setForm, "estructuraCapa2Rev", ev.target.value)}
-                            placeholder="Ej: CAST"
-                            disabled={!canEditShared}
-                          />
-                        </div>
-                        <div className="ot-field">
-                          <label className="ot-label">Capa 3</label>
-                          <input
-                            className="ot-input"
-                            value={readString(form.estructuraCapa3Rev)}
-                            onChange={(ev) => setKey(setForm, "estructuraCapa3Rev", ev.target.value)}
-                            placeholder="Ej: PEBD"
-                            disabled={!canEditShared}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
+                      {tipoImpresion === "reverso" ? (
+                        <>
+                          <div className="ot-field ot-dpm-span-2">
+                            <label className="ot-label required">Capa 1</label>
+                            <OtPlanillaInputIcon icon={LucideLayers}>
+                              <input
+                                className="ot-input"
+                                value={readString(form.estructuraCapa1Rev)}
+                                onChange={(ev) => setKey(setForm, "estructuraCapa1Rev", ev.target.value)}
+                                placeholder="BOPP transparente 40 µm"
+                                disabled={!canEditShared}
+                              />
+                            </OtPlanillaInputIcon>
+                          </div>
+                          <div className="ot-field ot-dpm-span-2">
+                            <label className="ot-label required">Capa 2</label>
+                            <OtPlanillaInputIcon icon={LucideLayers}>
+                              <input
+                                className="ot-input"
+                                value={readString(form.estructuraCapa2Rev)}
+                                onChange={(ev) => setKey(setForm, "estructuraCapa2Rev", ev.target.value)}
+                                placeholder="CAST 20 µm"
+                                disabled={!canEditShared}
+                              />
+                            </OtPlanillaInputIcon>
+                          </div>
+                          <div className="ot-field ot-dpm-span-2">
+                            <label className="ot-label required">Capa 3</label>
+                            <OtPlanillaInputIcon icon={LucideLayers}>
+                              <input
+                                className="ot-input"
+                                value={readString(form.estructuraCapa3Rev)}
+                                onChange={(ev) => setKey(setForm, "estructuraCapa3Rev", ev.target.value)}
+                                placeholder="PEBD coextrusión 55 µm"
+                                disabled={!canEditShared}
+                              />
+                            </OtPlanillaInputIcon>
+                          </div>
+                        </>
+                      ) : null}
 
-                    <div className="ot-grid ot-cols-3">
-                      <div className="ot-field">
-                        <div className="flex flex-nowrap items-center gap-1.5">
-                          <Label className="ot-label !font-black required">C.P.E.</Label>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Maestro
-                          </Badge>
-                        </div>
-                        <Input
-                          data-field="cpe"
-                          className="ot-input-unified h-9 text-sm"
-                          value={readString(form.cpe)}
-                          onChange={(ev) => setKey(setForm, "cpe", ev.target.value)}
-                          disabled={!canEditShared}
-                        />
+                      <div className="ot-field ot-dpm-span-2">
+                        <Label className="ot-label !font-black required">C.P.E.</Label>
+                        <OtPlanillaInputIcon icon={Tag}>
+                          <Input
+                            data-field="cpe"
+                            className="ot-input-unified h-9 text-sm"
+                            value={readString(form.cpe)}
+                            onChange={(ev) => setKey(setForm, "cpe", ev.target.value)}
+                            disabled={!canEditShared}
+                            placeholder="CPE-LAM-OT-01"
+                            aria-invalid={otInvalid("cpe")}
+                          />
+                        </OtPlanillaInputIcon>
                         {renderError("cpe")}
                       </div>
-                      <div className="ot-field">
-                        <div className="flex flex-nowrap items-center gap-1.5">
-                          <Label className="ot-label !font-black required">M.P.P.S.</Label>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Maestro
-                          </Badge>
-                        </div>
-                        <Input
-                          data-field="mpps"
-                          className="ot-input-unified h-9 text-sm"
-                          value={readString(form.mpps)}
-                          onChange={(ev) => setKey(setForm, "mpps", ev.target.value)}
-                          disabled={!canEditShared}
-                        />
+                      <div className="ot-field ot-dpm-span-2">
+                        <Label className="ot-label !font-black required">M.P.P.S.</Label>
+                        <OtPlanillaInputIcon icon={Tags}>
+                          <Input
+                            data-field="mpps"
+                            className="ot-input-unified h-9 text-sm"
+                            value={readString(form.mpps)}
+                            onChange={(ev) => setKey(setForm, "mpps", ev.target.value)}
+                            disabled={!canEditShared}
+                            placeholder="MPS-PR-2026-A"
+                            aria-invalid={otInvalid("mpps")}
+                          />
+                        </OtPlanillaInputIcon>
                         {renderError("mpps")}
                       </div>
-                      <div className="ot-field">
-                        <div className="flex flex-nowrap items-center gap-1.5">
-                          <Label className="ot-label !font-black required">Cod. Barra</Label>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Maestro
-                          </Badge>
-                        </div>
-                        <Input
-                          data-field="codigoBarra"
-                          className="ot-input-unified h-9 text-sm"
-                          value={readString(form.codigoBarra)}
-                          onChange={(ev) => setKey(setForm, "codigoBarra", ev.target.value)}
-                          disabled={!canEditShared}
-                        />
+                      <div className="ot-field ot-dpm-span-2">
+                        <Label className="ot-label !font-black required">Cod. Barra</Label>
+                        <OtPlanillaInputIcon icon={Barcode}>
+                          <Input
+                            data-field="codigoBarra"
+                            className="ot-input-unified h-9 text-sm"
+                            value={readString(form.codigoBarra)}
+                            onChange={(ev) => setKey(setForm, "codigoBarra", ev.target.value)}
+                            disabled={!canEditShared}
+                            placeholder="7750123456789"
+                            aria-invalid={otInvalid("codigoBarra")}
+                          />
+                        </OtPlanillaInputIcon>
                         {renderError("codigoBarra")}
                       </div>
                     </div>
@@ -2126,7 +2985,7 @@ export default function WorkOrderPlanillaPage() {
             {/* Montaje */}
             {canViewMontaje ? (
               <div className="ot-section">
-                <div className="section-header">
+                <div className="section-header section-hdr-montaje">
                   <span className="inline-flex items-center gap-2">
                     <Wrench className="h-4 w-4" />
                     AREA DE MONTAJE
@@ -2135,97 +2994,130 @@ export default function WorkOrderPlanillaPage() {
                 <div className="section-body">
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Frecuencia (mm)</label>
-                      <input
-                        data-field="frecuencia"
-                        className="ot-input"
-                        value={readString(form.frecuencia)}
-                        onChange={(e) => setKey(setForm, "frecuencia", sanitizeMetricInput(e.target.value))}
-                        placeholder="250±2"
-                        inputMode="decimal"
-                      />
+                      <label className="ot-label required">Frecuencia (mm)</label>
+                      <OtPlanillaInputIcon icon={Activity}>
+                        <input
+                          data-field="frecuencia"
+                          className="ot-input"
+                          value={readString(form.frecuencia)}
+                          onChange={(e) => setKey(setForm, "frecuencia", sanitizeMetricInput(e.target.value))}
+                          placeholder="250±2"
+                          inputMode="decimal"
+                          aria-invalid={otInvalid("frecuencia")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("frecuencia")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">N° Bandas</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        className="ot-input"
-                        value={readString(form.numBandas)}
-                        onChange={(e) => setKey(setForm, "numBandas", sanitizePositiveIntInput(e.target.value))}
-                        inputMode="numeric"
-                      />
+                      <label className="ot-label required">N° Bandas</label>
+                      <OtPlanillaInputIcon icon={GripHorizontal}>
+                        <input
+                          type="number"
+                          data-field="numBandas"
+                          min="1"
+                          step="1"
+                          className="ot-input"
+                          value={readString(form.numBandas)}
+                          onChange={(e) => setKey(setForm, "numBandas", sanitizePositiveIntInput(e.target.value))}
+                          inputMode="numeric"
+                          placeholder="4"
+                          aria-invalid={otInvalid("numBandas")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("numBandas")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Tipo Impresion</label>
-                      <select
-                        className="ot-select"
-                        value={readString(form.tipoImpresionMontaje)}
-                        onChange={(e) => setKey(setForm, "tipoImpresionMontaje", e.target.value)}
+                      <label className="ot-label required">Tipo impresión en montaje</label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        data-field="tipoImpresionMontaje"
+                        disabled
+                        title="Mismo valor que «Tipo impresión (especificación)» en Datos del producto; solo se edita allí."
+                        className="ot-input-unified h-9 w-full min-w-0 max-w-full cursor-not-allowed justify-between gap-2 bg-muted/40 px-2 font-normal opacity-100 print:hidden"
                       >
-                        <option value="">Seleccionar...</option>
-                        <option value="Superficie">Superficie</option>
-                        <option value="Reverso">Reverso</option>
-                      </select>
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate text-left text-sm">{tipoImpresionComboLabel}</span>
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                      </Button>
+                      <div className="ot-input-unified hidden h-9 items-center gap-2 bg-muted/40 px-2 text-sm print:flex">
+                        <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{tipoImpresionComboLabel}</span>
+                      </div>
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Ancho Corte (mm)</label>
-                      <input
-                        data-field="anchoCorteMontaje"
-                        className="ot-input"
-                        value={readString(form.anchoCorteMontaje)}
-                        onChange={(e) => setKey(setForm, "anchoCorteMontaje", sanitizeMetricInput(e.target.value))}
-                        placeholder="330±2"
-                        inputMode="decimal"
-                      />
+                      <label className="ot-label required">Ancho Corte (mm)</label>
+                      <OtPlanillaInputIcon icon={ArrowLeftRight}>
+                        <input
+                          data-field="anchoCorteMontaje"
+                          className="ot-input"
+                          value={readString(form.anchoCorteMontaje)}
+                          onChange={(e) => setKey(setForm, "anchoCorteMontaje", sanitizeMetricInput(e.target.value))}
+                          placeholder="330±2"
+                          inputMode="decimal"
+                          aria-invalid={otInvalid("anchoCorteMontaje")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("anchoCorteMontaje")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">N° Repeticion o Frecuencia</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        className="ot-input"
-                        value={readString(form.numRepeticion)}
-                        onChange={(e) => setKey(setForm, "numRepeticion", sanitizePositiveIntInput(e.target.value))}
-                        inputMode="numeric"
-                      />
+                      <label className="ot-label required">N° Repeticion o Frecuencia</label>
+                      <OtPlanillaInputIcon icon={Repeat}>
+                        <input
+                          type="number"
+                          data-field="numRepeticion"
+                          min="1"
+                          step="1"
+                          className="ot-input"
+                          value={readString(form.numRepeticion)}
+                          onChange={(e) => setKey(setForm, "numRepeticion", sanitizePositiveIntInput(e.target.value))}
+                          inputMode="numeric"
+                          placeholder="6"
+                          aria-invalid={otInvalid("numRepeticion")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("numRepeticion")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Desarrollo (mm) (auto)</label>
-                      <input
-                        data-field="desarrollo"
-                        className="ot-input"
-                        value={readString(form.desarrollo)}
-                        onChange={(e) => setKey(setForm, "desarrollo", sanitizeMetricInput(e.target.value))}
-                        inputMode="decimal"
-                      />
+                      <label className="ot-label required">Desarrollo (mm) (auto)</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="desarrollo"
+                          className="ot-input"
+                          value={readString(form.desarrollo)}
+                          onChange={(e) => setKey(setForm, "desarrollo", sanitizeMetricInput(e.target.value))}
+                          inputMode="decimal"
+                          placeholder="812±2"
+                          aria-invalid={otInvalid("desarrollo")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("desarrollo")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Ancho Montaje (mm) (auto)</label>
-                      <input
-                        data-field="anchoMontaje"
-                        className="ot-input"
-                        value={readString(form.anchoMontaje)}
-                        onChange={(e) => setKey(setForm, "anchoMontaje", sanitizeMetricInput(e.target.value))}
-                        placeholder="Ancho montaje"
-                        inputMode="decimal"
-                      />
+                      <label className="ot-label required">Ancho Montaje (mm) (auto)</label>
+                      <OtPlanillaInputIcon icon={Columns}>
+                        <input
+                          data-field="anchoMontaje"
+                          className="ot-input"
+                          value={readString(form.anchoMontaje)}
+                          onChange={(e) => setKey(setForm, "anchoMontaje", sanitizeMetricInput(e.target.value))}
+                          placeholder="1040±2"
+                          inputMode="decimal"
+                          aria-invalid={otInvalid("anchoMontaje")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("anchoMontaje")}
                     </div>
                     <div className="ot-field ot-field-figure sm:col-span-2">
                       <div className="ot-label-row">
-                        <label className="ot-label">Figura embobinado (1-8 o libre)</label>
+                        <label className="ot-label required">Figura embobinado (1-8 o libre)</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
-                          title="Botones 1–8 = atajo. El cuadro pequeño es solo vista previa del valor (no guarda nada aparte)."
+                          title="Botones 1–8 = atajo para el valor de la figura."
                         >
                           Figura
                         </Badge>
@@ -2236,23 +3128,35 @@ export default function WorkOrderPlanillaPage() {
                       />
                     </div>
                     <div className="ot-field ot-field-align-figure">
-                      <label className="ot-label">N° Colores</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        className="ot-input"
-                        value={readString(form.numColores)}
-                        onChange={(e) => setKey(setForm, "numColores", sanitizePositiveIntInput(e.target.value))}
-                        inputMode="numeric"
-                      />
+                      <label className="ot-label required">N° Colores</label>
+                      <OtPlanillaInputIcon icon={Palette}>
+                        <input
+                          type="number"
+                          data-field="numColores"
+                          min="1"
+                          step="1"
+                          className="ot-input"
+                          value={readString(form.numColores)}
+                          onChange={(e) => setKey(setForm, "numColores", sanitizePositiveIntInput(e.target.value))}
+                          inputMode="numeric"
+                          placeholder="6"
+                          aria-invalid={otInvalid("numColores")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("numColores")}
                     </div>
                   </div>
                   <div className="ot-grid ot-cols-1">
                     <div className="ot-field">
-                      <label className="ot-label">Observaciones montaje</label>
-                      <input className="ot-input" value={readString(form.obsMontaje)} onChange={(e) => setKey(setForm, "obsMontaje", e.target.value)} />
+                      <label className="ot-label required">Observaciones montaje</label>
+                      <OtPlanillaInputIcon icon={MessageSquare}>
+                        <input
+                          className="ot-input"
+                          value={readString(form.obsMontaje)}
+                          onChange={(e) => setKey(setForm, "obsMontaje", e.target.value)}
+                          placeholder="Revisar registro y centrado antes de arranque"
+                        />
+                      </OtPlanillaInputIcon>
                     </div>
                   </div>
                 </div>
@@ -2262,7 +3166,7 @@ export default function WorkOrderPlanillaPage() {
             {/* Impresión */}
             {(canViewImpresion || canViewTintas) ? (
               <div className="ot-section">
-                <div className="section-header">
+                <div className="section-header section-hdr-impresion">
                   <span className="inline-flex items-center gap-2">
                     <Droplets className="h-4 w-4" />
                     AREA DE IMPRESION
@@ -2274,39 +3178,117 @@ export default function WorkOrderPlanillaPage() {
 
                       <div className="ot-grid ot-cols-3">
                         <div className="ot-field">
-                          <label className="ot-label">Piñon (dientes)</label>
-                          <input
-                            data-field="pinonImp"
-                            className="ot-input"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            value={readString(form.pinonImp)}
-                            onChange={(e) => setKey(setForm, "pinonImp", sanitizePositiveIntInput(e.target.value))}
-                            placeholder="Ej: 840"
-                          />
+                          <label className="ot-label required">Piñon (dientes)</label>
+                          <OtPlanillaInputIcon icon={Cog}>
+                            <input
+                              data-field="pinonImp"
+                              className="ot-input"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={readString(form.pinonImp)}
+                              onChange={(e) => setKey(setForm, "pinonImp", sanitizePositiveIntInput(e.target.value))}
+                              placeholder="840"
+                              aria-invalid={otInvalid("pinonImp")}
+                            />
+                          </OtPlanillaInputIcon>
                           {renderError("pinonImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Linea de corte</label>
-                          <select
-                            data-field="lineaCorte"
-                            className="ot-select"
-                            value={normalizeYesNo(form.lineaCorte)}
-                            onChange={(e) => setKey(setForm, "lineaCorte", e.target.value)}
-                          >
-                            <option value="">Seleccionar...</option>
-                            <option value="si">Si</option>
-                            <option value="no">No</option>
-                          </select>
+                          <label className="ot-label required">Linea de corte</label>
+                          <Popover open={lineaCortePickerOpen} onOpenChange={setLineaCortePickerOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                data-field="lineaCorte"
+                                aria-expanded={lineaCortePickerOpen}
+                                aria-invalid={otInvalid("lineaCorte")}
+                                className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                              >
+                                <span className="flex min-w-0 flex-1 items-center gap-2">
+                                  <Minus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                  <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                    {lineaCorteComboLabel(form.lineaCorte)}
+                                  </span>
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="p-0 no-print w-[min(100vw-2rem,18rem)] min-w-[var(--radix-popover-trigger-width)]"
+                              align="start"
+                              side="bottom"
+                            >
+                              <Command>
+                                <CommandList>
+                                  <CommandGroup>
+                                    <CommandItem
+                                      value="elegir linea corte vacio"
+                                      onSelect={() => {
+                                        setKey(setForm, "lineaCorte", "")
+                                        setLineaCortePickerOpen(false)
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          normalizeYesNo(form.lineaCorte) === "" ? "opacity-100" : "opacity-0",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      Elegir…
+                                    </CommandItem>
+                                    <CommandItem
+                                      value="si linea corte"
+                                      onSelect={() => {
+                                        setKey(setForm, "lineaCorte", "si")
+                                        setLineaCortePickerOpen(false)
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          normalizeYesNo(form.lineaCorte) === "si" ? "opacity-100" : "opacity-0",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      Si
+                                    </CommandItem>
+                                    <CommandItem
+                                      value="no linea corte"
+                                      onSelect={() => {
+                                        setKey(setForm, "lineaCorte", "no")
+                                        setLineaCortePickerOpen(false)
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          normalizeYesNo(form.lineaCorte) === "no" ? "opacity-100" : "opacity-0",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      No
+                                    </CommandItem>
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                          <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
+                            <Minus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                            <span className="min-w-0 flex-1 truncate">{lineaCorteComboLabel(form.lineaCorte)}</span>
+                          </div>
                           {renderError("lineaCorte")}
                         </div>
                         <div className="ot-field sm:col-span-2 lg:col-span-1" data-field="figEmbImpDisplay">
                           <div className="flex flex-wrap items-center gap-2">
-                            <label className="ot-label">Figura emb. (1-8)</label>
+                            <label className="ot-label required">Figura emb. (1-8)</label>
                             <Badge
                               variant="outline"
                               className="text-[10px] font-normal"
-                              title="Botones 1–8 = atajo. El cuadro pequeño es solo vista previa del valor (no guarda nada aparte)."
+                              title="Botones 1–8 = atajo para el valor de la figura."
                             >
                               Figura
                             </Badge>
@@ -2314,103 +3296,281 @@ export default function WorkOrderPlanillaPage() {
                           <WindingFigurePicker
                             value={readString(form.figEmbImpDisplay)}
                             onChange={(v) => setKey(setForm, "figEmbImpDisplay", v)}
+                            invalid={otInvalid("figEmbImpDisplay")}
                           />
                           {renderError("figEmbImpDisplay")}
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="ot-label">Sustratos virgen (inventario)</span>
-                          <Badge variant="secondary" className="text-[10px] font-normal">
+                      <div className="ot-sustratos-virgen-block ot-sustratos-virgen-block--impresion">
+                        <div className="ot-sustratos-virgen-head">
+                          <span className="ot-label required">Sustratos virgen (inventario)</span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "ot-sustratos-virgen-badge--impresion shrink-0 border text-[10px] font-normal shadow-none",
+                            )}
+                          >
                             Inventario
                           </Badge>
                         </div>
-                        {sustratosImp.map((r, idx) => (
-                          <div
-                            key={idx}
-                            className="ot-grid ot-cols-2-asym"
-                          >
-                            <div className="ot-field">
-                              <label className="ot-label">{`Sustrato ${idx + 1}`}</label>
-                              <select
-                        data-field="sustratosImp"
-                                className="ot-select"
-                                value={r.material_id}
-                                onChange={(e) => {
-                                  const next = [...sustratosImp]
-                                  next[idx] = { ...next[idx], material_id: e.target.value }
-                                  setSustratosImp(setForm, next)
-                                }}
-                              >
-                                <option value="">Seleccionar del inventario...</option>
-                                {materials.map((m) => (
-                                  <option key={m.id} value={String(m.id)}>
-                                    {m.sku} · {m.name}
-                                  </option>
-                                ))}
-                              </select>
+                        <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
+                          <span className="font-medium text-foreground">Sustrato:</span> puede escribir la referencia,
+                          abrir el catálogo de inventario o crear un material nuevo en otra pestaña (botón{" "}
+                          <PackagePlus className="inline-block h-3 w-3 align-text-bottom opacity-80" aria-hidden />).
+                        </p>
+                        <div className="ot-sustratos-virgen-rows">
+                          {sustratosImp.map((r, idx) => (
+                            <div key={idx} className="ot-grid ot-cols-2-asym">
+                              <div className="ot-field">
+                                <label className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                                <div className="flex min-w-0 gap-1 no-print">
+                                  <OtPlanillaInputIcon icon={Warehouse} className="min-w-0 flex-1">
+                                    <Input
+                                      data-field="sustratosImp"
+                                      className="ot-input-unified h-9 min-w-0 text-sm"
+                                      value={sustratoVirgenDisplayValue(materials, r)}
+                                      onChange={(e) => {
+                                        const next = [...sustratosImp]
+                                        next[idx] = {
+                                          ...next[idx],
+                                          material_id: "",
+                                          material_free_text: e.target.value,
+                                        }
+                                        setSustratosImp(setForm, next)
+                                      }}
+                                      placeholder="Referencia libre o elegir del inventario…"
+                                      aria-invalid={otInvalid("sustratosImp")}
+                                    />
+                                  </OtPlanillaInputIcon>
+                                  <Popover
+                                    open={sustratoImpPickerIdx === idx}
+                                    onOpenChange={(open) => setSustratoImpPickerIdx(open ? idx : null)}
+                                  >
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-9 w-9 shrink-0"
+                                        title="Catálogo de materiales (área material)"
+                                        aria-expanded={sustratoImpPickerIdx === idx}
+                                      >
+                                        <ChevronsUpDown className="h-4 w-4 opacity-70" aria-hidden />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent
+                                      className="p-0 no-print w-[min(100vw-2rem,28rem)] min-w-[var(--radix-popover-trigger-width)]"
+                                      align="start"
+                                      side="bottom"
+                                    >
+                                      <Command shouldFilter>
+                                        <CommandInput placeholder="Buscar por SKU o nombre…" />
+                                        <CommandList>
+                                          <CommandEmpty>
+                                            {materials.length === 0
+                                              ? "No hay filas en inventario. Escriba la referencia a mano o cree un material."
+                                              : "Ninguno coincide."}
+                                          </CommandEmpty>
+                                          <CommandGroup>
+                                            <CommandItem
+                                              value="ninguno sustrato impresion"
+                                              onSelect={() => {
+                                                const next = [...sustratosImp]
+                                                next[idx] = { ...next[idx], material_id: "", material_free_text: "" }
+                                                setSustratosImp(setForm, next)
+                                                setSustratoImpPickerIdx(null)
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "mr-2 h-4 w-4",
+                                                  !sustratoRowHasMaterialChoice(r) ? "opacity-100" : "opacity-0",
+                                                )}
+                                                aria-hidden
+                                              />
+                                              Sin selección (solo texto libre abajo)
+                                            </CommandItem>
+                                            {materials.map((m) => {
+                                              const label = `${m.sku} · ${m.name}`
+                                              const stockQty = parseDecimalKgString(m.quantity_on_hand)
+                                              const stockLabel =
+                                                stockQty !== null ? `${formatKgForOtHint(stockQty)} kg` : null
+                                              const search = [m.sku, m.name, String(m.id)].filter(Boolean).join(" ")
+                                              const pickedInv =
+                                                readString(r.material_id).trim() === String(m.id) &&
+                                                !readString(r.material_free_text).trim()
+                                              return (
+                                                <CommandItem
+                                                  key={m.id}
+                                                  value={search}
+                                                  onSelect={() => {
+                                                    const next = [...sustratosImp]
+                                                    next[idx] = {
+                                                      ...next[idx],
+                                                      material_id: String(m.id),
+                                                      material_free_text: "",
+                                                    }
+                                                    setSustratosImp(setForm, next)
+                                                    setSustratoImpPickerIdx(null)
+                                                  }}
+                                                >
+                                                  <Check
+                                                    className={cn(
+                                                      "mr-2 h-4 w-4",
+                                                      pickedInv ? "opacity-100" : "opacity-0",
+                                                    )}
+                                                    aria-hidden
+                                                  />
+                                                  <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                                    <span className="truncate">{label}</span>
+                                                    {stockLabel != null ? (
+                                                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                                                        {stockLabel}
+                                                      </span>
+                                                    ) : null}
+                                                  </div>
+                                                </CommandItem>
+                                              )
+                                            })}
+                                          </CommandGroup>
+                                        </CommandList>
+                                      </Command>
+                                    </PopoverContent>
+                                  </Popover>
+                                  <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" asChild title="Crear material en inventario">
+                                    <Link to="/materiales/nuevo" target="_blank" rel="noopener noreferrer">
+                                      <PackagePlus className="h-4 w-4" aria-hidden />
+                                    </Link>
+                                  </Button>
+                                </div>
+                                <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
+                                  <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                  <span className="min-w-0 flex-1 truncate">
+                                    {sustratoVirgenDisplayValue(materials, r) || "—"}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="ot-field">
+                                <label className="ot-label required">Kg a utilizar</label>
+                                <OtPlanillaInputIcon icon={Weight}>
+                                  <input
+                                    data-field="sustratosImp"
+                                    type="number"
+                                    inputMode="decimal"
+                                    step="0.01"
+                                    min="0"
+                                    className="ot-input"
+                                    value={r.kg}
+                                    onChange={(e) => {
+                                      const next = [...sustratosImp]
+                                      next[idx] = { ...next[idx], kg: e.target.value }
+                                      setSustratosImp(setForm, next)
+                                    }}
+                                    placeholder="420.50"
+                                    aria-invalid={otInvalid("sustratosImp")}
+                                  />
+                                </OtPlanillaInputIcon>
+                                <SustratoKgStockFooter row={r} materials={materials} />
+                              </div>
                             </div>
-                            <div className="ot-field">
-                              <label className="ot-label">Kg a utilizar</label>
-                              <input
-                        data-field="sustratosImp"
-                                type="number"
-                                inputMode="decimal"
-                                step="0.01"
-                                min="0"
-                                className="ot-input"
-                                value={r.kg}
-                                onChange={(e) => {
-                                  const next = [...sustratosImp]
-                                  next[idx] = { ...next[idx], kg: e.target.value }
-                                  setSustratosImp(setForm, next)
-                                }}
-                                placeholder="Ej: 430"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                        <div className="no-print">
+                          ))}
+                        </div>
+                        <div className="ot-sustratos-virgen-toolbar no-print">
                           <Button
                             type="button"
                             variant="outline"
-                            size="sm"
+                            size="icon"
+                            className="h-9 w-9 shrink-0"
+                            title="Agregar sustrato"
+                            aria-label="Agregar sustrato"
                             disabled={sustratosImp.length >= MAX_SUSTRATO_ROWS}
                             onClick={() =>
                               setSustratosImp(
                                 setForm,
                                 sustratosImp.length >= MAX_SUSTRATO_ROWS
                                   ? sustratosImp
-                                  : [...sustratosImp, { material_id: "", kg: "" }],
+                                  : [...sustratosImp, { material_id: "", kg: "", material_free_text: "" }],
                               )
                             }
                           >
-                            Agregar sustrato
+                            <Plus className="h-4 w-4" aria-hidden />
                           </Button>
                         </div>
                         {renderError("sustratosImp")}
                       </div>
 
-                      <div className="ot-grid ot-metrics-before-nested ot-cols-4">
+                      <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
                         <div className="ot-field">
-                          <label className="ot-label">Kg ingresado</label>
-                          <input data-field="kgIngresadoImp" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.kgIngresadoImp)} onChange={(e) => setKey(setForm, "kgIngresadoImp", e.target.value)} />
+                          <label className="ot-label required">Kg ingresado</label>
+                          <OtPlanillaInputIcon icon={ArrowDownToLine}>
+                            <input
+                              data-field="kgIngresadoImp"
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              className="ot-input"
+                              value={readNumberString(form.kgIngresadoImp)}
+                              onChange={(e) => setKey(setForm, "kgIngresadoImp", e.target.value)}
+                              placeholder="1850.50"
+                              aria-invalid={otInvalid("kgIngresadoImp")}
+                            />
+                          </OtPlanillaInputIcon>
                           {renderError("kgIngresadoImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Kg salida</label>
-                          <input data-field="kgSalidaImp" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.kgSalidaImp)} onChange={(e) => setKey(setForm, "kgSalidaImp", e.target.value)} />
+                          <label className="ot-label required">Kg salida</label>
+                          <OtPlanillaInputIcon icon={ArrowUpFromLine}>
+                            <input
+                              data-field="kgSalidaImp"
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              className="ot-input"
+                              value={readNumberString(form.kgSalidaImp)}
+                              onChange={(e) => setKey(setForm, "kgSalidaImp", e.target.value)}
+                              placeholder="1825.00"
+                              aria-invalid={otInvalid("kgSalidaImp")}
+                            />
+                          </OtPlanillaInputIcon>
                           {renderError("kgSalidaImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Merma</label>
-                          <input data-field="mermaImp" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.mermaImp)} onChange={(e) => setKey(setForm, "mermaImp", e.target.value)} />
+                          <label className="ot-label required">Merma</label>
+                          <OtPlanillaInputIcon icon={TrendingDown}>
+                            <input
+                              data-field="mermaImp"
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              className="ot-input"
+                              value={readNumberString(form.mermaImp)}
+                              onChange={(e) => setKey(setForm, "mermaImp", e.target.value)}
+                              placeholder="14.25"
+                              aria-invalid={otInvalid("mermaImp")}
+                            />
+                          </OtPlanillaInputIcon>
                           {renderError("mermaImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Metros</label>
-                          <input data-field="metrosImp" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.metrosImp)} onChange={(e) => setKey(setForm, "metrosImp", e.target.value)} />
+                          <label className="ot-label required">Metros</label>
+                          <OtPlanillaInputIcon icon={Ruler}>
+                            <input
+                              data-field="metrosImp"
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              className="ot-input"
+                              value={readNumberString(form.metrosImp)}
+                              onChange={(e) => setKey(setForm, "metrosImp", e.target.value)}
+                              placeholder="8200"
+                              aria-invalid={otInvalid("metrosImp")}
+                            />
+                          </OtPlanillaInputIcon>
                           {renderError("metrosImp")}
                         </div>
                       </div>
@@ -2434,7 +3594,7 @@ export default function WorkOrderPlanillaPage() {
             {/* Laminación */}
             {canViewLaminacion ? (
               <div className="ot-section">
-                <div className="section-header">
+                <div className="section-header section-hdr-laminacion">
                   <span className="inline-flex items-center gap-2">
                     <Layers className="h-4 w-4" />
                     AREA DE LAMINACION
@@ -2444,11 +3604,11 @@ export default function WorkOrderPlanillaPage() {
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field sm:col-span-2 lg:col-span-1" data-field="figuraEmbobinadoLam">
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="ot-label">Figura embobinado</label>
+                        <label className="ot-label required">Figura embobinado</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
-                          title="Botones 1–8 = atajo. El cuadro pequeño es solo vista previa del valor (no guarda nada aparte)."
+                          title="Botones 1–8 = atajo para el valor de la figura."
                         >
                           Figura
                         </Badge>
@@ -2456,158 +3616,402 @@ export default function WorkOrderPlanillaPage() {
                       <WindingFigurePicker
                         value={readString(form.figuraEmbobinadoLam)}
                         onChange={(v) => setKey(setForm, "figuraEmbobinadoLam", v)}
+                        invalid={otInvalid("figuraEmbobinadoLam")}
                       />
                       {renderError("figuraEmbobinadoLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Gramaje adhesivo (g/m2)</label>
-                      <input
-                        data-field="gramajeAdhesivo"
-                        className="ot-input"
-                        value={readString(form.gramajeAdhesivo)}
-                        onChange={(e) => setKey(setForm, "gramajeAdhesivo", e.target.value.replace(/[^0-9.,]/g, ""))}
-                        placeholder="1,5 a 2,0"
-                        inputMode="decimal"
-                      />
+                      <label className="ot-label required">Gramaje adhesivo (g/m2)</label>
+                      <OtPlanillaInputIcon icon={FlaskConical}>
+                        <input
+                          data-field="gramajeAdhesivo"
+                          className="ot-input"
+                          value={readString(form.gramajeAdhesivo)}
+                          onChange={(e) => setKey(setForm, "gramajeAdhesivo", e.target.value.replace(/[^0-9.,]/g, ""))}
+                          placeholder="1,75"
+                          inputMode="decimal"
+                          aria-invalid={otInvalid("gramajeAdhesivo")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("gramajeAdhesivo")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Relacion mezcla</label>
-                      <input
-                        data-field="relacionMezcla"
-                        className="ot-input"
-                        value={readString(form.relacionMezcla)}
-                        onChange={(e) =>
-                          setKey(setForm, "relacionMezcla", e.target.value.replace(/[^0-9.,/]/g, "").replace(/\/{2,}/g, "/"))
-                        }
-                        placeholder="100/80"
-                        inputMode="decimal"
-                      />
+                      <label className="ot-label required">Relacion mezcla</label>
+                      <OtPlanillaInputIcon icon={Percent}>
+                        <input
+                          data-field="relacionMezcla"
+                          className="ot-input"
+                          value={readString(form.relacionMezcla)}
+                          onChange={(e) =>
+                            setKey(setForm, "relacionMezcla", e.target.value.replace(/[^0-9.,/]/g, "").replace(/\/{2,}/g, "/"))
+                          }
+                          placeholder="100/80"
+                          inputMode="decimal"
+                          aria-invalid={otInvalid("relacionMezcla")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("relacionMezcla")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Observaciones</label>
-                      <input className="ot-input" value={readString(form.obsLaminacion)} onChange={(e) => setKey(setForm, "obsLaminacion", e.target.value)} />
+                      <label className="ot-label required">Observaciones</label>
+                      <OtPlanillaInputIcon icon={StickyNote}>
+                        <input
+                          className="ot-input"
+                          value={readString(form.obsLaminacion)}
+                          onChange={(e) => setKey(setForm, "obsLaminacion", e.target.value)}
+                          placeholder="Temperatura tambor según ficha del adhesivo"
+                        />
+                      </OtPlanillaInputIcon>
                     </div>
                   </div>
 
-                  {/* Sección morada: sustratos virgen laminación (repetible) */}
-                  <div className="ot-section">
-                    <div className="section-header section-sublam">
-                      <span className="inline-flex items-center gap-2">
-                        <Package className="h-4 w-4" />
-                        SUSTRATOS VIRGEN A UTILIZAR (LAMINACION)
+                  <div className="ot-sustratos-virgen-block ot-sustratos-virgen-block--laminacion">
+                    <div className="ot-sustratos-virgen-head">
+                      <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                        <Package className="h-4 w-4 shrink-0" aria-hidden />
+                        <span className="ot-label required">Sustratos virgen a utilizar (laminación)</span>
                       </span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "ot-sustratos-virgen-badge--laminacion shrink-0 border text-[10px] font-normal shadow-none",
+                        )}
+                      >
+                        Laminación
+                      </Badge>
                     </div>
-                    <div className="section-body">
+                    <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
+                      <span className="font-medium text-foreground">Sustrato:</span> puede escribir la referencia,
+                      abrir el catálogo de inventario o crear un material nuevo en otra pestaña (botón{" "}
+                      <PackagePlus className="inline-block h-3 w-3 align-text-bottom opacity-80" aria-hidden />).
+                    </p>
+                    <div className="ot-sustratos-virgen-rows">
                       {sustratosLam.map((r, idx) => (
-                        <div
-                          key={idx}
-                          className="ot-grid ot-cols-2-asym ot-sustrato-lam"
-                        >
+                        <div key={idx} className="ot-grid ot-cols-2-asym">
                           <div className="ot-field">
-                            <label className="ot-label">{`Sustrato ${idx + 1}`}</label>
-                            <select
-                          data-field="sustratosLam"
-                              className="ot-select"
-                              value={r.material_id}
-                              onChange={(e) => {
-                                const next = [...sustratosLam]
-                                next[idx] = { ...next[idx], material_id: e.target.value }
-                                setSustratosLam(setForm, next)
-                              }}
-                            >
-                              <option value="">Seleccionar del inventario...</option>
-                              {materials.map((m) => (
-                                <option key={m.id} value={String(m.id)}>
-                                  {m.sku} · {m.name}
-                                </option>
-                              ))}
-                            </select>
+                            <label className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                            <div className="flex min-w-0 gap-1 no-print">
+                              <OtPlanillaInputIcon icon={Warehouse} className="min-w-0 flex-1">
+                                <Input
+                                  data-field="sustratosLam"
+                                  className="ot-input-unified h-9 min-w-0 text-sm"
+                                  value={sustratoVirgenDisplayValue(materials, r)}
+                                  onChange={(e) => {
+                                    const next = [...sustratosLam]
+                                    next[idx] = {
+                                      ...next[idx],
+                                      material_id: "",
+                                      material_free_text: e.target.value,
+                                    }
+                                    setSustratosLam(setForm, next)
+                                  }}
+                                  placeholder="Referencia libre o elegir del inventario…"
+                                  aria-invalid={otInvalid("sustratosLam")}
+                                />
+                              </OtPlanillaInputIcon>
+                              <Popover
+                                open={sustratoLamPickerIdx === idx}
+                                onOpenChange={(open) => setSustratoLamPickerIdx(open ? idx : null)}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-9 w-9 shrink-0"
+                                    title="Catálogo de materiales (área material)"
+                                    aria-expanded={sustratoLamPickerIdx === idx}
+                                  >
+                                    <ChevronsUpDown className="h-4 w-4 opacity-70" aria-hidden />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  className="p-0 no-print w-[min(100vw-2rem,28rem)] min-w-[var(--radix-popover-trigger-width)]"
+                                  align="start"
+                                  side="bottom"
+                                >
+                                  <Command shouldFilter>
+                                    <CommandInput placeholder="Buscar por SKU o nombre…" />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        {materials.length === 0
+                                          ? "No hay filas en inventario. Escriba la referencia a mano o cree un material."
+                                          : "Ninguno coincide."}
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        <CommandItem
+                                          value="ninguno sustrato laminacion"
+                                          onSelect={() => {
+                                            const next = [...sustratosLam]
+                                            next[idx] = { ...next[idx], material_id: "", material_free_text: "" }
+                                            setSustratosLam(setForm, next)
+                                            setSustratoLamPickerIdx(null)
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              !sustratoRowHasMaterialChoice(r) ? "opacity-100" : "opacity-0",
+                                            )}
+                                            aria-hidden
+                                          />
+                                          Sin selección (solo texto libre abajo)
+                                        </CommandItem>
+                                        {materials.map((m) => {
+                                          const label = `${m.sku} · ${m.name}`
+                                          const stockQty = parseDecimalKgString(m.quantity_on_hand)
+                                          const stockLabel =
+                                            stockQty !== null ? `${formatKgForOtHint(stockQty)} kg` : null
+                                          const search = [m.sku, m.name, String(m.id)].filter(Boolean).join(" ")
+                                          const pickedInv =
+                                            readString(r.material_id).trim() === String(m.id) &&
+                                            !readString(r.material_free_text).trim()
+                                          return (
+                                            <CommandItem
+                                              key={m.id}
+                                              value={search}
+                                              onSelect={() => {
+                                                const next = [...sustratosLam]
+                                                next[idx] = {
+                                                  ...next[idx],
+                                                  material_id: String(m.id),
+                                                  material_free_text: "",
+                                                }
+                                                setSustratosLam(setForm, next)
+                                                setSustratoLamPickerIdx(null)
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "mr-2 h-4 w-4",
+                                                  pickedInv ? "opacity-100" : "opacity-0",
+                                                )}
+                                                aria-hidden
+                                              />
+                                              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                                <span className="truncate">{label}</span>
+                                                {stockLabel != null ? (
+                                                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                                                    {stockLabel}
+                                                  </span>
+                                                ) : null}
+                                              </div>
+                                            </CommandItem>
+                                          )
+                                        })}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" asChild title="Crear material en inventario">
+                                <Link to="/materiales/nuevo" target="_blank" rel="noopener noreferrer">
+                                  <PackagePlus className="h-4 w-4" aria-hidden />
+                                </Link>
+                              </Button>
+                            </div>
+                            <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
+                              <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                              <span className="min-w-0 flex-1 truncate">
+                                {sustratoVirgenDisplayValue(materials, r) || "—"}
+                              </span>
+                            </div>
                           </div>
                           <div className="ot-field">
-                            <label className="ot-label">Kg a utilizar</label>
-                            <input
-                          data-field="sustratosLam"
-                              type="number"
-                              inputMode="decimal"
-                              step="0.01"
-                              min="0"
-                              className="ot-input"
-                              value={r.kg}
-                              onChange={(e) => {
-                                const next = [...sustratosLam]
-                                next[idx] = { ...next[idx], kg: e.target.value }
-                                setSustratosLam(setForm, next)
-                              }}
-                              placeholder="Ej: 430"
-                            />
+                            <label className="ot-label required">Kg a utilizar</label>
+                            <OtPlanillaInputIcon icon={Weight}>
+                              <input
+                                data-field="sustratosLam"
+                                type="number"
+                                inputMode="decimal"
+                                step="0.01"
+                                min="0"
+                                className="ot-input"
+                                value={r.kg}
+                                onChange={(e) => {
+                                  const next = [...sustratosLam]
+                                  next[idx] = { ...next[idx], kg: e.target.value }
+                                  setSustratosLam(setForm, next)
+                                }}
+                                placeholder="420.50"
+                                aria-invalid={otInvalid("sustratosLam")}
+                              />
+                            </OtPlanillaInputIcon>
+                            <SustratoKgStockFooter row={r} materials={materials} />
                           </div>
                         </div>
                       ))}
-                      <div className="no-print">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={sustratosLam.length >= MAX_SUSTRATO_ROWS}
-                          onClick={() =>
-                            setSustratosLam(
-                              setForm,
-                              sustratosLam.length >= MAX_SUSTRATO_ROWS
-                                ? sustratosLam
-                                : [...sustratosLam, { material_id: "", kg: "" }],
-                            )
-                          }
-                        >
-                          Agregar otro sustrato
-                        </Button>
-                      </div>
-                      {renderError("sustratosLam")}
                     </div>
+                    <div className="ot-sustratos-virgen-toolbar no-print">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                        title="Agregar otro sustrato"
+                        aria-label="Agregar otro sustrato"
+                        disabled={sustratosLam.length >= MAX_SUSTRATO_ROWS}
+                        onClick={() =>
+                          setSustratosLam(
+                            setForm,
+                            sustratosLam.length >= MAX_SUSTRATO_ROWS
+                              ? sustratosLam
+                              : [...sustratosLam, { material_id: "", kg: "", material_free_text: "" }],
+                          )
+                        }
+                      >
+                        <Plus className="h-4 w-4" aria-hidden />
+                      </Button>
+                    </div>
+                    {renderError("sustratosLam")}
                   </div>
 
-                  <div className="ot-grid ot-cols-4">
+                  <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Kg entrada</label>
-                      <input data-field="kgEntradaLam" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.kgEntradaLam)} onChange={(e) => setKey(setForm, "kgEntradaLam", e.target.value)} />
+                      <label className="ot-label required">Kg entrada</label>
+                      <OtPlanillaInputIcon icon={ArrowDownToLine}>
+                        <input
+                          data-field="kgEntradaLam"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgEntradaLam)}
+                          onChange={(e) => setKey(setForm, "kgEntradaLam", e.target.value)}
+                          placeholder="210.00"
+                          aria-invalid={otInvalid("kgEntradaLam")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgEntradaLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Kg salida</label>
-                      <input data-field="kgSalidaLam" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.kgSalidaLam)} onChange={(e) => setKey(setForm, "kgSalidaLam", e.target.value)} />
+                      <label className="ot-label required">Kg salida</label>
+                      <OtPlanillaInputIcon icon={ArrowUpFromLine}>
+                        <input
+                          data-field="kgSalidaLam"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgSalidaLam)}
+                          onChange={(e) => setKey(setForm, "kgSalidaLam", e.target.value)}
+                          placeholder="205.50"
+                          aria-invalid={otInvalid("kgSalidaLam")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgSalidaLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Metraje</label>
-                      <input data-field="metrajeLam" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.metrajeLam)} onChange={(e) => setKey(setForm, "metrajeLam", e.target.value)} />
+                      <label className="ot-label required">Metraje</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="metrajeLam"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.metrajeLam)}
+                          onChange={(e) => setKey(setForm, "metrajeLam", e.target.value)}
+                          placeholder="3100"
+                          aria-invalid={otInvalid("metrajeLam")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("metrajeLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Merma</label>
-                      <input data-field="mermaLam" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.mermaLam)} onChange={(e) => setKey(setForm, "mermaLam", e.target.value)} />
+                      <label className="ot-label required">Merma</label>
+                      <OtPlanillaInputIcon icon={TrendingDown}>
+                        <input
+                          data-field="mermaLam"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.mermaLam)}
+                          onChange={(e) => setKey(setForm, "mermaLam", e.target.value)}
+                          placeholder="8.50"
+                          aria-invalid={otInvalid("mermaLam")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("mermaLam")}
                     </div>
                   </div>
 
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Kg entrada 2 (trilam.)</label>
-                      <input data-field="kgEntradaLam2" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.kgEntradaLam2)} onChange={(e) => setKey(setForm, "kgEntradaLam2", e.target.value)} />
+                      <label className="ot-label required">Kg entrada 2 (trilam.)</label>
+                      <OtPlanillaInputIcon icon={LucideLayers}>
+                        <input
+                          data-field="kgEntradaLam2"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgEntradaLam2)}
+                          onChange={(e) => setKey(setForm, "kgEntradaLam2", e.target.value)}
+                          placeholder="180.00"
+                          aria-invalid={otInvalid("kgEntradaLam2")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgEntradaLam2")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Kg salida 2 (trilam.)</label>
-                      <input data-field="kgSalidaLam2" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.kgSalidaLam2)} onChange={(e) => setKey(setForm, "kgSalidaLam2", e.target.value)} />
+                      <label className="ot-label required">Kg salida 2 (trilam.)</label>
+                      <OtPlanillaInputIcon icon={LucideLayers}>
+                        <input
+                          data-field="kgSalidaLam2"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgSalidaLam2)}
+                          onChange={(e) => setKey(setForm, "kgSalidaLam2", e.target.value)}
+                          placeholder="175.00"
+                          aria-invalid={otInvalid("kgSalidaLam2")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgSalidaLam2")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Metraje 2</label>
-                      <input data-field="metrajeLam2" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.metrajeLam2)} onChange={(e) => setKey(setForm, "metrajeLam2", e.target.value)} />
+                      <label className="ot-label required">Metraje 2</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="metrajeLam2"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.metrajeLam2)}
+                          onChange={(e) => setKey(setForm, "metrajeLam2", e.target.value)}
+                          placeholder="2800"
+                          aria-invalid={otInvalid("metrajeLam2")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("metrajeLam2")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Merma 2</label>
-                      <input data-field="mermaLam2" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readNumberString(form.mermaLam2)} onChange={(e) => setKey(setForm, "mermaLam2", e.target.value)} />
+                      <label className="ot-label required">Merma 2</label>
+                      <OtPlanillaInputIcon icon={TrendingDown}>
+                        <input
+                          data-field="mermaLam2"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.mermaLam2)}
+                          onChange={(e) => setKey(setForm, "mermaLam2", e.target.value)}
+                          placeholder="6.20"
+                          aria-invalid={otInvalid("mermaLam2")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("mermaLam2")}
                     </div>
                   </div>
@@ -2618,39 +4022,63 @@ export default function WorkOrderPlanillaPage() {
             {/* Corte / Embalaje */}
             {canViewCorte ? (
               <div className="ot-section">
-                <div className="section-header">
+                <div className="section-header section-hdr-corte">
                   <span className="inline-flex items-center gap-2">
                     <Scissors className="h-4 w-4" />
                     AREA DE CORTE / EMBALAJE
                   </span>
                 </div>
                 <div className="section-body">
-                  <p className="text-muted-foreground text-xs mb-3">
-                    Campos de referencia (solo lectura).
-                  </p>
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Ancho corte (mm)</label>
-                      <input data-field="anchoCorteFinal" className="ot-input" value={readString(form.anchoCorteFinal)} placeholder="320±0" readOnly disabled />
+                      <label className="ot-label required">Ancho corte (mm)</label>
+                      <OtPlanillaInputIcon icon={Crop}>
+                        <input
+                          data-field="anchoCorteFinal"
+                          className="ot-input"
+                          value={readString(form.anchoCorteFinal)}
+                          placeholder="320±0"
+                          onChange={(e) => setKey(setForm, "anchoCorteFinal", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("anchoCorteFinal")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("anchoCorteFinal")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Peso bobina (Kg)</label>
-                      <input data-field="pesoBobina" className="ot-input" value={readString(form.pesoBobina)} placeholder="19-20" readOnly disabled />
+                      <label className="ot-label required">Peso bobina (Kg)</label>
+                      <OtPlanillaInputIcon icon={Weight}>
+                        <input
+                          data-field="pesoBobina"
+                          className="ot-input"
+                          value={readString(form.pesoBobina)}
+                          placeholder="19-20"
+                          onChange={(e) => setKey(setForm, "pesoBobina", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("pesoBobina")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("pesoBobina")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Metros/Bobina (m)</label>
-                      <input data-field="metrosBobina" className="ot-input" value={readString(form.metrosBobina)} placeholder="1020 ± 20" readOnly disabled />
+                      <label className="ot-label required">Metros/Bobina (m)</label>
+                      <OtPlanillaInputIcon icon={CircleDot}>
+                        <input
+                          data-field="metrosBobina"
+                          className="ot-input"
+                          value={readString(form.metrosBobina)}
+                          placeholder="1020 ± 20"
+                          onChange={(e) => setKey(setForm, "metrosBobina", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("metrosBobina")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("metrosBobina")}
                     </div>
-                    <div className="ot-field sm:col-span-2">
+                    <div className="ot-field sm:col-span-2" data-field="orientacionEmbalaje">
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="ot-label">Figura embobinado (1-8 o libre)</label>
+                        <label className="ot-label required">Figura embobinado (1-8 o libre)</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
-                          title="Botones 1–8 = atajo. El cuadro pequeño es solo vista previa del valor (no guarda nada aparte)."
+                          title="Botones 1–8 = atajo para el valor de la figura."
                         >
                           Figura
                         </Badge>
@@ -2658,76 +4086,211 @@ export default function WorkOrderPlanillaPage() {
                       <WindingFigurePicker
                         value={readString(form.orientacionEmbalaje)}
                         onChange={(v) => setKey(setForm, "orientacionEmbalaje", v)}
-                        disabled
+                        invalid={otInvalid("orientacionEmbalaje")}
                       />
                       {renderError("orientacionEmbalaje")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Ubic. fotocelda</label>
-                      <input className="ot-input" value={readString(form.ubicFotoceldaCorte)} readOnly disabled />
+                      <label className="ot-label required">Ubic. fotocelda</label>
+                      <OtPlanillaInputIcon icon={MapPin}>
+                        <input
+                          data-field="ubicFotoceldaCorte"
+                          className="ot-input"
+                          value={readString(form.ubicFotoceldaCorte)}
+                          onChange={(e) => setKey(setForm, "ubicFotoceldaCorte", e.target.value)}
+                          placeholder="Borde líder"
+                          aria-invalid={otInvalid("ubicFotoceldaCorte")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("ubicFotoceldaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Dist. fotocelda al borde (mm)</label>
-                      <input data-field="distFotoceldaBorde" className="ot-input" value={readString(form.distFotoceldaBorde)} placeholder="1±1" readOnly disabled />
+                      <label className="ot-label required">Dist. fotocelda al borde (mm)</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="distFotoceldaBorde"
+                          className="ot-input"
+                          value={readString(form.distFotoceldaBorde)}
+                          placeholder="1±1"
+                          onChange={(e) => setKey(setForm, "distFotoceldaBorde", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("distFotoceldaBorde")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("distFotoceldaBorde")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Dist. figura lado contrario (mm)</label>
-                      <input data-field="distFiguraLadoContrario" className="ot-input" value={readString(form.distFiguraLadoContrario)} placeholder="20±1" readOnly disabled />
+                      <label className="ot-label required">Dist. figura lado contrario (mm)</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="distFiguraLadoContrario"
+                          className="ot-input"
+                          value={readString(form.distFiguraLadoContrario)}
+                          placeholder="20±1"
+                          onChange={(e) => setKey(setForm, "distFiguraLadoContrario", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("distFiguraLadoContrario")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("distFiguraLadoContrario")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Dist. figura lado fotocelda (mm)</label>
-                      <input data-field="distFiguraLadoFotocelda" className="ot-input" value={readString(form.distFiguraLadoFotocelda)} placeholder="30±1" readOnly disabled />
+                      <label className="ot-label required">Dist. figura lado fotocelda (mm)</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="distFiguraLadoFotocelda"
+                          className="ot-input"
+                          value={readString(form.distFiguraLadoFotocelda)}
+                          placeholder="30±1"
+                          onChange={(e) => setKey(setForm, "distFiguraLadoFotocelda", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("distFiguraLadoFotocelda")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("distFiguraLadoFotocelda")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Max. empates</label>
-                      <input data-field="maxEmpates" className="ot-input" value={readString(form.maxEmpates)} placeholder="1" readOnly disabled />
+                      <label className="ot-label required">Max. empates</label>
+                      <OtPlanillaInputIcon icon={Link2}>
+                        <input
+                          data-field="maxEmpates"
+                          className="ot-input"
+                          value={readString(form.maxEmpates)}
+                          placeholder="1"
+                          inputMode="numeric"
+                          onChange={(e) => setKey(setForm, "maxEmpates", sanitizePositiveIntInput(e.target.value))}
+                          aria-invalid={otInvalid("maxEmpates")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("maxEmpates")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Diam. bobina (mm)</label>
-                      <input data-field="diamBobina" className="ot-input" value={readString(form.diamBobina)} placeholder="400 ± 5" readOnly disabled />
+                      <label className="ot-label required">Diam. bobina (mm)</label>
+                      <OtPlanillaInputIcon icon={Circle}>
+                        <input
+                          data-field="diamBobina"
+                          className="ot-input"
+                          value={readString(form.diamBobina)}
+                          placeholder="400 ± 5"
+                          onChange={(e) => setKey(setForm, "diamBobina", sanitizeMetricInput(e.target.value))}
+                          aria-invalid={otInvalid("diamBobina")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("diamBobina")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Ancho core (mm)</label>
-                      <input data-field="anchoCore" className="ot-input" value={readString(form.anchoCore)} readOnly disabled />
+                      <label className="ot-label required">Ancho core (mm)</label>
+                      <OtPlanillaInputIcon icon={Columns}>
+                        <input
+                          data-field="anchoCore"
+                          className="ot-input"
+                          value={readString(form.anchoCore)}
+                          onChange={(e) => setKey(setForm, "anchoCore", sanitizeMetricInput(e.target.value))}
+                          placeholder="152±1"
+                          aria-invalid={otInvalid("anchoCore")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("anchoCore")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Diam. core (Plg)</label>
-                      <input data-field="diamCorePlg" className="ot-input" value={readString(form.diamCorePlg)} readOnly disabled />
+                      <label className="ot-label required">Diam. core (Plg)</label>
+                      <OtPlanillaInputIcon icon={Disc}>
+                        <input
+                          data-field="diamCorePlg"
+                          className="ot-input"
+                          value={readString(form.diamCorePlg)}
+                          onChange={(e) => setKey(setForm, "diamCorePlg", sanitizeMetricInput(e.target.value))}
+                          placeholder="6"
+                          aria-invalid={otInvalid("diamCorePlg")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("diamCorePlg")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Cant. cores</label>
-                      <input data-field="cantCores" className="ot-input" value={readString(form.cantCores)} readOnly disabled />
+                      <label className="ot-label required">Cant. cores</label>
+                      <OtPlanillaInputIcon icon={Hash}>
+                        <input
+                          data-field="cantCores"
+                          className="ot-input"
+                          value={readString(form.cantCores)}
+                          inputMode="numeric"
+                          onChange={(e) => setKey(setForm, "cantCores", sanitizePositiveIntInput(e.target.value))}
+                          placeholder="1"
+                          aria-invalid={otInvalid("cantCores")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("cantCores")}
                     </div>
                   </div>
 
                   <div className="ot-grid ot-metrics-before-nested ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Kg ingresados</label>
-                      <input data-field="kgIngresadosCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgIngresadosCorte)} placeholder="kg ingresados" readOnly disabled />
+                      <label className="ot-label required">Kg ingresados</label>
+                      <OtPlanillaInputIcon icon={PackagePlus}>
+                        <input
+                          data-field="kgIngresadosCorte"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgIngresadosCorte)}
+                          placeholder="1200.50"
+                          onChange={(e) => setKey(setForm, "kgIngresadosCorte", e.target.value)}
+                          aria-invalid={otInvalid("kgIngresadosCorte")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgIngresadosCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Kg salida</label>
-                      <input data-field="kgSalidaCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgSalidaCorte)} readOnly disabled />
+                      <label className="ot-label required">Kg salida</label>
+                      <OtPlanillaInputIcon icon={ArrowUpFromLine}>
+                        <input
+                          data-field="kgSalidaCorte"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgSalidaCorte)}
+                          onChange={(e) => setKey(setForm, "kgSalidaCorte", e.target.value)}
+                          placeholder="1185.00"
+                          aria-invalid={otInvalid("kgSalidaCorte")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgSalidaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Kg merma</label>
-                      <input data-field="kgMermaCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.kgMermaCorte)} placeholder="Ej: 10.00" readOnly disabled />
+                      <label className="ot-label required">Kg merma</label>
+                      <OtPlanillaInputIcon icon={Trash2}>
+                        <input
+                          data-field="kgMermaCorte"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgMermaCorte)}
+                          placeholder="10.25"
+                          onChange={(e) => setKey(setForm, "kgMermaCorte", e.target.value)}
+                          aria-invalid={otInvalid("kgMermaCorte")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("kgMermaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Metraje</label>
-                      <input data-field="metrajeCorte" type="number" inputMode="decimal" step="0.01" min="0" className="ot-input" value={readString(form.metrajeCorte)} readOnly disabled />
+                      <label className="ot-label required">Metraje</label>
+                      <OtPlanillaInputIcon icon={Ruler}>
+                        <input
+                          data-field="metrajeCorte"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.metrajeCorte)}
+                          onChange={(e) => setKey(setForm, "metrajeCorte", e.target.value)}
+                          placeholder="9100"
+                          aria-invalid={otInvalid("metrajeCorte")}
+                        />
+                      </OtPlanillaInputIcon>
                       {renderError("metrajeCorte")}
                     </div>
                   </div>
@@ -2740,70 +4303,140 @@ export default function WorkOrderPlanillaPage() {
               <div className="ot-section">
                 <div className="ot-two-col">
                   <div>
-                    <div className="section-header">
+                    <div className="section-header section-hdr-obs">
                       <span className="inline-flex items-center gap-2">
                         <NotebookPen className="h-4 w-4" />
                         OBSERVACIONES GENERALES
                       </span>
                     </div>
                     <div className="section-body">
-                      <Textarea
-                        className="min-h-[5rem] resize-y"
-                        value={readString(form.observacionesGenerales)}
-                        onChange={(e) => setKey(setForm, "observacionesGenerales", e.target.value)}
-                        placeholder="Instrucciones especiales, notas adicionales..."
-                      />
+                      <div className="ot-field">
+                        <label className="ot-label required">Observaciones generales</label>
+                        <OtPlanillaInputIcon icon={FileText} align="top">
+                          <Textarea
+                            className="min-h-[5rem] resize-y"
+                            value={readString(form.observacionesGenerales)}
+                            onChange={(e) => setKey(setForm, "observacionesGenerales", e.target.value)}
+                            placeholder="Revisar secuencia de color y embalaje final acordado con el cliente"
+                          />
+                        </OtPlanillaInputIcon>
+                      </div>
                     </div>
                   </div>
                   <div>
-                    <div className="section-header header-blue">PROGRAMACION</div>
+                    <div className="section-header section-hdr-prog">PROGRAMACION</div>
                     <div className="section-body">
                       <div className="ot-grid ot-cols-2">
                         <div className="ot-field">
-                          <label className="ot-label">F. Inicio</label>
-                          <input
-                            type="date"
-                            className="ot-input"
-                            value={readString(form.fechaInicio)}
-                            onChange={(e) => setKey(setForm, "fechaInicio", e.target.value)}
-                          />
+                          <label className="ot-label required">F. Inicio</label>
+                          <OtPlanillaInputIcon icon={CalendarClock}>
+                            <input
+                              type="date"
+                              className="ot-input"
+                              value={readString(form.fechaInicio)}
+                              onChange={(e) => setKey(setForm, "fechaInicio", e.target.value)}
+                            />
+                          </OtPlanillaInputIcon>
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">F. Entrega</label>
-                          <input
-                            type="date"
-                            className="ot-input"
-                            value={readString(form.fechaEntrega)}
-                            onChange={(e) => setKey(setForm, "fechaEntrega", e.target.value)}
-                          />
+                          <label className="ot-label required">F. Entrega</label>
+                          <OtPlanillaInputIcon icon={CalendarDays}>
+                            <input
+                              type="date"
+                              className="ot-input"
+                              value={readString(form.fechaEntrega)}
+                              onChange={(e) => setKey(setForm, "fechaEntrega", e.target.value)}
+                            />
+                          </OtPlanillaInputIcon>
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Prioridad</label>
-                          <select
-                            className="ot-select"
-                            value={readString(form.priority) || "normal"}
-                            onChange={(e) => setKey(setForm, "priority", e.target.value)}
-                          >
-                            <option value="normal">Normal</option>
-                            <option value="alta">Alta</option>
-                            <option value="urgente">Urgente</option>
-                          </select>
+                          <label className="ot-label required">Prioridad</label>
+                          <Popover open={priorityPickerOpen} onOpenChange={setPriorityPickerOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                data-field="priority"
+                                aria-expanded={priorityPickerOpen}
+                                className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                              >
+                                <span className="flex min-w-0 flex-1 items-center gap-2">
+                                  <Flag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                  <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                    {priorityComboLabel(form.priority)}
+                                  </span>
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="p-0 no-print w-[min(100vw-2rem,16rem)] min-w-[var(--radix-popover-trigger-width)]"
+                              align="start"
+                              side="bottom"
+                            >
+                              <Command>
+                                <CommandList>
+                                  <CommandGroup>
+                                    {(
+                                      [
+                                        ["normal", "Normal"],
+                                        ["alta", "Alta"],
+                                        ["urgente", "Urgente"],
+                                      ] as const
+                                    ).map(([val, label]) => (
+                                      <CommandItem
+                                        key={val}
+                                        value={`prioridad ${val} ${label}`}
+                                        onSelect={() => {
+                                          setKey(setForm, "priority", val)
+                                          setPriorityPickerOpen(false)
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4",
+                                            normalizedPriorityValue(form.priority) === val
+                                              ? "opacity-100"
+                                              : "opacity-0",
+                                          )}
+                                          aria-hidden
+                                        />
+                                        {label}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                          <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
+                            <Flag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                            <span className="min-w-0 flex-1 truncate">{priorityComboLabel(form.priority)}</span>
+                          </div>
                         </div>
                         <div className="ot-field sm:col-span-2">
-                          <label className="ot-label">Asignar a área(s)</label>
-                          <AreasMultiCheckbox
-                            value={[...PROGRAMACION_AREAS]}
-                          />
+                          <label className="ot-label required">Asignar a área(s)</label>
+                          <div className="relative min-w-0 rounded-md border border-[rgba(0,0,0,0.18)] bg-[rgba(255,255,255,0.92)] p-2 pl-8">
+                            <LayoutGrid
+                              className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground"
+                              aria-hidden
+                              strokeWidth={2.25}
+                            />
+                            <AreasMultiCheckbox value={[...PROGRAMACION_AREAS]} />
+                          </div>
                         </div>
                         <div className="ot-field sm:col-span-2">
-                          <label className="ot-label">Motivo de asignación</label>
-                          <Textarea
-                            data-field="programacionMotivo"
-                            className="min-h-[4.5rem]"
-                            value={readString(form.programacionMotivo)}
-                            onChange={(e) => setKey(setForm, "programacionMotivo", e.target.value)}
-                            placeholder="Explique el motivo (por qué pendiente, instrucciones, etc.)"
-                          />
+                          <label className="ot-label required">Motivo de asignación</label>
+                          <OtPlanillaInputIcon icon={LucideClipboardList} align="top">
+                            <Textarea
+                              data-field="programacionMotivo"
+                              className="min-h-[4.5rem]"
+                              value={readString(form.programacionMotivo)}
+                              onChange={(e) => setKey(setForm, "programacionMotivo", e.target.value)}
+                              placeholder="Cliente confirma ventanas de corte; coordinar con programación"
+                            />
+                          </OtPlanillaInputIcon>
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-muted-foreground">
@@ -2848,28 +4481,49 @@ export default function WorkOrderPlanillaPage() {
           ) : null}
         </>
       )}
+      </div>
 
-      <AlertDialog
+      <Dialog
         open={pendingHeaderAction !== null}
         onOpenChange={(open) => {
           if (!open) setPendingHeaderAction(null)
         }}
       >
-        <AlertDialogContent className="sm:max-w-md">
-          {headerConfirmCopy ? (
+        <DialogContent
+          overlayClassName="z-[100] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            "max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl sm:max-w-md",
+            "z-[101] w-full translate-x-[-50%] translate-y-[-50%]",
+            "[&>button.absolute]:hidden",
+          )}
+        >
+          {headerConfirmCopy && pendingHeaderAction ? (
             <>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{headerConfirmCopy.title}</AlertDialogTitle>
-              </AlertDialogHeader>
-              <AlertDialogDescription>{headerConfirmCopy.description}</AlertDialogDescription>
-              <AlertDialogFooter>
-                <AlertDialogCancel type="button">Cancelar</AlertDialogCancel>
-                <AlertDialogAction
+              <DialogHeader className="border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-6 py-6 text-center sm:text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/12 text-primary">
+                  {pendingHeaderConfirmIcon(pendingHeaderAction)}
+                </div>
+                <DialogTitle className="text-balance text-xl font-bold leading-tight tracking-tight text-black dark:text-foreground sm:text-2xl">
+                  {headerConfirmCopy.title}
+                </DialogTitle>
+              </DialogHeader>
+              <DialogDescription className="px-6 py-4 text-center text-sm leading-relaxed text-muted-foreground">
+                {headerConfirmCopy.description}
+              </DialogDescription>
+              <DialogFooter className="flex flex-row flex-wrap items-center justify-center gap-3 border-t border-border/60 bg-muted/20 px-6 py-4 sm:flex-row sm:justify-center">
+                <Button
                   type="button"
-                  className={cn(
-                    buttonVariants({ variant: "default" }),
-                    "w-full border-primary/25 hover:bg-primary/90 sm:w-auto",
-                  )}
+                  variant="outline"
+                  className="min-w-[9.5rem] gap-2 border-primary/25"
+                  onClick={() => setPendingHeaderAction(null)}
+                >
+                  <X className="h-4 w-4 shrink-0" aria-hidden />
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant="default"
+                  className="min-w-[9.5rem] gap-2 border-primary/25 hover:bg-primary/90"
                   onClick={() => {
                     const a = pendingHeaderAction
                     if (!a) return
@@ -2880,34 +4534,130 @@ export default function WorkOrderPlanillaPage() {
                     else if (a === "save") void guardar()
                   }}
                 >
+                  {pendingHeaderConfirmIcon(pendingHeaderAction, "h-4 w-4 shrink-0")}
                   {headerConfirmCopy.cta}
-                </AlertDialogAction>
-              </AlertDialogFooter>
+                </Button>
+              </DialogFooter>
             </>
           ) : null}
-        </AlertDialogContent>
-      </AlertDialog>
+        </DialogContent>
+      </Dialog>
 
-      <AlertDialog open={rellenoAzarDialogOpen} onOpenChange={setRellenoAzarDialogOpen}>
-        <AlertDialogContent className="sm:max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Relleno al azar</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogDescription>
+      <Dialog
+        open={duplicateOtMatches !== null}
+        onOpenChange={(open) => {
+          if (!open) setDuplicateOtMatches(null)
+        }}
+      >
+        <DialogContent
+          overlayClassName="z-[100] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            "max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl sm:max-w-md",
+            "z-[101] w-full translate-x-[-50%] translate-y-[-50%]",
+            "[&>button.absolute]:hidden",
+          )}
+        >
+          {duplicateOtMatches && duplicateOtMatches.length > 0 ? (
+            <>
+              <DialogHeader className="border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-6 py-6 text-center sm:text-center">
+                <DialogTitle className="text-balance text-xl font-bold leading-tight tracking-tight text-black dark:text-foreground sm:text-2xl">
+                  OT ya registradas para este pedido y producto
+                </DialogTitle>
+              </DialogHeader>
+              <DialogDescription className="space-y-3 px-6 py-4 text-center text-sm leading-relaxed text-muted-foreground">
+                <p>
+                  Ya existe al menos una orden de trabajo activa vinculada al mismo pedido cliente y
+                  producto. Puede abrir la más reciente para seguir trabajando en ella (acumulativo en
+                  gestión), o crear una OT nueva independiente.
+                </p>
+                <p className="text-xs">
+                  Si abre una existente, este borrador no se guardará como OT nueva: deberá ajustar la
+                  planilla en la OT elegida.
+                </p>
+                <p className="font-mono text-xs text-foreground">
+                  {duplicateOtMatches
+                    .slice(0, 10)
+                    .map((w) => w.code)
+                    .join(", ")}
+                  {duplicateOtMatches.length > 10 ? " …" : ""}
+                </p>
+              </DialogDescription>
+              <DialogFooter className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-6 py-4 sm:flex-col">
+                <Button
+                  type="button"
+                  variant="default"
+                  className="w-full gap-2 border-primary/25 hover:bg-primary/90"
+                  onClick={() => {
+                    const pick = latestRowInGroup(duplicateOtMatches)
+                    setDuplicateOtMatches(null)
+                    toast.message(
+                      "Se abre la OT más reciente. El borrador actual no se creó como OT nueva.",
+                    )
+                    nav(`/ordenes-trabajo/${pick.id}`, { replace: true })
+                  }}
+                >
+                  Abrir OT existente (más reciente)
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setDuplicateOtMatches(null)
+                    void guardar({ forceNewOt: true })
+                  }}
+                >
+                  Crear nueva OT independiente
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setDuplicateOtMatches(null)}
+                >
+                  Cerrar
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rellenoAzarDialogOpen} onOpenChange={setRellenoAzarDialogOpen}>
+        <DialogContent
+          overlayClassName="z-[100] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            "max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl sm:max-w-md",
+            "z-[101] w-full translate-x-[-50%] translate-y-[-50%]",
+            "[&>button.absolute]:hidden",
+          )}
+        >
+          <DialogHeader className="border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-6 py-6 text-center sm:text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/12 text-primary">
+              <Shuffle className="h-6 w-6 shrink-0" aria-hidden />
+            </div>
+            <DialogTitle className="text-balance text-xl font-bold leading-tight tracking-tight text-black dark:text-foreground sm:text-2xl">
+              Relleno al azar
+            </DialogTitle>
+          </DialogHeader>
+          <DialogDescription className="px-6 py-4 text-center text-sm leading-relaxed text-muted-foreground">
             {rellenoAzarCount > 0
-              ? `Se rellenaron ${rellenoAzarCount} campo(s) vacío(s) con valores al azar en montaje, impresión, laminación, corte, tintas y programación. La cabecera (orden de cliente) y los datos del producto no se tocan: complete esos campos según su criterio.`
+              ? `Se rellenaron ${rellenoAzarCount} campo(s) vacío(s) con valores al azar en tipo de impresión (especificación), montaje, impresión, laminación, corte, tintas y programación. La cabecera (orden de cliente) y los datos del producto no se tocan: complete esos campos según su criterio.`
               : "No había campos vacíos que rellenar en las áreas técnicas (montaje en adelante), o todo ya estaba completo. Cabecera y datos del producto nunca se rellenan al azar."}
-          </AlertDialogDescription>
-          <AlertDialogFooter className="sm:justify-center">
-            <AlertDialogCancel
+          </DialogDescription>
+          <DialogFooter className="flex flex-row flex-wrap items-center justify-center gap-3 border-t border-border/60 bg-muted/20 px-6 py-4 sm:flex-row sm:justify-center">
+            <Button
               type="button"
-              className={cn(buttonVariants({ variant: "default" }), "border-primary/25 hover:bg-primary/90")}
+              variant="default"
+              className="min-w-[9.5rem] gap-2 border-primary/25 hover:bg-primary/90"
+              onClick={() => setRellenoAzarDialogOpen(false)}
             >
+              <Check className="h-4 w-4 shrink-0" aria-hidden />
               Aceptar
-            </AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

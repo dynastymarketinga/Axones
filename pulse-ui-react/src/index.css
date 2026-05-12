@@ -151,10 +151,7 @@
   box-shadow: 
     0 8px 32px rgba(0, 0, 0, 0.15),        /* depth */
     inset 0 1px 0 rgba(255, 255, 255, 0.1); /* subtle highlight */
-}
 
-/* Glass Sidebar Scrollbar */
-.classic-light .bg-sidebar {
   scrollbar-width: thin;
   scrollbar-color: rgba(100, 100, 120, 0.4) transparent;
 }
@@ -185,46 +182,6 @@
   );
 }
 
-/* ================================
-   FullCalendar – shadcn Dark Mode
-================================ */
-
-.fc {
-  --fc-border-color: hsl(var(--border));
-  --fc-page-bg-color: hsl(var(--background));
-  --fc-today-bg-color: hsl(var(--muted));
-}
-
-/* Event container */
-.fc .fc-event {
-  background-color: hsl(var(--secondary));
-  border: none;
-  border-radius: 0.5rem;
-  padding: 2px 6px;
-}
-
-/* Event text */
-.fc .fc-event-title,
-.fc .fc-event-time {
-  color: hsl(var(--secondary-foreground)) !important;
-  font-weight: 500;
-}
-
-/* Hover */
-.fc .fc-event:hover {
-  opacity: 0.9;
-}
-
-/* Day number */
-.fc .fc-daygrid-day-number {
-  color: hsl(var(--foreground));
-}
-
-/* Selected / today cell */
-.fc .fc-day-today {
-  background-color: hsl(var(--muted)) !important;
-}
-
 @layer base {
   * {
     @apply border-border;
@@ -232,41 +189,4 @@
   body {
     @apply bg-background text-foreground;
   }
-}
-
-/* REMOVE default FullCalendar button styles */
-.fc .fc-button {
-  background: none;
-  border: none;
-  padding: 0;
-  box-shadow: none;
-}
-
-/* Gradient Backgrounds for Cards and Progress Bars */
-.gradient-red {
-  background-image: linear-gradient(310deg, #ee0979, #ff6a00);
-}
-
-.gradient-blue {
-  background-image: linear-gradient(310deg, #00c6fb, #005bea);
-}
-
-.gradient-green {
-  background-image: linear-gradient(310deg, #17ad37, #98ec2d);
-}
-
-.gradient-purple {
-  background-image: linear-gradient(310deg, #7928ca, #ff0080);
-}
-
-.gradient-orange {
-  background-image: linear-gradient(310deg, #f7971e, #ffd200);
-}
-
-.gradient-violet {
-  background-image: linear-gradient(310deg, #3494e6, #ec6ead);
-}
-
-.gradient-cyan {
-  background-image: linear-gradient(310deg, #2af598, #009efd);
 }

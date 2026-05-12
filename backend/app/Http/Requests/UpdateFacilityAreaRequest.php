@@ -20,6 +20,7 @@ class UpdateFacilityAreaRequest extends FormRequest
     {
         return [
             'status' => ['sometimes', 'string', Rule::in(AreaRequestStatus::values())],
+            'title' => ['sometimes', 'string', 'max:255'],
             'body' => ['sometimes', 'nullable', 'string', 'max:10000'],
         ];
     }

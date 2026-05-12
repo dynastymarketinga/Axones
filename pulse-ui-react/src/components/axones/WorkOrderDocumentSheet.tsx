@@ -294,8 +294,8 @@ export function WorkOrderDocumentSheet({
               </div>
             ) : (
               <p className="text-muted-foreground text-xs">
-                Esta OT no está ligada a una orden de producción (Pedido del cliente) en el sistema. Puede enlazarse al crear o
-                editar la orden desde ese módulo.
+                Esta OT no está ligada a un pedido cliente (OC) en el sistema. Puede enlazarse al crear o editar la orden desde
+                ese módulo.
               </p>
             )}
             {workOrder.production_items?.length ? (

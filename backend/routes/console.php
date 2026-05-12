@@ -11,7 +11,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('axones:demo {--clean : Borra los datos demo} {--minimal : Pocas filas (comparación UI)} {--count=20 : Filas objetivo por tabla de dominio (5-200 sin --minimal; con --minimal 1–200)}', function () {
+Artisan::command('axones:demo {--clean : Borra los datos demo} {--minimal : Pocas filas (comparación UI)} {--micro : Volumen 1 con OT y grafo de producción (prueba rápida)} {--count=20 : Filas objetivo por tabla de dominio (5-200 sin --minimal; con --minimal 1–200)}', function () {
     /** @var AxonesDemoDataService $demo */
     $demo = app(AxonesDemoDataService::class);
 
@@ -24,10 +24,14 @@ Artisan::command('axones:demo {--clean : Borra los datos demo} {--minimal : Poca
 
     $count = (int) $this->option('count');
     $minimal = (bool) $this->option('minimal');
+    $micro = (bool) $this->option('micro');
 
     if ($minimal) {
-        $result = $demo->seed($count > 0 ? max(1, min(200, $count)) : 1, true);
+        $result = $demo->seed($count > 0 ? max(1, min(200, $count)) : 1, true, $micro);
         $this->info('Datos demo cargados (modo minimal).');
+    } elseif ($micro) {
+        $result = $demo->seed($count > 0 ? max(1, min(200, $count)) : 1, false, true);
+        $this->info('Datos demo cargados (modo micro: volumen 1 + grafo).');
     } else {
         $result = $demo->seed($count > 0 ? $count : 20);
         $this->info('Datos demo cargados.');

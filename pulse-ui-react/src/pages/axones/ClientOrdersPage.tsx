@@ -20,6 +20,7 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
+  ClientOrderDetailRecord,
   ClientOrderRow,
   ClientRecord,
   LaravelPaginated,
@@ -78,10 +79,14 @@ import {
 import {
   clientOrderStatusBadgeClass,
   clientOrderStatusLabel,
+  CLIENT_ORDER_CANCEL_DIALOG_TITLE,
+  CLIENT_ORDER_DETAIL_NO_OT_LINK,
+  CLIENT_ORDER_EDIT_LINES_SECTION_TITLE,
   CLIENT_ORDER_MODULE_LIST_FOCUS,
-  CLIENT_ORDER_MODULE_NEW_TITLE,
   CLIENT_ORDER_MODULE_TITLE,
+  CLIENT_ORDER_NEW_BUTTON_LABEL,
   CLIENT_ORDER_STATUS_HELP,
+  CLIENT_ORDER_TOAST_LOAD_FAILED,
 } from "@/pages/axones/client-order-i18n"
 import { cn } from "@/lib/utils"
 import {
@@ -92,6 +97,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Card, CardContent } from "@/components/ui/card"
 
 const CODE_SEARCH_DEBOUNCE_MS = 400
 
@@ -112,6 +118,9 @@ export default function ClientOrdersPage() {
   const [cancellingId, setCancellingId] = useState<number | null>(null)
   const [pendingCancelId, setPendingCancelId] = useState<number | null>(null)
   const [clientComboOpen, setClientComboOpen] = useState(false)
+  const [detailModalId, setDetailModalId] = useState<number | null>(null)
+  const [detailModalRecord, setDetailModalRecord] = useState<ClientOrderDetailRecord | null>(null)
+  const [detailModalLoading, setDetailModalLoading] = useState(false)
 
   const selectedClientLabel = useMemo(() => {
     if (clientId === "all") return "Todos los clientes"
@@ -184,6 +193,30 @@ export default function ClientOrdersPage() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (detailModalId == null) return
+    let cancelled = false
+    setDetailModalLoading(true)
+    setDetailModalRecord(null)
+    void (async () => {
+      try {
+        const data = await apiFetch<ClientOrderDetailRecord>(`client-orders/${detailModalId}`)
+        if (!cancelled) setDetailModalRecord(data)
+      } catch (e) {
+        if (!cancelled) {
+          setDetailModalRecord(null)
+          if (e instanceof ApiError) toast.error(e.message)
+          else toast.error(CLIENT_ORDER_TOAST_LOAD_FAILED)
+        }
+      } finally {
+        if (!cancelled) setDetailModalLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [detailModalId])
+
   const showInitialSkeleton = loading && rows === null
 
   async function runCancelAnular() {
@@ -206,12 +239,7 @@ export default function ClientOrdersPage() {
     }
   }
 
-  const listSubtitle = (
-    <>
-      Listado de{" "}
-      <strong className="text-foreground font-medium">{CLIENT_ORDER_MODULE_LIST_FOCUS}</strong> — código, cliente y filtros.
-    </>
-  )
+  const listSubtitle = "Filtros por código, cliente y estado."
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -222,7 +250,7 @@ export default function ClientOrdersPage() {
           icon={ScrollText}
           action={
             <Button asChild className="shrink-0">
-              <Link to="/ordenes-cliente/nueva">{CLIENT_ORDER_MODULE_NEW_TITLE}</Link>
+              <Link to="/ordenes-cliente/nueva">{CLIENT_ORDER_NEW_BUTTON_LABEL}</Link>
             </Button>
           }
         >
@@ -236,8 +264,8 @@ export default function ClientOrdersPage() {
               <CatalogFilterGrid>
                 <CatalogSearchField
                   id="co-q"
-                  label="Buscar por código (OC / orden de producción)"
-                  placeholder="Ej. OC-CLI, prefijo, número…"
+                  label="Código (OC)"
+                  placeholder="Ej. OC-CLI…"
                   value={codeQuery}
                   onChange={(ev) => setCodeQuery(ev.target.value)}
                   onKeyDown={(ev) => {
@@ -336,7 +364,7 @@ export default function ClientOrdersPage() {
                         <HelpCircle className="h-4 w-4 shrink-0" />
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs p-3 text-left font-normal" side="top">
-                        <p className="mb-2 font-medium">Estados de la orden de producción (Pedido del cliente)</p>
+                        <p className="mb-2 font-medium">Estados del pedido cliente (OC)</p>
                         <ul className="list-disc pl-4 space-y-1 text-xs">
                           <li>
                             <strong>Abierta:</strong> la orden sigue vigente para su flujo comercial.
@@ -380,9 +408,7 @@ export default function ClientOrdersPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <p className="text-muted-foreground text-xs lg:col-span-12">
-                  Se filtra automáticamente al escribir el código.
-                </p>
+                <p className="text-muted-foreground text-xs lg:col-span-12">Filtra al escribir.</p>
                 <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-primary/20 bg-muted/30 px-3 py-2.5 lg:col-span-12">
                   <Checkbox
                     id="await-ot"
@@ -406,7 +432,7 @@ export default function ClientOrdersPage() {
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs p-3 text-left text-xs" side="top">
                       Si lo marca, verá{" "}
-                      <strong className="text-foreground">órdenes de producción (Pedido del cliente)</strong>{" "}
+                      <strong className="text-foreground">pedidos cliente (OC)</strong>{" "}
                       <strong>abiertas</strong> que aún no tienen vinculado en el sistema un documento de producción (OT)
                       asociado a esta solicitud. Útil para ver qué falta por pasar a planta.
                     </TooltipContent>
@@ -436,7 +462,7 @@ export default function ClientOrdersPage() {
                           colSpan={5}
                           className={cn("text-muted-foreground", catalogTableBodyCellClass)}
                         >
-                          Sin órdenes de producción (Pedido del cliente).
+                          Sin pedidos cliente (OC).
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -478,12 +504,11 @@ export default function ClientOrdersPage() {
                                   variant="outline"
                                   className={cn("shrink-0", catalogActionButtonClass)}
                                   title="Ver detalle"
-                                  asChild
+                                  type="button"
+                                  onClick={() => setDetailModalId(r.id)}
                                 >
-                                  <Link to={`/ordenes-cliente/${r.id}`}>
-                                    <Eye className="h-4 w-4" />
-                                    <span className="sr-only">Ver</span>
-                                  </Link>
+                                  <Eye className="h-4 w-4" />
+                                  <span className="sr-only">Ver detalle</span>
                                 </Button>
                                 {r.status === "open" ? (
                                   <Button
@@ -493,7 +518,7 @@ export default function ClientOrdersPage() {
                                     title="Editar"
                                     asChild
                                   >
-                                    <Link to={`/ordenes-cliente/${r.id}/edit`}>
+                                    <Link to={`/ordenes-cliente/${r.id}`}>
                                       <Pencil className="h-4 w-4" />
                                       <span className="sr-only">Editar</span>
                                     </Link>
@@ -548,7 +573,7 @@ export default function ClientOrdersPage() {
               </div>
 
               {rows ? (
-                <div className="mt-4 flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="mt-4 flex flex-col items-center gap-3 text-center text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:text-left">
             <p className="text-muted-foreground min-w-0">
               {rows.total === 0
                 ? "Sin resultados con los filtros actuales."
@@ -556,7 +581,7 @@ export default function ClientOrdersPage() {
                   ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
                   : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
             </p>
-            <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
+            <div className="flex w-full flex-wrap items-center justify-center gap-3 sm:w-auto sm:shrink-0 sm:justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">Por página</span>
                 <Select
@@ -615,6 +640,176 @@ export default function ClientOrdersPage() {
         </CatalogPageShell>
 
         <Dialog
+          open={detailModalId !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDetailModalId(null)
+              setDetailModalRecord(null)
+            }
+          }}
+        >
+          <DialogContent
+            overlayClassName="z-[100] !bg-black/50 backdrop-blur-sm duration-200 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+            className="z-[100] flex max-h-[min(90vh,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden rounded-2xl border p-0 shadow-2xl sm:max-w-3xl"
+          >
+            <DialogHeader className="shrink-0 space-y-1 border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-6 py-4 pr-14 text-left">
+              <DialogTitle className="text-lg leading-tight">{CLIENT_ORDER_MODULE_TITLE}</DialogTitle>
+              <DialogDescription asChild>
+                <div className="space-y-2 pt-1 text-sm text-muted-foreground">
+                  {detailModalLoading ? (
+                    <p className="font-mono text-foreground/80">Cargando…</p>
+                  ) : detailModalRecord ? (
+                    <>
+                      <p className="font-mono text-base font-medium text-foreground">{detailModalRecord.code}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "font-medium border",
+                            clientOrderStatusBadgeClass(detailModalRecord.status),
+                          )}
+                        >
+                          {clientOrderStatusLabel(detailModalRecord.status)}
+                        </Badge>
+                        <span>
+                          Cliente:{" "}
+                          <span className="font-medium text-foreground">
+                            {detailModalRecord.client?.name ?? `#${detailModalRecord.client_id}`}
+                          </span>
+                        </span>
+                        {detailModalRecord.ordered_at ? (
+                          <span className="text-xs">
+                            Pedido:{" "}
+                            {new Date(detailModalRecord.ordered_at).toLocaleString("es-VE", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })}
+                          </span>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <p>No se pudo mostrar el detalle.</p>
+                  )}
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              {detailModalLoading ? (
+                <p className="text-muted-foreground text-sm">Obteniendo líneas y órdenes de trabajo…</p>
+              ) : detailModalRecord ? (
+                <Card className="shadow-sm">
+                  <CardContent className="space-y-6 p-6">
+                    {detailModalRecord.notes ? (
+                      <section className="space-y-2">
+                        <h3 className="text-base font-semibold tracking-tight">Notas</h3>
+                        <p className="text-sm whitespace-pre-wrap text-foreground">{detailModalRecord.notes}</p>
+                      </section>
+                    ) : null}
+
+                    <section
+                      className={cn(
+                        "space-y-3",
+                        detailModalRecord.notes && "border-t border-border/60 pt-6",
+                      )}
+                    >
+                      <div className="space-y-1">
+                        <h3 className="text-base font-semibold tracking-tight">
+                          {CLIENT_ORDER_EDIT_LINES_SECTION_TITLE}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          Cada ítem muestra qué se pidió, con cantidad y unidad por separado.
+                        </p>
+                      </div>
+                      {!detailModalRecord.lines?.length ? (
+                        <p className="text-muted-foreground text-sm">Sin líneas en este pedido.</p>
+                      ) : (
+                        <ul className="space-y-4">
+                          {detailModalRecord.lines.map((ln) => {
+                            const label =
+                              ln.product?.name ||
+                              (ln.material ? `${ln.material.sku} — ${ln.material.name}` : null) ||
+                              ln.description ||
+                              "—"
+                            return (
+                              <li key={ln.id} className="space-y-3 rounded-lg bg-muted/35 px-4 py-3">
+                                <div>
+                                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                    Producto / material / texto
+                                  </p>
+                                  <p className="mt-1 text-sm font-medium leading-snug text-foreground">{label}</p>
+                                </div>
+                                <dl className="grid gap-3 sm:grid-cols-2">
+                                  <div>
+                                    <dt className="text-xs font-medium text-muted-foreground">Cantidad</dt>
+                                    <dd className="mt-0.5 font-mono text-sm tabular-nums">{ln.quantity}</dd>
+                                  </div>
+                                  <div>
+                                    <dt className="text-xs font-medium text-muted-foreground">Unidad</dt>
+                                    <dd className="mt-0.5 text-sm">{ln.unit ?? "—"}</dd>
+                                  </div>
+                                </dl>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                    </section>
+
+                    <section className="space-y-3 border-t border-border/60 pt-6">
+                      <div className="space-y-1">
+                        <h3 className="text-base font-semibold tracking-tight">
+                          Órdenes de trabajo vinculadas
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          OT generadas o enlazadas desde este pedido; abra la vista de producción si aplica.
+                        </p>
+                      </div>
+                      {(detailModalRecord.workOrders ?? []).length === 0 ? (
+                        <p className="text-center text-sm text-muted-foreground">{CLIENT_ORDER_DETAIL_NO_OT_LINK}</p>
+                      ) : (
+                        <ul className="space-y-3">
+                          {(detailModalRecord.workOrders ?? []).map((w) => (
+                            <li
+                              key={w.id}
+                              className="flex flex-col gap-2 rounded-lg bg-muted/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div>
+                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  Código OT
+                                </p>
+                                <p className="mt-0.5 font-mono text-sm font-medium">{w.code}</p>
+                              </div>
+                              <Button variant="outline" size="sm" className="shrink-0 sm:self-center" asChild>
+                                <Link to={`/ordenes-trabajo/${w.id}/produccion`}>Ver producción</Link>
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                  </CardContent>
+                </Card>
+              ) : (
+                <p className="text-muted-foreground text-sm">
+                  Intente de nuevo o abra el detalle en página completa.
+                </p>
+              )}
+            </div>
+            <DialogFooter className="shrink-0 flex-row flex-wrap gap-2 border-t border-border/60 bg-muted/20 px-6 py-4 sm:justify-end">
+              {detailModalId != null && detailModalRecord ? (
+                <Button variant="outline" type="button" asChild>
+                  <Link to={`/ordenes-cliente/${detailModalId}`}>Abrir página completa</Link>
+                </Button>
+              ) : null}
+              <Button type="button" variant="secondary" onClick={() => setDetailModalId(null)}>
+                Cerrar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
           open={pendingCancelId !== null}
           onOpenChange={(open) => {
             if (!open) setPendingCancelId(null)
@@ -633,7 +828,7 @@ export default function ClientOrdersPage() {
                   <Ban className="h-6 w-6" />
                 </div>
                 <DialogTitle className="text-center sm:text-left sm:leading-tight">
-                  ¿Anular esta orden de producción (Pedido del cliente)?
+                  {CLIENT_ORDER_CANCEL_DIALOG_TITLE}
                 </DialogTitle>
               </div>
             </DialogHeader>

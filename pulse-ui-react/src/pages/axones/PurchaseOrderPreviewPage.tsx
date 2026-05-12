@@ -31,7 +31,6 @@ const AXONES_ADDRESS_LINE =
  */
 const REPORT_LOGO_VAR01 = `${import.meta.env.BASE_URL}brand/logo-axones-var-01.png`
 const REPORT_LOGO_1 = `${import.meta.env.BASE_URL}brand/logo-axones-1.png`
-const REPORT_LOGO_MAIN_SVG = `${import.meta.env.BASE_URL}brand/logo-axones-main.svg`
 
 /** Solo PNG para jsPDF (mismo orden que la vista). */
 const PDF_LOGO_TRY_PATHS = ["brand/logo-axones-var-01.png", "brand/logo-axones-1.png"] as const
@@ -510,7 +509,6 @@ export default function PurchaseOrderPreviewPage() {
                 onError={() => {
                   setHeaderLogoSrc((prev) => {
                     if (prev === REPORT_LOGO_VAR01) return REPORT_LOGO_1
-                    if (prev === REPORT_LOGO_1) return REPORT_LOGO_MAIN_SVG
                     return prev
                   })
                 }}

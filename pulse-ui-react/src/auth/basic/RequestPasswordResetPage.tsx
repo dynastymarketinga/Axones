@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Factory } from "lucide-react"
 import { toast } from "sonner"
 
+import { AxonesBrandMark } from "@/components/axones/AxonesBrandMark"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -33,11 +33,8 @@ export default function RequestPasswordResetPage() {
     <div className="min-h-svh w-full bg-gradient-to-b from-muted/80 to-background flex items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center gap-2 text-center">
-          <div className="bg-primary text-primary-foreground flex size-12 items-center justify-center rounded-xl shadow-sm">
-            <Factory className="size-6" />
-          </div>
+          <AxonesBrandMark />
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Axones</h1>
-          <p className="text-sm text-muted-foreground">Sistema operativo de planta</p>
         </div>
         <Card className="border-border/60 shadow-md">
           <CardHeader className="space-y-1 pb-4 text-center">

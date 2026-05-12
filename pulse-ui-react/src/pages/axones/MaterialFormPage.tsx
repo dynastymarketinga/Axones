@@ -147,7 +147,7 @@ export default function MaterialFormPage() {
   const [ancho, setAncho] = useState("")
   const [notes, setNotes] = useState("")
   const [minStock, setMinStock] = useState("0.00")
-  const [quantity, setQuantity] = useState("0.00")
+  const [quantity, setQuantity] = useState("")
   const [receivedOn, setReceivedOn] = useState("")
   const [products, setProducts] = useState<ProductRecord[]>([])
   const [clients, setClients] = useState<ClientRecord[]>([])
@@ -179,6 +179,7 @@ export default function MaterialFormPage() {
   const [noSupplierReasonError, setNoSupplierReasonError] = useState(false)
   const [confirmDimensionsOpen, setConfirmDimensionsOpen] = useState(false)
   const [pendingDimensionsPayload, setPendingDimensionsPayload] = useState<Record<string, unknown> | null>(null)
+  const [quantityError, setQuantityError] = useState(false)
 
   const noSupplierReasonFieldId = useMemo(() => {
     if (tab === "tintas") return "material-no-supplier-reason-tintas"
@@ -239,6 +240,7 @@ export default function MaterialFormPage() {
 
   useEffect(() => {
     setPreferredSupplierOpen(false)
+    setQuantityError(false)
   }, [tab])
 
   useEffect(() => {
@@ -488,6 +490,10 @@ export default function MaterialFormPage() {
     const nameOk = name.trim().length > 0
     const tintaSubareaOk = tab !== "tintas" || Boolean(tintaSubarea)
     const receivedOnOk = receivedOn.trim().length > 0
+    const quantityRequired = tab === "sustratos" || tab === "tintas" || tab === "quimicos"
+    const qtyVal = parseDecimalForApi(quantity)
+    const quantityOk =
+      !quantityRequired || qtyVal > 0 || (isEdit && qtyVal >= 0)
     const supplierOk = noSupplier
       ? canOmitNoSupplierReason || noSupplierReason.trim().length >= 5
       : supplierId != null && supplierId > 0
@@ -496,6 +502,7 @@ export default function MaterialFormPage() {
     setNameError(!nameOk)
     setTintaSubareaError(!tintaSubareaOk)
     setReceivedOnError(!receivedOnOk)
+    setQuantityError(!quantityOk)
     setSupplierIdError(!supplierOk && !noSupplier)
     setNoSupplierReasonError(noSupplier && !canOmitNoSupplierReason && !supplierOk)
 
@@ -521,6 +528,13 @@ export default function MaterialFormPage() {
     if (!receivedOnOk) {
       document.getElementById("material-received-on")?.scrollIntoView({ behavior: "smooth", block: "center" })
       toast.error("La fecha de ingreso es obligatoria.")
+      return
+    }
+    if (!quantityOk) {
+      const quantityAnchorId =
+        tab === "tintas" ? "material-quantity-tintas" : tab === "quimicos" ? "material-quantity-quimicos" : "material-quantity-sustratos"
+      document.getElementById(quantityAnchorId)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      toast.error("Los kilogramos (Kg) son obligatorios y deben ser mayores que 0.")
       return
     }
     if (!supplierOk) {
@@ -677,17 +691,23 @@ export default function MaterialFormPage() {
                 <div className="grid gap-2"><Label htmlFor="material-sku">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku" value={sku} onChange={(ev) => {
                   setSku(ev.target.value.toUpperCase())
                   if (skuError) setSkuError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: SUB-BOPP-1042" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-name">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name" value={name} onChange={(ev) => {
                   setName(ev.target.value)
                   if (nameError) setNameError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
-                <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
-                <div className="grid gap-2"><Label htmlFor="material-micras">Micras *</Label><div className="group/field relative"><ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-micras" type="number" min="0" step="0.001" value={micras} onChange={(ev) => setMicras(ev.target.value)} className={cn("pl-10", FILTER_INPUT_CLASS)} /></div></div>
-                <div className="grid gap-2"><Label htmlFor="material-ancho">Ancho *</Label><div className="group/field relative"><Ruler className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-ancho" type="number" min="0" step="0.001" value={ancho} onChange={(ev) => setAncho(ev.target.value)} className={cn("pl-10", FILTER_INPUT_CLASS)} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: BOPP transparente 20 µm" /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-quantity-sustratos">Kg *</Label><div className="group/field relative"><Scale className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", quantityError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-quantity-sustratos" className={cn("pl-10", FILTER_INPUT_CLASS, quantityError ? "border-red-500 focus-visible:ring-red-500" : "")} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" placeholder="Ej: 250,50" value={quantity} onChange={(ev) => {
+                  setQuantity(normalizeDecimalInput(ev.target.value))
+                  if (quantityError) setQuantityError(false)
+                }} onBlur={() => {
+                  if (quantity.trim() === "") return
+                  setQuantity(formatToTwoDecimals(quantity))
+                }} aria-invalid={quantityError} /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-micras">Micras *</Label><div className="group/field relative"><ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-micras" type="number" min="0" step="0.001" value={micras} onChange={(ev) => setMicras(ev.target.value)} className={cn("pl-10", FILTER_INPUT_CLASS)} placeholder="Ej: 20" /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-ancho">Ancho *</Label><div className="group/field relative"><Ruler className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-ancho" type="number" min="0" step="0.001" value={ancho} onChange={(ev) => setAncho(ev.target.value)} className={cn("pl-10", FILTER_INPUT_CLASS)} placeholder="Ej: 1040 (mm)" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-min-stock-sustratos">Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-min-stock-sustratos" className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => {
                   setMinStock(normalizeDecimalInput(ev.target.value))
-                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} placeholder="Ej: 50,00" /></div></div>
                 <div className="grid gap-2 md:col-span-3">
                   <Label htmlFor="material-preferred-supplier-sustratos">
                     {noSupplier ? "Proveedor" : "Proveedor *"}
@@ -829,12 +849,18 @@ export default function MaterialFormPage() {
                 <div className="grid gap-2"><Label htmlFor="material-sku-tintas">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku-tintas" value={sku} onChange={(ev) => {
                   setSku(ev.target.value.toUpperCase())
                   if (skuError) setSkuError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: TNT-CMYK-BASE-01" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-name-tintas">Color / Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name-tintas" value={name} onChange={(ev) => {
                   setName(ev.target.value)
                   if (nameError) setNameError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
-                <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: Magenta proceso" /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-quantity-tintas">Kg *</Label><div className="group/field relative"><Scale className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", quantityError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-quantity-tintas" className={cn("pl-10", FILTER_INPUT_CLASS, quantityError ? "border-red-500 focus-visible:ring-red-500" : "")} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" placeholder="Ej: 18,75" value={quantity} onChange={(ev) => {
+                  setQuantity(normalizeDecimalInput(ev.target.value))
+                  if (quantityError) setQuantityError(false)
+                }} onBlur={() => {
+                  if (quantity.trim() === "") return
+                  setQuantity(formatToTwoDecimals(quantity))
+                }} aria-invalid={quantityError} /></div></div>
                 <div className="grid gap-2"><Label>Subárea *</Label>
                   <div className="group/field relative">
                     <Layers className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", tintaSubareaError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden />
@@ -867,7 +893,7 @@ export default function MaterialFormPage() {
                 </div>
                 <div className="grid gap-2"><Label htmlFor="material-min-stock-tintas">Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-min-stock-tintas" className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => {
                   setMinStock(normalizeDecimalInput(ev.target.value))
-                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} placeholder="Ej: 5,00" /></div></div>
                 <div className="grid gap-2 md:col-span-3">
                   <Label htmlFor="material-preferred-supplier-tintas">{noSupplier ? "Proveedor" : "Proveedor *"}</Label>
                   <Popover open={preferredSupplierOpen} onOpenChange={setPreferredSupplierOpen}>
@@ -947,15 +973,21 @@ export default function MaterialFormPage() {
                 <div className="grid gap-2"><Label htmlFor="material-sku-quimicos">Cod *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku-quimicos" value={sku} onChange={(ev) => {
                   setSku(ev.target.value.toUpperCase())
                   if (skuError) setSkuError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: SOL-ETIL-01" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-name-quimicos">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name-quimicos" value={name} onChange={(ev) => {
                   setName(ev.target.value)
                   if (nameError) setNameError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
-                <div className="grid gap-2"><Label>Kg</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: Solvente etílico industrial" /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-quantity-quimicos">Kg *</Label><div className="group/field relative"><Scale className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", quantityError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-quantity-quimicos" className={cn("pl-10", FILTER_INPUT_CLASS, quantityError ? "border-red-500 focus-visible:ring-red-500" : "")} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" placeholder="Ej: 200,00" value={quantity} onChange={(ev) => {
+                  setQuantity(normalizeDecimalInput(ev.target.value))
+                  if (quantityError) setQuantityError(false)
+                }} onBlur={() => {
+                  if (quantity.trim() === "") return
+                  setQuantity(formatToTwoDecimals(quantity))
+                }} aria-invalid={quantityError} /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-min-stock-quimicos">Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-min-stock-quimicos" className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => {
                   setMinStock(normalizeDecimalInput(ev.target.value))
-                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} placeholder="Ej: 20,00" /></div></div>
                 <div className="hidden md:block md:col-span-2" aria-hidden />
                 <div className="grid gap-2 md:col-span-3">
                   <Label htmlFor="material-preferred-supplier-quimicos">{noSupplier ? "Proveedor" : "Proveedor *"}</Label>
@@ -1036,12 +1068,15 @@ export default function MaterialFormPage() {
                 <div className="grid gap-2"><Label htmlFor="material-sku-miscelaneo">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku-miscelaneo" value={sku} onChange={(ev) => {
                   setSku(ev.target.value.toUpperCase())
                   if (skuError) setSkuError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: MISC-CINTA-48" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-name-miscelaneo">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name-miscelaneo" value={name} onChange={(ev) => {
                   setName(ev.target.value)
                   if (nameError) setNameError(false)
-                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} /></div></div>
-                <div className="grid gap-2"><Label>Cantidad</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => setQuantity(formatToTwoDecimals(quantity))} /></div></div>
+                }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: Cinta doble faz 48 mm" /></div></div>
+                <div className="grid gap-2"><Label htmlFor="material-quantity-miscelaneo">Cantidad</Label><div className="group/field relative"><Scale className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-quantity-miscelaneo" className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" placeholder="Ej: 24 (según unidad)" value={quantity} onChange={(ev) => setQuantity(normalizeDecimalInput(ev.target.value))} onBlur={() => {
+                  if (quantity.trim() === "") return
+                  setQuantity(formatToTwoDecimals(quantity))
+                }} /></div></div>
                 <div className="grid gap-2"><Label>Unidad</Label>
                   <div className="group/field relative">
                   <Boxes className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden />
@@ -1057,7 +1092,7 @@ export default function MaterialFormPage() {
                 </div>
                 <div className="grid gap-2"><Label htmlFor="material-min-stock-miscelaneo">Stock mínimo</Label><div className="group/field relative"><Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-min-stock-miscelaneo" className={cn("pl-10", FILTER_INPUT_CLASS)} type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]{0,2}" value={minStock} onChange={(ev) => {
                   setMinStock(normalizeDecimalInput(ev.target.value))
-                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} /></div></div>
+                }} onBlur={() => setMinStock(formatToTwoDecimals(minStock))} placeholder="Ej: 6,00" /></div></div>
                 <div className="hidden md:block" aria-hidden />
                 <div className="grid gap-2 md:col-span-3">
                   <Label htmlFor="material-preferred-supplier-misc">{noSupplier ? "Proveedor" : "Proveedor *"}</Label>
@@ -1169,7 +1204,14 @@ export default function MaterialFormPage() {
               <Label htmlFor="m-notes">Notas</Label>
               <div className="group/field relative">
                 <StickyNote className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within/field:text-primary" aria-hidden />
-                <Textarea className={cn("pl-10", FILTER_INPUT_CLASS)} id="m-notes" rows={3} value={notes} onChange={(ev) => setNotes(ev.target.value)} />
+                <Textarea
+                  className={cn("pl-10", FILTER_INPUT_CLASS)}
+                  id="m-notes"
+                  rows={3}
+                  value={notes}
+                  onChange={(ev) => setNotes(ev.target.value)}
+                  placeholder="Ej: lote del proveedor, observaciones de calidad o de ubicación en almacén."
+                />
               </div>
             </div>
 

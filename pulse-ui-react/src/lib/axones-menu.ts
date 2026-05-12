@@ -4,9 +4,10 @@ import {
   Boxes,
   ClipboardList,
   Factory,
+  Layers2,
   Package,
   PackageOpen,
-  Receipt,
+  Scissors,
   ScrollText,
   Shield,
   ShoppingCart,
@@ -69,6 +70,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     icon: Warehouse,
     items: [
       { title: "Materiales", url: "materiales", icon: Boxes },
+      { title: "Solicitudes de insumos", url: "solicitudes-material", icon: Package },
       {
         title: "Recepción",
         url: "recepciones-oc",
@@ -76,15 +78,6 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
       },
       { title: "Bobinas", url: "bobinas", icon: Package },
       { title: "Movimientos", url: "movimientos-inventario", icon: ScrollText },
-      {
-        title: "Misceláneos",
-        url: "#",
-        icon: Receipt,
-        items: [
-          { title: "Historial", url: "miscelaneos", icon: ScrollText },
-          { title: "Nueva (adjuntos)", url: "miscelaneos/nuevo", icon: Receipt },
-        ],
-      },
       { title: "Devoluciones", url: "devoluciones", icon: PackageOpen },
     ],
   },
@@ -95,22 +88,15 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     items: [
       { title: "Programación", url: "programacion", icon: ClipboardList },
       { title: "Impresión", url: "impresion", icon: Factory },
-      { title: "Laminación", url: "laminacion", icon: Factory },
-      { title: "Corte", url: "corte", icon: Factory },
+      { title: "Laminación", url: "laminacion", icon: Layers2 },
+      { title: "Corte", url: "corte", icon: Scissors },
       { title: "Tintas", url: "tintas", icon: Factory },
       { title: CLIENT_ORDER_MODULE_TITLE, url: "ordenes-cliente", icon: ScrollText },
       { title: "Órdenes de trabajo", url: "ordenes-trabajo", icon: ClipboardList },
       { title: "Mezclas y tintas", url: "mezclas-tinta", icon: Boxes },
     ],
   },
-  {
-    title: "Solicitudes por área",
-    url: "#",
-    icon: ClipboardList,
-    items: [
-      { title: "Bandeja", url: "solicitudes-area", icon: ClipboardList },
-    ],
-  },
+  { title: "Solicitudes entre áreas", url: "solicitudes-area", icon: ClipboardList },
   {
     title: "Calidad",
     url: "#",
@@ -122,8 +108,8 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     url: "#",
     icon: Truck,
     items: [
+      { title: "Despacho a registrar", url: "notas-entrega", icon: ClipboardList },
       { title: "Producto terminado", url: "despacho-corte", icon: Truck },
-      { title: "Solicitudes de material", url: "solicitudes-material", icon: ClipboardList },
     ],
   },
   {

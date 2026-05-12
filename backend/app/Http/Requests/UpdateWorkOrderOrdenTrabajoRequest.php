@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\InventoryArea;
 use App\Enums\WorkOrderPriority;
+use App\Models\Material;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -209,7 +211,56 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
             $kg = $this->asStringValue($row['kg'] ?? null);
             if ($kg !== '' && ! $this->isDecimalLike($kg)) {
                 $validator->errors()->add("$path.$i.kg", 'Kg a utilizar debe ser numérico.');
+
+                continue;
             }
+
+            $this->validateSustratoRowMaterialStock($validator, $row, $i, $path, $kg);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function validateSustratoRowMaterialStock(Validator $validator, array $row, int|string $i, string $path, string $kg): void
+    {
+        if ($this->asStringValue($row['material_free_text'] ?? null) !== '') {
+            return;
+        }
+
+        $materialIdRaw = $row['material_id'] ?? null;
+        $mid = is_numeric($materialIdRaw) ? (int) $materialIdRaw : 0;
+        if ($mid < 1) {
+            return;
+        }
+
+        $material = Material::query()->find($mid);
+        if ($material === null) {
+            $validator->errors()->add("$path.$i.material_id", 'Material no encontrado.');
+
+            return;
+        }
+
+        if ((string) $material->inventory_area !== InventoryArea::Material->value) {
+            $validator->errors()->add(
+                "$path.$i.material_id",
+                'El material debe pertenecer al inventario de sustratos (área material).',
+            );
+
+            return;
+        }
+
+        if ($kg === '' || ! $this->isDecimalLike($kg)) {
+            return;
+        }
+
+        $kgNorm = str_replace(',', '.', $kg);
+        $stock = (string) $material->quantity_on_hand;
+        if (bccomp($kgNorm, $stock, 3) === 1) {
+            $validator->errors()->add(
+                "$path.$i.kg",
+                'La cantidad solicitada supera el stock disponible ('.$stock.' kg).',
+            );
         }
     }
 

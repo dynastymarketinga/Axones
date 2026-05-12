@@ -244,6 +244,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/area-requests/counts', [AreaRequestController::class, 'counts']);
     Route::post('/area-requests', [AreaRequestController::class, 'store']);
     Route::patch('/area-requests/{area_request}', [AreaRequestController::class, 'update']);
+    Route::delete('/area-requests/{area_request}', [AreaRequestController::class, 'destroy']);
 
     Route::get('/gate-movements', [GateMovementController::class, 'index']);
     Route::post('/gate-movements', [GateMovementController::class, 'store']);

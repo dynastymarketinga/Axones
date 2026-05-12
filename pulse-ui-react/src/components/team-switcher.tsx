@@ -11,7 +11,7 @@ export function TeamSwitcher({
   teams: {
     name: string
     logo?: React.ElementType
-    plan: string
+    plan?: string
   }[]
 }) {
   const [activeTeam] = React.useState(teams[0])
@@ -29,20 +29,22 @@ export function TeamSwitcher({
     <SidebarMenu>
       <SidebarMenuItem>
         <SidebarMenuButton size="lg">
-          <div className="flex aspect-square size-9 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary">
+          <div className="flex size-9 shrink-0 items-center justify-center bg-transparent">
             <img
               src={logoSrc}
               alt="Logo Axones"
-              className="h-full w-full object-cover object-top scale-110"
+              className="h-full w-full max-h-9 object-contain object-center"
               loading="eager"
               onError={() =>
-                setLogoSrc(`${import.meta.env.BASE_URL}brand/logo-axones-main.svg`)
+                setLogoSrc(`${import.meta.env.BASE_URL}brand/logo-axones-var-01.png`)
               }
             />
           </div>
           <div className="grid flex-1 text-left text-sm leading-tight">
             <span className="truncate font-semibold">{activeTeam.name}</span>
-            <span className="truncate text-xs">{activeTeam.plan}</span>
+            {activeTeam.plan ? (
+              <span className="truncate text-xs">{activeTeam.plan}</span>
+            ) : null}
           </div>
         </SidebarMenuButton>
       </SidebarMenuItem>

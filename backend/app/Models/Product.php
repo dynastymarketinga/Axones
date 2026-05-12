@@ -11,6 +11,7 @@ class Product extends Model
     protected $fillable = [
         'client_id',
         'name',
+        'barcode',
         'cpe',
         'mps',
         'print_type',

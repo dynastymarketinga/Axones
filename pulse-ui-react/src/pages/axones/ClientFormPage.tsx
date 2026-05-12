@@ -40,8 +40,13 @@ import {
   MapPin,
   MapPinned,
   Phone,
+  UserPlus,
   UserRound,
 } from "lucide-react"
+
+/** Secundario con hover similar al pedido cliente (ataljos desde maestros). */
+const CLIENT_FORM_VENDOR_SECONDARY_HOVER =
+  "transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:bg-primary/12 hover:text-foreground hover:shadow-md active:translate-y-0 active:shadow-sm dark:hover:bg-primary/18"
 
 const RIF_LETTERS = ["J", "V", "E", "G", "P", "C"] as const
 
@@ -186,6 +191,14 @@ export default function ClientFormPage() {
     const from = st?.from?.trim()
     return from && from.startsWith("/") ? from : "/clientes"
   }, [location.state])
+
+  const newVendorLink = useMemo(
+    () => ({
+      pathname: "/vendedores/form" as const,
+      state: { from: `${location.pathname}${location.search}` },
+    }),
+    [location.pathname, location.search],
+  )
 
   const normalizeRif = useCallback((value: string): string => {
     const raw = value.trim().toUpperCase().replace(/\s+/g, "")
@@ -719,68 +732,92 @@ export default function ClientFormPage() {
                 {isFullAccess ? (
                   <div className="grid gap-2 md:col-span-2">
                     <Label className={fieldLabelClass}>Vendedor</Label>
-                    <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={vendorOpen}
-                          className={cn("h-10 w-full justify-between font-normal", "border-primary/25 bg-background/90")}
-                        >
-                          <span className={cn("truncate text-left", !vendorId && "text-muted-foreground")}>
-                            {vendorId
-                              ? vendors.find((v) => v.id === vendorId)?.name ?? "Seleccione vendedor…"
-                              : "Seleccione vendedor…"}
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                        <Command shouldFilter>
-                          <CommandInput placeholder="Buscar vendedor..." />
-                          <CommandList className="max-h-60">
-                            <CommandEmpty>Sin resultados.</CommandEmpty>
-                            <CommandGroup>
-                              <CommandItem
-                                value="__none__"
-                                onSelect={() => {
-                                  setVendorId(null)
-                                  setVendorOpen(false)
-                                }}
-                              >
-                                <Check className={cn("mr-2 h-4 w-4", vendorId == null ? "opacity-100" : "opacity-0")} aria-hidden />
-                                <span>Sin vendedor</span>
-                              </CommandItem>
-                              {vendors.map((v) => (
-                                <CommandItem
-                                  key={v.id}
-                                  value={`${v.name} ${v.phone_primary ?? v.phone_secondary ?? ""}`}
-                                  onSelect={() => {
-                                    setVendorId(v.id)
-                                    setVendorOpen(false)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      vendorId === v.id ? "opacity-100" : "opacity-0",
-                                    )}
-                                    aria-hidden
-                                  />
-                                  <span>{v.name}</span>
-                                  {v.phone_primary || v.phone_secondary ? (
-                                    <span className="text-muted-foreground ml-2 text-xs">
-                                      {v.phone_primary ?? v.phone_secondary}
-                                    </span>
-                                  ) : null}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="grid min-w-0 flex-1 gap-1.5">
+                        <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={vendorOpen}
+                              className={cn(
+                                "h-10 w-full justify-between font-normal",
+                                "border-primary/25 bg-background/90",
+                              )}
+                            >
+                              <span className={cn("truncate text-left", !vendorId && "text-muted-foreground")}>
+                                {vendorId
+                                  ? vendors.find((v) => v.id === vendorId)?.name ?? "Seleccione vendedor…"
+                                  : "Seleccione vendedor…"}
+                              </span>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+                            align="start"
+                          >
+                            <Command shouldFilter>
+                              <CommandInput placeholder="Buscar vendedor..." />
+                              <CommandList className="max-h-60">
+                                <CommandEmpty>Sin resultados.</CommandEmpty>
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__none__"
+                                    onSelect={() => {
+                                      setVendorId(null)
+                                      setVendorOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn("mr-2 h-4 w-4", vendorId == null ? "opacity-100" : "opacity-0")}
+                                      aria-hidden
+                                    />
+                                    <span>Sin vendedor</span>
+                                  </CommandItem>
+                                  {vendors.map((v) => (
+                                    <CommandItem
+                                      key={v.id}
+                                      value={`${v.name} ${v.phone_primary ?? v.phone_secondary ?? ""}`}
+                                      onSelect={() => {
+                                        setVendorId(v.id)
+                                        setVendorOpen(false)
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          vendorId === v.id ? "opacity-100" : "opacity-0",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      <span>{v.name}</span>
+                                      {v.phone_primary || v.phone_secondary ? (
+                                        <span className="text-muted-foreground ml-2 text-xs">
+                                          {v.phone_primary ?? v.phone_secondary}
+                                        </span>
+                                      ) : null}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        asChild
+                        className={cn("h-10 shrink-0 sm:self-end", CLIENT_FORM_VENDOR_SECONDARY_HOVER)}
+                      >
+                        <Link to={newVendorLink.pathname} state={newVendorLink.state}>
+                          <UserPlus className="mr-2 h-4 w-4" />
+                          Nuevo vendedor
+                        </Link>
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
               </>

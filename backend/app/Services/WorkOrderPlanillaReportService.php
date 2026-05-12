@@ -104,8 +104,17 @@ class WorkOrderPlanillaReportService
                 $mid = isset($row['material_id']) ? (int) $row['material_id'] : 0;
                 $kg = isset($row['kg']) ? trim((string) $row['kg']) : '';
                 $metros = isset($row['metros']) ? trim((string) $row['metros']) : '';
+                $free = isset($row['material_free_text']) ? trim((string) $row['material_free_text']) : '';
                 $mat = $mid > 0 ? $materialsById->get($mid) : null;
-                $label = $mat ? trim((string) ($mat->sku ?? '').' — '.(string) ($mat->name ?? '')) : ($mid > 0 ? 'ID '.$mid : '—');
+                if ($mat) {
+                    $label = trim((string) ($mat->sku ?? '').' — '.(string) ($mat->name ?? ''));
+                } elseif ($free !== '') {
+                    $label = $free;
+                } elseif ($mid > 0) {
+                    $label = 'ID '.$mid;
+                } else {
+                    $label = '—';
+                }
                 $out[] = [
                     'kg' => $kg !== '' ? $kg : '—',
                     'label' => $label !== '' ? $label : '—',

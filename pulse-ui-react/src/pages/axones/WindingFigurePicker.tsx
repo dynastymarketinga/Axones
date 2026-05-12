@@ -1,8 +1,12 @@
 "use client"
 
+import { CircleDot } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+
+import { OtPlanillaInputIcon } from "./OtPlanillaInputIcon"
 
 const FIGURAS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const
 
@@ -10,37 +14,40 @@ type WindingFigurePickerProps = {
   value: string
   onChange: (v: string) => void
   className?: string
+  /** Solo el campo de texto muestra error (no todo el bloque de botones). */
+  invalid?: boolean
   helpText?: string
   disabled?: boolean
 }
 
 /**
- * FIGURA DE EMBOBINADO (1–8 o libre). Los botones son atajos; la miniatura solo repite el valor (referencia visual).
+ * FIGURA DE EMBOBINADO (1–8 o libre). Atajos 1–8 y campo en una sola fila para alinear con otros inputs de la planilla.
  */
 export function WindingFigurePicker({
   value,
   onChange,
   className,
-  helpText = "1–8 o libre",
+  invalid = false,
+  helpText = "3",
   disabled = false,
 }: WindingFigurePickerProps) {
   const v = (value || "").trim()
-  const previewText =
-    v.length === 0 ? "—" : v.length <= 3 ? v : `${v.slice(0, 2)}…`
-  const numericHelpText = helpText === "1–8 o libre" ? "1–8" : helpText
   return (
     <div
-      className={cn("ax-winding space-y-2", className)}
-      title="Atajos 1–8 o escribe en el campo. La miniatura es solo referencia visual de la figura."
+      className={cn(
+        "ax-winding flex min-h-9 min-w-0 flex-nowrap items-center gap-1 overflow-x-auto",
+        className,
+      )}
+      title="Atajos 1–8 o escribe en el campo."
     >
-      <div className="flex flex-wrap gap-1" role="group" aria-label="Atajos figura de embobinado 1 a 8">
+      <div className="flex shrink-0 flex-nowrap gap-px" role="group" aria-label="Atajos figura de embobinado 1 a 8">
         {FIGURAS.map((n) => (
           <Button
             key={n}
             type="button"
             size="sm"
             variant={v === n ? "default" : "outline"}
-            className="h-9 min-w-9 px-2.5 text-xs sm:h-8 sm:min-w-8 sm:px-2"
+            className="h-9 w-8 shrink-0 px-0 text-xs font-semibold leading-none"
             aria-pressed={v === n}
             disabled={disabled}
             onClick={() => onChange(n)}
@@ -49,51 +56,23 @@ export function WindingFigurePicker({
           </Button>
         ))}
       </div>
-      <div className="flex flex-row flex-wrap items-center gap-2">
+      <OtPlanillaInputIcon
+        icon={CircleDot}
+        compact
+        className="ot-input-icon-wrap--winding h-9 min-h-9 w-[4.25rem] shrink-0 self-stretch sm:w-[4.5rem]"
+      >
         <Input
-          className="h-9 min-h-9 min-w-0 w-full max-w-full flex-1 sm:max-w-xs text-sm"
+          className="ax-winding-figure-input h-9 min-h-9 w-full min-w-0 px-2 py-0 text-sm"
           value={v}
           inputMode="numeric"
           pattern="[0-9]*"
           disabled={disabled}
           onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 1))}
-          placeholder={numericHelpText}
+          placeholder={helpText}
           aria-label="Figura de embobinado (1-8)"
+          aria-invalid={invalid ? true : undefined}
         />
-        <div className="flex items-center gap-1.5">
-          <span className="text-muted-foreground shrink-0 text-[10px] leading-tight max-w-[4.5rem] sm:max-w-[7rem]">
-            Vista previa
-          </span>
-          <div
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"
-            aria-hidden
-            title="Vista previa: bobina con el número o texto elegido (no es un botón)."
-          >
-            <svg viewBox="0 0 40 40" className="h-7 w-7 text-foreground" xmlns="http://www.w3.org/2000/svg">
-              <rect
-                x="2"
-                y="4"
-                width="36"
-                height="32"
-                rx="4"
-                className="fill-background stroke-foreground/80"
-                strokeWidth="1.2"
-              />
-              <circle cx="20" cy="20" r="10" fill="none" className="stroke-muted-foreground" strokeWidth="1" />
-              <circle cx="20" cy="20" r="3" className="fill-muted-foreground" />
-              <text
-                x="20"
-                y="24"
-                textAnchor="middle"
-                className="fill-foreground"
-                style={{ fontSize: "10px", fontWeight: 700, fontFamily: "system-ui" }}
-              >
-                {previewText}
-              </text>
-            </svg>
-          </div>
-        </div>
-      </div>
+      </OtPlanillaInputIcon>
     </div>
   )
 }

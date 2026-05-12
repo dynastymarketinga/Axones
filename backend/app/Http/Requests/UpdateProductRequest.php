@@ -31,6 +31,7 @@ class UpdateProductRequest extends FormRequest
                     ->where(fn ($q) => $q->where('client_id', $this->input('client_id')))
                     ->ignore($productId),
             ],
+            'barcode' => ['nullable', 'string', 'max:255'],
             'cpe' => ['nullable', 'string', 'max:255'],
             'mps' => ['nullable', 'string', 'max:255'],
             'print_type' => ['nullable', 'string', 'max:128'],

@@ -150,7 +150,7 @@ class WorkOrderController extends Controller
                 }
             });
 
-            if (in_array($areaProcessTag, ['not_started', 'in_progress'], true)) {
+            if (in_array($areaProcessTag, ['not_started', 'in_progress', 'active'], true)) {
                 $targetStage = $this->targetBoardStageForMiArea($miArea);
                 $targetIdx = $this->boardStageOrderIndex($targetStage);
                 if ($areaProcessTag === 'not_started') {
@@ -162,6 +162,19 @@ class WorkOrderController extends Controller
                     }
                     if ($before !== []) {
                         $query->whereIn('board_stage', $before);
+                    } else {
+                        $query->whereRaw('1 = 0');
+                    }
+                } elseif ($areaProcessTag === 'active') {
+                    /** Cola + etapa del área: mismas etapas que `not_started` ∪ `in_progress` (hasta la columna Kanban del área). */
+                    $through = [];
+                    foreach (WorkOrderBoardStage::cases() as $i => $case) {
+                        if ($i <= $targetIdx) {
+                            $through[] = $case->value;
+                        }
+                    }
+                    if ($through !== []) {
+                        $query->whereIn('board_stage', $through);
                     } else {
                         $query->whereRaw('1 = 0');
                     }

@@ -18,7 +18,6 @@ import SuppliersPage from "@/pages/axones/SuppliersPage"
 import PurchaseOrdersPage from "@/pages/axones/PurchaseOrdersPage"
 import ClientOrdersPage from "@/pages/axones/ClientOrdersPage"
 import ClientOrderNewPage from "@/pages/axones/ClientOrderNewPage"
-import ClientOrderDetailPage from "@/pages/axones/ClientOrderDetailPage"
 import ClientOrderEditPage from "@/pages/axones/ClientOrderEditPage"
 import InventoryMovementsPage from "@/pages/axones/InventoryMovementsPage"
 import InventoryMovementsPreviewPage from "@/pages/axones/InventoryMovementsPreviewPage"
@@ -96,6 +95,11 @@ function LegacyInventoryAreasRedirect(): ReactElement {
   return <Navigate to="/recepciones-oc" replace />
 }
 
+/** Compat: URLs antiguas `/ordenes-cliente/:id/edit` → `/ordenes-cliente/:id`. */
+function ClientOrderLegacyEditRedirect(): ReactElement {
+  return <Navigate to=".." replace relative="path" />
+}
+
 export const router = createBrowserRouter(
   [
     // AUTH ROUTES
@@ -160,8 +164,11 @@ export const router = createBrowserRouter(
         },
         { path: "ordenes-cliente", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrdersPage /> }) },
         { path: "ordenes-cliente/nueva", element: guardAxonesRoute({ routeKey: "ordenes-cliente/nueva", element: <ClientOrderNewPage /> }) },
-        { path: "ordenes-cliente/:coId/edit", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderEditPage /> }) },
-        { path: "ordenes-cliente/:coId", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderDetailPage /> }) },
+        {
+          path: "ordenes-cliente/:coId/edit",
+          element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderLegacyEditRedirect /> }),
+        },
+        { path: "ordenes-cliente/:coId", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrderEditPage /> }) },
         { path: "pedidos-cliente", element: guardAxonesRoute({ routeKey: "pedidos-cliente", element: <ClientOrdersPage /> }) },
         { path: "materiales", element: guardAxonesRoute({ routeKey: "materiales", element: <MaterialsPage /> }) },
         { path: "materiales/nuevo", element: guardAxonesRoute({ routeKey: "materiales", element: <MaterialFormPage /> }) },

@@ -16,13 +16,6 @@ class StoreInventoryReturnRequest extends FormRequest
         return true;
     }
 
-    protected function prepareForValidation(): void
-    {
-        if ($this->input('destination_area') !== InventoryArea::BobinasRechazadas->value) {
-            $this->merge(['work_order_id' => null]);
-        }
-    }
-
     /**
      * @return array<string, mixed>
      */

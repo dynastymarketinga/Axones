@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { Check, ChevronsUpDown } from "lucide-react"
 import { toast } from "sonner"
 
@@ -154,6 +154,48 @@ const OC_CODE_SEQ_KEY = "axones_oc_code_seq_v1"
 /** Misma longitud máxima que `StorePurchaseOrderRequest` (`max:64`). */
 const PO_CODE_MAX_LEN = 64
 
+const PURCHASE_ORDER_NEW_DRAFT_KEY = "axones:purchase-order-new-draft"
+
+type PurchaseOrderNewDraftV1 = {
+  v: 1
+  supplierId: string
+  code: string
+  codeTouched: boolean
+  orderedAt: string
+  notes: string
+  taxApplies: boolean
+  lines: PoLineDraft[]
+}
+
+/** Alinea micras/ancho si el tipo oculta dimensiones (mismo criterio que al editar en UI). */
+function normalizeLineByBusinessRules(line: PoLineDraft): PoLineDraft {
+  const hide = shouldHideDims(line.item_type)
+  return {
+    ...line,
+    ...(hide ? { micras: "", ancho_mm: "" } : {}),
+  }
+}
+
+function normalizePoLineDraftFromStorage(raw: unknown): PoLineDraft {
+  if (!raw || typeof raw !== "object") return emptyLine()
+  const r = raw as Partial<PoLineDraft>
+  const it = r.item_type
+  const item_type: PoLineDraft["item_type"] =
+    it === "sustrato" || it === "tinta" || it === "quimico" || it === "otros" ? it : "sustrato"
+  const u = typeof r.unit === "string" ? r.unit.trim() : ""
+  const unit: PoLineUnit = isPoLineUnit(u) ? u : "kg"
+  return normalizeLineByBusinessRules({
+    description: typeof r.description === "string" ? r.description : "",
+    material_id: typeof r.material_id === "string" ? r.material_id : "",
+    item_type,
+    micras: typeof r.micras === "string" ? r.micras : "",
+    ancho_mm: typeof r.ancho_mm === "string" ? r.ancho_mm : "",
+    quantity_ordered: typeof r.quantity_ordered === "string" ? r.quantity_ordered : "",
+    unit,
+    unit_price: typeof r.unit_price === "string" ? r.unit_price : "",
+  })
+}
+
 type PoFieldErrors = {
   supplier?: string
   code?: string
@@ -203,6 +245,7 @@ function lineDraftTotal(line: PoLineDraft): number {
 export default function PurchaseOrderNewPage() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
   const [supplierOpen, setSupplierOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -265,6 +308,31 @@ export default function PurchaseOrderNewPage() {
     return from && from.startsWith("/") ? from : "/ordenes-compra"
   }, [navState?.from])
 
+  function savePoDraftToSession(): boolean {
+    const draft: PurchaseOrderNewDraftV1 = {
+      v: 1,
+      supplierId,
+      code,
+      codeTouched,
+      orderedAt,
+      notes,
+      taxApplies,
+      lines,
+    }
+    try {
+      sessionStorage.setItem(PURCHASE_ORDER_NEW_DRAFT_KEY, JSON.stringify(draft))
+      return true
+    } catch {
+      toast.error("No se pudo guardar el borrador del formulario. Intente de nuevo.")
+      return false
+    }
+  }
+
+  function persistPoDraftAndGoToNewSupplier() {
+    if (!savePoDraftToSession()) return
+    navigate("/proveedores/form", { state: { from: "/ordenes-compra/nueva" } })
+  }
+
   useEffect(() => {
     if (!codeTouched && !code.trim()) {
       setCode(buildAutoPoCode())
@@ -302,6 +370,75 @@ export default function PurchaseOrderNewPage() {
     presetSupplierConsumedRef.current = true
     setSupplierId(String(pid))
   }, [supplierListReady, navState?.presetSupplierId])
+
+  useEffect(() => {
+    const proveedorRaw = searchParams.get("proveedor")
+    const proveedorNum = proveedorRaw ? Number(proveedorRaw) : NaN
+    const hasProveedor = Number.isFinite(proveedorNum) && proveedorNum > 0
+    if (!hasProveedor) return
+
+    let parsed: PurchaseOrderNewDraftV1 | null = null
+    try {
+      const raw = sessionStorage.getItem(PURCHASE_ORDER_NEW_DRAFT_KEY)
+      if (raw) {
+        const data = JSON.parse(raw) as Partial<PurchaseOrderNewDraftV1>
+        if (data?.v === 1) parsed = data as PurchaseOrderNewDraftV1
+      }
+    } catch {
+      parsed = null
+    }
+
+    setSupplierId(String(proveedorNum))
+    supplierResolveFailedForRef.current = null
+    setFieldErrors({})
+    setLineErrors({})
+
+    if (parsed) {
+      setCode(typeof parsed.code === "string" ? parsed.code : "")
+      setCodeTouched(Boolean(parsed.codeTouched))
+      setOrderedAt(
+        typeof parsed.orderedAt === "string" && parsed.orderedAt
+          ? parsed.orderedAt
+          : toDateInputValue(new Date()),
+      )
+      setNotes(typeof parsed.notes === "string" ? parsed.notes : "")
+      setTaxApplies(typeof parsed.taxApplies === "boolean" ? parsed.taxApplies : true)
+      if (Array.isArray(parsed.lines) && parsed.lines.length > 0) {
+        setLines(parsed.lines.map((row) => normalizePoLineDraftFromStorage(row)))
+      } else {
+        setLines([emptyLine()])
+      }
+    }
+
+    void (async () => {
+      try {
+        const one = await apiFetch<SupplierRecord>(`suppliers/${proveedorNum}`)
+        setSuppliers((prev) => {
+          if (prev.some((s) => s.id === one.id)) return prev
+          return [...prev, one].sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+        })
+      } catch {
+        /* el combo puede mostrar vacío hasta recargar */
+      }
+    })()
+
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("proveedor")
+        return next
+      },
+      { replace: true },
+    )
+
+    if (parsed) {
+      try {
+        sessionStorage.removeItem(PURCHASE_ORDER_NEW_DRAFT_KEY)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     supplierResolveFailedForRef.current = null
@@ -512,6 +649,11 @@ export default function PurchaseOrderNewPage() {
         }),
       })
       toast.success("Orden de compra creada.")
+      try {
+        sessionStorage.removeItem(PURCHASE_ORDER_NEW_DRAFT_KEY)
+      } catch {
+        /* ignore */
+      }
       navigate(returnTo)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -547,78 +689,90 @@ export default function PurchaseOrderNewPage() {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="grid gap-2">
             <Label htmlFor="po-supplier-trigger">Proveedor *</Label>
-            <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  id="po-supplier-trigger"
-                  type="button"
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={supplierOpen}
-                  aria-invalid={Boolean(fieldErrors.supplier)}
-                  aria-describedby={fieldErrors.supplier ? "po-supplier-error" : undefined}
-                  className={cn(
-                    "h-10 w-full justify-between font-normal",
-                    "border-primary/25 bg-background/90",
-                    fieldErrors.supplier && "border-destructive ring-1 ring-destructive/40",
-                  )}
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="po-supplier-trigger"
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={supplierOpen}
+                      aria-invalid={Boolean(fieldErrors.supplier)}
+                      aria-describedby={fieldErrors.supplier ? "po-supplier-error" : undefined}
+                      className={cn(
+                        "h-10 w-full justify-between font-normal",
+                        "border-primary/25 bg-background/90",
+                        fieldErrors.supplier && "border-destructive ring-1 ring-destructive/40",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "truncate text-left",
+                          supplierTriggerDisplay.muted && "text-muted-foreground",
+                        )}
+                      >
+                        {supplierTriggerDisplay.text}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+                  align="start"
                 >
-                  <span
-                    className={cn(
-                      "truncate text-left",
-                      supplierTriggerDisplay.muted && "text-muted-foreground",
-                    )}
-                  >
-                    {supplierTriggerDisplay.text}
-                  </span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
-                align="start"
+                  <Command shouldFilter>
+                    <CommandInput placeholder="Buscar proveedor..." />
+                    <CommandList className="max-h-60">
+                      <CommandEmpty>Sin resultados.</CommandEmpty>
+                      <CommandGroup>
+                        {suppliers.map((s) => (
+                          <CommandItem
+                            key={s.id}
+                            value={`${s.name} ${s.rif ?? ""}`}
+                            onSelect={() => {
+                              supplierResolveFailedForRef.current = null
+                              setSupplierId(String(s.id))
+                              setSupplierOpen(false)
+                              setFieldErrors((prev) => {
+                                if (!prev.supplier) return prev
+                                const next = { ...prev }
+                                delete next.supplier
+                                return next
+                              })
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                String(s.id) === supplierId ? "opacity-100" : "opacity-0",
+                              )}
+                              aria-hidden
+                            />
+                            <span className="truncate">{s.name}</span>
+                            {s.rif ? (
+                              <span className="text-muted-foreground ml-2 shrink-0 text-xs">
+                                {s.rif}
+                              </span>
+                            ) : null}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => persistPoDraftAndGoToNewSupplier()}
+                disabled={saving}
               >
-                <Command shouldFilter>
-                  <CommandInput placeholder="Buscar proveedor..." />
-                  <CommandList className="max-h-60">
-                    <CommandEmpty>Sin resultados.</CommandEmpty>
-                    <CommandGroup>
-                      {suppliers.map((s) => (
-                        <CommandItem
-                          key={s.id}
-                          value={`${s.name} ${s.rif ?? ""}`}
-                          onSelect={() => {
-                            supplierResolveFailedForRef.current = null
-                            setSupplierId(String(s.id))
-                            setSupplierOpen(false)
-                            setFieldErrors((prev) => {
-                              if (!prev.supplier) return prev
-                              const next = { ...prev }
-                              delete next.supplier
-                              return next
-                            })
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              String(s.id) === supplierId ? "opacity-100" : "opacity-0",
-                            )}
-                            aria-hidden
-                          />
-                          <span className="truncate">{s.name}</span>
-                          {s.rif ? (
-                            <span className="text-muted-foreground ml-2 shrink-0 text-xs">
-                              {s.rif}
-                            </span>
-                          ) : null}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+                + Nuevo
+              </Button>
+            </div>
             {fieldErrors.supplier ? (
               <p id="po-supplier-error" className="text-destructive text-xs font-medium">
                 {fieldErrors.supplier}
@@ -756,22 +910,17 @@ export default function PurchaseOrderNewPage() {
                           </div>
                         </TableCell>
                         <TableCell className="align-top">
-                          <div className="grid gap-1">
-                            <Input
-                              id={`po-line-${i}-requested`}
-                              value={line.description}
-                              onChange={(ev) => {
-                                const next = ev.target.value
-                                updateLine(i, { description: next, material_id: "" })
-                              }}
-                              placeholder="Ej: BOPP transparente 20 micras 520 mm"
-                              aria-label={`Material solicitado, fila ${i + 1}`}
-                              disabled={saving}
-                            />
-                            <p className="text-muted-foreground text-xs">
-                              Este texto describe lo que se pide. El material real se selecciona o crea en Recepción.
-                            </p>
-                          </div>
+                          <Input
+                            id={`po-line-${i}-requested`}
+                            value={line.description}
+                            onChange={(ev) => {
+                              const next = ev.target.value
+                              updateLine(i, { description: next, material_id: "" })
+                            }}
+                            placeholder="Ej: BOPP transparente 20 micras 520 mm"
+                            aria-label={`Material solicitado, fila ${i + 1}`}
+                            disabled={saving}
+                          />
                         </TableCell>
                         <TableCell className="align-top">
                           <Select

@@ -3,7 +3,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
-import { Plus, Trash2 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import {
+  Barcode,
+  Boxes,
+  Calendar,
+  CreditCard,
+  FileStack,
+  FileText,
+  Layers,
+  ListTree,
+  Mail,
+  MapPin,
+  Package,
+  Phone,
+  Plus,
+  Printer,
+  ShoppingCart,
+  Tag,
+  Trash2,
+  User,
+} from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { CLIENT_ORDER_MODULE_TITLE } from "@/pages/axones/client-order-i18n"
@@ -14,6 +34,14 @@ import type {
 } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -171,146 +199,279 @@ export function WorkOrderDocumentSheet({
   const p = workOrder.product
   const co = workOrder.client_order
 
+  const clientRows: { label: string; value: string; Icon: LucideIcon }[] = [
+    { label: "Nombre", value: c?.name ?? "—", Icon: User },
+    { label: "RIF", value: c?.rif ?? "—", Icon: CreditCard },
+    {
+      label: "Ubicación",
+      value:
+        c?.state || c?.city
+          ? [c.state, c.city].filter(Boolean).join(" · ") || "—"
+          : "—",
+      Icon: MapPin,
+    },
+    { label: "Correo", value: c?.email ?? "—", Icon: Mail },
+    { label: "Teléfono", value: c?.phone ?? "—", Icon: Phone },
+  ]
+
+  const productRows: { label: string; value: string; mono?: boolean; Icon: LucideIcon }[] = p
+    ? [
+        { label: "Nombre", value: p.name, Icon: Tag },
+        { label: "CPE", value: p.cpe ?? "—", Icon: Layers },
+        { label: "M.P.P.S", value: p.mps ?? "—", Icon: Boxes },
+        { label: "Código de barra", value: p.barcode ?? "—", mono: true, Icon: Barcode },
+        { label: "Tipo impresión", value: p.print_type ?? "—", Icon: Printer },
+        { label: "Estructura", value: p.structure ?? "—", Icon: Package },
+      ]
+    : []
+
   return (
     <div className="space-y-4">
-      <Card className="border-l-4 border-sky-500 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base font-semibold">
+      <Card className="overflow-hidden rounded-xl border border-primary/12 shadow-sm">
+        <CardHeader className="border-b border-border/50 bg-muted/20 pb-3">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold tracking-tight">
+            <FileStack className="h-4 w-4 shrink-0 text-primary" aria-hidden />
             Maestro y pedido
           </CardTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-xs leading-relaxed">
             Datos que en papel vienen en la cabecera: cliente, producto y pedido
             (precarga desde datos maestros).
             {readOnly ? (
-              <span className="mt-1 block text-amber-800 dark:text-amber-200">
-                Solo lectura: la ficha de materiales la gestiona Calidad / planificación.
+              <span className="mt-2 block rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-amber-950 dark:text-amber-100">
+                Solo lectura: la ficha de materiales la gestiona Calidad /
+                planificación.
               </span>
             ) : null}
           </p>
         </CardHeader>
-        <CardContent className="grid gap-4 text-sm md:grid-cols-2">
-          <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-            <div className="font-medium text-foreground">Cliente</div>
-            <div className="text-muted-foreground space-y-1">
-              <div>
-                <span className="text-foreground font-medium">
-                  {c?.name ?? "—"}
-                </span>
-              </div>
-              {c?.rif ? <div>RIF: {c.rif}</div> : null}
-              {c?.state || c?.city ? (
-                <div>
-                  {[c.state, c.city].filter(Boolean).join(" · ") || "—"}
-                </div>
-              ) : null}
-              {c?.email ? <div>{c.email}</div> : null}
-              {c?.phone ? <div>{c.phone}</div> : null}
+        <CardContent className="grid gap-6 p-4 md:grid-cols-2 md:p-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <User className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Cliente
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-border/60">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                    <TableHead className="w-[38%] pl-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Campo
+                    </TableHead>
+                    <TableHead className="pr-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Valor
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {clientRows.map((row) => {
+                    const RowIcon = row.Icon
+                    return (
+                    <TableRow
+                      key={row.label}
+                      className="border-border/50 hover:bg-transparent"
+                    >
+                      <TableCell className="pl-4 text-xs font-medium text-muted-foreground">
+                        <span className="inline-flex items-center gap-1.5">
+                          <RowIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                          {row.label}
+                        </span>
+                      </TableCell>
+                      <TableCell className="pr-4 text-sm text-foreground">
+                        {row.value}
+                      </TableCell>
+                    </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
 
-          <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-            <div className="font-medium text-foreground">Producto (maestro)</div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Package className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Producto (maestro)
+            </div>
             {p ? (
-              <dl className="text-muted-foreground grid gap-1">
-                <div>
-                  <dt className="sr-only">Nombre</dt>
-                  <dd className="text-foreground font-medium">{p.name}</dd>
-                </div>
-                {p.cpe ? (
-                  <div>
-                    CPE: <span className="text-foreground">{p.cpe}</span>
-                  </div>
-                ) : null}
-                {p.mps ? (
-                  <div>
-                    M.P.P.S: <span className="text-foreground">{p.mps}</span>
-                  </div>
-                ) : null}
-                {p.barcode ? (
-                  <div>
-                    Código de barra:{" "}
-                    <span className="text-foreground font-mono text-xs">
-                      {p.barcode}
-                    </span>
-                  </div>
-                ) : null}
-                {p.print_type ? (
-                  <div>
-                    Tipo impresión:{" "}
-                    <span className="text-foreground">{p.print_type}</span>
-                  </div>
-                ) : null}
-                {p.structure ? (
-                  <div>
-                    Estructura:{" "}
-                    <span className="text-foreground">{p.structure}</span>
-                  </div>
-                ) : null}
-              </dl>
+              <div className="overflow-x-auto rounded-lg border border-border/60">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                      <TableHead className="w-[38%] pl-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Campo
+                      </TableHead>
+                      <TableHead className="pr-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Valor
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productRows.map((row) => {
+                      const RowIcon = row.Icon
+                      return (
+                      <TableRow
+                        key={row.label}
+                        className="border-border/50 hover:bg-transparent"
+                      >
+                        <TableCell className="pl-4 text-xs font-medium text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <RowIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                            {row.label}
+                          </span>
+                        </TableCell>
+                        <TableCell
+                          className={
+                            row.mono
+                              ? "pr-4 font-mono text-sm text-foreground"
+                              : "pr-4 text-sm font-medium text-foreground"
+                          }
+                        >
+                          {row.value}
+                        </TableCell>
+                      </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             ) : (
-              <p className="text-muted-foreground">Sin producto ligado.</p>
+              <p className="text-muted-foreground text-sm">Sin producto ligado.</p>
             )}
           </div>
 
-          <div className="space-y-2 rounded-lg border bg-muted/30 p-3 md:col-span-2">
-            <div className="font-medium text-foreground">{CLIENT_ORDER_MODULE_TITLE}</div>
+          <div className="space-y-3 md:col-span-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <ShoppingCart className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {CLIENT_ORDER_MODULE_TITLE}
+            </div>
             {co ? (
-              <div className="text-muted-foreground grid gap-2 md:grid-cols-2">
-                <div>
-                  <div>
-                    Código:{" "}
-                    <span className="text-foreground font-mono">{co.code}</span>
+              <div className="space-y-4">
+                <div className="overflow-x-auto rounded-lg border border-border/60">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                        <TableHead className="min-w-[120px] pl-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Campo
+                        </TableHead>
+                        <TableHead className="pr-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Valor
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow className="border-border/50 hover:bg-transparent">
+                        <TableCell className="pl-4 text-xs font-medium text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                            Código
+                          </span>
+                        </TableCell>
+                        <TableCell className="pr-4 font-mono text-sm font-medium">
+                          {co.code}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow className="border-border/50 hover:bg-transparent">
+                        <TableCell className="pl-4 text-xs font-medium text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                            Fecha
+                          </span>
+                        </TableCell>
+                        <TableCell className="pr-4 text-sm">
+                          {formatDate(co.ordered_at ?? null)}
+                        </TableCell>
+                      </TableRow>
+                      {workOrder.client_order_reference ? (
+                        <TableRow className="border-border/50 hover:bg-transparent">
+                          <TableCell className="pl-4 text-xs font-medium text-muted-foreground">
+                            <span className="inline-flex items-center gap-1.5">
+                              <FileStack className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                              Ref. OT
+                            </span>
+                          </TableCell>
+                          <TableCell className="pr-4 text-sm">
+                            {workOrder.client_order_reference}
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </TableBody>
+                  </Table>
+                </div>
+                {co.lines?.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                          <TableHead className="min-w-[160px] pl-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Línea / producto
+                          </TableHead>
+                          <TableHead className="w-28 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Cantidad
+                          </TableHead>
+                          <TableHead className="min-w-[100px] pr-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Material
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {co.lines.map((ln, idx) => (
+                          <TableRow
+                            key={ln.id}
+                            className={
+                              idx % 2 === 1
+                                ? "border-border/50 bg-muted/20 hover:bg-muted/30"
+                                : "border-border/50 hover:bg-transparent"
+                            }
+                          >
+                            <TableCell className="pl-4 text-sm">
+                              {ln.product?.name ??
+                                ln.material?.name ??
+                                ln.description ??
+                                "Línea"}
+                            </TableCell>
+                            <TableCell className="text-sm tabular-nums">
+                              {ln.quantity} {ln.unit ?? ""}
+                            </TableCell>
+                            <TableCell className="pr-4 font-mono text-xs text-muted-foreground">
+                              {ln.material?.sku ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
-                  <div>Fecha: {formatDate(co.ordered_at ?? null)}</div>
-                  {workOrder.client_order_reference ? (
-                    <div>
-                      Ref. OT:{" "}
-                      <span className="text-foreground">
-                        {workOrder.client_order_reference}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-                <div>
-                  {co.lines?.length ? (
-                    <ul className="list-inside list-disc space-y-1 text-xs">
-                      {co.lines.map((ln) => (
-                        <li key={ln.id}>
-                          {ln.product?.name ??
-                            ln.material?.name ??
-                            ln.description ??
-                            "Línea"}
-                          : {ln.quantity} {ln.unit ?? ""}
-                          {ln.material
-                            ? ` · ${ln.material.sku}`
-                            : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="text-xs">Sin líneas en la orden.</span>
-                  )}
-                </div>
+                ) : (
+                  <p className="text-muted-foreground text-xs">
+                    Sin líneas en la orden.
+                  </p>
+                )}
               </div>
             ) : (
-              <p className="text-muted-foreground text-xs">
-                Esta OT no está ligada a un pedido cliente (OC) en el sistema. Puede enlazarse al crear o editar la orden desde
-                ese módulo.
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                Esta OT no está ligada a un pedido cliente (OC) en el sistema.
+                Puede enlazarse al crear o editar la orden desde ese módulo.
               </p>
             )}
             {workOrder.production_items?.length ? (
-              <div className="border-t pt-2">
-                <div className="text-foreground mb-1 text-xs font-medium">
+              <div className="rounded-lg border border-dashed border-border/80 bg-muted/15 p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <ListTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   Partidas / cantidades en documento
                 </div>
-                <ul className="space-y-1 text-xs">
+                <ul className="space-y-1.5 text-sm">
                   {workOrder.production_items.map((it) => (
-                    <li key={it.id}>
-                      {it.product_description}: {it.quantity}{" "}
-                      {it.quantity_unit}
-                      {it.technical_specs
-                        ? ` · ${it.technical_specs}`
-                        : ""}
+                    <li key={it.id} className="leading-snug">
+                      <span className="font-medium text-foreground">
+                        {it.product_description}
+                      </span>
+                      {": "}
+                      {it.quantity} {it.quantity_unit}
+                      {it.technical_specs ? (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {it.technical_specs}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

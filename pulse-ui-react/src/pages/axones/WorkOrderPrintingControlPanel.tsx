@@ -1,23 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { toast } from "sonner"
 import { useNavigate } from "react-router-dom"
 
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
+import { MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import {
   Dialog,
   DialogContent,
@@ -26,10 +18,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import WorkOrderPrintingOpsSection, { type BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
+import WorkOrderPrintingOpsSection, {
+  type BobinaLabelMeta,
+  type DraftPerson,
+  type DraftPersonRole,
+  stringsFromActivePersonnel,
+} from "./WorkOrderPrintingOpsSection"
+import { PRINTING_CONTROL_SAVED_EVENT } from "@/lib/printing-mes-band-status"
 import {
   IMP_ACTUAL_KEY,
   IMP_ESTADO_KEY,
@@ -39,6 +35,7 @@ import {
   clearPrintingMirrorKeys,
   createNewPrintingTurno,
   finalizeTurnTimerNow,
+  IMP_BOBINAS_SLOTS,
   parsePrintingTurnoActual,
   parsePrintingTurnos,
   printingTurnoToMirror,
@@ -47,9 +44,11 @@ import {
   sumEntradaKg,
   sumSalidaKg,
   type PrintingTurnoEntry,
+  type PrintingTurnTimer,
+  type WarehouseReturnDraft,
 } from "./printing-turnos"
 import "./work-order-planilla.css"
-import { Sparkles } from "lucide-react"
+import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, RotateCcw, Save, Sparkles, Users } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
 
@@ -79,20 +78,7 @@ type ProductionSummaryPayload = {
   } | null
 }
 
-type ReturnDraft = {
-  buenaMaterialId: string
-  buenaKg: string
-  rechazadaMaterialId: string
-  rechazadaKg: string
-  rechazadaMotivo: string
-  rechazadaObs: string
-  bobinaCode: string
-}
-
 type InventoryReturnCreated = { id: number }
-
-type DraftPersonRole = "operador" | "ayudante" | "supervisor"
-type DraftPerson = { id: string; role: DraftPersonRole; name: string }
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
@@ -127,6 +113,136 @@ function normalizeNumericString(v: unknown): string {
 }
 
 const LOCAL_PRINTING_DRAFT_PREFIX = "axones.printing.control.draft."
+
+/** Tonos visuales para confirmaciones del panel de impresión (alineados a cada acción). */
+type MesPrintingConfirmTone =
+  | "emerald"
+  | "sky"
+  | "indigo"
+  | "violet"
+  | "amber"
+  | "orange"
+  | "rose"
+  | "red"
+
+const MES_PRINTING_CONFIRM: Record<MesPrintingConfirmTone, { panel: string; iconBox: string }> = {
+  emerald: {
+    panel:
+      "border-emerald-200/80 bg-gradient-to-b from-emerald-50/55 to-background sm:max-w-md sm:rounded-lg dark:from-emerald-950/35 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-100/80 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-300",
+  },
+  sky: {
+    panel:
+      "border-sky-200/80 bg-gradient-to-b from-sky-50/55 to-background sm:max-w-md sm:rounded-lg dark:from-sky-950/35 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-sky-200 bg-sky-100/80 text-sky-800 dark:border-sky-800 dark:bg-sky-950/45 dark:text-sky-300",
+  },
+  indigo: {
+    panel:
+      "border-indigo-200/80 bg-gradient-to-b from-indigo-50/50 to-background sm:max-w-md sm:rounded-lg dark:from-indigo-950/35 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-100/80 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/45 dark:text-indigo-300",
+  },
+  violet: {
+    panel:
+      "border-violet-200/70 bg-gradient-to-b from-violet-50/50 to-background sm:max-w-md sm:rounded-lg dark:from-violet-950/30 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-200 bg-violet-100/80 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300",
+  },
+  amber: {
+    panel:
+      "border-amber-200/85 bg-gradient-to-b from-amber-50/55 to-background sm:max-w-md sm:rounded-lg dark:from-amber-950/30 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-100/80 text-amber-900 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-300",
+  },
+  orange: {
+    panel:
+      "border-orange-200/85 bg-gradient-to-b from-orange-50/50 to-background sm:max-w-md sm:rounded-lg dark:from-orange-950/28 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-orange-200 bg-orange-100/80 text-orange-900 dark:border-orange-800 dark:bg-orange-950/45 dark:text-orange-300",
+  },
+  rose: {
+    panel:
+      "border-rose-200/80 bg-gradient-to-b from-rose-50/50 to-background sm:max-w-md sm:rounded-lg dark:from-rose-950/28 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-100/80 text-rose-800 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-300",
+  },
+  red: {
+    panel:
+      "border-red-300/70 bg-gradient-to-b from-red-50/55 to-background sm:max-w-md sm:rounded-lg dark:from-red-950/40 dark:to-background",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-200 bg-red-100/80 text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-300",
+  },
+}
+
+type MesPrintingConfirmDialogProps = {
+  tone: MesPrintingConfirmTone
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  icon: ReactNode
+  title: string
+  description: ReactNode
+  confirmLabel: string
+  onConfirm: () => void
+  confirmVariant?: "default" | "destructive"
+}
+
+function MesPrintingConfirmDialog(props: MesPrintingConfirmDialogProps) {
+  const skin = MES_PRINTING_CONFIRM[props.tone]
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className={skin.panel}>
+        <DialogHeader className="space-y-4 text-left">
+          <div className="flex items-start gap-3">
+            <div className={skin.iconBox}>{props.icon}</div>
+            <div className="min-w-0 space-y-2">
+              <DialogTitle className="text-xl font-semibold tracking-tight">{props.title}</DialogTitle>
+              <DialogDescription className="text-sm leading-relaxed">{props.description}</DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button type="button" variant={props.confirmVariant ?? "default"} onClick={() => props.onConfirm()}>
+            {props.confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const MES_PRINTING_SUCCESS_TOAST_CLASSNAMES = {
+  toast:
+    "border-violet-200/70 bg-gradient-to-b from-violet-50/50 to-background text-foreground shadow-lg dark:from-violet-950/25 dark:to-background",
+  title: "text-foreground text-sm font-medium",
+  success: "!bg-transparent !border-transparent",
+  description: "text-muted-foreground text-sm",
+  icon: "text-violet-600",
+} as const
+
+function mesPrintingToastSuccess(message: string) {
+  toast.success(message, {
+    richColors: false,
+    classNames: MES_PRINTING_SUCCESS_TOAST_CLASSNAMES,
+    icon: createElement(Sparkles, { className: "h-4 w-4 shrink-0 text-violet-600", "aria-hidden": true }),
+  })
+}
+
+function mesPrintingToastWarning(message: string) {
+  toast.warning(message, {
+    richColors: false,
+    classNames: {
+      ...MES_PRINTING_SUCCESS_TOAST_CLASSNAMES,
+      warning: "!bg-transparent !border-transparent",
+      icon: "text-amber-600",
+    },
+    icon: createElement(AlertCircle, { className: "h-4 w-4 shrink-0 text-amber-600", "aria-hidden": true }),
+  })
+}
 
 type LocalPrintingDraft = {
   work_order_id: number
@@ -245,9 +361,13 @@ export default function WorkOrderPrintingControlPanel({
   /** Borrador para iniciar turno (sin turno activo). */
   const [draftTurno, setDraftTurno] = useState<"diurno" | "nocturno">("diurno")
   const [draftGrupo, setDraftGrupo] = useState<"A" | "B" | "C">("A")
-  const [draftPeople, setDraftPeople] = useState<DraftPerson[]>([
-    { id: "p0", role: "operador", name: "" },
-  ])
+  const [draftPeople, setDraftPeople] = useState<DraftPerson[]>([])
+  const [draftStaging, setDraftStaging] = useState<{ name: string; role: DraftPersonRole }>({
+    name: "",
+    role: "operador",
+  })
+  const draftPeopleRef = useRef<DraftPerson[]>([])
+  draftPeopleRef.current = draftPeople
 
   const draftOperadorName = useMemo(
     () => draftPeople.find((p) => p.role === "operador")?.name.trim() ?? "",
@@ -266,64 +386,37 @@ export default function WorkOrderPrintingControlPanel({
   }, [draftPeople])
   const draftOperadorMissing = useMemo(() => !draftOperadorName, [draftOperadorName])
 
-  const addDraftPerson = useCallback(() => {
-    setDraftPeople((prev) => [
-      ...prev,
-      { id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, role: "ayudante", name: "" },
-    ])
+  const onDraftStagingName = useCallback((v: string) => {
+    setDraftStaging((s) => ({ ...s, name: v }))
+  }, [])
+
+  const onDraftStagingRole = useCallback((v: DraftPersonRole) => {
+    setDraftStaging((s) => ({ ...s, role: v }))
+  }, [])
+
+  const guardarDraftPerson = useCallback((name: string, role: DraftPersonRole) => {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      toast.error("Escriba el nombre antes de guardar.")
+      return
+    }
+    const prev = draftPeopleRef.current
+    if (role === "supervisor" && prev.some((p) => p.role === "supervisor")) {
+      mesPrintingToastWarning("Solo puede haber un Supervisor en el turno.")
+      return
+    }
+    if (role === "operador" && prev.some((p) => p.role === "operador")) {
+      mesPrintingToastWarning("Solo puede haber un Operador principal en el turno.")
+      return
+    }
+    const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    setDraftPeople((p) => [...p, { id, role, name: trimmed }])
+    setDraftStaging((s) => ({ ...s, name: "" }))
   }, [])
 
   const removeDraftPerson = useCallback((id: string) => {
-    setDraftPeople((prev) => {
-      const next = prev.filter((p) => p.id !== id)
-      // Siempre mantener al menos 1 fila operador (restauración)
-      if (!next.some((p) => p.role === "operador")) {
-        return [{ id: "p0", role: "operador", name: "" }, ...next]
-      }
-      return next
-    })
+    setDraftPeople((prev) => prev.filter((p) => p.id !== id))
   }, [])
-
-  const updateDraftPerson = useCallback(
-    (id: string, patch: Partial<Pick<DraftPerson, "role" | "name">>) => {
-      setDraftPeople((prev) => {
-        const existingSupervisorId = prev.find((p) => p.role === "supervisor")?.id
-        const desiredRole = patch.role
-        if (desiredRole === "supervisor" && existingSupervisorId && existingSupervisorId !== id) {
-          toast.warning("Solo puede haber un Supervisor en el turno.")
-          return prev
-        }
-        if (desiredRole && desiredRole !== "operador") {
-          const target = prev.find((p) => p.id === id)
-          const operadorCount = prev.filter((p) => p.role === "operador").length
-          if (target?.role === "operador" && operadorCount === 1) {
-            toast.warning("Agregue otra persona al turno antes de cambiar el rol del único operador.")
-            return prev
-          }
-        }
-
-        let next = prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
-
-        if (desiredRole === "operador") {
-          return next.map((p) =>
-            p.id !== id && p.role === "operador" ? { ...p, role: "ayudante" } : p,
-          )
-        }
-
-        if (!next.some((p) => p.role === "operador")) {
-          const promoteIdx = next.findIndex((p) => p.role === "ayudante")
-          if (promoteIdx === -1) {
-            toast.warning("Debe existir al menos un operador en el turno.")
-            return prev
-          }
-          next = next.map((p, i) => (i === promoteIdx ? { ...p, role: "operador" } : p))
-        }
-
-        return next
-      })
-    },
-    [],
-  )
 
   const load = useCallback(async () => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -414,10 +507,10 @@ export default function WorkOrderPrintingControlPanel({
     })
   }, [])
 
-  const entradaBobinas = useMemo(() => getNumericSeries(form, "impEntradaBobinasKg", 26), [form])
-  const salidaBobinas = useMemo(() => getNumericSeries(form, "impSalidaBobinasKg", 22), [form])
-  const entradaBobinasMeta = useMemo(() => getMetaSeries(form, "impEntradaBobinasMeta", 26), [form])
-  const salidaBobinasMeta = useMemo(() => getMetaSeries(form, "impSalidaBobinasMeta", 22), [form])
+  const entradaBobinas = useMemo(() => getNumericSeries(form, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS), [form])
+  const salidaBobinas = useMemo(() => getNumericSeries(form, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS), [form])
+  const entradaBobinasMeta = useMemo(() => getMetaSeries(form, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS), [form])
+  const salidaBobinasMeta = useMemo(() => getMetaSeries(form, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS), [form])
   const totalEntradaTurnoActual = useMemo(
     () => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0),
     [entradaBobinas],
@@ -476,7 +569,7 @@ export default function WorkOrderPrintingControlPanel({
       ? formProducedBaseline
       : jsonAccum.producidoKg
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
-  const turnosRegistrados = hasHistoricalPrinting ? inferredHistoricalTurns : jsonAccum.turnosCerrados
+  const turnosRegistrados = hasHistoricalPrinting ? inferredHistoricalTurns : jsonAccum.turnosRegistrados
   const totalEntradaAcumulada = hasHistoricalPrinting ? historicalEntrada : jsonAccum.entradaKg
   const formScrapAcumulado = readNumber(form.impScrapAcumuladoKg)
   const totalScrapAcumulado = hasHistoricalPrinting
@@ -508,22 +601,28 @@ export default function WorkOrderPrintingControlPanel({
   const [labelEditorIndex, setLabelEditorIndex] = useState(0)
   const [labelEditorDraft, setLabelEditorDraft] = useState<BobinaLabelMeta>(emptyBobinaLabelMeta())
   const [labelEditorError, setLabelEditorError] = useState("")
-  const [returnModalOpen, setReturnModalOpen] = useState(false)
+  const [returnWarehouseOpen, setReturnWarehouseOpen] = useState(false)
   const [startTurnConfirmOpen, setStartTurnConfirmOpen] = useState(false)
   const [startTimerConfirmOpen, setStartTimerConfirmOpen] = useState(false)
   const [takeoverConfirmOpen, setTakeoverConfirmOpen] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
+  const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
+  const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
+  const [finalizeOtConfirmOpen, setFinalizeOtConfirmOpen] = useState(false)
+  const [emptyShiftCloseDialogOpen, setEmptyShiftCloseDialogOpen] = useState(false)
+  const pendingEmptyShiftCloseRef = useRef<{
+    cur: PrintingTurnoEntry
+    finalizedTimer: PrintingTurnTimer
+  } | null>(null)
   const [returnLoadingMaterialsGood, setReturnLoadingMaterialsGood] = useState(false)
   const [returnLoadingMaterialsBad, setReturnLoadingMaterialsBad] = useState(false)
   const [returnSubmitting, setReturnSubmitting] = useState(false)
   const [returnMaterialOptionsGood, setReturnMaterialOptionsGood] = useState<MaterialRow[]>([])
   const [returnMaterialOptionsBad, setReturnMaterialOptionsBad] = useState<MaterialRow[]>([])
-  const [returnDraft, setReturnDraft] = useState<ReturnDraft>({
+  const [returnDraft, setReturnDraft] = useState<WarehouseReturnDraft>({
     buenaMaterialId: "",
-    buenaKg: "",
     rechazadaMaterialId: "",
-    rechazadaKg: "",
-    rechazadaMotivo: "",
     rechazadaObs: "",
     bobinaCode: "",
   })
@@ -580,9 +679,13 @@ export default function WorkOrderPrintingControlPanel({
   const controlReadOnly = readOnlyOps || !canEditByControl
 
   const [pauseMotivoModalOpen, setPauseMotivoModalOpen] = useState(false)
+  const wasTimerPausedRef = useRef(false)
 
   useEffect(() => {
-    if (!timerPaused) setPauseMotivoModalOpen(false)
+    if (wasTimerPausedRef.current && !timerPaused) {
+      setPauseMotivoModalOpen(false)
+    }
+    wasTimerPausedRef.current = timerPaused
   }, [timerPaused])
 
   // Respaldo local inmediato del temporizador (evita pérdida al navegar atrás/recargar).
@@ -666,7 +769,7 @@ export default function WorkOrderPrintingControlPanel({
     }
     patchActiveTurn(() => nextTurn)
     setTakeoverConfirmOpen(false)
-    toast.success("Control tomado. Puede editar el turno.")
+    mesPrintingToastSuccess("Control tomado. Puede editar el turno.")
     void persistPrintingForm({
       ...form,
       [IMP_ACTUAL_KEY]: nextTurn,
@@ -674,11 +777,7 @@ export default function WorkOrderPrintingControlPanel({
     })
   }
 
-  function openTimerReportPreview() {
-    if (!canPreviewTimerReport) {
-      toast.error("Inicie el temporizador para habilitar la vista previa.")
-      return
-    }
+  function runOpenTimerReportPreview() {
     const payload = {
       generated_at: new Date().toISOString(),
       work_order_id: workOrderId,
@@ -723,6 +822,19 @@ export default function WorkOrderPrintingControlPanel({
     window.open(url, "_blank", "noopener,noreferrer")
   }
 
+  function requestOpenTimerReportPreview() {
+    if (!canPreviewTimerReport) {
+      toast.error("Inicie el temporizador para habilitar la vista previa.")
+      return
+    }
+    setPreviewTimerConfirmOpen(true)
+  }
+
+  function confirmOpenTimerReportPreview() {
+    setPreviewTimerConfirmOpen(false)
+    runOpenTimerReportPreview()
+  }
+
   function openDesperdicioPreview() {
     if (!canPreviewDesperdicioReport) {
       toast.error("Active un turno editable para habilitar la vista previa de desperdicio.")
@@ -765,6 +877,37 @@ export default function WorkOrderPrintingControlPanel({
       String(workOrderId),
     )}/impresion/desperdicio/vista-previa`
     window.open(url, "_blank", "noopener,noreferrer")
+  }
+
+  function requestCerrarTurnoActual() {
+    if (controlReadOnly) return
+    const cur = parsePrintingTurnoActual(form[IMP_ACTUAL_KEY])
+    if (!cur) return
+    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
+      toast.error("Complete turno, grupo y operador.")
+      return
+    }
+    const rechCierre = toFiniteOrNull(cur.devolucionRechazadaKg) ?? 0
+    if (rechCierre > 0 && !readString(cur.devolucionRechazadaMotivo).trim()) {
+      toast.error("Devolución rechazada: indique un motivo antes de cerrar el turno.")
+      return
+    }
+    setCloseTurnConfirmOpen(true)
+  }
+
+  function confirmCloseTurnFirstStep() {
+    setCloseTurnConfirmOpen(false)
+    cerrarTurnoActual()
+  }
+
+  function requestFinalizarAreaImpresion() {
+    if (!canFinalizeOrder) return
+    setFinalizeOtConfirmOpen(true)
+  }
+
+  function confirmFinalizarAreaImpresion() {
+    setFinalizeOtConfirmOpen(false)
+    void finalizarAreaImpresion()
   }
 
   const outlierWarnings = useMemo(() => {
@@ -846,13 +989,13 @@ export default function WorkOrderPrintingControlPanel({
       }
 
       if (outlierWarnings.length > 0) {
-        toast.warning(`Se detectaron ${outlierWarnings.length} valores atípicos. Se guardará de todas formas.`)
+        mesPrintingToastWarning(`Se detectaron ${outlierWarnings.length} valores atípicos. Se guardará de todas formas.`)
       }
 
-      const eb = getNumericSeries(src, "impEntradaBobinasKg", 26)
-      const sb = getNumericSeries(src, "impSalidaBobinasKg", 22)
-      const em = getMetaSeries(src, "impEntradaBobinasMeta", 26)
-      const sm = getMetaSeries(src, "impSalidaBobinasMeta", 22)
+      const eb = getNumericSeries(src, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS)
+      const sb = getNumericSeries(src, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS)
+      const em = getMetaSeries(src, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS)
+      const sm = getMetaSeries(src, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS)
 
       const closedP = parsePrintingTurnos(src[IMP_TURNOS_KEY])
       const actualP = parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
@@ -882,7 +1025,7 @@ export default function WorkOrderPrintingControlPanel({
         impMermaKg: normalizeNumericString(src.impMermaKg),
         impTimerEffectiveAccSec: normalizeNumericString(src.impTimerEffectiveAccSec),
         impTimerDeadAccSec: normalizeNumericString(src.impTimerDeadAccSec),
-        impRegistrosTurnos: String(accFromJson.turnosCerrados),
+        impRegistrosTurnos: String(accFromJson.turnosRegistrados),
         impAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
       }
 
@@ -900,7 +1043,10 @@ export default function WorkOrderPrintingControlPanel({
             notify_on_production_save: true,
           }),
         })
-        toast.success("Control de impresión guardado.")
+        mesPrintingToastSuccess("Control de impresión guardado.")
+        window.dispatchEvent(
+          new CustomEvent(PRINTING_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
+        )
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
         else toast.error("No se pudo guardar control de impresión.")
@@ -963,12 +1109,21 @@ export default function WorkOrderPrintingControlPanel({
     })
   }
 
-  function pauseProductionTimer() {
+  function requestPauseProductionTimer() {
+    if (!timerRunning || controlReadOnly) return
+    setPauseConfirmOpen(true)
+  }
+
+  function confirmPauseProductionTimer() {
+    setPauseConfirmOpen(false)
+    executePauseProductionTimer()
+  }
+
+  function executePauseProductionTimer() {
     if (!timerRunning || controlReadOnly) return
     const now = Date.now()
     const cur = activeTurno
     if (!cur) return
-    if (cur.timer.state !== "running") return
     const last = cur.timer.lastResumeAtMs
     const nextTurn: PrintingTurnoEntry = {
       ...cur,
@@ -1064,8 +1219,35 @@ export default function WorkOrderPrintingControlPanel({
       ...printingTurnoToMirror(turnoWithPeople),
       [IMP_TURNOS_KEY]: parsePrintingTurnos(prev[IMP_TURNOS_KEY]),
     }))
+    setDraftPeople([])
+    setDraftStaging({ name: "", role: "operador" })
     setStartTurnConfirmOpen(false)
-    toast.success("Turno iniciado. Use Guardar para persistir en el servidor.")
+    mesPrintingToastSuccess("Turno iniciado. Use Guardar para persistir en el servidor.")
+  }
+
+  function applyCerrarTurno(cur: PrintingTurnoEntry, finalizedTimer: PrintingTurnTimer) {
+    const u = getStoredUser()
+    const closed: PrintingTurnoEntry = {
+      ...cur,
+      timer: finalizedTimer,
+      closed_at: new Date().toISOString(),
+      closed_by: u ? { id: u.id, name: u.name } : null,
+    }
+    setForm((prev) => ({
+      ...prev,
+      [IMP_TURNOS_KEY]: [...parsePrintingTurnos(prev[IMP_TURNOS_KEY]), closed],
+      [IMP_ACTUAL_KEY]: null,
+      ...clearPrintingMirrorKeys(),
+    }))
+    mesPrintingToastSuccess("Turno cerrado. Puede iniciar otro turno cuando corresponda.")
+  }
+
+  function confirmEmptyShiftClose() {
+    const p = pendingEmptyShiftCloseRef.current
+    pendingEmptyShiftCloseRef.current = null
+    setEmptyShiftCloseDialogOpen(false)
+    if (!p) return
+    applyCerrarTurno(p.cur, p.finalizedTimer)
   }
 
   function cerrarTurnoActual() {
@@ -1087,25 +1269,11 @@ export default function WorkOrderPrintingControlPanel({
       sumSalidaKg(cur) === 0 &&
       sumEntradaKg(cur) === 0
     ) {
-      const ok = window.confirm(
-        "El turno no registra tiempo efectivo ni producción. ¿Desea cerrarlo igual?",
-      )
-      if (!ok) return
+      pendingEmptyShiftCloseRef.current = { cur, finalizedTimer }
+      setEmptyShiftCloseDialogOpen(true)
+      return
     }
-    const u = getStoredUser()
-    const closed: PrintingTurnoEntry = {
-      ...cur,
-      timer: finalizedTimer,
-      closed_at: new Date().toISOString(),
-      closed_by: u ? { id: u.id, name: u.name } : null,
-    }
-    setForm((prev) => ({
-      ...prev,
-      [IMP_TURNOS_KEY]: [...parsePrintingTurnos(prev[IMP_TURNOS_KEY]), closed],
-      [IMP_ACTUAL_KEY]: null,
-      ...clearPrintingMirrorKeys(),
-    }))
-    toast.success("Turno cerrado. Puede iniciar otro turno cuando corresponda.")
+    applyCerrarTurno(cur, finalizedTimer)
   }
 
   async function finalizarAreaImpresion() {
@@ -1137,7 +1305,7 @@ export default function WorkOrderPrintingControlPanel({
     }
     setForm(nextForm)
     await persistPrintingForm(nextForm)
-    toast.success("Área de impresión finalizada.")
+    mesPrintingToastSuccess("Área de impresión finalizada.")
   }
 
   function openLabelEditor(mode: "entrada" | "salida", idx: number) {
@@ -1168,7 +1336,7 @@ export default function WorkOrderPrintingControlPanel({
       return
     }
 
-    const size = labelEditorMode === "entrada" ? 26 : 22
+    const size = IMP_BOBINAS_SLOTS
     patchActiveTurn((t) => {
       if (labelEditorMode === "entrada") {
         const next = [...t.entradaBobinasMeta]
@@ -1201,26 +1369,36 @@ export default function WorkOrderPrintingControlPanel({
     }
   }, [])
 
-  function openReturnModal() {
-    setReturnDraft({
-      buenaMaterialId: "",
-      buenaKg: normalizeNumericString(form.impDevolucionBuenaKg),
-      rechazadaMaterialId: "",
-      rechazadaKg: normalizeNumericString(form.impDevolucionRechazadaKg),
-      rechazadaMotivo: readString(form.impDevolucionRechazadaMotivo),
-      rechazadaObs: "",
-      bobinaCode: "",
-    })
-    setReturnModalOpen(true)
-    void loadReturnMaterials("material")
-    void loadReturnMaterials("bobinas_rechazadas")
+  const devolucionesPendientePrevRef = useRef(false)
+  useEffect(() => {
+    if (devolucionesPendienteAlmacen && !devolucionesPendientePrevRef.current) {
+      setReturnWarehouseOpen(true)
+      void loadReturnMaterials("material")
+      void loadReturnMaterials("bobinas_rechazadas")
+    }
+    devolucionesPendientePrevRef.current = devolucionesPendienteAlmacen
+  }, [devolucionesPendienteAlmacen, loadReturnMaterials])
+
+  function handleReturnWarehouseOpenChange(open: boolean) {
+    setReturnWarehouseOpen(open)
+    if (open) {
+      setReturnDraft({
+        buenaMaterialId: "",
+        rechazadaMaterialId: "",
+        rechazadaObs: "",
+        bobinaCode: "",
+      })
+      void loadReturnMaterials("material")
+      void loadReturnMaterials("bobinas_rechazadas")
+    }
   }
 
   async function submitReturn() {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
 
-    const buenaKg = Number(readString(returnDraft.buenaKg).trim().replace(",", "."))
-    const rechKg = Number(readString(returnDraft.rechazadaKg).trim().replace(",", "."))
+    const buenaKg = Number(readString(readNumberString(form.impDevolucionBuenaKg)).trim().replace(",", "."))
+    const rechKg = Number(readString(readNumberString(form.impDevolucionRechazadaKg)).trim().replace(",", "."))
+    const rechMotivo = readString(form.impDevolucionRechazadaMotivo)
     const hasBuena = Number.isFinite(buenaKg) && buenaKg > 0
     const hasRech = Number.isFinite(rechKg) && rechKg > 0
     if (!hasBuena && !hasRech) {
@@ -1238,15 +1416,14 @@ export default function WorkOrderPrintingControlPanel({
       toast.error("Seleccione el material de la devolución rechazada.")
       return
     }
-    if (hasRech && !returnDraft.rechazadaMotivo.trim()) {
+    if (hasRech && !rechMotivo.trim()) {
       toast.error("Seleccione un motivo para la devolución rechazada.")
       return
     }
 
     const bobinaRef = returnDraft.bobinaCode.trim()
     const rejectReasonLabel =
-      PRINTING_REJECT_REASONS.find((r) => r.id === returnDraft.rechazadaMotivo)?.label ??
-      returnDraft.rechazadaMotivo.trim()
+      PRINTING_REJECT_REASONS.find((r) => r.id === rechMotivo)?.label ?? rechMotivo.trim()
     const rejectObs = returnDraft.rechazadaObs.trim()
 
     setReturnSubmitting(true)
@@ -1260,7 +1437,7 @@ export default function WorkOrderPrintingControlPanel({
           method: "POST",
           body: JSON.stringify({
             material_id: buenaMaterialId,
-            work_order_id: null,
+            work_order_id: workOrderId,
             destination_area: "material",
             quantity: buenaKg.toFixed(3),
             reason: bobinaRef ? `Bobina/Ref: ${bobinaRef}` : null,
@@ -1325,7 +1502,7 @@ export default function WorkOrderPrintingControlPanel({
             ...(hasRech
               ? {
                   impDevolucionRechazadaKg: normalizeNumericString(rechKg),
-                  impDevolucionRechazadaMotivo: returnDraft.rechazadaMotivo.trim(),
+                  impDevolucionRechazadaMotivo: rechMotivo.trim(),
                 }
               : null),
             impDevolucionesAlmacenUltimoEnvioMs: Date.now(),
@@ -1342,7 +1519,7 @@ export default function WorkOrderPrintingControlPanel({
             ? normalizeNumericString(rechKg)
             : cur.devolucionRechazadaKg,
           devolucionRechazadaMotivo: hasRech
-            ? returnDraft.rechazadaMotivo.trim()
+            ? rechMotivo.trim()
             : cur.devolucionRechazadaMotivo,
         }
         return {
@@ -1355,8 +1532,9 @@ export default function WorkOrderPrintingControlPanel({
         }
       }
       setForm((prev) => patchDev(prev))
-      setReturnModalOpen(false)
-      toast.success("Solicitud enviada a almacén. Devoluciones registradas.")
+      setReturnWarehouseOpen(false)
+      mesPrintingToastSuccess("Solicitud enviada a almacén. Devoluciones registradas.")
+      window.dispatchEvent(new Event("alerts:refresh"))
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo registrar la devolución / solicitud.")
@@ -1392,14 +1570,14 @@ export default function WorkOrderPrintingControlPanel({
 
     clearLocalPrintingDrafts(workOrderId)
     setForm(bootstrapPrintingFormState(cleared))
-    toast.success("Impresión reiniciada localmente. Guardando en el servidor…")
+    mesPrintingToastSuccess("Impresión reiniciada localmente. Guardando en el servidor…")
     await persistPrintingForm(cleared)
   }
 
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de impresión…</p>
 
   return (
-    <div className="space-y-4">
+    <div className="ax-mes space-y-4">
       <WorkOrderStageBadge current="produccion" />
       {hasActiveTurno && !readOnlyOps && !canEditByControl ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
@@ -1487,7 +1665,7 @@ export default function WorkOrderPrintingControlPanel({
         setPauseReason={setPauseReason}
         setPauseObs={setPauseObs}
         startProductionTimer={startProductionTimer}
-        pauseProductionTimer={pauseProductionTimer}
+        pauseProductionTimer={requestPauseProductionTimer}
         confirmPauseAndResume={confirmPauseAndResume}
         hasActiveTurno={hasActiveTurno}
         areaFinalizada={areaFinalizada}
@@ -1497,20 +1675,24 @@ export default function WorkOrderPrintingControlPanel({
         draftGrupo={draftGrupo}
         draftPeople={draftPeople}
         draftOperadorMissing={draftOperadorMissing}
+        draftStagingName={draftStaging.name}
+        draftStagingRole={draftStaging.role}
         onDraftTurno={setDraftTurno}
         onDraftGrupo={setDraftGrupo}
-        onDraftPeopleAdd={addDraftPerson}
-        onDraftPeopleRemove={removeDraftPerson}
-        onDraftPeopleUpdate={updateDraftPerson}
+        onDraftStagingName={onDraftStagingName}
+        onDraftStagingRole={onDraftStagingRole}
+        onDraftPersonGuardar={guardarDraftPerson}
+        onDraftPersonRemove={removeDraftPerson}
         onIniciarTurno={requestIniciarTurno}
-        onCerrarTurnoActual={cerrarTurnoActual}
-        onFinalizarAreaImpresion={() => void finalizarAreaImpresion()}
+        onCerrarTurnoActual={requestCerrarTurnoActual}
+        onFinalizarAreaImpresion={requestFinalizarAreaImpresion}
         closedTurnos={closedTurnos}
         onSetTurno={(v) => patchActiveTurn((t) => ({ ...t, turno: v }))}
         onSetGrupo={(v) => patchActiveTurn((t) => ({ ...t, grupo: v }))}
-        onSetOperador={(v) => patchActiveTurn((t) => ({ ...t, operador: v }))}
-        onSetAyudante={(v) => patchActiveTurn((t) => ({ ...t, ayudante: v }))}
-        onSetSupervisor={(v) => patchActiveTurn((t) => ({ ...t, supervisor: v }))}
+        onActivePersonnelApply={(people) => {
+          const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
+          patchActiveTurn((t) => ({ ...t, operador, ayudante, supervisor }))
+        }}
         onEntradaChange={(idx, v) =>
           patchActiveTurn((t) => {
             const next = [...t.entradaBobinasKg]
@@ -1537,7 +1719,22 @@ export default function WorkOrderPrintingControlPanel({
         onSetDevolucionRechazadaMotivo={(v) =>
           patchActiveTurn((t) => ({ ...t, devolucionRechazadaMotivo: v }))
         }
-        onOpenReturnModal={openReturnModal}
+        warehouseReturn={{
+          open: returnWarehouseOpen,
+          onOpenChange: (open) => {
+            if (!open && returnSubmitting) return
+            handleReturnWarehouseOpenChange(open)
+          },
+          workOrderCode: readString(prefill.code) || `OT-${workOrderId}`,
+          draft: returnDraft,
+          onDraftChange: (patch) => setReturnDraft((prev) => ({ ...prev, ...patch })),
+          materialOptionsGood: returnMaterialOptionsGood,
+          materialOptionsBad: returnMaterialOptionsBad,
+          loadingGood: returnLoadingMaterialsGood,
+          loadingBad: returnLoadingMaterialsBad,
+          submitting: returnSubmitting,
+          onSubmit: submitReturn,
+        }}
         onSalidaChange={(idx, v) =>
           patchActiveTurn((t) => {
             const next = [...t.salidaBobinasKg]
@@ -1565,7 +1762,7 @@ export default function WorkOrderPrintingControlPanel({
         onLabelClear={clearLabelEditor}
         onLabelSave={saveLabelEditor}
         canPreviewTimerReport={canPreviewTimerReport}
-        onPreviewTimerReport={openTimerReportPreview}
+        onPreviewTimerReport={requestOpenTimerReportPreview}
         canPreviewDesperdicioReport={canPreviewDesperdicioReport}
         onPreviewDesperdicioReport={openDesperdicioPreview}
         canResetAll={!saving && !controlReadOnly}
@@ -1576,275 +1773,162 @@ export default function WorkOrderPrintingControlPanel({
       {(() => {
         const doneObs = !!readString(form.impObservaciones).trim()
         return (
-          <div
-            className={[
-              "rounded-lg border p-3",
-              doneObs ? "border-emerald-300 bg-emerald-50/40" : "bg-card",
-            ].join(" ")}
+          <MesSectionShell
+            title={
+              <span className="inline-flex items-center gap-2">
+                <NotebookPen className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                Observaciones del turno
+              </span>
+            }
+            subtle
+            headerRight={
+              doneObs ? (
+                <div className="mes-badge-done">
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                  Completo
+                </div>
+              ) : null
+            }
           >
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="text-sm font-medium">Observaciones del turno</div>
-                {doneObs ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
-                    Completo
-                  </span>
-                ) : null}
-              </div>
-            </div>
-        <Textarea
-          value={readString(form.impObservaciones)}
-          onChange={(e) => {
-            if (!hasActiveTurno || controlReadOnly) return
-            patchActiveTurn((t) => ({ ...t, observaciones: e.target.value }))
-          }}
-          placeholder={hasActiveTurno ? "Observaciones adicionales..." : "Inicie un turno para registrar observaciones."}
-          disabled={controlReadOnly || !hasActiveTurno}
-        />
-          </div>
+            <Textarea
+              value={readString(form.impObservaciones)}
+              onChange={(e) => {
+                if (!hasActiveTurno || controlReadOnly) return
+                patchActiveTurn((t) => ({ ...t, observaciones: e.target.value }))
+              }}
+              placeholder={
+                hasActiveTurno
+                  ? "Observaciones adicionales..."
+                  : "Inicie un turno para registrar observaciones."
+              }
+              disabled={controlReadOnly || !hasActiveTurno}
+            />
+          </MesSectionShell>
         )
       })()}
 
       <div className="no-print mb-12 flex justify-center">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button type="button" onClick={() => void guardar()} disabled={saving || controlReadOnly}>
+            <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
         </div>
       </div>
 
-      <AlertDialog open={startTimerConfirmOpen} onOpenChange={setStartTimerConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Iniciar producción (Impresión)</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogDescription>
-            ¿Está seguro? Una vez inicializado, empieza el proceso de producción de impresión y el cronómetro comenzará a correr.
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => confirmStartProductionTimer()}>
-              Sí, iniciar producción
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MesPrintingConfirmDialog
+        tone="emerald"
+        open={startTimerConfirmOpen}
+        onOpenChange={setStartTimerConfirmOpen}
+        icon={<CirclePlay className="h-5 w-5" aria-hidden />}
+        title="Iniciar producción (Impresión)"
+        description="¿Está seguro? Una vez inicializado, empieza el proceso de producción de impresión y el cronómetro comenzará a correr."
+        confirmLabel="Confirmar e iniciar"
+        onConfirm={() => confirmStartProductionTimer()}
+      />
 
-      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reiniciar impresión (OT)</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogDescription>
-            Esto borrará turnos, temporizador, entradas/salidas/scrap/merma/metraje registrados en Impresión para
-            esta OT. También limpia el respaldo local del navegador. ¿Desea continuar?
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmResetAll()}>
-              Sí, reiniciar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MesPrintingConfirmDialog
+        tone="sky"
+        open={pauseConfirmOpen}
+        onOpenChange={setPauseConfirmOpen}
+        icon={<CirclePause className="h-5 w-5" aria-hidden />}
+        title="Pausar producción"
+        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada. ¿Desea pausar ahora?"
+        confirmLabel="Sí, pausar"
+        onConfirm={() => confirmPauseProductionTimer()}
+      />
 
-      <AlertDialog open={takeoverConfirmOpen} onOpenChange={setTakeoverConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Tomar control del turno</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogDescription>
+      <MesPrintingConfirmDialog
+        tone="violet"
+        open={previewTimerConfirmOpen}
+        onOpenChange={setPreviewTimerConfirmOpen}
+        icon={<FileSearch className="h-5 w-5" aria-hidden />}
+        title="Vista previa del temporizador"
+        description="Se abrirá una pestaña nueva con el reporte de tiempos y pausas registrados hasta este momento."
+        confirmLabel="Abrir vista previa"
+        onConfirm={() => confirmOpenTimerReportPreview()}
+      />
+
+      <MesPrintingConfirmDialog
+        tone="amber"
+        open={resetConfirmOpen}
+        onOpenChange={setResetConfirmOpen}
+        icon={<RotateCcw className="h-5 w-5" aria-hidden />}
+        title="Reiniciar impresión (OT)"
+        description={
+          <>
+            Esto borrará turnos, temporizador, entradas/salidas/scrap/merma/metraje registrados en Impresión para esta
+            OT. También limpia el respaldo local del navegador. ¿Desea continuar?
+          </>
+        }
+        confirmLabel="Confirmar reinicio"
+        onConfirm={() => void confirmResetAll()}
+      />
+
+      <MesPrintingConfirmDialog
+        tone="violet"
+        open={takeoverConfirmOpen}
+        onOpenChange={setTakeoverConfirmOpen}
+        icon={<Users className="h-5 w-5" aria-hidden />}
+        title="Tomar control del turno"
+        description={
+          <>
             Este turno está siendo gestionado por{" "}
-            <span className="font-semibold text-foreground">{activeOwnerName ?? "otro usuario"}</span>. ¿Desea tomar el control para editar?
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => confirmTakeover()}>Tomar control</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            <span className="font-semibold text-foreground">{activeOwnerName ?? "otro usuario"}</span>. ¿Desea tomar
+            el control para editar?
+          </>
+        }
+        confirmLabel="Tomar control"
+        onConfirm={() => confirmTakeover()}
+      />
 
-      <Dialog
-        open={returnModalOpen}
+      <MesPrintingConfirmDialog
+        tone="rose"
+        open={closeTurnConfirmOpen}
+        onOpenChange={setCloseTurnConfirmOpen}
+        icon={<LogOut className="h-5 w-5" aria-hidden />}
+        title="Cerrar turno"
+        description="Se cerrará el turno en curso, se consolidará el temporizador y podrá iniciar otro turno después. ¿Confirma el cierre?"
+        confirmLabel="Sí, cerrar turno"
+        onConfirm={() => confirmCloseTurnFirstStep()}
+      />
+
+      <MesPrintingConfirmDialog
+        tone="red"
+        open={finalizeOtConfirmOpen}
+        onOpenChange={setFinalizeOtConfirmOpen}
+        icon={<Flag className="h-5 w-5" aria-hidden />}
+        title="Finalizar área de impresión (OT)"
+        description="Marcará el área de impresión como finalizada en la orden. Revise que los datos del turno estén completos antes de continuar."
+        confirmLabel="Sí, finalizar área"
+        confirmVariant="destructive"
+        onConfirm={() => confirmFinalizarAreaImpresion()}
+      />
+
+      <MesPrintingConfirmDialog
+        tone="orange"
+        open={emptyShiftCloseDialogOpen}
         onOpenChange={(open) => {
-          if (!returnSubmitting) setReturnModalOpen(open)
+          setEmptyShiftCloseDialogOpen(open)
+          if (!open) pendingEmptyShiftCloseRef.current = null
         }}
-      >
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Devolución del turno (Impresión → Almacén)</DialogTitle>
-          </DialogHeader>
+        icon={<AlertCircle className="h-5 w-5" aria-hidden />}
+        title="Cerrar turno sin actividad"
+        description="El turno no registra tiempo efectivo ni producción. ¿Desea cerrarlo igual?"
+        confirmLabel="Sí, cerrar igual"
+        onConfirm={() => confirmEmptyShiftClose()}
+      />
 
-          <div className="grid gap-3">
-            <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs">
-              <span className="text-muted-foreground">OT preseleccionada</span>{" "}
-              <span className="font-semibold">{readString(prefill.code) || `OT-${workOrderId}`}</span>
-            </div>
-
-            <div className="rounded-lg border bg-background p-3">
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold">Referencia</div>
-                  <div className="text-xs text-muted-foreground">Opcional</div>
-                </div>
-                <div className="space-y-1">
-                  <Label>Bobina / referencia</Label>
-                  <Input
-                    value={returnDraft.bobinaCode}
-                    onChange={(e) => setReturnDraft((prev) => ({ ...prev, bobinaCode: e.target.value }))}
-                    placeholder="Código de bobina, etiqueta o lote"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/30 p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-emerald-900">Devolución buena</div>
-                  <div className="text-xs text-emerald-900/70">Reingresa a inventario</div>
-                </div>
-                <div className="grid gap-2">
-                  <div className="space-y-1">
-                    <Label>Cantidad (Kg)</Label>
-                    <Input
-                      inputMode="decimal"
-                      value={returnDraft.buenaKg}
-                      onChange={(e) => setReturnDraft((prev) => ({ ...prev, buenaKg: e.target.value }))}
-                      placeholder="0.000"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Material</Label>
-                    <select
-                      className="ot-select h-9"
-                      value={returnDraft.buenaMaterialId}
-                      onChange={(e) => setReturnDraft((prev) => ({ ...prev, buenaMaterialId: e.target.value }))}
-                      disabled={returnLoadingMaterialsGood}
-                    >
-                      <option value="">
-                        {returnLoadingMaterialsGood ? "Cargando materiales..." : "Seleccione material"}
-                      </option>
-                      {returnMaterialOptionsGood.map((m) => (
-                        <option key={m.id} value={String(m.id)}>
-                          {m.sku} · {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-rose-200/70 bg-rose-50/30 p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-rose-900">Devolución rechazada</div>
-                  <div className="text-xs text-rose-900/70">Queda en rechazadas</div>
-                </div>
-                <div className="grid gap-2">
-                  <div className="space-y-1">
-                    <Label>Cantidad (Kg)</Label>
-                    <Input
-                      inputMode="decimal"
-                      value={returnDraft.rechazadaKg}
-                      onChange={(e) => setReturnDraft((prev) => ({ ...prev, rechazadaKg: e.target.value }))}
-                      placeholder="0.000"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Material (rechazadas)</Label>
-                    <select
-                      className="ot-select h-9"
-                      value={returnDraft.rechazadaMaterialId}
-                      onChange={(e) => setReturnDraft((prev) => ({ ...prev, rechazadaMaterialId: e.target.value }))}
-                      disabled={returnLoadingMaterialsBad}
-                    >
-                      <option value="">
-                        {returnLoadingMaterialsBad ? "Cargando materiales..." : "Seleccione material"}
-                      </option>
-                      {returnMaterialOptionsBad.map((m) => (
-                        <option key={m.id} value={String(m.id)}>
-                          {m.sku} · {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Motivo (obligatorio)</Label>
-                    <select
-                      className="ot-select h-9"
-                      value={returnDraft.rechazadaMotivo}
-                      onChange={(e) => setReturnDraft((prev) => ({ ...prev, rechazadaMotivo: e.target.value }))}
-                    >
-                      <option value="">Seleccione motivo</option>
-                      {PRINTING_REJECT_REASONS.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Observación (opcional)</Label>
-                    <Textarea
-                      value={returnDraft.rechazadaObs}
-                      onChange={(e) => setReturnDraft((prev) => ({ ...prev, rechazadaObs: e.target.value }))}
-                      placeholder="Detalle adicional (si aplica)"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="sm:justify-center">
-            <div className="flex w-full flex-col justify-center gap-2 sm:w-auto sm:flex-row">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setReturnModalOpen(false)}
-                disabled={returnSubmitting}
-                className="sm:min-w-40"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void submitReturn()}
-                disabled={returnSubmitting}
-                className="sm:min-w-56"
-              >
-                {returnSubmitting ? "Enviando..." : "Enviar a almacén"}
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={startTurnConfirmOpen} onOpenChange={setStartTurnConfirmOpen}>
-        <DialogContent className="border-violet-200/70 bg-gradient-to-b from-violet-50/50 to-background sm:max-w-md">
-          <DialogHeader className="space-y-4 text-left">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-200 bg-violet-100/80 text-violet-700">
-                <Sparkles className="h-5 w-5" aria-hidden />
-              </div>
-              <div className="min-w-0 space-y-2">
-                <DialogTitle className="text-xl">Activar turno de impresión</DialogTitle>
-                <DialogDescription className="text-sm leading-relaxed">
-                  Confirme para habilitar el temporizador, el registro de bobinas y el resumen operativo del turno en curso.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" onClick={() => setStartTurnConfirmOpen(false)}>
-              Cancelar
-            </Button>
-            <Button type="button" onClick={() => confirmIniciarTurno()}>
-              Confirmar e iniciar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MesPrintingConfirmDialog
+        tone="indigo"
+        open={startTurnConfirmOpen}
+        onOpenChange={setStartTurnConfirmOpen}
+        icon={<Sparkles className="h-5 w-5" aria-hidden />}
+        title="Activar turno de impresión"
+        description="Confirme para habilitar el temporizador, el registro de bobinas y el resumen operativo del turno en curso."
+        confirmLabel="Confirmar e iniciar"
+        onConfirm={() => confirmIniciarTurno()}
+      />
 
     </div>
   )

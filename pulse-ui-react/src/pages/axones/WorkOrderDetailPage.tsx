@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+import { ArrowLeft, ClipboardList, Info } from "lucide-react"
 
 import { ProductionAreaPanel } from "@/components/axones/ProductionAreaPanel"
 import { WorkOrderDocumentSheet } from "@/components/axones/WorkOrderDocumentSheet"
@@ -11,26 +12,9 @@ import { getStoredUser } from "@/lib/auth-storage"
 import WorkOrderPrintingControlPanel from "@/pages/axones/WorkOrderPrintingControlPanel"
 import WorkOrderLaminacionControlPanel from "@/pages/axones/WorkOrderLaminacionControlPanel"
 import WorkOrderCorteControlPanel from "@/pages/axones/WorkOrderCorteControlPanel"
+import { WorkOrderPrintingPlanillaSnapshot } from "@/pages/axones/WorkOrderPrintingPlanillaSnapshot"
 import type { WorkOrderDetailRecord } from "@/types/api"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ChevronDown } from "lucide-react"
-
-function readString(v: unknown): string {
-  return typeof v === "string" ? v : ""
-}
-
-function yesNoLabel(v: unknown): string {
-  const s = readString(v).trim().toLowerCase()
-  if (s === "si" || s === "sí") return "Si"
-  if (s === "no") return "No"
-  return "—"
-}
 
 export default function WorkOrderDetailPage() {
   const { woId } = useParams<{ woId: string }>()
@@ -93,25 +77,6 @@ export default function WorkOrderDetailPage() {
   const product = order?.product
   const code = order?.code ?? `OT #${id}`
   const form = (order?.technical_document?.form ?? {}) as Record<string, unknown>
-  const sustratosImpRaw = Array.isArray(form.sustratosVirgenImp)
-    ? (form.sustratosVirgenImp as Array<Record<string, unknown>>)
-    : []
-  const sustratoImp1Id = readString(
-    sustratosImpRaw[0]?.material_id ?? form.sustratoVirgenImp1,
-  )
-  const sustratoImp1Free = readString(sustratosImpRaw[0]?.material_free_text).trim()
-  const sustratoImp1Display = sustratoImp1Free || sustratoImp1Id || "—"
-  const sustratoImp1Kg = readString(sustratosImpRaw[0]?.kg ?? form.kgUtilizarImp1)
-  const tintaRows = Array.from({ length: 8 }, (_, idx) => {
-    const n = idx + 1
-    return {
-      posicion: String(n),
-      color: readString(form[`tintaColor${n}`]) || "—",
-      anilox: readString(form[`tintaAnilox${n}`]) || "—",
-      visc: readString(form[`tintaVisc${n}`]) || "—",
-      observaciones: readString(form[`tintaObs${n}`]) || "—",
-    }
-  })
   const isPrintingFocusedView = tabParam === "printing" && canUsePrintingOps
   const isCorteFocusedView = tabParam === "corte"
   const showPrintingPrefill = isPrintingFocusedView
@@ -121,9 +86,10 @@ export default function WorkOrderDetailPage() {
       <div className="flex flex-wrap items-center gap-4">
         <Link
           to={otBackPath}
-          className="text-muted-foreground text-sm hover:text-foreground"
+          className="text-muted-foreground inline-flex items-center gap-1.5 text-sm transition-colors hover:text-foreground"
         >
-          {isPrintingOperator ? "← Área Impresión" : "← Órdenes de trabajo"}
+          <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+          {isPrintingOperator ? "Área Impresión" : "Órdenes de trabajo"}
         </Link>
       </div>
 
@@ -133,16 +99,26 @@ export default function WorkOrderDetailPage() {
         <p className="text-destructive">No se encontró la orden.</p>
       ) : (
         <>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight font-mono">
+          <div className="rounded-xl border border-border/60 bg-card/60 p-4 shadow-sm">
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground font-mono">
+              <ClipboardList className="h-6 w-6 shrink-0 text-primary" aria-hidden />
               {code}
             </h1>
-            <p className="text-muted-foreground text-sm">
-              {client?.name ?? "—"} · {product?.name ?? "—"}
+            <p className="text-muted-foreground mt-1 text-sm">
+              <span className="font-medium text-foreground">
+                {client?.name ?? "—"}
+              </span>
+              <span className="text-border mx-2">·</span>
+              <span className="font-medium text-foreground">
+                {product?.name ?? "—"}
+              </span>
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">
-              Seleccione una pestaña de fase para temporizadores, consumos y
-              mermas. Los datos se guardan en el sistema por área.
+            <p className="text-muted-foreground mt-3 flex gap-2 rounded-lg border border-primary/10 bg-primary/[0.04] px-3 py-2 text-xs leading-relaxed">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span>
+                Seleccione una pestaña de fase para temporizadores, consumos y mermas. Los datos se guardan en el
+                sistema por área.
+              </span>
             </p>
           </div>
 
@@ -153,81 +129,7 @@ export default function WorkOrderDetailPage() {
             onSaved={() => void loadOrder()}
           />
 
-          {showPrintingPrefill ? (
-            <Card className="border-l-4 border-fuchsia-500 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base font-semibold">
-                  Área de impresión (pre-hecho)
-                </CardTitle>
-                <p className="text-muted-foreground text-xs">
-                  Datos base pre-cargados desde la planilla de orden de trabajo.
-                </p>
-              </CardHeader>
-              <CardContent className="grid gap-3 text-sm md:grid-cols-2">
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-muted-foreground text-xs">Piñón (dientes)</div>
-                  <div className="font-medium">{readString(form.pinonImp) || "—"}</div>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-muted-foreground text-xs">Línea de corte</div>
-                  <div className="font-medium">{yesNoLabel(form.lineaCorte)}</div>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-muted-foreground text-xs">Figura emb. (1-8)</div>
-                  <div className="font-medium">
-                    {readString(form.figEmbImpDisplay) || "—"}
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-muted-foreground text-xs">Sustrato 1</div>
-                  <div className="font-medium">{sustratoImp1Display}</div>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3 md:col-span-2">
-                  <div className="text-muted-foreground text-xs">Kg a utilizar</div>
-                  <div className="font-medium">{sustratoImp1Kg || "—"}</div>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-          {showPrintingPrefill ? (
-            <Card className="border-l-4 border-fuchsia-500 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base font-semibold">
-                  DESCRIPCION DE TINTAS
-                </CardTitle>
-                <p className="text-muted-foreground text-xs">
-                  Vista pre-hecha de tintas guardadas en la planilla de orden de
-                  trabajo.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-muted/40">
-                        <th className="border px-2 py-1 text-left">POSICION</th>
-                        <th className="border px-2 py-1 text-left">COLOR</th>
-                        <th className="border px-2 py-1 text-left">ANILOX</th>
-                        <th className="border px-2 py-1 text-left">VISC (seg)</th>
-                        <th className="border px-2 py-1 text-left">OBSERVACIONES</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tintaRows.map((row) => (
-                        <tr key={row.posicion}>
-                          <td className="border px-2 py-1">{row.posicion}</td>
-                          <td className="border px-2 py-1">{row.color}</td>
-                          <td className="border px-2 py-1">{row.anilox}</td>
-                          <td className="border px-2 py-1">{row.visc}</td>
-                          <td className="border px-2 py-1">{row.observaciones}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
+          {showPrintingPrefill ? <WorkOrderPrintingPlanillaSnapshot form={form} /> : null}
 
           {isPrintingFocusedView ? (
             <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />

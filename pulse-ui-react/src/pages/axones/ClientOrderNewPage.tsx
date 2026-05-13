@@ -629,6 +629,12 @@ export default function ClientOrderNewPage() {
     }
   }, [clientId])
 
+  /** Tras crear material desde una línea, volver al alta de OC (`MaterialFormPage` usa `state.from`). */
+  const newMaterialLink = {
+    pathname: "/materiales/nuevo" as const,
+    state: { from: RETURN_TO_NEW_CLIENT_ORDER_PATH },
+  }
+
   if (loading) {
     return (
       <div className="p-4 md:p-6">
@@ -1077,85 +1083,118 @@ export default function ClientOrderNewPage() {
                     <Layers className="h-4 w-4 text-muted-foreground" />
                     {CLIENT_ORDER_LINE_MATERIAL_LABEL}
                   </Label>
-                  <Popover
-                    open={materialComboOpenKey === row.key}
-                    onOpenChange={(open) => setMaterialComboOpenKey(open ? row.key : null)}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        role="combobox"
-                        id={`co-material-${row.key}`}
-                        aria-expanded={materialComboOpenKey === row.key}
-                        className={cn(
-                          "h-10 w-full justify-between gap-2 bg-background px-3 font-normal",
-                          CO_FOCUS_RING,
-                          "focus-visible:ring-primary/35",
-                        )}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1">
+                      <Popover
+                        open={materialComboOpenKey === row.key}
+                        onOpenChange={(open) => setMaterialComboOpenKey(open ? row.key : null)}
                       >
-                        <Layers className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate text-left">
-                          {selectedMat
-                            ? `${selectedMat.sku} — ${selectedMat.name}`
-                            : CLIENT_ORDER_LINE_MATERIAL_PLACEHOLDER}
-                        </span>
-                        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
-                      align="start"
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            id={`co-material-${row.key}`}
+                            aria-expanded={materialComboOpenKey === row.key}
+                            className={cn(
+                              "h-10 w-full justify-between gap-2 bg-background px-3 font-normal",
+                              CO_FOCUS_RING,
+                              "focus-visible:ring-primary/35",
+                            )}
+                          >
+                            <Layers className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                            <span className="min-w-0 flex-1 truncate text-left">
+                              {selectedMat
+                                ? `${selectedMat.sku} — ${selectedMat.name}`
+                                : CLIENT_ORDER_LINE_MATERIAL_PLACEHOLDER}
+                            </span>
+                            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
+                          align="start"
+                        >
+                          <Command shouldFilter>
+                            <CommandInput placeholder={CLIENT_ORDER_LINE_MATERIAL_SEARCH_PLACEHOLDER} />
+                            <CommandList>
+                              <CommandEmpty>
+                                <div className="space-y-2 p-2 text-sm">
+                                  <p>No hay materiales que coincidan.</p>
+                                  <Button type="button" variant="secondary" size="sm" asChild>
+                                    <Link
+                                      className="inline-flex items-center"
+                                      to={newMaterialLink.pathname}
+                                      state={newMaterialLink.state}
+                                      onClick={() => setMaterialComboOpenKey(null)}
+                                    >
+                                      <Plus className="mr-2 h-4 w-4" />
+                                      Crear material
+                                    </Link>
+                                  </Button>
+                                </div>
+                              </CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem
+                                  value="sin-material"
+                                  onSelect={() => {
+                                    updateLine(i, { material_id: "" })
+                                    setMaterialComboOpenKey(null)
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      row.material_id ? "opacity-0" : "opacity-100",
+                                    )}
+                                  />
+                                  {CLIENT_ORDER_LINE_MATERIAL_EMPTY}
+                                </CommandItem>
+                                {materials.map((m) => (
+                                  <CommandItem
+                                    key={m.id}
+                                    value={`${m.sku} ${m.name}`}
+                                    onSelect={() => {
+                                      updateLine(i, { material_id: String(m.id) })
+                                      setMaterialComboOpenKey(null)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        row.material_id === String(m.id) ? "opacity-100" : "opacity-0",
+                                      )}
+                                    />
+                                    <span className="truncate">
+                                      {m.sku} — {m.name}
+                                    </span>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className={cn(
+                        "h-10 shrink-0 sm:self-end",
+                        CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER,
+                      )}
+                      asChild
                     >
-                      <Command shouldFilter>
-                        <CommandInput placeholder={CLIENT_ORDER_LINE_MATERIAL_SEARCH_PLACEHOLDER} />
-                        <CommandList>
-                          <CommandEmpty>
-                            <p className="p-2 text-sm text-muted-foreground">
-                              No hay materiales que coincidan.
-                            </p>
-                          </CommandEmpty>
-                          <CommandGroup>
-                            <CommandItem
-                              value="sin-material"
-                              onSelect={() => {
-                                updateLine(i, { material_id: "" })
-                                setMaterialComboOpenKey(null)
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  row.material_id ? "opacity-0" : "opacity-100",
-                                )}
-                              />
-                              {CLIENT_ORDER_LINE_MATERIAL_EMPTY}
-                            </CommandItem>
-                            {materials.map((m) => (
-                              <CommandItem
-                                key={m.id}
-                                value={`${m.sku} ${m.name}`}
-                                onSelect={() => {
-                                  updateLine(i, { material_id: String(m.id) })
-                                  setMaterialComboOpenKey(null)
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    row.material_id === String(m.id) ? "opacity-100" : "opacity-0",
-                                  )}
-                                />
-                                <span className="truncate">
-                                  {m.sku} — {m.name}
-                                </span>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                      <Link
+                        className="inline-flex items-center"
+                        to={newMaterialLink.pathname}
+                        state={newMaterialLink.state}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Nuevo material
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid gap-2 sm:col-span-2">

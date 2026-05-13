@@ -690,7 +690,7 @@ export default function WorkOrderLaminacionControlPanel({ workOrderId }: { workO
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de laminación…</p>
 
   return (
-    <div className="space-y-4">
+    <div className="ax-mes space-y-4">
       <WorkOrderStageBadge current="produccion" />
       <div className="ax-ot">
         <div className="ot-section">

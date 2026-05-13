@@ -66,7 +66,7 @@ export default function WorkOrderPrintingBobinasSelector({
   devolucionRechazadaRaw,
   onSetDevolucionBuena,
   onSetDevolucionRechazada,
-  onOpenReturnModal,
+  onOpenReturnWarehouse,
 }: {
   workOrderId: number
   disabled: boolean
@@ -77,7 +77,7 @@ export default function WorkOrderPrintingBobinasSelector({
   devolucionRechazadaRaw: string
   onSetDevolucionBuena: (v: string) => void
   onSetDevolucionRechazada: (v: string) => void
-  onOpenReturnModal: () => void
+  onOpenReturnWarehouse: () => void
 }) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -255,7 +255,7 @@ export default function WorkOrderPrintingBobinasSelector({
             </div>
           </div>
           <div className="mt-2">
-            <Button type="button" variant="outline" onClick={onOpenReturnModal} disabled={disabled}>
+            <Button type="button" variant="outline" onClick={onOpenReturnWarehouse} disabled={disabled}>
               Registrar devolución real
             </Button>
           </div>

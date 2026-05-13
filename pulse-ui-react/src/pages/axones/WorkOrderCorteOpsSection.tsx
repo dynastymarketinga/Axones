@@ -1,12 +1,27 @@
-import { Flag, Pause, Play, PlusCircle, ReceiptText, Scissors, Square, Trash2 } from "lucide-react"
+import {
+  CirclePause,
+  CirclePlay,
+  Flag,
+  LogOut,
+  Moon,
+  PlusCircle,
+  ReceiptText,
+  Scissors,
+  Sun,
+  Trash2,
+  Users,
+} from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
+import { MesSectionShell, MesStatTile, MesTimerFace } from "@/components/axones/mes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
@@ -448,45 +463,135 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
 
   return (
     <>
-      <div className="mt-3 rounded-lg border border-cyan-200/70 bg-cyan-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-900">
-          Acumulado de la orden (todos los turnos)
+      <MesSectionShell title="Acumulado de la orden (todos los turnos)">
+        <div className="mes-stat-grid mes-stat-grid--4">
+          <MesStatTile label="Pedido total" value={`${pedidoTotalKg.toFixed(2)} Kg`} />
+          <MesStatTile label="Producido" value={`${producidoAcumuladoKg.toFixed(2)} Kg`} tone="positive" />
+          <MesStatTile label="Falta por producir" value={`${faltanteKg.toFixed(2)} Kg`} tone="negative" />
+          <MesStatTile label="Registros / turnos" value={turnosRegistrados} />
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Pedido total</span><p className="font-semibold">{pedidoTotalKg.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Producido</span><p className="font-semibold text-emerald-700">{producidoAcumuladoKg.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Falta por producir</span><p className="font-semibold text-rose-700">{faltanteKg.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Registros / turnos</span><p className="font-semibold">{turnosRegistrados}</p></div>
-        </div>
-        <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-          <div className="rounded border bg-background px-2 py-1.5">Kg entrada: <span className="font-semibold text-foreground">{kgIngresados.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background px-2 py-1.5">Kg salida: <span className="font-semibold text-foreground">{kgSalida.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background px-2 py-1.5">Último turno: <span className="font-semibold text-foreground">{ultimoTurnoLabel}</span></div>
-        </div>
-      </div>
-
-      <div className="mt-3 rounded-lg border border-sky-200/70 bg-sky-50/40 p-3">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-sky-900"><ReceiptText className="h-4 w-4" />Temporizador de producción</div>
-          <Badge variant="secondary" className="text-xs">
-            {timerState === "running" ? "En producción" : timerState === "paused" ? "En pausa" : timerState === "completed" ? "Orden finalizada" : timerState === "stopped" ? "Turno cerrado" : "Pendiente"}
-          </Badge>
-        </div>
-        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="font-mono text-3xl font-bold text-sky-900">{formatTimerHms(totalSec)}</div>
-            <p className="text-muted-foreground text-xs">Tiempo transcurrido</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <div className="rounded border bg-muted/30 p-2"><p className="text-muted-foreground text-[11px]">Tiempo muerto</p><p className="font-mono text-sm font-semibold text-red-600">{formatTimerHms(deadSec)}</p></div>
-              <div className="rounded border bg-muted/30 p-2"><p className="text-muted-foreground text-[11px]">Tiempo efectivo</p><p className="font-mono text-sm font-semibold text-emerald-700">{formatTimerHms(effectiveSec)}</p></div>
-              <div className="col-span-2 rounded border bg-muted/30 p-2 sm:col-span-1"><p className="text-muted-foreground text-[11px]">Kg/Hora estimado</p><p className="text-sm font-semibold">{kgHora}</p></div>
-            </div>
+        <div className="mes-footer-bar mes-footer-bar--3">
+          <div className="mes-footer-bar__item">
+            Kg entrada: <strong>{kgIngresados.toFixed(2)} Kg</strong>
           </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-1">
-            <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" onClick={startProductionTimer} disabled={timerRunning || timerState === "completed"}><Play className="mr-1 h-4 w-4" />Iniciar</Button>
-            <Button type="button" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50" onClick={pauseProductionTimer} disabled={!timerRunning}><Pause className="mr-1 h-4 w-4" />Pausar</Button>
-            <Button type="button" variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-50" onClick={() => stopProductionTimer("stopped")} disabled={timerStopped || timerState === "pending"}><Square className="mr-1 h-4 w-4" />Fin turno</Button>
-            <Button type="button" variant="destructive" onClick={() => stopProductionTimer("completed")} disabled={timerState === "completed" || timerState === "pending"}><Flag className="mr-1 h-4 w-4" />Finalizar</Button>
+          <div className="mes-footer-bar__item">
+            Kg salida: <strong>{kgSalida.toFixed(2)} Kg</strong>
+          </div>
+          <div className="mes-footer-bar__item">
+            Último turno: <strong>{ultimoTurnoLabel}</strong>
+          </div>
+        </div>
+      </MesSectionShell>
+
+      <MesSectionShell
+        title={
+          <span className="inline-flex items-center gap-2">
+            <ReceiptText className="h-4 w-4 shrink-0" aria-hidden />
+            Temporizador de producción
+          </span>
+        }
+        headerRight={
+          <Badge variant="secondary" className="text-xs">
+            {timerState === "running"
+              ? "En producción"
+              : timerState === "paused"
+                ? "En pausa"
+                : timerState === "completed"
+                  ? "Orden finalizada"
+                  : timerState === "stopped"
+                    ? "Turno cerrado"
+                    : "Pendiente"}
+          </Badge>
+        }
+      >
+        <div className="mes-timer-grid">
+          <MesTimerFace
+            elapsedLabel={formatTimerHms(totalSec)}
+            deadHms={formatTimerHms(deadSec)}
+            effectiveHms={formatTimerHms(effectiveSec)}
+            kgHora={kgHora}
+          />
+          <div className="mes-timer-actions w-full min-w-0">
+            <TooltipProvider delayDuration={200}>
+              <div className="mes-timer-action-stack">
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Iniciar</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-primary shrink-0"
+                        aria-label="Iniciar"
+                        onClick={startProductionTimer}
+                        disabled={timerRunning || timerState === "completed"}
+                      >
+                        <CirclePlay className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Iniciar temporizador</TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Pausar</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-secondary shrink-0"
+                        aria-label="Pausar"
+                        onClick={pauseProductionTimer}
+                        disabled={!timerRunning}
+                      >
+                        <CirclePause className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Pausar temporizador</TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Fin turno</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-danger-outline shrink-0"
+                        aria-label="Fin turno"
+                        onClick={() => stopProductionTimer("stopped")}
+                        disabled={timerStopped || timerState === "pending"}
+                      >
+                        <LogOut className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Cerrar turno sin finalizar la orden</TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Finalizar</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-destructive-solid shrink-0"
+                        aria-label="Finalizar orden"
+                        onClick={() => stopProductionTimer("completed")}
+                        disabled={timerState === "completed" || timerState === "pending"}
+                      >
+                        <Flag className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Finalizar orden de trabajo</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+            </TooltipProvider>
           </div>
         </div>
         {timerPaused ? (
@@ -503,7 +608,7 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
           </div>
         ) : null}
         {pauseEntries.length > 0 ? (
-          <div className="mt-3 space-y-1 rounded-md border bg-background p-2">
+          <div className="mt-3 space-y-1 rounded-md border border-slate-200 bg-white p-2">
             <p className="text-muted-foreground text-xs">Paradas registradas</p>
             {pauseEntries.map((entry, idx) => (
               <div key={`${entry.at}-${idx}`} className="text-xs">
@@ -514,43 +619,66 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             ))}
           </div>
         ) : null}
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-amber-200/70 bg-amber-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">Información del turno</div>
+      <MesSectionShell title="Información del turno" subtle>
         <div className="grid gap-2 md:grid-cols-2">
           <div className="space-y-1">
             <Label className="ot-label">Turno</Label>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              className="w-full"
-              value={readString(form.corTurno)}
-              onValueChange={(v) => {
-                if (!v) return
-                setKey("corTurno", v)
-              }}
-            >
-              <ToggleGroupItem value="diurno" className="flex-1">Diurno</ToggleGroupItem>
-              <ToggleGroupItem value="nocturno" className="flex-1">Nocturno</ToggleGroupItem>
-            </ToggleGroup>
+            <div className="mes-toggle-row mes-toggle-turno">
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                className="w-full"
+                value={readString(form.corTurno)}
+                onValueChange={(v) => {
+                  if (!v) return
+                  setKey("corTurno", v)
+                }}
+              >
+                <ToggleGroupItem value="diurno" className="flex-1 gap-2">
+                  <Sun className="h-4 w-4 shrink-0" aria-hidden />
+                  Diurno
+                </ToggleGroupItem>
+                <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
+                  <Moon className="h-4 w-4 shrink-0" aria-hidden />
+                  Nocturno
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+            <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
           </div>
           <div className="space-y-1">
             <Label className="ot-label">Grupo</Label>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              className="w-full"
-              value={readString(form.corGrupo)}
-              onValueChange={(v) => {
-                if (!v) return
-                setKey("corGrupo", v)
-              }}
-            >
-              {(["A", "B", "C"] as const).map((g) => (
-                <ToggleGroupItem key={g} value={g} className="flex-1">{g}</ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            <div className="mes-toggle-row mes-toggle-grupo">
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                className="w-full"
+                value={readString(form.corGrupo)}
+                onValueChange={(v) => {
+                  if (!v) return
+                  setKey("corGrupo", v)
+                }}
+              >
+                {(["A", "B", "C"] as const).map((g) => (
+                  <ToggleGroupItem
+                    key={g}
+                    value={g}
+                    className={cn(
+                      "flex-1 gap-1",
+                      g === "A" && "mes-grupo-a",
+                      g === "B" && "mes-grupo-b",
+                      g === "C" && "mes-grupo-c",
+                    )}
+                  >
+                    <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                    {g}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+            <p className="mes-field-hint">Cuadrilla o equipo asignado a la máquina (rotación interna A / B / C).</p>
           </div>
           <div className="ot-field">
             <Label className="ot-label">Operador</Label>
@@ -580,12 +708,13 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             />
           </div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-violet-200/70 bg-violet-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900">
-          Ingreso de bobinas impresa - Kg
-        </div>
+      <MesSectionShell
+        title="Ingreso de bobinas impresa — Kg"
+        subtle
+        bodyClassName="mes-section__body--flush"
+      >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
           {entradaBobinas.map((val, idx) => (
             <div key={`ent-cor-${idx}`} className="space-y-1">
@@ -604,29 +733,33 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             </div>
           ))}
         </div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-3">
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaBobinasCount}</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">TOTAL</span><p className="font-semibold">{entradaBobinasTotal.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Paletas (300 Kg)</span>
-            <p className="font-semibold">{paletasEquivalentes.toFixed(2)}</p>
-            <p className="text-muted-foreground text-xs">Completas: {paletasCompletas}</p>
+        <div className="mt-2 mes-stat-grid sm:grid-cols-3">
+          <MesStatTile label="N° bobinas" value={entradaBobinasCount} />
+          <MesStatTile label="Total" value={`${entradaBobinasTotal.toFixed(2)} Kg`} />
+          <div className="mes-stat-tile">
+            <span className="mes-stat-tile__label">Paletas (300 Kg)</span>
+            <div className="mes-stat-tile__value">{paletasEquivalentes.toFixed(2)}</div>
+            <p className="text-muted-foreground mt-1 text-xs">Completas: {paletasCompletas}</p>
           </div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-violet-200/70 bg-violet-50/40 p-3">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-violet-900">
-            <Scissors className="h-4 w-4" />
-            Bobinas de salida por paleta - Peso neto (Kg)
-          </div>
+      <MesSectionShell
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Scissors className="h-4 w-4 shrink-0" aria-hidden />
+            Bobinas de salida por paleta — Peso neto (Kg)
+          </span>
+        }
+        subtle
+        bodyClassName="mes-section__body--flush"
+        headerRight={
           <Button type="button" size="sm" className="h-8" onClick={addPaleta}>
             <PlusCircle className="mr-1 h-4 w-4" />
             Agregar paleta
           </Button>
-        </div>
-
+        }
+      >
         <div className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
           {salidaPaletas.map((paleta, paletaIdx) => (
             <div key={`paleta-${paletaIdx}`} className="rounded-lg border bg-background">
@@ -690,13 +823,9 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             </div>
           ))}
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-violet-200/70 bg-violet-50/40 p-3">
-        <div className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-violet-900">
-          <Scissors className="h-4 w-4" />
-          Proceso de corte
-        </div>
+      <MesSectionShell title="Proceso de corte" subtle bodyClassName="mes-section__body--flush">
         <div className="grid gap-2 sm:grid-cols-4">
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Kg ingresados</span><Input className="ot-input-unified mt-1 h-8" inputMode="decimal" value={readString(form.kgIngresadosCorte)} onChange={(e) => setKey("kgIngresadosCorte", e.target.value)} placeholder="0" /></div>
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Kg salida</span><Input className="ot-input-unified mt-1 h-8" inputMode="decimal" value={readString(form.kgSalidaCorte)} onChange={(e) => setKey("kgSalidaCorte", e.target.value)} placeholder="0" /></div>
@@ -714,12 +843,9 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Paletas</span><p className="font-semibold">{salidaPaletas.length}</p></div>
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Bobinas</span><p className="font-semibold">{bobinasSalidaCount}</p></div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-amber-200/70 bg-amber-50/40 p-3">
-        <div className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-900">
-          Scrap / Refil
-        </div>
+      <MesSectionShell title="Scrap / Refil" subtle>
         <div className="mb-3 space-y-2 rounded border bg-background/80 p-2">
           <Label className="text-muted-foreground text-xs font-medium">Sustrato del desperdicio (reporte)</Label>
           <p className="text-muted-foreground text-[11px] leading-snug">
@@ -858,9 +984,10 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             <p className="font-semibold">{kgIngresados > 0 ? "Calculado" : "Sin datos"}</p>
           </div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+      <MesSectionShell title="Resúmenes" subtle>
+        <div className="grid gap-3 lg:grid-cols-2">
         <div className="rounded-lg border border-cyan-200/70 bg-cyan-50/40 p-3">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-900">Resumen del turno</div>
           <div className="grid gap-2 sm:grid-cols-4">
@@ -911,17 +1038,17 @@ export default function WorkOrderCorteOpsSection({ form, setForm, pedidoTotalKg 
             </table>
           </div>
         </div>
-      </div>
+        </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-slate-200/70 bg-slate-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-900">Observaciones</div>
+      <MesSectionShell title="Observaciones" subtle>
         <Textarea
           className="min-h-24"
           value={readString(form.corObservaciones)}
           onChange={(e) => setKey("corObservaciones", e.target.value)}
           placeholder="Observaciones adicionales..."
         />
-      </div>
+      </MesSectionShell>
     </>
   )
 }

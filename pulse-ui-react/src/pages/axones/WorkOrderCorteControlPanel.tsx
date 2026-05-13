@@ -57,7 +57,7 @@ export default function WorkOrderCorteControlPanel({ workOrderId }: { workOrderI
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de corte…</p>
 
   return (
-    <div className="space-y-4">
+    <div className="ax-mes space-y-4">
       <WorkOrderStageBadge current="corte" />
       <div className="ax-ot">
         <div className="ot-section">

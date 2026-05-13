@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\AlertSeverity;
 use App\Enums\InventoryMovementType;
+use App\Enums\OperationalAlertType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreInventoryReturnRequest;
 use App\Models\Bobina;
 use App\Models\InventoryReturn;
 use App\Models\Material;
+use App\Models\OperationalAlert;
 use App\Services\InventoryLedgerService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
@@ -88,7 +91,47 @@ class InventoryReturnController extends Controller
 
         $return->load(['material.supplier:id,name', 'workOrder']);
 
+        $this->notifyInventoryReturnPending($return, $request->user());
+
         return response()->json($return, 201);
+    }
+
+    /**
+     * Campana operativa: almacén / inventario (metadata target_area inventario excluye vista solo-impresión).
+     */
+    private function notifyInventoryReturnPending(InventoryReturn $return, ?\Illuminate\Contracts\Auth\Authenticatable $user): void
+    {
+        $material = $return->material;
+        $wo = $return->workOrder;
+        $isRejected = ($return->destination_area ?? '') === 'bobinas_rechazadas';
+        $tipo = $isRejected ? 'Rechazada (bobinas rechazadas)' : 'Buena (reingreso a material)';
+        $sku = $material ? (string) $material->sku : '—';
+        $name = $material ? (string) $material->name : '—';
+        $ot = $wo ? (string) $wo->code : '—';
+
+        OperationalAlert::query()->create([
+            'alert_type' => OperationalAlertType::InventoryReturnPending->value,
+            'severity' => $isRejected ? AlertSeverity::Warning->value : AlertSeverity::Info->value,
+            'message' => sprintf(
+                'Devolución pendiente · %s · %s %s · OT %s · %s Kg (id #%d).',
+                $tipo,
+                $sku,
+                $name,
+                $ot,
+                (string) $return->quantity,
+                $return->getKey(),
+            ),
+            'work_order_id' => $return->work_order_id,
+            'material_id' => $return->material_id,
+            'metadata' => [
+                'target_area' => 'inventario',
+                'channel' => 'bell',
+                'inventory_return_id' => $return->getKey(),
+                'destination_area' => $return->destination_area,
+                'return_kind' => $isRejected ? 'rechazada' : 'buena',
+            ],
+            'created_by' => $user?->getKey(),
+        ]);
     }
 
     public function accept(Request $request, InventoryReturn $inventoryReturn): JsonResponse

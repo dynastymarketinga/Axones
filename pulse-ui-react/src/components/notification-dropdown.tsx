@@ -73,6 +73,7 @@ const ALERT_TITLE_ES: Record<string, string> = {
   scrap_threshold_exceeded: "Merma por encima del umbral",
   mount_time_exceeded: "Tiempo de montaje excedido",
   password_reset_requested: "Solicitud de restablecimiento de clave",
+  inventory_return_pending: "Devolución a inventario pendiente",
 }
 
 function alertTitleInSpanish(alertType: string): string {
@@ -86,6 +87,7 @@ function routeForAreaTarget(targetArea?: string | null): string | null {
   if (a === "laminacion") return "/laminacion"
   if (a === "corte") return "/corte"
   if (a === "tintas") return "/tintas"
+  if (a === "inventario") return "/devoluciones"
   return null
 }
 
@@ -94,9 +96,12 @@ function routeForAlertType(
   workOrderId?: number,
   targetArea?: string | null,
 ): string {
+  const key = alertType.toLowerCase().trim()
+  if (key === "inventory_return_pending") {
+    return "/devoluciones"
+  }
   const areaRoute = routeForAreaTarget(targetArea)
   if (areaRoute) return areaRoute
-  const key = alertType.toLowerCase().trim()
   if (
     [
       "work_order_saved_broadcast",

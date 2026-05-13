@@ -6,12 +6,21 @@ export function userTargetAreaFromRole(role?: string | null): string | null {
   if (r === "corte") return "corte"
   if (r === "tintas") return "tintas"
   if (r === "montaje") return "montaje"
+  if (
+    r === "inventory" ||
+    r === "inventario" ||
+    r === "inventory_chief" ||
+    r === "jefe_inventario" ||
+    r === "jefe_almacen"
+  ) {
+    return "inventario"
+  }
   return null
 }
 
 function isFullAlertRole(role?: string | null): boolean {
   const r = (role ?? "").toLowerCase().trim()
-  return ["boss", "admin", "jefe_supremo", "superadmin"].includes(r)
+  return ["boss", "admin", "jefe_supremo", "superadmin", "jefe_operaciones"].includes(r)
 }
 
 /**

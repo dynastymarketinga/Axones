@@ -45,6 +45,7 @@ import {
   CLIENT_ORDER_EDIT_HEADER_HINT,
   CLIENT_ORDER_EDIT_LINES_HELPER,
   CLIENT_ORDER_EDIT_LINES_SECTION_TITLE,
+  CLIENT_ORDER_EDIT_NON_PRODUCT_LINES_WARNING,
   CLIENT_ORDER_EDIT_ONLY_OPEN_TOAST,
   CLIENT_ORDER_LINE_INVALID_PRODUCT_TOAST,
   CLIENT_ORDER_LINE_MATERIAL_EMPTY,
@@ -361,7 +362,7 @@ export default function ClientOrderEditPage() {
         toast.error(CLIENT_ORDER_LINE_INVALID_PRODUCT_TOAST)
         return
       }
-      if (isLineQuantityInvalid(row.product_id, row.quantity)) {
+      if (isLineQuantityInvalid(row.quantity)) {
         toast.error(CLIENT_ORDER_LINE_QUANTITY_TOAST)
         return
       }

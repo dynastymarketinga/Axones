@@ -18,7 +18,18 @@ export const IMP_TURNOS_KEY = "impTurnosImpresion"
 export const IMP_ACTUAL_KEY = "impTurnoActual"
 export const IMP_ESTADO_KEY = "impEstadoArea"
 
-/** Motivos estándar para devolución rechazada (impresión); mismo criterio que el modal de registro. */
+/** Casillas por rejilla: ingreso material virgen y salida bobina impresa (OT impresión). */
+export const IMP_BOBINAS_SLOTS = 30
+
+/** Borrador de campos solo para el envío a almacén (materiales y referencia). Los Kg y motivo van en el formulario del turno (`impDevolucion*`). */
+export type WarehouseReturnDraft = {
+  buenaMaterialId: string
+  rechazadaMaterialId: string
+  bobinaCode: string
+  rechazadaObs: string
+}
+
+/** Motivos estándar para devolución rechazada (impresión); mismo criterio que el panel de envío a almacén. */
 export const PRINTING_REJECT_REASONS: Array<{ id: string; label: string }> = [
   { id: "impresion_defectuosa", label: "Impresión defectuosa" },
   { id: "manchas", label: "Manchas" },
@@ -186,10 +197,10 @@ export function createNewPrintingTurno(params: {
     operador: params.operador.trim(),
     ayudante: "",
     supervisor: "",
-    entradaBobinasKg: emptyNumericSeries(26),
-    entradaBobinasMeta: emptyMetaSeries(26),
-    salidaBobinasKg: emptyNumericSeries(22),
-    salidaBobinasMeta: emptyMetaSeries(22),
+    entradaBobinasKg: emptyNumericSeries(IMP_BOBINAS_SLOTS),
+    entradaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
+    salidaBobinasKg: emptyNumericSeries(IMP_BOBINAS_SLOTS),
+    salidaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
     devolucionBuenaKg: "",
     devolucionRechazadaKg: "",
     devolucionRechazadaMotivo: "",
@@ -326,10 +337,10 @@ export function normalizePrintingTurno(raw: unknown): PrintingTurnoEntry | null 
     operador: readString(o.operador),
     ayudante: readString(o.ayudante),
     supervisor: readString(o.supervisor),
-    entradaBobinasKg: padStringArray(o.entradaBobinasKg, 26),
-    entradaBobinasMeta: padMetaArray(o.entradaBobinasMeta, 26),
-    salidaBobinasKg: padStringArray(o.salidaBobinasKg, 22),
-    salidaBobinasMeta: padMetaArray(o.salidaBobinasMeta, 22),
+    entradaBobinasKg: padStringArray(o.entradaBobinasKg, IMP_BOBINAS_SLOTS),
+    entradaBobinasMeta: padMetaArray(o.entradaBobinasMeta, IMP_BOBINAS_SLOTS),
+    salidaBobinasKg: padStringArray(o.salidaBobinasKg, IMP_BOBINAS_SLOTS),
+    salidaBobinasMeta: padMetaArray(o.salidaBobinasMeta, IMP_BOBINAS_SLOTS),
     devolucionBuenaKg: readNumberString(o.devolucionBuenaKg),
     devolucionRechazadaKg: readNumberString(o.devolucionRechazadaKg),
     devolucionRechazadaMotivo: readString(o.devolucionRechazadaMotivo),
@@ -384,8 +395,8 @@ export function hasLegacyPrintingMirror(form: Record<string, unknown>): boolean 
   if (ts && ts !== "pending") return true
   if (readString(form.impOperador).trim()) return true
 
-  const ent = getNumericSeriesForm(form, "impEntradaBobinasKg", 26)
-  const sal = getNumericSeriesForm(form, "impSalidaBobinasKg", 22)
+  const ent = getNumericSeriesForm(form, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS)
+  const sal = getNumericSeriesForm(form, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS)
   if (ent.some((x) => readNumber(x) > 0) || sal.some((x) => readNumber(x) > 0)) return true
 
   if (readNumber(form.impScrapTransparenteKg) > 0 || readNumber(form.impScrapImpresoKg) > 0) return true
@@ -413,10 +424,10 @@ export function legacyClosedTurnoFromMirror(form: Record<string, unknown>): Prin
     operador: readString(form.impOperador),
     ayudante: readString(form.impAyudante),
     supervisor: readString(form.impSupervisor),
-    entradaBobinasKg: getNumericSeriesForm(form, "impEntradaBobinasKg", 26),
-    entradaBobinasMeta: getMetaSeriesForm(form, "impEntradaBobinasMeta", 26),
-    salidaBobinasKg: getNumericSeriesForm(form, "impSalidaBobinasKg", 22),
-    salidaBobinasMeta: getMetaSeriesForm(form, "impSalidaBobinasMeta", 22),
+    entradaBobinasKg: getNumericSeriesForm(form, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS),
+    entradaBobinasMeta: getMetaSeriesForm(form, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS),
+    salidaBobinasKg: getNumericSeriesForm(form, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS),
+    salidaBobinasMeta: getMetaSeriesForm(form, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS),
     devolucionBuenaKg: readNumberString(form.impDevolucionBuenaKg),
     devolucionRechazadaKg: readNumberString(form.impDevolucionRechazadaKg),
     devolucionRechazadaMotivo: readString(form.impDevolucionRechazadaMotivo),
@@ -461,10 +472,10 @@ export function clearPrintingMirrorKeys(): Record<string, unknown> {
     impOperador: "",
     impAyudante: "",
     impSupervisor: "",
-    impEntradaBobinasKg: emptyNumericSeries(26),
-    impEntradaBobinasMeta: emptyMetaSeries(26),
-    impSalidaBobinasKg: emptyNumericSeries(22),
-    impSalidaBobinasMeta: emptyMetaSeries(22),
+    impEntradaBobinasKg: emptyNumericSeries(IMP_BOBINAS_SLOTS),
+    impEntradaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
+    impSalidaBobinasKg: emptyNumericSeries(IMP_BOBINAS_SLOTS),
+    impSalidaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
     impDevolucionBuenaKg: "",
     impDevolucionRechazadaKg: "",
     impDevolucionRechazadaMotivo: "",
@@ -541,7 +552,10 @@ export type JsonAccumulatedPrinting = {
   producidoKg: number
   entradaKg: number
   scrapKg: number
+  /** Solo turnos ya cerrados en historial. */
   turnosCerrados: number
+  /** Cerrados + 1 si hay turno actual abierto (vista en tiempo real). */
+  turnosRegistrados: number
   ultimoCierreLabel: string
 }
 
@@ -580,6 +594,7 @@ export function accumulatePrintingFromJson(
     entradaKg,
     scrapKg,
     turnosCerrados: cerrados.length,
+    turnosRegistrados: cerrados.length + (actual ? 1 : 0),
     ultimoCierreLabel,
   }
 }

@@ -15,6 +15,7 @@ import { LoadingTableRow } from "@/components/axones/LoadingStates"
 import { labelInventoryArea } from "@/lib/inventory-area-labels"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { ReasonModal } from "@/components/axones/ReasonModal"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -98,7 +99,7 @@ export default function InventoryReturnsPage() {
   }
 
   const showInitialSkeleton = loading && rows === null
-  const colCount = listTab === "history" ? 8 : 7
+  const colCount = listTab === "history" ? 9 : 8
 
   return (
     <div className={AXONES_INVENTORY_PAGE_CLASS}>
@@ -117,6 +118,7 @@ export default function InventoryReturnsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>ID</TableHead>
+                  <TableHead>Tipo</TableHead>
                   <TableHead>OT</TableHead>
                   <TableHead>Material</TableHead>
                   <TableHead>Proveedor</TableHead>
@@ -127,7 +129,7 @@ export default function InventoryReturnsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <LoadingTableRow colSpan={8} />
+                <LoadingTableRow colSpan={9} />
               </TableBody>
             </Table>
           </div>
@@ -166,16 +168,17 @@ export default function InventoryReturnsPage() {
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>ID</TableHead>
-                        <TableHead>OT</TableHead>
-                        <TableHead>Material</TableHead>
-                        <TableHead>Proveedor</TableHead>
-                        <TableHead>Cantidad</TableHead>
-                        <TableHead>Área destino</TableHead>
-                        {listTab === "history" ? <TableHead>Estado</TableHead> : null}
-                        <TableHead className="text-right">Acciones</TableHead>
-                      </TableRow>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead>OT</TableHead>
+                      <TableHead>Material</TableHead>
+                      <TableHead>Proveedor</TableHead>
+                      <TableHead>Cantidad</TableHead>
+                      <TableHead>Área destino</TableHead>
+                      {listTab === "history" ? <TableHead>Estado</TableHead> : null}
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loading ? (
@@ -218,9 +221,30 @@ export default function InventoryReturnsPage() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        rows.data.map((r) => (
-                          <TableRow key={r.id}>
+                        rows.data.map((r) => {
+                          const isRechazada = r.destination_area === "bobinas_rechazadas"
+                          return (
+                          <TableRow
+                            key={r.id}
+                            className={
+                              isRechazada
+                                ? "bg-rose-50/70 dark:bg-rose-950/25"
+                                : "bg-emerald-50/50 dark:bg-emerald-950/20"
+                            }
+                          >
                             <TableCell>{r.id}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={isRechazada ? "destructive" : "outline"}
+                                className={
+                                  isRechazada
+                                    ? "font-semibold"
+                                    : "border-emerald-600/50 bg-emerald-600 text-white hover:bg-emerald-600 dark:border-emerald-500"
+                                }
+                              >
+                                {isRechazada ? "Rechazada" : "Buena"}
+                              </Badge>
+                            </TableCell>
                             <TableCell>
                               {r.work_order?.code ?? r.work_order_id ?? "—"}
                             </TableCell>
@@ -270,7 +294,8 @@ export default function InventoryReturnsPage() {
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))
+                          )
+                        })
                       )}
                     </TableBody>
                   </Table>

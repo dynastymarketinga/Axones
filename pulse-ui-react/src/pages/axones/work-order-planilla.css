@@ -815,3 +815,441 @@
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* MES / piso de planta — paneles de producción OT (impresión, laminación, corte) */
+/* -------------------------------------------------------------------------- */
+.ax-mes {
+  --ax-mes-surface: #f8fafc;
+  --ax-mes-panel: #ffffff;
+  --ax-mes-border: #cbd5e1;
+  --ax-mes-header-from: #0f172a;
+  --ax-mes-header-to: #1e293b;
+  --ax-mes-header-fore: #f8fafc;
+  --ax-mes-muted: #475569;
+  --ax-mes-timer-bg: #0f172a;
+  --ax-mes-timer-digits: #e2e8f0;
+  --ax-mes-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ax-mes .mes-section {
+  border: 1px solid var(--ax-mes-border);
+  border-radius: 10px;
+  background: var(--ax-mes-panel);
+  box-shadow: var(--ax-mes-shadow);
+  overflow: hidden;
+}
+
+.ax-mes .mes-section__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, var(--ax-mes-header-from) 0%, var(--ax-mes-header-to) 100%);
+  color: var(--ax-mes-header-fore);
+  border-bottom: 1px solid color-mix(in srgb, var(--ax-mes-header-from) 70%, #000 30%);
+}
+
+.ax-mes .mes-section__title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ax-mes .mes-section__titleExtras {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ax-mes .mes-section__body {
+  padding: 14px;
+  background: var(--ax-mes-surface);
+}
+
+.ax-mes .mes-section__body--flush {
+  padding: 12px;
+}
+
+/* Variante suave cuando el bloque no lleva cabecera oscura (rejillas densas) */
+.ax-mes .mes-section--subtle .mes-section__header {
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+}
+
+.ax-mes .mes-stat-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 1024px) {
+  .ax-mes .mes-stat-grid--4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.ax-mes .mes-stat-tile {
+  border: 1px solid var(--ax-mes-border);
+  border-radius: 8px;
+  background: var(--ax-mes-panel);
+  padding: 10px 12px;
+  min-height: 3.5rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.ax-mes .mes-stat-tile__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ax-mes-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.ax-mes .mes-stat-tile__labelRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ax-mes .mes-stat-tile__labelIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--ax-mes-muted) 92%, #64748b 8%);
+}
+
+.ax-mes .mes-stat-tile__labelIcon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ax-mes .mes-stat-tile__value {
+  font-size: 1.125rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.ax-mes .mes-stat-tile__value--positive {
+  color: #047857;
+}
+
+.ax-mes .mes-stat-tile__value--negative {
+  color: #b91c1c;
+}
+
+.ax-mes .mes-footer-bar {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .ax-mes .mes-footer-bar--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.ax-mes .mes-footer-bar__item {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ax-mes-muted);
+  border: 1px solid color-mix(in srgb, var(--ax-mes-border) 85%, #64748b 15%);
+  border-radius: 8px;
+  background: var(--ax-mes-panel);
+  padding: 8px 10px;
+}
+
+.ax-mes .mes-footer-bar__item strong {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.ax-mes .mes-field-hint {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ax-mes-muted);
+  margin-top: 4px;
+}
+
+.ax-mes .mes-timer-grid {
+  display: grid;
+  gap: 12px;
+  align-items: stretch;
+}
+
+@media (min-width: 768px) {
+  .ax-mes .mes-timer-grid {
+    grid-template-columns: 1fr auto;
+  }
+}
+
+.ax-mes .mes-timer-face {
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: var(--ax-mes-timer-bg);
+  color: var(--ax-mes-timer-digits);
+  padding: 14px 16px;
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
+.ax-mes .mes-timer-face__digits {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+
+.ax-mes .mes-timer-face__caption {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ax-mes .mes-timer-face__caption--inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.ax-mes .mes-timer-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+@media (min-width: 640px) {
+  .ax-mes .mes-timer-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.ax-mes .mes-timer-metric {
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: color-mix(in srgb, var(--ax-mes-timer-bg) 88%, #1e293b 12%);
+  padding: 10px 12px;
+}
+
+.ax-mes .mes-timer-metric__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: clamp(11px, 1.6vw, 13px);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  line-height: 1.25;
+}
+
+.ax-mes .mes-timer-metric__value {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: clamp(1.05rem, 2.4vw, 1.35rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 6px;
+  line-height: 1.15;
+}
+
+.ax-mes .mes-timer-metric__value--dead {
+  color: #fca5a5;
+}
+
+.ax-mes .mes-timer-metric__value--live {
+  color: #6ee7b7;
+}
+
+.ax-mes .mes-timer-metric__value--neutral {
+  color: #e2e8f0;
+}
+
+.ax-mes .mes-toggle-row.mes-toggle-turno button,
+.ax-mes .mes-toggle-row.mes-toggle-grupo button {
+  min-height: 44px;
+  font-weight: 700;
+}
+
+/* Turno: selección neutra industrial (no violeta “app”) */
+.ax-mes .mes-toggle-turno button[data-state="on"] {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #020617 !important;
+}
+
+/* Grupo A/B/C: color distinto al activar */
+.ax-mes .mes-toggle-grupo button[data-state="off"] {
+  background: #fff !important;
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.ax-mes .mes-toggle-grupo button[data-state="on"].mes-grupo-a {
+  background: #1d4ed8 !important;
+  color: #fff !important;
+  border-color: #1e3a8a !important;
+}
+
+.ax-mes .mes-toggle-grupo button[data-state="on"].mes-grupo-b {
+  background: #c2410c !important;
+  color: #fff !important;
+  border-color: #9a3412 !important;
+}
+
+.ax-mes .mes-toggle-grupo button[data-state="on"].mes-grupo-c {
+  background: #0f766e !important;
+  color: #fff !important;
+  border-color: #115e59 !important;
+}
+
+/* Botonera temporizador: iconos circulares (HMI) */
+.ax-mes .mes-timer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ax-mes .mes-timer-actions .mes-timer-fab-btn {
+  width: 3rem !important;
+  height: 3rem !important;
+  min-height: 3rem !important;
+  min-width: 3rem !important;
+  padding: 0 !important;
+  border-radius: 9999px !important;
+  font-weight: 600;
+  font-size: 0;
+  line-height: 0;
+  justify-content: center !important;
+  flex-shrink: 0;
+  gap: 0 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-timer-fab-btn svg {
+  width: 1.375rem;
+  height: 1.375rem;
+  flex-shrink: 0;
+  stroke-width: 2.25px;
+}
+
+/* Botonera temporizador: columna de acciones; en cada fila la etiqueta va encima del icono */
+.ax-mes .mes-timer-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+}
+
+.ax-mes .mes-timer-action-labeled {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.ax-mes .mes-timer-action-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.2;
+  text-align: center;
+  min-width: 0;
+  max-width: 10rem;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-primary {
+  background: #047857 !important;
+  color: #fff !important;
+  border: 1px solid #065f46 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-primary:hover:not(:disabled) {
+  background: #065f46 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-secondary {
+  background: #fff !important;
+  color: #0f172a !important;
+  border: 1px solid #475569 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-secondary:hover:not(:disabled) {
+  background: #f1f5f9 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-muted {
+  background: #f8fafc !important;
+  color: #334155 !important;
+  border: 1px solid #94a3b8 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-muted:hover:not(:disabled) {
+  background: #f1f5f9 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-warn-outline {
+  background: #fffbeb !important;
+  color: #92400e !important;
+  border: 1px solid #d97706 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-warn-outline:hover:not(:disabled) {
+  background: #fef3c7 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-danger-outline {
+  background: #fff !important;
+  color: #991b1b !important;
+  border: 1px solid #b91c1c !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-danger-outline:hover:not(:disabled) {
+  background: #fef2f2 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-destructive-solid {
+  background: #b91c1c !important;
+  color: #fff !important;
+  border: 1px solid #991b1b !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-destructive-solid:hover:not(:disabled) {
+  background: #991b1b !important;
+}
+
+.ax-mes .mes-badge-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid #059669;
+  background: #ecfdf5;
+  color: #065f46;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 10px;
+}
+

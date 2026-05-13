@@ -1,5 +1,17 @@
-import { ArrowUpRight, ChevronDown, Flag, Pause, Play, ReceiptText, Square } from "lucide-react"
+import {
+  ArrowUpRight,
+  ChevronDown,
+  CirclePause,
+  CirclePlay,
+  Flag,
+  LogOut,
+  Moon,
+  ReceiptText,
+  Sun,
+  Users,
+} from "lucide-react"
 
+import { MesSectionShell, MesStatTile, MesTimerFace } from "@/components/axones/mes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +30,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 
 import type { BobinaLabelMeta } from "./WorkOrderPrintingOpsSection"
 
@@ -158,25 +171,28 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
 
   return (
     <>
-      <div className="mt-3 rounded-lg border border-cyan-200/70 bg-cyan-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-900">
-          Acumulado de la orden (todos los turnos)
+      <MesSectionShell title="Acumulado de la orden (todos los turnos)">
+        <div className="mes-stat-grid mes-stat-grid--4">
+          <MesStatTile label="Pedido total" value={`${props.pedidoTotalKg.toFixed(2)} Kg`} />
+          <MesStatTile label="Producido" value={`${props.producidoAcumuladoKg.toFixed(2)} Kg`} tone="positive" />
+          <MesStatTile label="Falta por producir" value={`${props.faltanteKg.toFixed(2)} Kg`} tone="negative" />
+          <MesStatTile label="Registros / turnos" value={props.turnosRegistrados} />
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Pedido total</span><p className="font-semibold">{props.pedidoTotalKg.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Producido</span><p className="font-semibold text-emerald-700">{props.producidoAcumuladoKg.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Falta por producir</span><p className="font-semibold text-rose-700">{props.faltanteKg.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Registros / turnos</span><p className="font-semibold">{props.turnosRegistrados}</p></div>
+        <div className="mes-footer-bar mes-footer-bar--3">
+          <div className="mes-footer-bar__item">
+            Entrada impresa: <strong>{props.totalEntradaImpresa.toFixed(2)} Kg</strong>
+          </div>
+          <div className="mes-footer-bar__item">
+            Salida laminada: <strong>{props.totalSalida.toFixed(2)} Kg</strong>
+          </div>
+          <div className="mes-footer-bar__item">
+            Último turno: <strong>{props.ultimoTurnoLabel}</strong>
+          </div>
         </div>
-        <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-          <div className="rounded border bg-background px-2 py-1.5">Entrada impresa: <span className="font-semibold text-foreground">{props.totalEntradaImpresa.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background px-2 py-1.5">Salida laminada: <span className="font-semibold text-foreground">{props.totalSalida.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background px-2 py-1.5">Último turno: <span className="font-semibold text-foreground">{props.ultimoTurnoLabel}</span></div>
-        </div>
-      </div>
+      </MesSectionShell>
 
       {props.archivedTurns.length > 0 ? (
-        <Collapsible className="mt-3 rounded-lg border bg-muted/30">
+        <Collapsible className="rounded-lg border border-slate-300 bg-white shadow-sm">
           <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/50">
             <span>Historial de turnos ({props.archivedTurns.length})</span>
             <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
@@ -216,28 +232,115 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         </Collapsible>
       ) : null}
 
-      <div className="mt-3 rounded-lg border border-sky-200/70 bg-sky-50/40 p-3">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-sky-900"><ReceiptText className="h-4 w-4" />Temporizador de producción</div>
+      <MesSectionShell
+        title={
+          <span className="inline-flex items-center gap-2">
+            <ReceiptText className="h-4 w-4 shrink-0" aria-hidden />
+            Temporizador de producción
+          </span>
+        }
+        headerRight={
           <Badge variant="secondary" className="text-xs">
-            {props.timerState === "running" ? "En producción" : props.timerState === "paused" ? "En pausa" : props.timerState === "completed" ? "Orden finalizada" : props.timerState === "stopped" ? "Turno cerrado" : "Pendiente"}
+            {props.timerState === "running"
+              ? "En producción"
+              : props.timerState === "paused"
+                ? "En pausa"
+                : props.timerState === "completed"
+                  ? "Orden finalizada"
+                  : props.timerState === "stopped"
+                    ? "Turno cerrado"
+                    : "Pendiente"}
           </Badge>
-        </div>
-        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="font-mono text-3xl font-bold text-sky-900">{props.formatTimerHms(props.totalSec)}</div>
-            <p className="text-muted-foreground text-xs">Tiempo transcurrido</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <div className="rounded border bg-muted/30 p-2"><p className="text-muted-foreground text-[11px]">Tiempo muerto</p><p className="font-mono text-sm font-semibold text-red-600">{props.formatTimerHms(props.deadSec)}</p></div>
-              <div className="rounded border bg-muted/30 p-2"><p className="text-muted-foreground text-[11px]">Tiempo efectivo</p><p className="font-mono text-sm font-semibold text-emerald-700">{props.formatTimerHms(props.effectiveSec)}</p></div>
-              <div className="col-span-2 rounded border bg-muted/30 p-2 sm:col-span-1"><p className="text-muted-foreground text-[11px]">Kg/Hora estimado</p><p className="text-sm font-semibold">{props.kgHora}</p></div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-1">
-            <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" onClick={props.startProductionTimer} disabled={props.timerRunning || props.timerState === "completed"}><Play className="mr-1 h-4 w-4" />Iniciar</Button>
-            <Button type="button" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50" onClick={props.pauseProductionTimer} disabled={!props.timerRunning}><Pause className="mr-1 h-4 w-4" />Pausar</Button>
-            <Button type="button" variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-50" onClick={() => props.stopProductionTimer("stopped")} disabled={props.timerStopped || props.timerState === "pending"}><Square className="mr-1 h-4 w-4" />Fin turno</Button>
-            <Button type="button" variant="destructive" onClick={() => props.stopProductionTimer("completed")} disabled={props.timerState === "completed" || props.timerState === "pending"}><Flag className="mr-1 h-4 w-4" />Finalizar</Button>
+        }
+      >
+        <div className="mes-timer-grid">
+          <MesTimerFace
+            elapsedLabel={props.formatTimerHms(props.totalSec)}
+            deadHms={props.formatTimerHms(props.deadSec)}
+            effectiveHms={props.formatTimerHms(props.effectiveSec)}
+            kgHora={props.kgHora}
+          />
+          <div className="mes-timer-actions w-full min-w-0">
+            <TooltipProvider delayDuration={200}>
+              <div className="mes-timer-action-stack">
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Iniciar</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-primary shrink-0"
+                        aria-label="Iniciar"
+                        onClick={props.startProductionTimer}
+                        disabled={props.timerRunning || props.timerState === "completed"}
+                      >
+                        <CirclePlay className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Iniciar temporizador</TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Pausar</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-secondary shrink-0"
+                        aria-label="Pausar"
+                        onClick={props.pauseProductionTimer}
+                        disabled={!props.timerRunning}
+                      >
+                        <CirclePause className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Pausar temporizador</TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Fin turno</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-danger-outline shrink-0"
+                        aria-label="Fin turno"
+                        onClick={() => props.stopProductionTimer("stopped")}
+                        disabled={props.timerStopped || props.timerState === "pending"}
+                      >
+                        <LogOut className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Cerrar turno sin finalizar la orden</TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Finalizar</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="mes-timer-fab-btn mes-btn-destructive-solid shrink-0"
+                        aria-label="Finalizar orden"
+                        onClick={() => props.stopProductionTimer("completed")}
+                        disabled={props.timerState === "completed" || props.timerState === "pending"}
+                      >
+                        <Flag className="shrink-0" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Finalizar orden de trabajo</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+            </TooltipProvider>
           </div>
         </div>
         {props.timerPaused ? (
@@ -254,7 +357,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
           </div>
         ) : null}
         {props.pauseEntries.length > 0 ? (
-          <div className="mt-3 space-y-1 rounded-md border bg-background p-2">
+          <div className="mt-3 space-y-1 rounded-md border border-slate-200 bg-white p-2">
             <p className="text-muted-foreground text-xs">Paradas registradas</p>
             {props.pauseEntries.map((entry, idx) => (
               <div key={`${entry.at}-${idx}`} className="text-xs">
@@ -265,43 +368,66 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             ))}
           </div>
         ) : null}
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-amber-200/70 bg-amber-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">Información del turno</div>
+      <MesSectionShell title="Información del turno" subtle>
         <div className="grid gap-2 md:grid-cols-2">
           <div className="space-y-1">
             <Label className="ot-label">Turno</Label>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              className="w-full"
-              value={props.turno}
-              onValueChange={(v) => {
-                if (!v) return
-                props.onSetTurno(v as "diurno" | "nocturno")
-              }}
-            >
-              <ToggleGroupItem value="diurno" className="flex-1">Diurno</ToggleGroupItem>
-              <ToggleGroupItem value="nocturno" className="flex-1">Nocturno</ToggleGroupItem>
-            </ToggleGroup>
+            <div className="mes-toggle-row mes-toggle-turno">
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                className="w-full"
+                value={props.turno}
+                onValueChange={(v) => {
+                  if (!v) return
+                  props.onSetTurno(v as "diurno" | "nocturno")
+                }}
+              >
+                <ToggleGroupItem value="diurno" className="flex-1 gap-2">
+                  <Sun className="h-4 w-4 shrink-0" aria-hidden />
+                  Diurno
+                </ToggleGroupItem>
+                <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
+                  <Moon className="h-4 w-4 shrink-0" aria-hidden />
+                  Nocturno
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+            <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
           </div>
           <div className="space-y-1">
             <Label className="ot-label">Grupo</Label>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              className="w-full"
-              value={props.grupo}
-              onValueChange={(v) => {
-                if (!v) return
-                props.onSetGrupo(v as "A" | "B" | "C")
-              }}
-            >
-              {(["A", "B", "C"] as const).map((g) => (
-                <ToggleGroupItem key={g} value={g} className="flex-1">{g}</ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            <div className="mes-toggle-row mes-toggle-grupo">
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                className="w-full"
+                value={props.grupo}
+                onValueChange={(v) => {
+                  if (!v) return
+                  props.onSetGrupo(v as "A" | "B" | "C")
+                }}
+              >
+                {(["A", "B", "C"] as const).map((g) => (
+                  <ToggleGroupItem
+                    key={g}
+                    value={g}
+                    className={cn(
+                      "flex-1 gap-1",
+                      g === "A" && "mes-grupo-a",
+                      g === "B" && "mes-grupo-b",
+                      g === "C" && "mes-grupo-c",
+                    )}
+                  >
+                    <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                    {g}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+            <p className="mes-field-hint">Cuadrilla o equipo asignado a la máquina (rotación interna A / B / C).</p>
           </div>
           <div className="ot-field">
             <Label className="ot-label">Operador</Label>
@@ -316,12 +442,13 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             <Input className="ot-input-unified h-9" value={props.supervisor} onChange={(e) => props.onSetSupervisor(e.target.value)} placeholder="Nombre supervisor" />
           </div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-emerald-200/70 bg-emerald-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900">
-          Entrada — bobinas impresas (laminación)
-        </div>
+      <MesSectionShell
+        title="Entrada — bobinas impresas (laminación)"
+        subtle
+        bodyClassName="mes-section__body--flush"
+      >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
           {props.entradaImpresaBobinas.map((val, idx) => (
             <div key={`ent-imp-${idx}`} className="space-y-1">
@@ -355,16 +482,17 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             </div>
           ))}
         </div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaImpresaCount}</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Peso total</span><p className="font-semibold">{props.totalEntradaImpresa.toFixed(2)} Kg</p></div>
+        <div className="mt-2 mes-stat-grid sm:grid-cols-2">
+          <MesStatTile label="N° bobinas" value={entradaImpresaCount} />
+          <MesStatTile label="Peso total" value={`${props.totalEntradaImpresa.toFixed(2)} Kg`} />
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-rose-200/70 bg-rose-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900">
-          Ingreso de material virgen (laminación)
-        </div>
+      <MesSectionShell
+        title="Ingreso de material virgen (laminación)"
+        subtle
+        bodyClassName="mes-section__body--flush"
+      >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
           {props.entradaVirgenBobinas.map((val, idx) => (
             <div key={`ent-virg-${idx}`} className="space-y-1">
@@ -422,16 +550,13 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             <p className="text-muted-foreground text-[11px]">Material apto para reingreso a inventario.</p>
           </div>
         </div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{entradaVirgenCount}</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Peso total</span><p className="font-semibold">{props.totalEntradaVirgen.toFixed(2)} Kg</p></div>
+        <div className="mt-2 mes-stat-grid sm:grid-cols-2">
+          <MesStatTile label="N° bobinas" value={entradaVirgenCount} />
+          <MesStatTile label="Peso total" value={`${props.totalEntradaVirgen.toFixed(2)} Kg`} />
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-violet-200/70 bg-violet-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-900">
-          Proceso — salida bobina laminada
-        </div>
+      <MesSectionShell title="Proceso — salida bobina laminada" subtle bodyClassName="mes-section__body--flush">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
           {props.salidaBobinas.map((val, idx) => (
             <div key={`sal-${idx}`} className="space-y-1">
@@ -465,44 +590,44 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             </div>
           ))}
         </div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-4">
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">N° bobinas</span><p className="font-semibold">{props.salidaBobinas.filter((v) => Number(v) > 0).length}</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Peso total</span><p className="font-semibold">{props.totalSalida.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Merma</span><p className="font-semibold">{props.mermaCalc.toFixed(2)} Kg</p></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Metraje</span><Input className="ot-input-unified mt-1 h-8" inputMode="decimal" value={props.metrajeRaw} onChange={(e) => props.onSetMetraje(e.target.value)} placeholder="0" /></div>
+        <div className="mt-2 mes-stat-grid mes-stat-grid--4">
+          <MesStatTile label="N° bobinas" value={props.salidaBobinas.filter((v) => Number(v) > 0).length} />
+          <MesStatTile label="Peso total" value={`${props.totalSalida.toFixed(2)} Kg`} />
+          <MesStatTile label="Merma" value={`${props.mermaCalc.toFixed(2)} Kg`} />
+          <div className="mes-stat-tile">
+            <span className="mes-stat-tile__label">Metraje</span>
+            <Input className="ot-input-unified mt-1 h-9" inputMode="decimal" value={props.metrajeRaw} onChange={(e) => props.onSetMetraje(e.target.value)} placeholder="0" />
+          </div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fuchsia-900">Control de adhesivo</div>
+      <MesSectionShell title="Control de adhesivo" subtle>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Adhesivo (entrada/sobro)</span><div className="mt-1 grid grid-cols-2 gap-1"><Input className="ot-input-unified h-8" inputMode="decimal" value={props.adhesivoEntradaRaw} onChange={(e) => props.onSetAdhesivoEntrada(e.target.value)} /><Input className="ot-input-unified h-8" inputMode="decimal" value={props.adhesivoSobroRaw} onChange={(e) => props.onSetAdhesivoSobro(e.target.value)} /></div><p className="mt-1 text-xs">Consumo: {adhesivoConsumido.toFixed(2)} Kg</p></div>
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Catalizador (entrada/sobro)</span><div className="mt-1 grid grid-cols-2 gap-1"><Input className="ot-input-unified h-8" inputMode="decimal" value={props.catalizadorEntradaRaw} onChange={(e) => props.onSetCatalizadorEntrada(e.target.value)} /><Input className="ot-input-unified h-8" inputMode="decimal" value={props.catalizadorSobroRaw} onChange={(e) => props.onSetCatalizadorSobro(e.target.value)} /></div><p className="mt-1 text-xs">Consumo: {catalizadorConsumido.toFixed(2)} Kg</p></div>
           <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Acetato (entrada/sobro)</span><div className="mt-1 grid grid-cols-2 gap-1"><Input className="ot-input-unified h-8" inputMode="decimal" value={props.acetatoEntradaRaw} onChange={(e) => props.onSetAcetatoEntrada(e.target.value)} /><Input className="ot-input-unified h-8" inputMode="decimal" value={props.acetatoSobroRaw} onChange={(e) => props.onSetAcetatoSobro(e.target.value)} /></div><p className="mt-1 text-xs">Consumo: {acetatoConsumido.toFixed(2)} Lt</p></div>
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border border-orange-200/70 bg-orange-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-900">Scrap del turno (Kg)</div>
+      <MesSectionShell title="Scrap del turno (Kg)" subtle>
         <div className="grid gap-2 sm:grid-cols-4">
           <div><Label className="ot-label">Transparente</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapTransparenteRaw} onChange={(e) => props.onSetScrapTransparente(e.target.value)} placeholder="0" /></div>
           <div><Label className="ot-label">Impreso</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapImpresoRaw} onChange={(e) => props.onSetScrapImpreso(e.target.value)} placeholder="0" /></div>
           <div><Label className="ot-label">Laminado</Label><Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapLaminadoRaw} onChange={(e) => props.onSetScrapLaminado(e.target.value)} placeholder="0" /></div>
-          <div className="rounded border bg-background p-2 text-sm"><span className="text-muted-foreground">Total scrap</span><p className="font-semibold">{props.totalScrap.toFixed(2)} Kg</p></div>
+          <MesStatTile label="Total scrap" value={`${props.totalScrap.toFixed(2)} Kg`} />
         </div>
-      </div>
+      </MesSectionShell>
 
-      <div className="mt-3 rounded-lg border bg-muted/20 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide">Resumen de producción</div>
-        <div className="grid gap-2 text-sm sm:grid-cols-2">
-          <div className="rounded border bg-background p-2">Bobinas impresas (entrada): <span className="font-semibold">{props.totalEntradaImpresa.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background p-2">Bobinas virgen (entrada): <span className="font-semibold">{props.totalEntradaVirgen.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background p-2">Total salida laminada: <span className="font-semibold">{props.totalSalida.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background p-2">Total scrap: <span className="font-semibold">{props.totalScrap.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background p-2">Merma calculada: <span className="font-semibold">{props.mermaCalc.toFixed(2)} Kg</span></div>
-          <div className="rounded border bg-background p-2">% Refil: <span className="font-semibold">{props.refilPct.toFixed(2)}%</span></div>
+      <MesSectionShell title="Resumen de producción" subtle>
+        <div className="mes-stat-grid sm:grid-cols-2">
+          <MesStatTile label="Bobinas impresas (entrada)" value={`${props.totalEntradaImpresa.toFixed(2)} Kg`} />
+          <MesStatTile label="Bobinas virgen (entrada)" value={`${props.totalEntradaVirgen.toFixed(2)} Kg`} />
+          <MesStatTile label="Total salida laminada" value={`${props.totalSalida.toFixed(2)} Kg`} />
+          <MesStatTile label="Total scrap" value={`${props.totalScrap.toFixed(2)} Kg`} />
+          <MesStatTile label="Merma calculada" value={`${props.mermaCalc.toFixed(2)} Kg`} />
+          <MesStatTile label="% Refil" value={`${props.refilPct.toFixed(2)}%`} />
         </div>
-      </div>
+      </MesSectionShell>
 
       <Dialog open={props.labelEditorOpen} onOpenChange={props.onLabelOpenChange}>
         <DialogContent className="max-w-3xl">

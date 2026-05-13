@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\WorkOrderStatus;
+use App\Models\Bobina;
 use App\Models\InventoryReturn;
 use App\Models\Material;
 use App\Models\User;
@@ -99,22 +100,15 @@ class RejectedBobinaRuleTest extends TestCase
         $retResp->assertCreated();
         $returnId = $retResp->json('id');
 
-        $this->postJson("/api/inventory-returns/{$returnId}/accept", [], $headers)->assertOk();
+        $this->assertDatabaseHas('bobinas', ['inventory_return_id' => $returnId]);
+
+        $this->postJson("/api/inventory-returns/{$returnId}/accept", [
+            'reason' => 'Aceptación prueba stock',
+        ], $headers)->assertOk();
 
         $mat->refresh();
         $this->assertEquals('12.500', $mat->quantity_on_hand);
-
-        $bobResp = $this->postJson('/api/bobinas', [
-            'material_id' => $mat->id,
-            'code' => 'BR-CODE-001',
-            'weight_kg' => 12.5,
-            'inventory_return_id' => $returnId,
-        ], $headers);
-        $bobResp->assertCreated();
-
-        $mat->refresh();
-        $this->assertEquals('12.500', $mat->quantity_on_hand);
-        $this->assertEquals($returnId, $bobResp->json('inventory_return_id'));
+        $this->assertEquals(1, Bobina::query()->where('inventory_return_id', $returnId)->count());
     }
 
     public function test_second_bobina_for_same_return_is_rejected(): void
@@ -133,14 +127,10 @@ class RejectedBobinaRuleTest extends TestCase
             'quantity' => 3,
         ], $headers);
         $returnId = $retResp->json('id');
-        $this->postJson("/api/inventory-returns/{$returnId}/accept", [], $headers)->assertOk();
-
-        $this->postJson('/api/bobinas', [
-            'material_id' => $mat->id,
-            'code' => 'BR-DUP-A',
-            'weight_kg' => 3,
-            'inventory_return_id' => $returnId,
-        ], $headers)->assertCreated();
+        $this->assertDatabaseHas('bobinas', ['inventory_return_id' => $returnId]);
+        $this->postJson("/api/inventory-returns/{$returnId}/accept", [
+            'reason' => 'Aceptación prueba duplicado',
+        ], $headers)->assertOk();
 
         $this->postJson('/api/bobinas', [
             'material_id' => $mat->id,
@@ -172,7 +162,9 @@ class RejectedBobinaRuleTest extends TestCase
             'quantity' => 2,
         ], $headers);
         $returnId = $retResp->json('id');
-        $this->postJson("/api/inventory-returns/{$returnId}/accept", [], $headers)->assertOk();
+        $this->postJson("/api/inventory-returns/{$returnId}/accept", [
+            'reason' => 'Aceptación prueba material normal',
+        ], $headers)->assertOk();
 
         $this->postJson('/api/bobinas', [
             'material_id' => $normal->id,
@@ -219,7 +211,9 @@ class RejectedBobinaRuleTest extends TestCase
             'quantity' => 8,
         ], $headers);
         $returnId = $retResp->json('id');
-        $this->postJson("/api/inventory-returns/{$returnId}/accept", [], $headers)->assertOk();
+        $this->postJson("/api/inventory-returns/{$returnId}/accept", [
+            'reason' => 'Aceptación prueba peso',
+        ], $headers)->assertOk();
 
         $this->postJson('/api/bobinas', [
             'material_id' => $mat->id,
@@ -227,5 +221,42 @@ class RejectedBobinaRuleTest extends TestCase
             'weight_kg' => 7.999,
             'inventory_return_id' => $returnId,
         ], $headers)->assertUnprocessable();
+    }
+
+    public function test_inventory_return_to_material_creates_operational_alert_and_keeps_work_order(): void
+    {
+        $user = User::factory()->create();
+        $headers = $this->authHeaders($user);
+        $mat = Material::query()->create([
+            'sku' => 'MAT-GOOD-RET-1',
+            'name' => 'Sustrato bueno',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 100])->save();
+        $woResp = $this->postJson('/api/work-orders', ['auto_create_material_request' => false], $headers);
+        $woId = $woResp->json('id');
+
+        $r = $this->postJson('/api/inventory-returns', [
+            'material_id' => $mat->id,
+            'work_order_id' => $woId,
+            'destination_area' => 'material',
+            'quantity' => 3.5,
+            'reason' => 'Devolución buena',
+        ], $headers);
+        $r->assertCreated();
+        $retId = (int) $r->json('id');
+
+        $this->assertDatabaseHas('inventory_returns', [
+            'id' => $retId,
+            'work_order_id' => $woId,
+            'destination_area' => 'material',
+        ]);
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => 'inventory_return_pending',
+            'work_order_id' => $woId,
+            'material_id' => $mat->id,
+        ]);
     }
 }

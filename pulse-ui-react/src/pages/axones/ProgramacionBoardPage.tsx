@@ -241,9 +241,9 @@ export default function ProgramacionBoardPage() {
           placeholder="Código OT, referencia, cliente…"
           value={qInput}
           onChange={(ev) => setQInput(ev.target.value)}
-          className="min-w-0 lg:col-span-5"
+          className="min-w-0 md:col-span-5"
         />
-        <CatalogLabeledField label="Etapa en tablero" className="lg:col-span-3">
+        <CatalogLabeledField label="Etapa en tablero" className="md:col-span-3">
           <Select
             value={boardStageFilter}
             onValueChange={(v) => {
@@ -264,7 +264,7 @@ export default function ProgramacionBoardPage() {
             </SelectContent>
           </Select>
         </CatalogLabeledField>
-        <CatalogLabeledField label="Estado OT" className="lg:col-span-4">
+        <CatalogLabeledField label="Estado OT" className="md:col-span-4">
           <Select
             value={statusFilter}
             onValueChange={(v) => {
@@ -284,7 +284,7 @@ export default function ProgramacionBoardPage() {
             </SelectContent>
           </Select>
         </CatalogLabeledField>
-        <p className="text-muted-foreground text-xs lg:col-span-12">
+        <p className="text-muted-foreground text-xs md:col-span-12">
           Las órdenes canceladas no aparecen. La búsqueda filtra al escribir (código, referencia o cliente).
         </p>
       </CatalogFilterGrid>

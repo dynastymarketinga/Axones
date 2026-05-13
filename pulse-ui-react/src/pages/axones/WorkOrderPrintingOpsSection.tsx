@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
 import { Link } from "react-router-dom"
 import {
+  AlarmClock,
   ArrowDownToLine,
   ArrowUpFromLine,
   ArrowUpRight,
@@ -124,6 +125,26 @@ function roleLabelEs(role: DraftPersonRole): string {
   if (role === "operador") return "Operador"
   if (role === "supervisor") return "Supervisor"
   return "Ayudante"
+}
+
+function personnelLinesFromPrintingTurno(t: PrintingTurnoEntry): string[] {
+  const lines: string[] = []
+  const op = t.operador.trim()
+  if (op) lines.push(`${op} — Operador`)
+  t.ayudante
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .forEach((n) => lines.push(`${n} — Ayudante`))
+  const sup = t.supervisor.trim()
+  if (sup) lines.push(`${sup} — Supervisor`)
+  return lines
+}
+
+function turnoGrupoLabel(turno: string, grupo: string): string {
+  const t = turno === "diurno" ? "Diurno" : turno === "nocturno" ? "Nocturno" : turno.trim() || "—"
+  const g = grupo === "A" || grupo === "B" || grupo === "C" ? `Grupo ${grupo}` : grupo.trim() || "—"
+  return `${t} · ${g}`
 }
 
 /** Reconstruye la lista editable a partir de los tres campos persistidos en el turno. */
@@ -384,6 +405,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
   const [motivoComboOpen, setMotivoComboOpen] = useState(false)
   const [buenaComboOpen, setBuenaComboOpen] = useState(false)
   const [rechComboOpen, setRechComboOpen] = useState(false)
+  const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
 
   const motivoComboLabel = useMemo(() => {
     if (motivoSelectDisabled) return "— (indique Kg rechazados primero)"
@@ -912,6 +934,23 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         title={mesSectionTitle(Timer, "Temporizador de producción")}
         headerRight={
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    aria-label="Ver turnos acumulativos y personal"
+                    onClick={() => setCumulativeTurnosDialogOpen(true)}
+                  >
+                    <AlarmClock className="h-4 w-4 shrink-0" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Turnos acumulativos y personal</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {doneTemporizador ? (
               <div className="mes-badge-done">
                 <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
@@ -952,7 +991,6 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             <TooltipProvider delayDuration={200}>
               <div className="mes-timer-action-stack">
                 <div className="mes-timer-action-labeled">
-                  <span className="mes-timer-action-label">Iniciar</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -960,7 +998,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         variant="outline"
                         size="icon"
                         className="mes-timer-fab-btn mes-btn-primary shrink-0"
-                        aria-label="Iniciar"
+                        aria-label="Iniciar temporizador de producción"
                         onClick={props.startProductionTimer}
                         disabled={
                           props.readOnlyOps ||
@@ -1934,6 +1972,107 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={props.onLabelClear}>Limpiar</Button>
             <Button type="button" onClick={props.onLabelSave}>Guardar etiqueta</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cumulativeTurnosDialogOpen} onOpenChange={setCumulativeTurnosDialogOpen}>
+        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Turnos acumulativos</DialogTitle>
+            <DialogDescription>
+              Turnos cerrados y turno en curso con tiempos registrados y personal involucrado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="rounded-md border bg-muted/25 p-3 text-xs leading-relaxed">
+              <p>
+                <span className="font-semibold text-foreground">Registros / turnos:</span>{" "}
+                {props.turnosRegistrados}
+              </p>
+              <p className="mt-1">
+                <span className="font-semibold text-foreground">Turnos cerrados:</span>{" "}
+                {props.closedTurnos.length}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                Último estado: <strong className="text-foreground">{props.ultimoTurnoLabel}</strong>
+              </p>
+            </div>
+
+            {props.hasActiveTurno ? (
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Turno en curso
+                </p>
+                <p className="mt-2 text-xs">
+                  {turnoGrupoLabel(props.impTurno, props.impGrupo)}
+                </p>
+                <p className="mt-2 text-xs font-medium text-foreground">Personal</p>
+                {activeSaved.length === 0 ? (
+                  <p className="text-muted-foreground mt-1 text-xs">Sin personal guardado en este turno.</p>
+                ) : (
+                  <ul className="mt-1 space-y-1 text-xs">
+                    {activeSaved.map((p) => (
+                      <li key={p.id}>
+                        <span className="font-medium">{p.name}</span>
+                        <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
+                  Efectivo {props.formatTimerHms(props.effectiveSec)} · Muerto{" "}
+                  {props.formatTimerHms(props.deadSec)} · Total {props.formatTimerHms(props.totalSec)}
+                </p>
+              </div>
+            ) : null}
+
+            {props.closedTurnos.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Turnos cerrados ({props.closedTurnos.length})
+                </p>
+                <ul className="max-h-[40vh] space-y-3 overflow-y-auto pr-1">
+                  {props.closedTurnos.map((t) => {
+                    const people = personnelLinesFromPrintingTurno(t)
+                    return (
+                      <li key={t.id} className="rounded-md border bg-background p-3 text-xs">
+                        <p className="font-medium text-foreground">
+                          {t.closed_at
+                            ? new Date(t.closed_at).toLocaleString("es-VE")
+                            : "Sin fecha de cierre"}{" "}
+                          · {turnoGrupoLabel(t.turno, t.grupo)}
+                        </p>
+                        <p className="text-muted-foreground mt-1">
+                          Salida {sumSalidaKg(t).toFixed(2)} Kg · Scrap {sumScrapKg(t).toFixed(2)} Kg · Efectivo{" "}
+                          {props.formatTimerHms(t.timer.effectiveAccSec)} · Muerto{" "}
+                          {props.formatTimerHms(t.timer.deadAccSec)}
+                        </p>
+                        <p className="mt-2 font-medium text-foreground">Personal</p>
+                        {people.length === 0 ? (
+                          <p className="text-muted-foreground mt-1">Sin personal registrado.</p>
+                        ) : (
+                          <ul className="mt-1 space-y-0.5">
+                            {people.map((line, i) => (
+                              <li key={`${t.id}-p-${i}`}>{line}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ) : !props.hasActiveTurno ? (
+              <p className="text-muted-foreground text-xs">
+                Aún no hay turnos cerrados. Al cerrar un turno, aparecerá aquí con tiempos y personal.
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCumulativeTurnosDialogOpen(false)}>
+              Cerrar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

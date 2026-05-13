@@ -122,9 +122,9 @@ export default function TintaMixturesPage() {
                   setQApi(ev.currentTarget.value.trim())
                 }
               }}
-              className="min-w-0 lg:col-span-12"
+              className="min-w-0 md:col-span-12"
             />
-            <p className="text-muted-foreground text-xs lg:col-span-12">
+            <p className="text-muted-foreground text-xs md:col-span-12">
               Filtra al escribir (demora breve). Pulse Actualizar para forzar recarga desde el servidor.
             </p>
           </CatalogFilterGrid>

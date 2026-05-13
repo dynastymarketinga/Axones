@@ -3,22 +3,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import {
-  Activity,
-  Barcode,
+  AlarmClock,
+  ArrowRight,
+  ArrowUp,
+  Calendar,
+  CalendarClock,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
   CircleDashed,
-  CircleDot,
+  ClipboardList,
   Droplets,
-  Factory,
+  ExternalLink,
+  History,
+  Inbox,
+  Info,
   Layers2,
+  List,
+  ListFilter,
   ListOrdered,
-  Package,
+  Minus,
   PauseCircle,
   PlayCircle,
+  Printer,
+  Rows3,
   Scissors,
-  Settings2,
+  Search,
+  SlidersHorizontal,
   Timer,
-  Users,
+  XCircle,
+  Zap,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -28,15 +43,12 @@ import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
-  CatalogTableHead,
-  CatalogTableHeadRight,
-} from "@/components/axones/CatalogTableHead"
-import {
-  catalogSelectTriggerClass,
-  catalogTableBodyCellClass,
-  catalogTableBodyRowClass,
-  catalogTableHeaderRowClass,
-} from "@/components/axones/catalog-list-classes"
+  INSUMOS_BANDEJA_TABLE_COLSPAN,
+  InsumosBandejaTableCard,
+  insumosBandejaDataRowClassName,
+  insumosBandejaIdLinkClassName,
+} from "@/components/axones/InsumosBandejaTable"
+import { catalogFilterDateInputClass, catalogFilterPanelClass, catalogSelectTriggerClass } from "@/components/axones/catalog-list-classes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -65,6 +77,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { apiFetch, ApiError } from "@/lib/api"
 import {
   BANDEJA_COLLECT_MAX_PAGES,
@@ -80,6 +94,7 @@ import type { LaravelPaginated, WorkOrderListRow } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import {
   PRINTING_CONTROL_SAVED_EVENT,
+  formatHmsFromSeconds,
   printingBandejaCardClass,
   printingBandejaRowAccentClass,
   printingBandejaStatePillClass,
@@ -88,7 +103,21 @@ import {
   type PrintingBandejaMes,
   type PrintingBandejaWorkflow,
 } from "@/lib/printing-mes-band-status"
+import {
+  areaRequestBadgeClass,
+  areaRequestStatusGlyph,
+  areaRequestStatusLabel,
+} from "@/lib/axones-area-request-display"
 import { cn } from "@/lib/utils"
+import {
+  IMP_ACTUAL_KEY,
+  IMP_TURNOS_KEY,
+  parsePrintingTurnoActual,
+  parsePrintingTurnos,
+  sumSalidaKg,
+  sumScrapKg,
+  type PrintingTurnoEntry,
+} from "@/pages/axones/printing-turnos"
 
 export type AreaKey = "printing" | "laminacion" | "corte" | "tintas"
 
@@ -102,29 +131,24 @@ const TAB_BY_AREA: Record<AreaKey, string> = {
 }
 
 const AREA_ICON: Record<AreaKey, LucideIcon> = {
-  printing: Factory,
+  printing: Printer,
   laminacion: Layers2,
   corte: Scissors,
   tintas: Droplets,
 }
 
-function areaRequestStatusLabel(v?: string | null): string {
-  const key = (v ?? "").toLowerCase().trim()
-  if (key === "pending") return "Pendiente"
-  if (key === "done") return "Hecho"
-  if (key === "cancelled") return "Cancelado"
-  return v?.trim() || "—"
-}
-
-function areaRequestBadgeClass(v?: string | null): string {
-  const key = (v ?? "").toLowerCase().trim()
-  if (key === "done") {
-    return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-emerald-950 dark:text-emerald-100 border-emerald-500/28 bg-emerald-500/10"
+function printingWorkflowPillGlyph(wf: PrintingBandejaWorkflow) {
+  const c = "h-3 w-3 shrink-0"
+  if (wf === "iniciado") {
+    return <PlayCircle className={cn(c, "text-emerald-600 dark:text-emerald-400")} aria-hidden />
   }
-  if (key === "cancelled") {
-    return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground"
+  if (wf === "pausado") {
+    return <PauseCircle className={cn(c, "text-amber-600 dark:text-amber-400")} aria-hidden />
   }
-  return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-amber-950 dark:text-amber-100 border-amber-500/30 bg-amber-500/10"
+  if (wf === "finalizado") {
+    return <CheckCircle2 className={cn(c, "text-slate-600 dark:text-slate-300")} aria-hidden />
+  }
+  return <CircleDashed className={cn(c, "text-violet-600 dark:text-violet-400")} aria-hidden />
 }
 
 function areaTitle(area: AreaKey): string {
@@ -136,7 +160,7 @@ function areaTitle(area: AreaKey): string {
 
 function areaSubtitle(area: AreaKey): string {
   if (area === "printing") {
-    return "En curso: use las pestañas inferiores (pendientes, producción, finalizadas). Historial: solicitudes del área cerradas."
+    return "Bandeja de OT activas. Las vistas filtran por temporizador de impresión. Historial: solicitudes del área ya cerradas."
   }
   return "En curso: solicitud pendiente y OT en cola o ya en la etapa de este área. Historial: solicitudes cerradas en el área (hechas o canceladas)."
 }
@@ -215,7 +239,8 @@ function PrintingMesBandDetailBlock({
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <span>Solicitud de área</span>
-        <Badge variant="outline" className={cn(areaRequestBadgeClass(reqStatus), "h-6 px-2 text-xs")}>
+        <Badge variant="outline" className={cn(areaRequestBadgeClass(reqStatus), "inline-flex h-6 items-center gap-1 px-2 text-xs")}>
+          {areaRequestStatusGlyph(reqStatus)}
           {areaRequestStatusLabel(reqStatus)}
         </Badge>
       </div>
@@ -223,46 +248,122 @@ function PrintingMesBandDetailBlock({
   )
 }
 
-/** Icono de actividad del temporizador (columna separada de estatus). */
-function PrintingBandejaTimerGlyph({ workflow }: { workflow: PrintingBandejaWorkflow }) {
-  if (workflow === "iniciado") {
+function printingFormRecord(row: WorkOrderListRow): Record<string, unknown> | null {
+  const f = row.technical_document?.form
+  return f && typeof f === "object" && !Array.isArray(f) ? (f as Record<string, unknown>) : null
+}
+
+function printingPersonnelLinesFromTurno(t: PrintingTurnoEntry): string[] {
+  const lines: string[] = []
+  const op = t.operador.trim()
+  if (op) lines.push(`${op} — Operador`)
+  t.ayudante
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .forEach((n) => lines.push(`${n} — Ayudante`))
+  const sup = t.supervisor.trim()
+  if (sup) lines.push(`${sup} — Supervisor`)
+  return lines
+}
+
+function turnoGrupoFromTurno(t: PrintingTurnoEntry): string {
+  const p: string[] = []
+  if (t.turno === "diurno") p.push("Diurno")
+  else if (t.turno === "nocturno") p.push("Nocturno")
+  else if (String(t.turno ?? "").trim()) p.push(String(t.turno).trim())
+  if (t.grupo === "A" || t.grupo === "B" || t.grupo === "C") p.push(`Grupo ${t.grupo}`)
+  else if (String(t.grupo ?? "").trim()) p.push(String(t.grupo).trim())
+  return p.join(" · ") || "—"
+}
+
+function printingTimerStateEs(st: string): string {
+  if (st === "running") return "En marcha"
+  if (st === "paused") return "En pausa"
+  if (st === "pending") return "Pendiente"
+  if (st === "stopped") return "Turno cerrado"
+  if (st === "completed") return "Completado"
+  return st
+}
+
+function PrintingMesModalTurnosSection({ row }: { row: WorkOrderListRow }) {
+  const form = printingFormRecord(row)
+  const cerrados = form ? parsePrintingTurnos(form[IMP_TURNOS_KEY]) : []
+  const actual = form ? parsePrintingTurnoActual(form[IMP_ACTUAL_KEY]) : null
+
+  if (cerrados.length === 0 && !actual) {
     return (
-      <span
-        className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md shadow-emerald-600/20 ring-2 ring-emerald-400/35 ring-offset-2 ring-offset-background dark:shadow-emerald-500/25 dark:ring-emerald-300/30"
-        title="Temporizador activo"
-      >
-        <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/50" aria-hidden />
-        <Timer className="relative z-[1] h-4 w-4" aria-hidden />
-      </span>
+      <div className="rounded-lg border border-dashed border-slate-300 bg-muted/15 p-3 text-xs text-muted-foreground">
+        Sin turnos de impresión guardados en la OT. Los datos aparecen al iniciar turno y guardar en Producción →
+        Impresión.
+      </div>
     )
   }
-  if (workflow === "pausado") {
-    return (
-      <span
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm"
-        title="En pausa"
-      >
-        <PauseCircle className="h-4 w-4" aria-hidden />
-      </span>
-    )
-  }
-  if (workflow === "finalizado") {
-    return (
-      <span
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-500 text-white shadow-sm dark:bg-slate-600"
-        title="Área finalizada"
-      >
-        <CheckCircle2 className="h-4 w-4" aria-hidden />
-      </span>
-    )
-  }
+
+  const totalReg = cerrados.length + (actual ? 1 : 0)
+
   return (
-    <span
-      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-300/70 bg-violet-100/70 text-violet-900 shadow-sm dark:border-violet-500/40 dark:bg-violet-950/45 dark:text-violet-100"
-      title="Sin temporizador en marcha"
-    >
-      <Timer className="h-4 w-4 opacity-85" aria-hidden />
-    </span>
+    <div className="space-y-3 border-t border-black/[0.06] pt-4 dark:border-white/[0.08]">
+      <div className="flex items-center gap-2">
+        <History className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Turnos acumulativos · {totalReg} registro(s)
+        </p>
+      </div>
+      <ul className="max-h-[min(42vh,18rem)] space-y-2.5 overflow-y-auto pr-1">
+        {cerrados.map((t) => {
+          const people = printingPersonnelLinesFromTurno(t)
+          return (
+            <li key={t.id} className="rounded-md border bg-muted/5 p-2.5 text-xs">
+              <p className="font-medium text-foreground">
+                {t.closed_at
+                  ? new Date(t.closed_at).toLocaleString("es-VE")
+                  : "Sin fecha de cierre"}{" "}
+                · {turnoGrupoFromTurno(t)}
+              </p>
+              <p className="text-muted-foreground mt-1">
+                Salida {sumSalidaKg(t).toFixed(2)} Kg · Scrap {sumScrapKg(t).toFixed(2)} Kg · Efectivo{" "}
+                {formatHmsFromSeconds(t.timer.effectiveAccSec)} · Muerto{" "}
+                {formatHmsFromSeconds(t.timer.deadAccSec)}
+              </p>
+              <p className="mt-1.5 font-medium text-foreground/90">Personal</p>
+              {people.length === 0 ? (
+                <p className="text-muted-foreground">Sin personal registrado.</p>
+              ) : (
+                <ul className="mt-0.5 space-y-0.5">
+                  {people.map((line, i) => (
+                    <li key={`${t.id}-p-${i}`}>{line}</li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          )
+        })}
+        {actual ? (
+          <li className="rounded-md border border-violet-300/40 bg-violet-500/6 p-2.5 text-xs">
+            <p className="font-medium text-foreground">Turno en curso · {turnoGrupoFromTurno(actual)}</p>
+            <p className="text-muted-foreground mt-1">
+              Temporizador: {printingTimerStateEs(String(actual.timer.state))}
+            </p>
+            <p className="text-muted-foreground mt-1">
+              Efectivo {formatHmsFromSeconds(actual.timer.effectiveAccSec)} · Muerto{" "}
+              {formatHmsFromSeconds(actual.timer.deadAccSec)} · Total acum. turno{" "}
+              {formatHmsFromSeconds(actual.timer.effectiveAccSec + actual.timer.deadAccSec)}
+            </p>
+            <p className="mt-1.5 font-medium text-foreground/90">Personal</p>
+            {printingPersonnelLinesFromTurno(actual).length === 0 ? (
+              <p className="text-muted-foreground">Sin personal registrado.</p>
+            ) : (
+              <ul className="mt-0.5 space-y-0.5">
+                {printingPersonnelLinesFromTurno(actual).map((line, i) => (
+                  <li key={`actual-p-${i}`}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ) : null}
+      </ul>
+    </div>
   )
 }
 
@@ -270,6 +371,12 @@ type AreaBandejaTab = "activas" | "historial"
 
 /** Sub-vistas dentro de «En curso» solo para bandeja de impresión. */
 type PrintingActivasSubTab = "pendientes" | "produccion" | "finalizadas"
+
+const PRINTING_SUB_TAB_LABEL: Record<PrintingActivasSubTab, string> = {
+  pendientes: "Pendientes",
+  produccion: "En producción",
+  finalizadas: "Finalizadas",
+}
 
 function printingActivasBucket(
   row: WorkOrderListRow,
@@ -538,20 +645,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     return { pendientes, produccion, finalizadas }
   }, [area, rows, mesBandNowMs])
 
-  /** Si la sub-pestaña actual no tiene filas en esta página, usar la primera que sí tenga. */
-  useEffect(() => {
-    if (area !== "printing" || activeTab !== "activas" || !rows?.data.length) return
-    const buckets = rows.data.map((o) => printingActivasBucket(o, mesBandNowMs))
-    const count = (b: PrintingActivasSubTab) => buckets.filter((x) => x === b).length
-    setPrintingActivasSubTab((prev) => {
-      if (count(prev) > 0) return prev
-      if (count("pendientes") > 0) return "pendientes"
-      if (count("produccion") > 0) return "produccion"
-      if (count("finalizadas") > 0) return "finalizadas"
-      return prev
-    })
-  }, [area, activeTab, rows, mesBandNowMs])
-
   useEffect(() => {
     if (activeTab !== "activas") {
       setPrintingActivasSubTab("pendientes")
@@ -619,6 +712,19 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     return "Antes de esta etapa"
   }
 
+  function printingTrayMesStickerClass(bs?: string | null): string {
+    const t = processStateForArea(bs)
+    const base =
+      "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold leading-tight"
+    if (t === "Hecho en área") {
+      return `${base} border-emerald-500/35 bg-emerald-500/12 text-emerald-950 dark:text-emerald-50`
+    }
+    if (t === "En proceso") {
+      return `${base} border-sky-500/35 bg-sky-500/12 text-sky-950 dark:text-sky-50`
+    }
+    return `${base} border-violet-400/35 bg-violet-500/10 text-violet-950 dark:border-violet-500/30 dark:bg-violet-950/35 dark:text-violet-100`
+  }
+
   function openUrl(woId: number): string {
     if (area === "printing") {
       return `/ordenes-trabajo/${woId}/produccion?tab=printing`
@@ -683,17 +789,18 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   }
 
   const AreaIcon = AREA_ICON[area]
-  const activasTableColSpan = area === "printing" ? 7 : 6
 
   const filterHint = (
-    <p className="text-muted-foreground text-xs lg:col-span-12">
-      La búsqueda filtra por código de OT, referencia de pedido o nombre de cliente al escribir.
+    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs lg:col-span-12">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <span>La búsqueda filtra por código de OT, referencia de pedido o nombre de cliente al escribir.</span>
     </p>
   )
 
   const historialFilterHint = (
-    <p className="text-muted-foreground text-xs lg:col-span-12">
-      Busque por cliente, producto, código de OT o referencia de pedido al escribir.
+    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs lg:col-span-12">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <span>Busque por cliente, producto, código de OT o referencia de pedido al escribir.</span>
     </p>
   )
 
@@ -709,7 +816,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             size="sm"
             disabled={rows.current_page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="gap-1.5"
           >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
             Anterior
           </Button>
           <Button
@@ -717,8 +826,10 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             size="sm"
             disabled={rows.current_page >= rows.last_page || loading}
             onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+            className="gap-1.5"
           >
             Siguiente
+            <ChevronRight className="h-4 w-4" aria-hidden />
           </Button>
         </div>
       </div>
@@ -730,7 +841,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       return "Cola u obra en impresión sin temporizador en marcha. Abra la OT para iniciar turno."
     }
     if (printingActivasSubTab === "produccion") {
-      return "Temporizador activo o en pausa. El desglose completo está en el modal (clic en la fila)."
+      return "Temporizador activo o en pausa. Use «Tiempos y detalle» o el icono de reloj para ver el modal con turnos y personal."
     }
     return "Área de impresión finalizada para estas OT. Use Historial para solicitudes cerradas del área."
   }, [area, printingActivasSubTab])
@@ -759,17 +870,27 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               </DialogDescription>
             </DialogHeader>
             <div className="py-4">
-              {printingMesModalBand ? (
-                <PrintingMesBandDetailBlock
-                  mesBand={printingMesModalBand}
-                  reqStatus={printingMesModalReqStatus}
-                />
-              ) : printingMesModalId !== null ? (
+              {printingMesModalId !== null && !printingMesModalRow ? (
                 <p className="text-muted-foreground text-sm">
                   Esta OT no está en la página actual del listado. Cierre el cuadro o navegue en el listado hasta
                   encontrarla.
                 </p>
-              ) : null}
+              ) : (
+                <>
+                  {printingMesModalBand ? (
+                    <PrintingMesBandDetailBlock
+                      mesBand={printingMesModalBand}
+                      reqStatus={printingMesModalReqStatus}
+                    />
+                  ) : printingMesModalRow ? (
+                    <p className="text-muted-foreground mb-4 text-sm leading-relaxed">
+                      La OT no está en etapa Impresión en el tablero. Los temporizadores visibles en la bandeja aplican
+                      cuando la OT figura en Impresión; puede abrir la OT para avanzar etapas o revisar datos.
+                    </p>
+                  ) : null}
+                  {printingMesModalRow ? <PrintingMesModalTurnosSection row={printingMesModalRow} /> : null}
+                </>
+              )}
             </div>
             <DialogFooter className="flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end">
               {printingMesModalId !== null ? (
@@ -788,17 +909,21 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
           </DialogContent>
         </Dialog>
         <Tabs
-        value={activeTab}
-        onValueChange={(v) => {
-          setActiveTab(v as AreaBandejaTab)
-          if (v === "historial") {
-            setStatus("all")
-          }
-          setPage(1)
-        }}
-      >
+          value={activeTab}
+          onValueChange={(v) => {
+            setActiveTab(v as AreaBandejaTab)
+            if (v === "historial") {
+              setStatus("all")
+            }
+            setPage(1)
+          }}
+        >
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
-          <TabsTrigger value="activas" className="inline-flex max-w-full flex-wrap items-center gap-1.5">
+          <TabsTrigger
+            value="activas"
+            className="inline-flex max-w-full flex-wrap items-center gap-2"
+          >
+            <Rows3 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
             <span>En curso</span>
             <span className="text-muted-foreground font-normal tabular-nums">({totalActivas})</span>
             {unseenActivas > 0 ? (
@@ -810,65 +935,90 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               </Badge>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger value="historial">Historial</TabsTrigger>
+          <TabsTrigger value="historial" className="inline-flex items-center gap-2">
+            <History className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+            Historial
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="activas" className="mt-4 space-y-4">
           {area === "printing" ? (
-            <Tabs
-              value={printingActivasSubTab}
-              onValueChange={(v) => {
-                setPrintingActivasSubTab(v as PrintingActivasSubTab)
-                setPrintingMesModalId(null)
-              }}
-              className="space-y-3"
-            >
-              <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg bg-muted/70 p-1">
-                <TabsTrigger value="pendientes" className="gap-1.5 text-xs sm:text-sm">
-                  <span>Pendientes</span>
+            <div className="space-y-2">
+              <ToggleGroup
+                type="single"
+                value={printingActivasSubTab}
+                onValueChange={(v) => {
+                  if (!v) return
+                  setPrintingActivasSubTab(v as PrintingActivasSubTab)
+                  setPrintingMesModalId(null)
+                }}
+                variant="outline"
+                size="sm"
+                className="flex h-auto w-full flex-wrap justify-stretch gap-1.5 rounded-xl border border-border/60 bg-muted/30 p-1.5 sm:justify-start"
+                aria-label="Vista de bandeja de impresión"
+              >
+                <ToggleGroupItem
+                  value="pendientes"
+                  className="inline-flex min-h-9 flex-1 basis-[calc(33.333%-0.25rem)] flex-wrap items-center justify-center gap-2 rounded-lg px-2.5 py-2 text-xs data-[state=on]:border-primary/35 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm sm:flex-initial sm:basis-auto sm:text-sm"
+                >
+                  <Inbox className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <span className="font-medium">Pendientes</span>
                   <span className="text-muted-foreground font-normal tabular-nums">
                     ({printingActivasBucketCounts?.pendientes ?? 0})
                   </span>
-                </TabsTrigger>
-                <TabsTrigger value="produccion" className="gap-1.5 text-xs sm:text-sm">
-                  <span>En producción</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="produccion"
+                  className="inline-flex min-h-9 flex-1 basis-[calc(33.333%-0.25rem)] flex-wrap items-center justify-center gap-2 rounded-lg px-2.5 py-2 text-xs data-[state=on]:border-primary/35 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm sm:flex-initial sm:basis-auto sm:text-sm"
+                >
+                  <PlayCircle className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <span className="font-medium">En producción</span>
                   <span className="text-muted-foreground font-normal tabular-nums">
                     ({printingActivasBucketCounts?.produccion ?? 0})
                   </span>
-                </TabsTrigger>
-                <TabsTrigger value="finalizadas" className="gap-1.5 text-xs sm:text-sm">
-                  <span>Finalizadas</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="finalizadas"
+                  className="inline-flex min-h-9 flex-1 basis-[calc(33.333%-0.25rem)] flex-wrap items-center justify-center gap-2 rounded-lg px-2.5 py-2 text-xs data-[state=on]:border-primary/35 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm sm:flex-initial sm:basis-auto sm:text-sm"
+                >
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <span className="font-medium">Finalizadas</span>
                   <span className="text-muted-foreground font-normal tabular-nums">
                     ({printingActivasBucketCounts?.finalizadas ?? 0})
                   </span>
-                </TabsTrigger>
-              </TabsList>
-              <p className="text-muted-foreground text-xs sm:text-sm">{printingSubTabHint}</p>
-            </Tabs>
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <p className="text-muted-foreground flex items-start gap-2 text-xs leading-relaxed sm:text-sm">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>{printingSubTabHint}</span>
+              </p>
+            </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             {area === "printing" ? (
-              <p className="text-muted-foreground text-xs sm:text-sm">
-                Página actual: {displayActivasRows.length} en «
-                {printingActivasSubTab === "pendientes"
-                  ? "Pendientes"
-                  : printingActivasSubTab === "produccion"
-                    ? "En producción"
-                    : "Finalizadas"}
-                » · Total bandeja: {totalActivas}
+              <p className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm">
+                <ClipboardList className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>
+                  <span className="tabular-nums text-foreground/90">{displayActivasRows.length}</span> OT en esta
+                  página · Bandeja del área:{" "}
+                  <span className="tabular-nums text-foreground/90">{totalActivas}</span>
+                </span>
               </p>
             ) : (
-              <p className="text-muted-foreground text-sm">
-                Solicitud pendiente: OT en cola (antes de esta etapa) o ya en la etapa de este área.
+              <p className="text-muted-foreground flex items-start gap-2 text-sm">
+                <Inbox className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>Solicitud pendiente: OT en cola (antes de esta etapa) o ya en la etapa de este área.</span>
               </p>
             )}
-            <Badge variant="outline" className={areaRequestBadgeClass("pending")}>
-              {area === "printing"
-                ? `Vista: ${displayActivasRows.length} · Bandeja: ${totalActivas}`
-                : `En curso: ${totalActivas}`}
-            </Badge>
+            {area === "printing" ? null : (
+              <Badge variant="outline" className={cn(areaRequestBadgeClass("pending"), "inline-flex items-center gap-1.5")}>
+                <ClipboardList className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                {`En curso: ${totalActivas}`}
+              </Badge>
+            )}
           </div>
-          <CatalogFilterGrid>
+          <div className={catalogFilterPanelClass}>
+            <CatalogFilterGrid>
             <CatalogSearchField
               id={`a-q-act-${area}`}
               label="Ref. pedido cliente"
@@ -877,7 +1027,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               onChange={(ev) => setQInput(ev.target.value)}
               className="min-w-0 lg:col-span-6"
             />
-            <CatalogLabeledField label="Prioridad" className="lg:col-span-3">
+            <CatalogLabeledField label="Prioridad" icon={ListFilter} className="lg:col-span-3">
               <Select
                 value={priority}
                 onValueChange={(v) => {
@@ -889,14 +1039,26 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="alta">Alta</SelectItem>
-                  <SelectItem value="urgente">Urgente</SelectItem>
+                  <SelectItem value="all" className="gap-2">
+                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Todas
+                  </SelectItem>
+                  <SelectItem value="normal" className="gap-2">
+                    <Minus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Normal
+                  </SelectItem>
+                  <SelectItem value="alta" className="gap-2">
+                    <ArrowUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Alta
+                  </SelectItem>
+                  <SelectItem value="urgente" className="gap-2">
+                    <Zap className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Urgente
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Estado" className="lg:col-span-3">
+            <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="lg:col-span-3">
               <Select
                 value={status}
                 onValueChange={(v) => {
@@ -908,16 +1070,29 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="open">Abierta</SelectItem>
-                  <SelectItem value="completed">Completada</SelectItem>
-                  <SelectItem value="cancelled">Cancelada</SelectItem>
+                  <SelectItem value="all" className="gap-2">
+                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Todos
+                  </SelectItem>
+                  <SelectItem value="open" className="gap-2">
+                    <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Abierta
+                  </SelectItem>
+                  <SelectItem value="completed" className="gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Completada
+                  </SelectItem>
+                  <SelectItem value="cancelled" className="gap-2">
+                    <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Cancelada
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (desde)" className="lg:col-span-3">
+            <CatalogLabeledField label="Fecha OT (desde)" icon={Calendar} className="lg:col-span-3">
               <Input
                 type="date"
+                className={catalogFilterDateInputClass}
                 value={createdFrom}
                 onChange={(ev) => {
                   setCreatedFrom(ev.target.value)
@@ -925,9 +1100,10 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 }}
               />
             </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (hasta)" className="lg:col-span-3">
+            <CatalogLabeledField label="Fecha OT (hasta)" icon={Calendar} className="lg:col-span-3">
               <Input
                 type="date"
+                className={catalogFilterDateInputClass}
                 value={createdTo}
                 onChange={(ev) => {
                   setCreatedTo(ev.target.value)
@@ -935,9 +1111,10 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 }}
               />
             </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (desde)" className="lg:col-span-3">
+            <CatalogLabeledField label="Solicitud área (desde)" icon={CalendarClock} className="lg:col-span-3">
               <Input
                 type="date"
+                className={catalogFilterDateInputClass}
                 value={areaRequestedFrom}
                 onChange={(ev) => {
                   setAreaRequestedFrom(ev.target.value)
@@ -945,9 +1122,10 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 }}
               />
             </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (hasta)" className="lg:col-span-3">
+            <CatalogLabeledField label="Solicitud área (hasta)" icon={CalendarClock} className="lg:col-span-3">
               <Input
                 type="date"
+                className={catalogFilterDateInputClass}
                 value={areaRequestedTo}
                 onChange={(ev) => {
                   setAreaRequestedTo(ev.target.value)
@@ -957,49 +1135,65 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             </CatalogLabeledField>
             {filterHint}
           </CatalogFilterGrid>
+          </div>
 
-          <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
+          <InsumosBandejaTableCard>
             <Table>
               <TableHeader>
-                <TableRow className={catalogTableHeaderRowClass}>
-                  <CatalogTableHead icon={ListOrdered} className="w-14">
-                    N.º
-                  </CatalogTableHead>
-                  <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
-                  <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
-                  <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
-                  <CatalogTableHead icon={CircleDot}>Estatus</CatalogTableHead>
+                <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                  <TableHead className="h-10 w-[88px] px-2 pl-5 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    ID
+                  </TableHead>
+                  <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Estado
+                  </TableHead>
                   {area === "printing" ? (
-                    <CatalogTableHead icon={Timer} className="w-[9.5rem] whitespace-nowrap">
-                      Tiempo efectivo
-                    </CatalogTableHead>
+                    <TableHead className="h-10 min-w-[11.5rem] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Timer className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                        Temporizador
+                      </span>
+                    </TableHead>
                   ) : null}
-                  <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
+                  <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Material
+                  </TableHead>
+                  <TableHead className="h-10 w-[120px] px-2 pr-5 text-right align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Acciones
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={activasTableColSpan} className="text-muted-foreground">
+                  <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableCell
+                      colSpan={area === "printing" ? 5 : INSUMOS_BANDEJA_TABLE_COLSPAN}
+                      className="text-muted-foreground py-10 text-center"
+                    >
                       Cargando…
                     </TableCell>
                   </TableRow>
                 ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={activasTableColSpan} className="text-muted-foreground">
-                      Sin órdenes en curso para esta área.
+                  <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableCell
+                      colSpan={area === "printing" ? 5 : INSUMOS_BANDEJA_TABLE_COLSPAN}
+                      className="text-muted-foreground py-10 text-center"
+                    >
+                      Sin solicitudes.
                     </TableCell>
                   </TableRow>
                 ) : area === "printing" && displayActivasRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={activasTableColSpan} className="text-muted-foreground">
-                      Sin OT en esta vista en esta página. Pruebe otra pestaña o otra página.
+                  <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableCell
+                      colSpan={5}
+                      className="text-muted-foreground py-10 text-center"
+                    >
+                      Ninguna OT en «{PRINTING_SUB_TAB_LABEL[printingActivasSubTab]}» en esta página. Pruebe otra
+                      vista o otra página del listado.
                     </TableCell>
                   </TableRow>
                 ) : (
                   (area === "printing" ? displayActivasRows : rows.data).map((o, idx) => {
-                    const pageIdx = area === "printing" ? rows.data.indexOf(o) : idx
-                    const n = (rows.current_page - 1) * rows.per_page + pageIdx + 1
                     const reqStatus =
                       (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ??
                       "pending"
@@ -1007,108 +1201,136 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       area === "printing" ? printingMesBandFromWorkOrderRow(o, mesBandNowMs) : null
                     const rowAccent =
                       mesBand && area === "printing" ? printingBandejaRowAccentClass(mesBand.workflow) : ""
+                    const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
                     return (
-                      <TableRow key={o.id} className={cn(catalogTableBodyRowClass, rowAccent)}>
-                        <TableCell
-                          className={cn(
-                            "tabular-nums text-muted-foreground",
-                            catalogTableBodyCellClass,
-                          )}
-                        >
-                          {n}
+                      <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
+                        <TableCell className="pl-5 align-middle">
+                          <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
+                            {o.code}
+                          </Link>
                         </TableCell>
-                        <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
-                          {o.code}
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          {o.client?.name ?? "—"}
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          {o.product?.name ?? "—"}
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          {area === "printing" && mesBand ? (
-                            <div className="flex max-w-[12rem] flex-col gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setPrintingMesModalId(o.id)}
-                                className={cn(
-                                  "group/mes rounded-lg border border-transparent bg-transparent p-1.5 text-left transition-colors",
-                                  "hover:border-primary/35 hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                        <TableCell className="align-middle">
+                          {area === "printing" ? (
+                            <div className="flex min-w-0 max-w-[20rem] flex-col gap-2">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                {mesBand ? (
+                                  <span
+                                    className={printingBandejaStatePillClass(mesBand.workflow)}
+                                    role="status"
+                                  >
+                                    {printingWorkflowPillGlyph(mesBand.workflow)}
+                                    {printingBandejaWorkflowTitle(mesBand.workflow)}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={printingTrayMesStickerClass(o.board_stage)}
+                                    title="La OT aún no está en etapa Impresión en el tablero; no hay bloque MES en esta vista."
+                                  >
+                                    <CircleDashed className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                                    <span className="min-w-0">{processStateForArea(o.board_stage)}</span>
+                                  </span>
                                 )}
-                              >
-                                <span className={printingBandejaStatePillClass(mesBand.workflow)}>
-                                  {printingBandejaWorkflowTitle(mesBand.workflow)}
-                                </span>
-                                <p className="text-primary/85 pt-1 text-[10px] font-medium leading-tight group-hover/mes:underline">
-                                  Ver tiempos y detalle
-                                </p>
-                              </button>
-                              <div className="flex flex-wrap items-center gap-1.5 px-0.5 text-[10px] text-muted-foreground">
-                                <span>Solicitud</span>
                                 <Badge
                                   variant="outline"
                                   className={cn(
                                     areaRequestBadgeClass(reqStatus),
-                                    "h-5 px-1.5 py-0 text-[10px] leading-none",
+                                    "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
                                   )}
+                                  title="Estado de la solicitud al área"
                                 >
+                                  {areaRequestStatusGlyph(reqStatus)}
                                   {areaRequestStatusLabel(reqStatus)}
                                 </Badge>
                               </div>
                             </div>
                           ) : (
-                            <Badge variant="outline" className={areaRequestBadgeClass(reqStatus)}>
+                            <Badge
+                              variant="outline"
+                              className={cn(areaRequestBadgeClass(reqStatus), "inline-flex items-center gap-1")}
+                            >
+                              {areaRequestStatusGlyph(reqStatus)}
                               {areaRequestStatusLabel(reqStatus)}
                             </Badge>
                           )}
                         </TableCell>
                         {area === "printing" ? (
-                          <TableCell className={cn(catalogTableBodyCellClass, "w-[9.5rem]")}>
-                            {mesBand ? (
-                              <button
-                                type="button"
-                                onClick={() => setPrintingMesModalId(o.id)}
-                                className={cn(
-                                  "flex w-full min-w-0 items-center gap-2 rounded-lg border border-transparent py-1 text-left transition-colors",
-                                  "hover:border-primary/30 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                                )}
-                                title="Ver detalle de tiempos"
-                              >
-                                <PrintingBandejaTimerGlyph workflow={mesBand.workflow} />
-                                <span
-                                  className={cn(
-                                    "min-w-0 truncate font-mono text-sm font-semibold tabular-nums tracking-tight",
-                                    mesBand.workflow === "iniciado" && "text-emerald-800 dark:text-emerald-100",
-                                    mesBand.workflow === "pausado" && "text-amber-900 dark:text-amber-100",
-                                    mesBand.workflow === "finalizado" && "text-muted-foreground",
-                                    mesBand.workflow === "sin_iniciar" && "text-foreground/80",
-                                  )}
-                                >
-                                  {mesBand.showTimes ? mesBand.effectiveHms : "—"}
-                                </span>
-                              </button>
-                            ) : (
-                              <span className="text-muted-foreground tabular-nums">—</span>
-                            )}
+                          <TableCell className="min-w-[11.5rem] align-middle">
+                            <TooltipProvider delayDuration={220}>
+                              <div className="flex flex-col gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPrintingMesModalId(o.id)}
+                                    className="text-primary inline-flex max-w-full items-center gap-2 rounded-md text-left text-xs font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 sm:text-sm"
+                                  >
+                                    <Timer
+                                      className="h-7 w-7 shrink-0 opacity-90 sm:h-8 sm:w-8"
+                                      strokeWidth={2.25}
+                                      aria-hidden
+                                    />
+                                    <span className="min-w-0 leading-snug">Tiempos y detalle</span>
+                                  </button>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-9 w-9 shrink-0 border-primary/30"
+                                        aria-label="Turnos acumulativos y personal"
+                                        onClick={() => setPrintingMesModalId(o.id)}
+                                      >
+                                        <AlarmClock className="h-5 w-5 shrink-0" aria-hidden />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">Turnos acumulativos y personal</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                                {mesBand?.showTimes ? (
+                                  <p className="text-muted-foreground font-mono text-xs tabular-nums">
+                                    Tiempo efectivo: {mesBand.effectiveHms}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </TooltipProvider>
                           </TableCell>
                         ) : null}
-                        <TableCell className={cn("text-right", catalogTableBodyCellClass)}>
+                        <TableCell className="max-w-md align-middle">
+                          <p
+                            className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
+                            title={materialTitle}
+                          >
+                            {o.product?.name?.trim() ? o.product.name : "—"}
+                          </p>
+                          <p className="text-muted-foreground text-xs leading-snug">
+                            {o.client?.name?.trim() ? o.client.name : "—"}
+                          </p>
+                        </TableCell>
+                        <TableCell className="pr-5 text-right align-middle">
                           <div className="flex flex-wrap justify-end gap-2">
-                            <Button variant="outline" size="sm" className="border-primary/25" asChild>
-                              <Link to={openUrl(o.id)}>Abrir</Link>
+                            <Button variant="outline" size="sm" className="border-primary/25 gap-1.5" asChild>
+                              <Link to={openUrl(o.id)}>
+                                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                                Abrir
+                              </Link>
                             </Button>
                             {canMoveFromHere(o.board_stage) && nextStageByArea[area] ? (
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="secondary"
+                                className="gap-1.5"
                                 disabled={movingId === o.id}
                                 onClick={() => void moveToNextStage(o.id)}
                               >
-                                {movingId === o.id
-                                  ? "…"
-                                  : `Pasar a ${stageLabel[nextStageByArea[area]!]}`}
+                                {movingId === o.id ? (
+                                  "…"
+                                ) : (
+                                  <>
+                                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                                    {`Pasar a ${stageLabel[nextStageByArea[area]!]}`}
+                                  </>
+                                )}
                               </Button>
                             ) : null}
                           </div>
@@ -1119,25 +1341,30 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 )}
               </TableBody>
             </Table>
-          </div>
+          </InsumosBandejaTableCard>
           {pagination}
         </TabsContent>
 
         <TabsContent value="historial" className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-muted-foreground text-sm">
-              Archivo de solicitudes cerradas en el área (hechas o canceladas). Busque por cliente o producto entre
-              el historial.
+            <p className="text-muted-foreground flex items-start gap-2 text-sm">
+              <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span>
+                Archivo de solicitudes cerradas en el área (hechas o canceladas). Busque por cliente o producto entre
+                el historial.
+              </span>
             </p>
             <Badge
               variant="outline"
-              className="gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground"
+              className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground"
             >
+              <ListOrdered className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
               En listado: {rows?.total ?? 0}
             </Badge>
           </div>
 
-          <CatalogFilterGrid>
+          <div className={catalogFilterPanelClass}>
+            <CatalogFilterGrid>
             <CatalogSearchField
               id={`a-q2-${area}`}
               label="Cliente, producto u OT"
@@ -1148,40 +1375,47 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             />
             {historialFilterHint}
           </CatalogFilterGrid>
+          </div>
 
-          <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
+          <InsumosBandejaTableCard>
             <Table>
               <TableHeader>
-                <TableRow className={catalogTableHeaderRowClass}>
-                  <CatalogTableHead icon={ListOrdered} className="w-14">
-                    N.º
-                  </CatalogTableHead>
-                  <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
-                  <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
-                  <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
-                  <CatalogTableHead icon={Activity}>Fecha OT</CatalogTableHead>
-                  <CatalogTableHead icon={Activity}>Fecha solicitud</CatalogTableHead>
-                  <CatalogTableHead icon={Activity}>Proceso en área</CatalogTableHead>
-                  <CatalogTableHead icon={CircleDot}>Estatus</CatalogTableHead>
-                  <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
+                <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                  <TableHead className="h-10 w-[88px] px-2 pl-5 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    ID
+                  </TableHead>
+                  <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Estado
+                  </TableHead>
+                  <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Material
+                  </TableHead>
+                  <TableHead className="h-10 w-[120px] px-2 pr-5 text-right align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Acciones
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-muted-foreground">
+                  <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableCell
+                      colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                      className="text-muted-foreground py-10 text-center"
+                    >
                       Cargando…
                     </TableCell>
                   </TableRow>
                 ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-muted-foreground">
-                      Sin resultados.
+                  <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableCell
+                      colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                      className="text-muted-foreground py-10 text-center"
+                    >
+                      Sin solicitudes.
                     </TableCell>
                   </TableRow>
                 ) : (
                   rows.data.map((o, idx) => {
-                    const n = (rows.current_page - 1) * rows.per_page + idx + 1
                     const reqStatus =
                       (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ??
                       null
@@ -1189,59 +1423,79 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       o.areaRequests && o.areaRequests.length
                         ? (o.areaRequests[0]?.created_at ?? null)
                         : null
+                    const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
                     return (
-                      <TableRow key={o.id} className={catalogTableBodyRowClass}>
-                        <TableCell
-                          className={cn(
-                            "tabular-nums text-muted-foreground",
-                            catalogTableBodyCellClass,
-                          )}
-                        >
-                          {n}
+                      <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx)}>
+                        <TableCell className="pl-5 align-middle">
+                          <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
+                            {o.code}
+                          </Link>
                         </TableCell>
-                        <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
-                          {o.code}
+                        <TableCell className="align-middle">
+                          <div className="flex flex-col gap-2">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                areaRequestBadgeClass(reqStatus),
+                                "inline-flex w-fit items-center gap-1",
+                              )}
+                            >
+                              {areaRequestStatusGlyph(reqStatus)}
+                              {areaRequestStatusLabel(reqStatus)}
+                            </Badge>
+                            <div className="text-muted-foreground text-xs leading-snug">
+                              <span className="text-foreground/90">{processStateForArea(o.board_stage)}</span>
+                              {o.created_at ? (
+                                <span>
+                                  {" "}
+                                  · OT {new Date(o.created_at).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                              {reqCreatedAt ? (
+                                <span>
+                                  {" "}
+                                  · Sol. {new Date(reqCreatedAt).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
                         </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          {o.client?.name ?? "—"}
+                        <TableCell className="max-w-md align-middle">
+                          <p
+                            className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
+                            title={materialTitle}
+                          >
+                            {o.product?.name?.trim() ? o.product.name : "—"}
+                          </p>
+                          <p className="text-muted-foreground text-xs leading-snug">
+                            {o.client?.name?.trim() ? o.client.name : "—"}
+                          </p>
                         </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          {o.product?.name ?? "—"}
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          <span className="text-sm text-muted-foreground">
-                            {o.created_at ? new Date(o.created_at).toLocaleDateString() : "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          <span className="text-sm text-muted-foreground">
-                            {reqCreatedAt ? new Date(reqCreatedAt).toLocaleDateString() : "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          {processStateForArea(o.board_stage)}
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
-                          <Badge variant="outline" className={areaRequestBadgeClass(reqStatus)}>
-                            {areaRequestStatusLabel(reqStatus)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className={cn("text-right", catalogTableBodyCellClass)}>
+                        <TableCell className="pr-5 text-right align-middle">
                           <div className="flex flex-wrap justify-end gap-2">
-                            <Button variant="outline" size="sm" className="border-primary/25" asChild>
-                              <Link to={openUrl(o.id)}>Abrir</Link>
+                            <Button variant="outline" size="sm" className="border-primary/25 gap-1.5" asChild>
+                              <Link to={openUrl(o.id)}>
+                                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                                Abrir
+                              </Link>
                             </Button>
                             {canMoveFromHere(o.board_stage) && nextStageByArea[area] ? (
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="secondary"
+                                className="gap-1.5"
                                 disabled={movingId === o.id}
                                 onClick={() => void moveToNextStage(o.id)}
                               >
-                                {movingId === o.id
-                                  ? "…"
-                                  : `Pasar a ${stageLabel[nextStageByArea[area]!]}`}
+                                {movingId === o.id ? (
+                                  "…"
+                                ) : (
+                                  <>
+                                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                                    {`Pasar a ${stageLabel[nextStageByArea[area]!]}`}
+                                  </>
+                                )}
                               </Button>
                             ) : null}
                           </div>
@@ -1252,7 +1506,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 )}
               </TableBody>
             </Table>
-          </div>
+          </InsumosBandejaTableCard>
 
           {pagination}
         </TabsContent>

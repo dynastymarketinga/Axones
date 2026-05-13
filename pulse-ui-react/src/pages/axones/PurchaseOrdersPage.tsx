@@ -900,7 +900,7 @@ export default function PurchaseOrdersPage() {
       ) : (
         <>
           <CatalogFilterGrid>
-            <CatalogLabeledField label="Proveedor" className="lg:col-span-3">
+            <CatalogLabeledField label="Proveedor" className="md:col-span-3">
               <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -984,7 +984,7 @@ export default function PurchaseOrdersPage() {
                 </PopoverContent>
               </Popover>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Estado" className="lg:col-span-3">
+            <CatalogLabeledField label="Estado" className="md:col-span-3">
               <Select
                 value={status}
                 onValueChange={(v) => {
@@ -1011,10 +1011,10 @@ export default function PurchaseOrdersPage() {
                 setPage(1)
                 setQInput(ev.target.value)
               }}
-              className="min-w-0 lg:col-span-6"
+              className="min-w-0 md:col-span-6"
             />
             {isBoss ? (
-              <CatalogLabeledField label="Vigencia" className="lg:col-span-3">
+              <CatalogLabeledField label="Vigencia" className="md:col-span-3">
                 <Select
                   value={visibility}
                   onValueChange={(v) => {
@@ -1033,7 +1033,7 @@ export default function PurchaseOrdersPage() {
                 </Select>
               </CatalogLabeledField>
             ) : null}
-            <p className="text-muted-foreground text-xs lg:col-span-12">
+            <p className="text-muted-foreground text-xs md:col-span-12">
               Escribe para filtrar automáticamente por código. <span className="font-medium">Parcial</span> aparece al
               registrar la primera recepción. <span className="font-medium">Completada</span> se marca cuando todas las
               órdenes de trabajo que usaron material de esta OC tienen su nota de entrega despachada (o cuando el jefe

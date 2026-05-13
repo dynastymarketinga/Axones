@@ -275,9 +275,9 @@ export default function ClientOrdersPage() {
                       setPage(1)
                     }
                   }}
-                  className="min-w-0 lg:col-span-5"
+                  className="min-w-0 md:col-span-5"
                 />
-                <CatalogLabeledField label="Cliente" className="min-w-0 lg:col-span-4">
+                <CatalogLabeledField label="Cliente" className="min-w-0 md:col-span-4">
                   <Popover open={clientComboOpen} onOpenChange={setClientComboOpen}>
                     <PopoverTrigger asChild>
                       <Button
@@ -347,7 +347,7 @@ export default function ClientOrdersPage() {
                     </PopoverContent>
                   </Popover>
                 </CatalogLabeledField>
-                <div className="grid min-w-0 gap-2 lg:col-span-3">
+                <div className="grid min-w-0 gap-2 md:col-span-3">
                   <div className="flex items-center gap-1.5">
                     <Label
                       htmlFor="co-status"
@@ -408,8 +408,8 @@ export default function ClientOrdersPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <p className="text-muted-foreground text-xs lg:col-span-12">Filtra al escribir.</p>
-                <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-primary/20 bg-muted/30 px-3 py-2.5 lg:col-span-12">
+                <p className="text-muted-foreground text-xs md:col-span-12">Filtra al escribir.</p>
+                <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-primary/20 bg-muted/30 px-3 py-2.5 md:col-span-12">
                   <Checkbox
                     id="await-ot"
                     checked={awaitingOt}

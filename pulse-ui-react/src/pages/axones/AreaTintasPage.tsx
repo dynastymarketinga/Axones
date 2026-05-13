@@ -2,8 +2,34 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  ClipboardList,
+  Droplets,
+  History,
+  Inbox,
+  ListOrdered,
+  Rows3,
+  Search,
+  SlidersHorizontal,
+  XCircle,
+} from "lucide-react"
 import { toast } from "sonner"
 
+import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
+import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
+import {
+  INSUMOS_BANDEJA_TABLE_COLSPAN,
+  InsumosBandejaTableCard,
+  insumosBandejaDataRowClassName,
+  insumosBandejaIdLinkClassName,
+} from "@/components/axones/InsumosBandejaTable"
+import { catalogSelectTriggerClass } from "@/components/axones/catalog-list-classes"
 import { apiFetch, ApiError } from "@/lib/api"
 import {
   BANDEJA_COLLECT_MAX_PAGES,
@@ -15,7 +41,13 @@ import {
   type BandejaListFilters,
   type MiAreaApi,
 } from "@/lib/axones-area-bandeja"
+import {
+  areaRequestBadgeClass,
+  areaRequestStatusGlyph,
+  areaRequestStatusLabel,
+} from "@/lib/axones-area-request-display"
 import { getStoredUser } from "@/lib/auth-storage"
+import { cn } from "@/lib/utils"
 import type { LaravelPaginated, MaterialRow, WorkOrderListRow } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,6 +75,10 @@ import { Textarea } from "@/components/ui/textarea"
 type TintasBandejaTab = "activas" | "historial"
 
 const MI_AREA_TINTAS: MiAreaApi = "tintas"
+
+function tintasWorkOrderProduccionUrl(woId: number): string {
+  return `/ordenes-trabajo/${woId}/produccion?tab=tintas`
+}
 
 export default function AreaTintasPage() {
   const session = getStoredUser()
@@ -496,36 +532,95 @@ export default function AreaTintasPage() {
     [chemRows],
   )
 
-  return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Área: Tintas</h1>
-          <p className="text-muted-foreground text-[13px]">
-            En curso: solicitudes pendientes de tintas con la OT en etapa de impresión. Historial: solicitudes cerradas;
-            opcional incluir pendientes o solo pendientes.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+  const tintasPagination =
+    rows && rows.last_page > 1 ? (
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span className="text-muted-foreground">
+          Página {rows.current_page} de {rows.last_page} · {rows.total}
+        </span>
+        <div className="flex gap-2">
           <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              if (mode === "list") {
-                void loadAreaRows()
-                void refreshBandejaMeta()
-                return
-              }
-              void loadLists()
-              void loadWorkOrderConsumables()
-            }}
-            disabled={loading}
+            variant="outline"
+            size="sm"
+            disabled={rows.current_page <= 1 || loading}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="gap-1.5"
           >
-            Actualizar
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            Anterior
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={rows.current_page >= rows.last_page || loading}
+            onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+            className="gap-1.5"
+          >
+            Siguiente
+            <ChevronRight className="h-4 w-4" aria-hidden />
           </Button>
         </div>
       </div>
+    ) : null
 
+  const tintasFilterHint = (
+    <p className="text-muted-foreground flex items-start gap-2 text-xs md:col-span-12">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <span>
+        Pulse <strong className="font-medium text-foreground">Buscar</strong> o Enter para filtrar por código de OT,
+        referencia de pedido o nombre de cliente. El estado se aplica al cambiar el valor.
+      </span>
+    </p>
+  )
+
+  const tintasHistorialFilterHint = (
+    <p className="text-muted-foreground flex items-start gap-2 text-xs md:col-span-12">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <span>
+        Pulse <strong className="font-medium text-foreground">Buscar</strong> o Enter para aplicar el texto. Use las
+        casillas de arriba para acotar el historial.
+      </span>
+    </p>
+  )
+
+  const applyTintasSearch = () => {
+    setPage(1)
+    setSearch(q.trim())
+  }
+
+  return (
+    <CatalogPageShell
+      title="Área: Tintas"
+      subtitle={
+        mode === "list" ? (
+          <>
+            En curso: solicitudes pendientes de tintas con la OT en etapa de impresión. Historial: solicitudes cerradas;
+            opcional incluir pendientes o solo pendientes.
+          </>
+        ) : (
+          "Registre consumos, consulte inventario de tintas, cementerio y mezclas para la OT seleccionada."
+        )
+      }
+      icon={Droplets}
+      action={
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            if (mode === "list") {
+              void loadAreaRows()
+              void refreshBandejaMeta()
+              return
+            }
+            void loadLists()
+            void loadWorkOrderConsumables()
+          }}
+          disabled={loading}
+        >
+          Actualizar
+        </Button>
+      }
+    >
       {mode === "list" ? (
         <Tabs
           value={activeTab}
@@ -538,15 +633,14 @@ export default function AreaTintasPage() {
             setPage(1)
           }}
         >
-          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
             <TabsTrigger
               value="activas"
-              className="inline-flex max-w-full flex-wrap items-center gap-1 text-xs"
+              className="inline-flex max-w-full flex-wrap items-center gap-2"
             >
+              <Rows3 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
               <span>En curso</span>
-              <span className="text-muted-foreground font-normal tabular-nums">
-                ({totalActivas})
-              </span>
+              <span className="text-muted-foreground font-normal tabular-nums">({totalActivas})</span>
               {unseenActivas > 0 ? (
                 <Badge
                   variant="destructive"
@@ -556,33 +650,46 @@ export default function AreaTintasPage() {
                 </Badge>
               ) : null}
             </TabsTrigger>
-            <TabsTrigger value="historial" className="text-xs">
+            <TabsTrigger value="historial" className="inline-flex items-center gap-2">
+              <History className="h-4 w-4 shrink-0 text-primary" aria-hidden />
               Historial
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="activas" className="mt-4 space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="grid flex-1 gap-2">
-                <Label htmlFor="tintas-q-act" className="text-xs font-medium">
-                  Ref. pedido cliente
-                </Label>
-                <Input
-                  id="tintas-q-act"
-                  placeholder="Buscar por referencia..."
-                  className="h-8 text-xs"
-                  value={q}
-                  onChange={(ev) => setQ(ev.target.value)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter") {
-                      setPage(1)
-                      setSearch(q.trim())
-                    }
-                  }}
-                />
-              </div>
-              <div className="grid w-48 gap-2">
-                <Label className="text-xs font-medium">Estado</Label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-muted-foreground flex items-start gap-2 text-sm">
+                <Inbox className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>
+                  Solicitud pendiente: OT en cola (antes de esta etapa) o ya en la etapa de tintas con impresión en
+                  curso.
+                </span>
+              </p>
+              <Badge
+                variant="outline"
+                className={cn(
+                  areaRequestBadgeClass("pending"),
+                  "inline-flex items-center gap-1.5",
+                )}
+              >
+                <ClipboardList className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                {`En curso: ${totalActivas}`}
+              </Badge>
+            </div>
+
+            <CatalogFilterGrid>
+              <CatalogSearchField
+                id="tintas-q-act"
+                label="Ref. pedido cliente"
+                placeholder="Código OT, referencia, cliente…"
+                value={q}
+                onChange={(ev) => setQ(ev.target.value)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") applyTintasSearch()
+                }}
+                className="min-w-0 md:col-span-6"
+              />
+              <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="md:col-span-3">
                 <Select
                   value={status}
                   onValueChange={(v) => {
@@ -590,65 +697,114 @@ export default function AreaTintasPage() {
                     setPage(1)
                   }}
                 >
-                  <SelectTrigger className="h-8 text-xs">
+                  <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="open">Abierta</SelectItem>
-                    <SelectItem value="completed">Completada</SelectItem>
-                    <SelectItem value="cancelled">Cancelada</SelectItem>
+                    <SelectItem value="all" className="gap-2">
+                      <Rows3 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Todos
+                    </SelectItem>
+                    <SelectItem value="open" className="gap-2">
+                      <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Abierta
+                    </SelectItem>
+                    <SelectItem value="completed" className="gap-2">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Completada
+                    </SelectItem>
+                    <SelectItem value="cancelled" className="gap-2">
+                      <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Cancelada
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
-                onClick={() => {
-                  setPage(1)
-                  setSearch(q.trim())
-                }}
-              >
-                Buscar
-              </Button>
-            </div>
+              </CatalogLabeledField>
+              <CatalogLabeledField label="Aplicar" className="md:col-span-3">
+                <Button type="button" className="h-11 w-full" onClick={applyTintasSearch}>
+                  Buscar
+                </Button>
+              </CatalogLabeledField>
+              {tintasFilterHint}
+            </CatalogFilterGrid>
 
-            <div className="bg-card overflow-x-auto rounded-xl border shadow-sm">
+            <InsumosBandejaTableCard>
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="h-8 py-2 text-xs">Código</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
-                    <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
+                  <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                    <TableHead className="h-10 w-[88px] px-2 pl-5 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      ID
+                    </TableHead>
+                    <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Estado
+                    </TableHead>
+                    <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Material
+                    </TableHead>
+                    <TableHead className="h-10 w-[120px] px-2 pr-5 text-right align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Acciones
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-muted-foreground">
-                        Cargando...
+                    <TableRow className="border-border/50 hover:bg-transparent">
+                      <TableCell
+                        colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                        className="text-muted-foreground py-10 text-center"
+                      >
+                        Cargando…
                       </TableCell>
                     </TableRow>
                   ) : !rows?.data.length ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-muted-foreground">
-                        Sin órdenes en curso para tintas.
+                    <TableRow className="border-border/50 hover:bg-transparent">
+                      <TableCell
+                        colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                        className="text-muted-foreground py-10 text-center"
+                      >
+                        Sin solicitudes.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    rows.data.map((o) => (
-                      <TableRow key={o.id} className="h-9">
-                        <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-wrap justify-end gap-2">
+                    rows.data.map((o, idx) => {
+                      const reqStatus =
+                        (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ?? "pending"
+                      const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
+                      return (
+                        <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx)}>
+                          <TableCell className="pl-5 align-middle">
+                            <Link to={tintasWorkOrderProduccionUrl(o.id)} className={insumosBandejaIdLinkClassName}>
+                              {o.code}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="align-middle">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                areaRequestBadgeClass(reqStatus),
+                                "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
+                              )}
+                            >
+                              {areaRequestStatusGlyph(reqStatus)}
+                              {areaRequestStatusLabel(reqStatus)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-md align-middle">
+                            <p
+                              className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
+                              title={materialTitle}
+                            >
+                              {o.product?.name?.trim() ? o.product.name : "—"}
+                            </p>
+                            <p className="text-muted-foreground text-xs leading-snug">
+                              {o.client?.name?.trim() ? o.client.name : "—"}
+                            </p>
+                          </TableCell>
+                          <TableCell className="pr-5 text-right align-middle">
                             <Button
                               type="button"
                               variant="link"
-                              className="h-auto p-0 text-xs"
+                              className="h-auto p-0 text-sm text-primary"
                               onClick={() => {
                                 setWoId(String(o.id))
                                 setMode("consumo")
@@ -656,21 +812,40 @@ export default function AreaTintasPage() {
                             >
                               Registrar consumo
                             </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
                   )}
                 </TableBody>
               </Table>
-            </div>
+            </InsumosBandejaTableCard>
+            {tintasPagination}
           </TabsContent>
 
           <TabsContent value="historial" className="mt-4 space-y-4">
-            <div className="flex flex-wrap gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-muted-foreground flex items-start gap-2 text-sm">
+                <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>
+                  Archivo de solicitudes cerradas en tintas (hechas o canceladas). Use las casillas para acotar qué
+                  solicitudes incluye el listado.
+                </span>
+              </p>
+              <Badge
+                variant="outline"
+                className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground"
+              >
+                <ListOrdered className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                En listado: {rows?.total ?? 0}
+              </Badge>
+            </div>
+
+            <div className="flex flex-wrap gap-4 rounded-lg border border-border/60 bg-muted/25 px-3 py-2.5">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  className="rounded border-input"
                   checked={onlyPendingArea}
                   onChange={(ev) => {
                     const on = ev.target.checked
@@ -681,9 +856,10 @@ export default function AreaTintasPage() {
                 />
                 Solo pendientes
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  className="rounded border-input"
                   checked={historialIncludePending}
                   disabled={onlyPendingArea}
                   onChange={(ev) => {
@@ -694,27 +870,20 @@ export default function AreaTintasPage() {
                 Ver también solicitudes abiertas
               </label>
             </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="grid flex-1 gap-2">
-                <Label htmlFor="tintas-q-historial" className="text-xs font-medium">
-                  Ref. pedido cliente
-                </Label>
-                <Input
-                  id="tintas-q-historial"
-                  placeholder="Buscar por referencia..."
-                  className="h-8 text-xs"
-                  value={q}
-                  onChange={(ev) => setQ(ev.target.value)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter") {
-                      setPage(1)
-                      setSearch(q.trim())
-                    }
-                  }}
-                />
-              </div>
-              <div className="grid w-48 gap-2">
-                <Label className="text-xs font-medium">Estado</Label>
+
+            <CatalogFilterGrid>
+              <CatalogSearchField
+                id="tintas-q-historial"
+                label="Ref. pedido cliente"
+                placeholder="Código OT, referencia, cliente…"
+                value={q}
+                onChange={(ev) => setQ(ev.target.value)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") applyTintasSearch()
+                }}
+                className="min-w-0 md:col-span-6"
+              />
+              <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="md:col-span-3">
                 <Select
                   value={status}
                   onValueChange={(v) => {
@@ -722,67 +891,119 @@ export default function AreaTintasPage() {
                     setPage(1)
                   }}
                 >
-                  <SelectTrigger className="h-8 text-xs">
+                  <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="open">Abierta</SelectItem>
-                    <SelectItem value="completed">Completada</SelectItem>
-                    <SelectItem value="cancelled">Cancelada</SelectItem>
+                    <SelectItem value="all" className="gap-2">
+                      <Rows3 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Todos
+                    </SelectItem>
+                    <SelectItem value="open" className="gap-2">
+                      <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Abierta
+                    </SelectItem>
+                    <SelectItem value="completed" className="gap-2">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Completada
+                    </SelectItem>
+                    <SelectItem value="cancelled" className="gap-2">
+                      <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      Cancelada
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
-                onClick={() => {
-                  setPage(1)
-                  setSearch(q.trim())
-                }}
-              >
-                Buscar
-              </Button>
-            </div>
+              </CatalogLabeledField>
+              <CatalogLabeledField label="Aplicar" className="md:col-span-3">
+                <Button type="button" className="h-11 w-full" onClick={applyTintasSearch}>
+                  Buscar
+                </Button>
+              </CatalogLabeledField>
+              {tintasHistorialFilterHint}
+            </CatalogFilterGrid>
 
-            <div className="bg-card border rounded-xl shadow-sm overflow-x-auto">
+            <InsumosBandejaTableCard>
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="h-8 py-2 text-xs">Código</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Cliente</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Producto</TableHead>
-                    <TableHead className="h-8 py-2 text-xs">Estado OT</TableHead>
-                    <TableHead className="h-8 py-2 text-right text-xs">Acciones</TableHead>
+                  <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
+                    <TableHead className="h-10 w-[88px] px-2 pl-5 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      ID
+                    </TableHead>
+                    <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Estado
+                    </TableHead>
+                    <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Material
+                    </TableHead>
+                    <TableHead className="h-10 w-[120px] px-2 pr-5 text-right align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Acciones
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-muted-foreground">
-                        Cargando...
+                    <TableRow className="border-border/50 hover:bg-transparent">
+                      <TableCell
+                        colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                        className="text-muted-foreground py-10 text-center"
+                      >
+                        Cargando…
                       </TableCell>
                     </TableRow>
                   ) : !rows?.data.length ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-muted-foreground">
-                        Sin resultados.
+                    <TableRow className="border-border/50 hover:bg-transparent">
+                      <TableCell
+                        colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                        className="text-muted-foreground py-10 text-center"
+                      >
+                        Sin solicitudes.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    rows.data.map((o) => (
-                      <TableRow key={o.id} className="h-9">
-                        <TableCell className="py-2 font-mono text-xs">{o.code}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.client?.name ?? "—"}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.product?.name ?? "—"}</TableCell>
-                        <TableCell className="py-2 text-xs">{o.status}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-wrap justify-end gap-2">
+                    rows.data.map((o, idx) => {
+                      const reqStatus =
+                        (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ?? null
+                      const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
+                      return (
+                        <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx)}>
+                          <TableCell className="pl-5 align-middle">
+                            <Link to={tintasWorkOrderProduccionUrl(o.id)} className={insumosBandejaIdLinkClassName}>
+                              {o.code}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="align-middle">
+                            <div className="flex flex-col gap-2">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  areaRequestBadgeClass(reqStatus),
+                                  "inline-flex w-fit items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
+                                )}
+                              >
+                                {areaRequestStatusGlyph(reqStatus)}
+                                {areaRequestStatusLabel(reqStatus)}
+                              </Badge>
+                              {o.status ? (
+                                <span className="text-muted-foreground text-xs">OT: {o.status}</span>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="max-w-md align-middle">
+                            <p
+                              className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
+                              title={materialTitle}
+                            >
+                              {o.product?.name?.trim() ? o.product.name : "—"}
+                            </p>
+                            <p className="text-muted-foreground text-xs leading-snug">
+                              {o.client?.name?.trim() ? o.client.name : "—"}
+                            </p>
+                          </TableCell>
+                          <TableCell className="pr-5 text-right align-middle">
                             <Button
                               type="button"
                               variant="link"
-                              className="h-auto p-0 text-xs"
+                              className="h-auto p-0 text-sm text-primary"
                               onClick={() => {
                                 setWoId(String(o.id))
                                 setMode("consumo")
@@ -790,14 +1011,15 @@ export default function AreaTintasPage() {
                             >
                               Registrar consumo
                             </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
                   )}
                 </TableBody>
               </Table>
-            </div>
+            </InsumosBandejaTableCard>
+            {tintasPagination}
           </TabsContent>
         </Tabs>
       ) : (
@@ -1080,7 +1302,7 @@ export default function AreaTintasPage() {
                 <Button
                   type="button"
                   size="sm"
-                  className="h-8 bg-[#6f42c1] text-white hover:bg-[#6137ae]"
+                  className="h-8"
                   onClick={() => void save()}
                   disabled={saving || loading}
                 >
@@ -1352,32 +1574,6 @@ export default function AreaTintasPage() {
           </Tabs>
         </div>
       )}
-
-      {rows && rows.last_page > 1 && mode === "list" ? (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            Página {rows.current_page} de {rows.last_page} · {rows.total}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page >= rows.last_page || loading}
-              onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-            >
-              Siguiente
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    </CatalogPageShell>
   )
 }

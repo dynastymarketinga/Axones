@@ -7,9 +7,9 @@ type CatalogFilterGridProps = {
   className?: string
 }
 
-/** Rejilla 12 columnas en lg, misma base que Órdenes de compra */
+/** Rejilla 12 columnas desde md (tablets); en pantallas pequeñas una columna. */
 export function CatalogFilterGrid({ children, className }: CatalogFilterGridProps) {
   return (
-    <div className={cn("grid gap-3 lg:grid-cols-12", className)}>{children}</div>
+    <div className={cn("grid grid-cols-1 gap-3 md:grid-cols-12", className)}>{children}</div>
   )
 }

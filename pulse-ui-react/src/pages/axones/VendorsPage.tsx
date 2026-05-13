@@ -184,7 +184,7 @@ export default function VendorsPage() {
       ) : (
         <>
           <CatalogFilterGrid>
-            <CatalogLabeledField label="Estado" className="lg:col-span-3">
+            <CatalogLabeledField label="Estado" className="md:col-span-3">
               <Select
                 value={activeFilter}
                 onValueChange={(v) => {
@@ -214,9 +214,9 @@ export default function VendorsPage() {
                   setPage(1)
                 }
               }}
-              className="min-w-0 lg:col-span-6"
+              className="min-w-0 md:col-span-6"
             />
-            <p className="text-muted-foreground text-xs lg:col-span-12">
+            <p className="text-muted-foreground text-xs md:col-span-12">
               El texto de búsqueda se aplica automáticamente al escribir.
             </p>
           </CatalogFilterGrid>

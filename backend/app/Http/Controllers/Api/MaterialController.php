@@ -11,7 +11,6 @@ use App\Models\InventoryChangeApproval;
 use App\Models\InventoryMovement;
 use App\Models\Material;
 use App\Models\TintaSubarea;
-use App\Services\InventoryLedgerService;
 use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
@@ -21,10 +20,6 @@ use Illuminate\Support\Facades\DB;
 
 class MaterialController extends Controller
 {
-    public function __construct(
-        private readonly InventoryLedgerService $ledger,
-    ) {}
-
     public function index(MaterialIndexRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -178,7 +173,6 @@ class MaterialController extends Controller
 
         $material = DB::transaction(function () use ($request) {
             $data = $request->validated();
-            $initial = $data['quantity_on_hand'] ?? '0';
             $tintaSubarea = $data['tinta_subarea'] ?? null;
             $productIds = collect($data['product_ids'] ?? [])->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->unique()->values()->all();
             unset($data['quantity_on_hand']);
@@ -196,19 +190,6 @@ class MaterialController extends Controller
 
             if ($material->inventory_area === 'material') {
                 $material->substrateProducts()->sync($productIds);
-            }
-
-            if (bccomp((string) $initial, '0', 3) === 1) {
-                $this->ledger->apply(
-                    $material,
-                    InventoryMovementType::In,
-                    (string) $initial,
-                    $request->user(),
-                    'material_opening',
-                    $material->getKey(),
-                    ['note' => 'Stock inicial al crear material'],
-                );
-                $material->refresh();
             }
 
             return $material->fresh(['tintaSubareas', 'substrateProducts', 'supplier']);

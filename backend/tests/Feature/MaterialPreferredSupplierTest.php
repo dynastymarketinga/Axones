@@ -604,4 +604,37 @@ class MaterialPreferredSupplierTest extends TestCase
         $response->assertJsonPath('supplier_id', $supplier->id);
         $response->assertJsonPath('inventory_area', 'cementerio_tintas');
     }
+
+    public function test_store_material_rejects_positive_opening_stock(): void
+    {
+        $user = User::factory()->create(['role' => 'admin']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov Stock',
+            'rif' => 'J-999',
+            'email' => null,
+            'phone' => null,
+            'address' => null,
+        ]);
+
+        $response = $this->postJson(
+            '/api/materials',
+            [
+                'sku' => 'NO-STOCK-INIT',
+                'name' => 'Material sin stock al crear',
+                'barcode' => null,
+                'inventory_area' => 'quimicos',
+                'unit' => 'kg',
+                'min_stock' => 0,
+                'quantity_on_hand' => 12.5,
+                'notes' => null,
+                'supplier_id' => $supplier->id,
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors(['quantity_on_hand']);
+    }
 }

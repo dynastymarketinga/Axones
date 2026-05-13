@@ -109,6 +109,14 @@ class StoreMaterialRequest extends FormRequest
                     $validator->errors()->add('supplier_id', 'El proveedor solo aplica a sustratos, tintas, cementerio de tintas, químicos o misceláneos.');
                 }
             }
+
+            $opening = $this->input('quantity_on_hand');
+            if ($opening !== null && $opening !== '' && bccomp((string) $opening, '0', 3) === 1) {
+                $validator->errors()->add(
+                    'quantity_on_hand',
+                    'No se puede cargar stock al crear el material. Registre las cantidades reales en Inventario → Recepción de material (con orden de compra).',
+                );
+            }
         });
     }
 

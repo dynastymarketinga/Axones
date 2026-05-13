@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
-import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText } from "lucide-react"
+import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText, Scale } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -37,6 +37,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { getMaterialAreaTheme } from "@/lib/material-area-theme"
 import { cn } from "@/lib/utils"
 
 type PurchaseOrderLineDetail = {
@@ -105,6 +108,25 @@ function mapItemTypeToInventoryArea(itemType: string): "material" | "tintas" | "
   return "material"
 }
 
+/** Etiquetas alineadas con las pastillas de Materiales (insumos). */
+function receiptInventoryAreaLabel(area: "material" | "tintas" | "quimicos" | "miscelaneos"): string {
+  if (area === "material") return "Sustrato"
+  if (area === "tintas") return "Tintas"
+  if (area === "quimicos") return "Químicos"
+  return "Misceláneos"
+}
+
+const RECEIPT_AREA_ORDER: Array<"material" | "tintas" | "quimicos" | "miscelaneos"> = [
+  "material",
+  "tintas",
+  "quimicos",
+  "miscelaneos",
+]
+
+function receiptAreaBadgeClassName(area: "material" | "tintas" | "quimicos" | "miscelaneos"): string {
+  return cn("border shadow-sm", getMaterialAreaTheme(area).rowClass)
+}
+
 function mapUiItemTypeToApi(itemType: string) {
   if (itemType === "Sustrato") return "sustrato"
   if (itemType === "Misceláneo") return "miscelaneo"
@@ -146,6 +168,36 @@ function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
     micras: requiresDimensions ? line.micras : "",
     ancho_mm: requiresDimensions ? line.ancho_mm : "",
   }
+}
+
+/** Mensaje concreto por fila; evita el toast genérico cuando el fallo es solo el SKU del catálogo. */
+function receiptLineValidationMessage(row: FreeLine): string | null {
+  const hasPol = row.purchase_order_line_id.trim().length > 0
+  const hasType = row.item_type.trim().length > 0
+  const materialId = Number(row.material_id)
+  const quantity = Number(row.quantity)
+  const requiresDimensions = !HIDE_DIMENSIONS_FOR_TYPES.has(row.item_type)
+  const micras = Number(row.micras)
+  const ancho = Number(row.ancho_mm)
+  if (!hasPol) {
+    return "Falta asociar la fila a una línea de la orden de compra (recargue la OC o agregue de nuevo el ítem)."
+  }
+  if (!hasType) {
+    return "Seleccione el tipo de ítem (Sustrato, Tinta, etc.) en cada fila."
+  }
+  if (!Number.isFinite(materialId) || materialId <= 0) {
+    return "Debe abrir «Material» y elegir un SKU del catálogo. Lo que muestra la OC es solo referencia hasta que seleccione el material."
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return "Indique cantidad recibida mayor que 0 (entrada física)."
+  }
+  if (
+    requiresDimensions &&
+    (!Number.isFinite(micras) || micras <= 0 || !Number.isFinite(ancho) || ancho <= 0)
+  ) {
+    return "En Sustrato indique Micras y Ancho mayores que 0."
+  }
+  return null
 }
 
 function sanitizeDecimalInput(raw: string) {
@@ -752,31 +804,19 @@ export default function PurchaseReceiptNewPage() {
       return
     }
 
-    const firstInvalid = rowsWithContent.findIndex(({ row }) => {
-      const hasPol = row.purchase_order_line_id.trim().length > 0
-      const hasType = row.item_type.trim().length > 0
-      const materialId = Number(row.material_id)
-      const quantity = Number(row.quantity)
-      const requiresDimensions = !HIDE_DIMENSIONS_FOR_TYPES.has(row.item_type)
-      const micras = Number(row.micras)
-      const ancho = Number(row.ancho_mm)
-      const dimensionsOk = !requiresDimensions || (
-        Number.isFinite(micras) && micras > 0 &&
-        Number.isFinite(ancho) && ancho > 0
-      )
-      const materialOk = Number.isFinite(materialId) && materialId > 0
-      const quantityOk = Number.isFinite(quantity) && quantity > 0
-      return !hasPol || !hasType || !materialOk || !quantityOk || !dimensionsOk
-    })
+    const firstInvalid = rowsWithContent.findIndex(({ row }) => receiptLineValidationMessage(row) !== null)
 
     if (firstInvalid !== -1) {
-      const invalidRowIndex = rowsWithContent[firstInvalid]?.index ?? 0
+      const invalidEntry = rowsWithContent[firstInvalid]
+      const invalidRowIndex = invalidEntry?.index ?? 0
       setFirstInvalidRowIndex(invalidRowIndex)
       document
         .getElementById(`receipt-row-${invalidRowIndex}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" })
+      const msg = invalidEntry ? receiptLineValidationMessage(invalidEntry.row) : null
       toast.error(
-        "Seleccione la línea de OC, tipo, material y cantidad recibida (debe ser mayor que 0). En Sustrato también indique Micras y Ancho.",
+        msg ??
+          "Revise línea de OC, tipo, material del catálogo, cantidad y (en Sustrato) Micras y Ancho.",
       )
       return
     }
@@ -831,6 +871,32 @@ export default function PurchaseReceiptNewPage() {
 
   const reachedItemLimit = freeLines.length >= MAX_RECEIPT_LINES
 
+  const receiptAreaSummary = useMemo(() => {
+    const areaSet = new Set<"material" | "tintas" | "quimicos" | "miscelaneos">()
+    for (const line of freeLines) {
+      const t = line.item_type.trim()
+      if (t) areaSet.add(mapItemTypeToInventoryArea(t))
+    }
+    const labels = RECEIPT_AREA_ORDER.filter((a) => areaSet.has(a)).map(receiptInventoryAreaLabel)
+    if (labels.length === 0) {
+      return {
+        mainText: "Seleccione tipo en ítems…",
+        badgeClassName: "border-muted-foreground/30 bg-muted/50 text-muted-foreground",
+      }
+    }
+    if (labels.length === 1) {
+      const only = RECEIPT_AREA_ORDER.find((a) => areaSet.has(a))!
+      return {
+        mainText: labels[0],
+        badgeClassName: receiptAreaBadgeClassName(only),
+      }
+    }
+    return {
+      mainText: `Varias áreas (${labels.join(", ")})`,
+      badgeClassName: "border-amber-500/45 bg-amber-50/90 text-amber-950 shadow-sm",
+    }
+  }, [freeLines])
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -839,7 +905,8 @@ export default function PurchaseReceiptNewPage() {
             Ingreso de material
           </h1>
           <p className="text-muted-foreground text-sm">
-            Registre entradas físicas al inventario de materiales.
+            Punto de partida del stock: registre aquí las cantidades físicas que entran al inventario (con OC y
+            factura).
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -856,14 +923,37 @@ export default function PurchaseReceiptNewPage() {
         onSubmit={(ev) => void submit(ev)}
         className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
       >
-        <div className="flex items-start justify-end border-b pb-3">
-          <div className="text-right">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
+          <div className="min-w-0 flex-1" aria-live="polite">
+            <p className="text-muted-foreground text-xs">Área de ingreso</p>
+            <Badge
+              variant="outline"
+              className={cn(
+                "mt-1 max-w-full whitespace-normal rounded-md px-2.5 py-1 text-left text-sm font-semibold leading-snug",
+                receiptAreaSummary.badgeClassName,
+              )}
+            >
+              {receiptAreaSummary.mainText}
+            </Badge>
+          </div>
+          <div className="shrink-0 text-right">
             <p className="text-muted-foreground text-xs">Correlativo de recepción</p>
             <h2 className="text-primary text-3xl font-bold tracking-tight">
               {formatReceiptCode(estimatedNextReceiptId)}
             </h2>
           </div>
         </div>
+
+        <Alert className="border-primary/30 bg-primary/5">
+          <Scale className="h-4 w-4 text-primary" aria-hidden />
+          <AlertTitle className="text-foreground">Cantidades reales en inventario</AlertTitle>
+          <AlertDescription>
+            Esta pantalla es el registro oficial de <strong>entrada física</strong> contra orden de compra: lo que
+            guarde aquí es lo que suma al stock del material (y queda trazado en movimientos de inventario). Use kg
+            reales en báscula o lo documentado en la factura de este despacho; el maestro de materiales no sustituye
+            esta recepción.
+          </AlertDescription>
+        </Alert>
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="grid gap-2">
@@ -1148,16 +1238,10 @@ export default function PurchaseReceiptNewPage() {
                   <TableHead className="w-14">N°</TableHead>
                   <TableHead className="min-w-[200px]">Ítem solicitado (OC)</TableHead>
                   <TableHead className="w-40">Tipo</TableHead>
-                  <TableHead className="min-w-[260px]">Material / descripción *</TableHead>
+                  <TableHead className="min-w-[200px]">Material *</TableHead>
                   <TableHead className="w-24">Micras</TableHead>
                   <TableHead className="w-24">Ancho</TableHead>
-                  <TableHead className="w-32">
-                    <span className="block leading-tight">Cantidad recibida *</span>
-                    <span className="text-muted-foreground block text-[10px] font-normal leading-tight">
-                      Entrada física
-                    </span>
-                  </TableHead>
-                  <TableHead className="w-28">Unidad</TableHead>
+                  <TableHead className="min-w-[12rem] whitespace-nowrap">Cantidad recibida *</TableHead>
                   <TableHead className="w-52 text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1187,7 +1271,10 @@ export default function PurchaseReceiptNewPage() {
                           )
                         })()
                       ) : (
-                        <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground">
+                        <div
+                          className="flex h-9 min-w-0 max-w-full items-center truncate rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground"
+                          title="Seleccione OC arriba para cargar ítems…"
+                        >
                           Seleccione OC arriba para cargar ítems…
                         </div>
                       )}
@@ -1233,18 +1320,18 @@ export default function PurchaseReceiptNewPage() {
                             disabled={saving}
                             className="h-9 w-full justify-between font-normal"
                           >
-                            <span className={cn("truncate text-left", !line.material_id && "text-muted-foreground")}>
-                              {line.material_id
-                                ? materials.find((m) => String(m.id) === line.material_id)?.sku || "Seleccione SKU..."
-                                : (() => {
-                                    const pol = line.purchase_order_line_id
-                                      ? purchaseOrderDetail?.lines?.find(
-                                          (ln) => String(ln.id) === String(line.purchase_order_line_id),
-                                        )
-                                      : null
-                                    const meta = parseOcLineMeta(pol?.description)
-                                    return meta.baseText || "Escribir o seleccionar SKU..."
-                                  })()}
+                            <span
+                              className={cn(
+                                "min-w-0 flex-1 text-left",
+                                !line.material_id && "text-muted-foreground",
+                                line.material_id && "truncate",
+                              )}
+                            >
+                              {line.material_id ? (
+                                materials.find((m) => String(m.id) === line.material_id)?.sku || "Seleccione SKU…"
+                              ) : (
+                                <span className="text-foreground">Seleccione material del catálogo…</span>
+                              )}
                             </span>
                             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                           </Button>
@@ -1332,38 +1419,35 @@ export default function PurchaseReceiptNewPage() {
                       />
                     </TableCell>
                     <TableCell className="align-top">
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        pattern="[0-9]*[.,]?[0-9]*"
-                        value={line.quantity}
-                        onChange={(ev) => updateFreeLine(i, { quantity: sanitizeDecimalInput(ev.target.value) })}
-                        placeholder={
-                          (line.unit || "kg") === "kg"
-                            ? "Kg que entran"
-                            : "0"
-                        }
-                        title="Cantidad física de esta recepción en la unidad elegida (p. ej. kg reales)."
-                        disabled={saving}
-                      />
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <Select
-                        value={line.unit || "kg"}
-                        disabled={saving}
-                        onValueChange={(v) => updateFreeLine(i, { unit: v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Unidad..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {allowedUnitsByItemType(line.item_type).map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex min-w-[11rem] items-center gap-2">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          pattern="[0-9]*[.,]?[0-9]*"
+                          className="min-w-0 flex-1"
+                          value={line.quantity}
+                          onChange={(ev) => updateFreeLine(i, { quantity: sanitizeDecimalInput(ev.target.value) })}
+                          placeholder="Cantidad"
+                          title="Cantidad física de esta recepción; la unidad es la del selector a la derecha."
+                          disabled={saving}
+                        />
+                        <Select
+                          value={line.unit || "kg"}
+                          disabled={saving}
+                          onValueChange={(v) => updateFreeLine(i, { unit: v })}
+                        >
+                          <SelectTrigger className="h-9 w-[4.75rem] shrink-0 px-2">
+                            <SelectValue placeholder="…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allowedUnitsByItemType(line.item_type).map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </TableCell>
                     <TableCell className="align-top">
                       <div className="flex items-start justify-end gap-1.5">
@@ -1470,8 +1554,8 @@ export default function PurchaseReceiptNewPage() {
               línea; el sistema no permite pasar lo pendiente de esa línea en la orden.
             </p>
             <p><strong>Flujo por línea:</strong> elija la línea de la OC, tipo, material y cantidad; si no existe el material, use <strong>+ Nuevo material</strong> para abrir el formulario completo de maestro. Se guarda un borrador de esta recepción y al volver (con proveedor ya elegido) puede seguir y seleccionar el SKU nuevo en la lista.</p>
-            <p><strong>Importante:</strong> esta pantalla no reemplaza el maestro de productos; solo gestiona entradas de materiales.</p>
-            <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo, 3) Ingreso de material cuando llegue físicamente.</p>
+            <p><strong>Importante:</strong> el stock del material no se carga al crear el SKU; las cantidades reales entran solo por esta recepción (u otros flujos de inventario autorizados). Esta pantalla no reemplaza el maestro de productos.</p>
+            <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo (maestro, stock en cero), 3) Ingreso de material cuando llegue físicamente.</p>
           </div>
           <DialogFooter>
             <Button type="button" onClick={() => setHelpOpen(false)}>

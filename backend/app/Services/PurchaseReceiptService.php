@@ -183,8 +183,12 @@ class PurchaseReceiptService
                         'purchase_receipt',
                         $receipt->getKey(),
                         [
+                            'entry_kind' => 'physical_receipt',
+                            'purchase_receipt_line_id' => $receiptLine->getKey(),
                             'purchase_order_id' => $receipt->purchase_order_id,
                             'purchase_order_line_id' => $polId,
+                            'invoice_number' => $receipt->invoice_number,
+                            'purchase_order_reference' => $receipt->purchase_order_reference,
                         ],
                         $receipt->received_at,
                     );
@@ -270,11 +274,14 @@ class PurchaseReceiptService
             'bobina',
             (int) $bobina->getKey(),
             [
+                'entry_kind' => 'physical_receipt_bobina',
                 'bobina_code' => $bobina->code,
                 'purchase_receipt_id' => $receipt->getKey(),
                 'purchase_receipt_line_id' => $receiptLine->getKey(),
                 'purchase_order_id' => $receipt->purchase_order_id,
                 'purchase_order_line_id' => $purchaseOrderLineId,
+                'invoice_number' => $receipt->invoice_number,
+                'purchase_order_reference' => $receipt->purchase_order_reference,
             ],
             $receipt->received_at,
         );

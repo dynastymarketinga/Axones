@@ -791,14 +791,14 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const AreaIcon = AREA_ICON[area]
 
   const filterHint = (
-    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs lg:col-span-12">
+    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs md:col-span-12 lg:col-span-12">
       <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
       <span>La búsqueda filtra por código de OT, referencia de pedido o nombre de cliente al escribir.</span>
     </p>
   )
 
   const historialFilterHint = (
-    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs lg:col-span-12">
+    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs md:col-span-12 lg:col-span-12">
       <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
       <span>Busque por cliente, producto, código de OT o referencia de pedido al escribir.</span>
     </p>
@@ -1025,9 +1025,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               placeholder="Código OT, referencia, cliente…"
               value={qInput}
               onChange={(ev) => setQInput(ev.target.value)}
-              className="min-w-0 lg:col-span-6"
+              className="min-w-0 md:col-span-6 lg:col-span-6"
             />
-            <CatalogLabeledField label="Prioridad" icon={ListFilter} className="lg:col-span-3">
+            <CatalogLabeledField label="Prioridad" icon={ListFilter} className="md:col-span-3 lg:col-span-3">
               <Select
                 value={priority}
                 onValueChange={(v) => {
@@ -1058,7 +1058,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 </SelectContent>
               </Select>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="lg:col-span-3">
+            <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="md:col-span-3 lg:col-span-3">
               <Select
                 value={status}
                 onValueChange={(v) => {
@@ -1089,7 +1089,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 </SelectContent>
               </Select>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (desde)" icon={Calendar} className="lg:col-span-3">
+            <CatalogLabeledField label="Fecha OT (desde)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
               <Input
                 type="date"
                 className={catalogFilterDateInputClass}
@@ -1100,7 +1100,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 }}
               />
             </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (hasta)" icon={Calendar} className="lg:col-span-3">
+            <CatalogLabeledField label="Fecha OT (hasta)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
               <Input
                 type="date"
                 className={catalogFilterDateInputClass}
@@ -1111,7 +1111,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 }}
               />
             </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (desde)" icon={CalendarClock} className="lg:col-span-3">
+            <CatalogLabeledField label="Solicitud área (desde)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
               <Input
                 type="date"
                 className={catalogFilterDateInputClass}
@@ -1122,7 +1122,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 }}
               />
             </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (hasta)" icon={CalendarClock} className="lg:col-span-3">
+            <CatalogLabeledField label="Solicitud área (hasta)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
               <Input
                 type="date"
                 className={catalogFilterDateInputClass}
@@ -1371,7 +1371,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               placeholder="Cliente, producto, código OT o referencia…"
               value={qInput}
               onChange={(ev) => setQInput(ev.target.value)}
-              className="min-w-0 lg:col-span-12"
+              className="min-w-0 md:col-span-12 lg:col-span-12"
             />
             {historialFilterHint}
           </CatalogFilterGrid>

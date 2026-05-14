@@ -824,7 +824,7 @@ export default function WorkOrderPrintingControlPanel({
 
   function requestOpenTimerReportPreview() {
     if (!canPreviewTimerReport) {
-      toast.error("Inicie el temporizador para habilitar la vista previa.")
+      toast.error("Inicie el cronómetro para habilitar la vista previa.")
       return
     }
     setPreviewTimerConfirmOpen(true)
@@ -1119,68 +1119,83 @@ export default function WorkOrderPrintingControlPanel({
     executePauseProductionTimer()
   }
 
+  /** Pausa atómica: un solo setForm + persist con el mismo snapshot (evita desincronía mirror / turno anidado). */
   function executePauseProductionTimer() {
     if (!timerRunning || controlReadOnly) return
     const now = Date.now()
-    const cur = activeTurno
-    if (!cur) return
-    const last = cur.timer.lastResumeAtMs
-    const nextTurn: PrintingTurnoEntry = {
-      ...cur,
-      timer: {
-        ...cur.timer,
-        state: "paused",
-        effectiveAccSec: cur.timer.effectiveAccSec + (last > 0 ? (now - last) / 1000 : 0),
-        pauseAtMs: now,
-        lastResumeAtMs: 0,
-      },
-    }
-    patchActiveTurn(() => nextTurn)
-    void persistPrintingForm({
-      ...form,
-      [IMP_ACTUAL_KEY]: nextTurn,
-      ...printingTurnoToMirror(nextTurn),
+    setForm((prev) => {
+      const cur = parsePrintingTurnoActual(prev[IMP_ACTUAL_KEY])
+      if (!cur || cur.timer.state !== "running") return prev
+      const last = cur.timer.lastResumeAtMs
+      const nextTurn: PrintingTurnoEntry = {
+        ...cur,
+        timer: {
+          ...cur.timer,
+          state: "paused",
+          effectiveAccSec: cur.timer.effectiveAccSec + (last > 0 ? (now - last) / 1000 : 0),
+          pauseAtMs: now,
+          lastResumeAtMs: 0,
+        },
+      }
+      const nextForm: Record<string, unknown> = {
+        ...prev,
+        [IMP_ACTUAL_KEY]: nextTurn,
+        ...printingTurnoToMirror(nextTurn),
+      }
+      queueMicrotask(() => {
+        void persistPrintingForm(nextForm)
+      })
+      return nextForm
     })
     setPauseMotivoModalOpen(true)
   }
 
   function confirmPauseAndResume() {
-    if (!timerPaused || !pauseReason) {
+    const reason = pauseReason.trim()
+    if (!reason) {
       toast.error("Seleccione el motivo de parada.")
       return
     }
-    const now = Date.now()
-    const pauseDurationSec = pauseAt > 0 ? (now - pauseAt) / 1000 : 0
-    const cur = activeTurno
-    if (!cur) return
-    const nextTurn: PrintingTurnoEntry = {
-      ...cur,
-      timer: {
-        ...cur.timer,
-        state: "running",
-        deadAccSec: cur.timer.deadAccSec + pauseDurationSec,
-        pauseAtMs: 0,
-        lastResumeAtMs: now,
-        pauses: [
-          ...cur.timer.pauses,
-          {
-            at: new Date(now).toISOString(),
-            reason: pauseReason,
-            obs: pauseObs.trim(),
-            duration_sec: pauseDurationSec,
-          },
-        ],
-      },
-    }
-    patchActiveTurn(() => nextTurn)
+    const obs = pauseObs.trim()
+    setForm((prev) => {
+      const cur = parsePrintingTurnoActual(prev[IMP_ACTUAL_KEY])
+      if (!cur || cur.timer.state !== "paused") return prev
+      const now = Date.now()
+      const pauseStart = cur.timer.pauseAtMs
+      const pauseDurationSec = pauseStart > 0 ? (now - pauseStart) / 1000 : 0
+      const nextTurn: PrintingTurnoEntry = {
+        ...cur,
+        timer: {
+          ...cur.timer,
+          state: "paused",
+          deadAccSec: cur.timer.deadAccSec + pauseDurationSec,
+          pauseAtMs: now,
+          lastResumeAtMs: 0,
+          pauses: [
+            ...cur.timer.pauses,
+            {
+              at: new Date(now).toISOString(),
+              reason,
+              obs,
+              duration_sec: pauseDurationSec,
+            },
+          ],
+        },
+      }
+      const nextForm: Record<string, unknown> = {
+        ...prev,
+        [IMP_ACTUAL_KEY]: nextTurn,
+        ...printingTurnoToMirror(nextTurn),
+      }
+      queueMicrotask(() => {
+        void persistPrintingForm(nextForm)
+      })
+      return nextForm
+    })
     setPauseReason("")
     setPauseObs("")
     setPauseMotivoModalOpen(false)
-    void persistPrintingForm({
-      ...form,
-      [IMP_ACTUAL_KEY]: nextTurn,
-      ...printingTurnoToMirror(nextTurn),
-    })
+    mesPrintingToastSuccess("Parada registrada. El cronómetro sigue en pausa; use play para reanudar el tiempo efectivo.")
   }
 
   function requestIniciarTurno() {
@@ -1222,7 +1237,9 @@ export default function WorkOrderPrintingControlPanel({
     setDraftPeople([])
     setDraftStaging({ name: "", role: "operador" })
     setStartTurnConfirmOpen(false)
-    mesPrintingToastSuccess("Turno iniciado. Use Guardar para persistir en el servidor.")
+    mesPrintingToastSuccess(
+      "Turno de planta abierto. Use Guardar para persistir. El cronómetro se inicia con el play en «Cronómetro de producción».",
+    )
   }
 
   function applyCerrarTurno(cur: PrintingTurnoEntry, finalizedTimer: PrintingTurnTimer) {
@@ -1821,8 +1838,8 @@ export default function WorkOrderPrintingControlPanel({
         open={startTimerConfirmOpen}
         onOpenChange={setStartTimerConfirmOpen}
         icon={<CirclePlay className="h-5 w-5" aria-hidden />}
-        title="Iniciar producción (Impresión)"
-        description="¿Está seguro? Una vez inicializado, empieza el proceso de producción de impresión y el cronómetro comenzará a correr."
+        title="Iniciar cronómetro (Impresión)"
+        description="¿Está seguro? Una vez iniciado, el cronómetro de máquina corre (tiempo efectivo); las paradas registran motivo. El turno de planta ya debe estar abierto."
         confirmLabel="Confirmar e iniciar"
         onConfirm={() => confirmStartProductionTimer()}
       />
@@ -1832,8 +1849,8 @@ export default function WorkOrderPrintingControlPanel({
         open={pauseConfirmOpen}
         onOpenChange={setPauseConfirmOpen}
         icon={<CirclePause className="h-5 w-5" aria-hidden />}
-        title="Pausar producción"
-        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada. ¿Desea pausar ahora?"
+        title="Pausar cronómetro (parada)"
+        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada (tiempo muerto). No cierra el turno de planta; use «Cerrar turno» para eso. Tras registrar el motivo, el cronómetro seguirá en pausa hasta que pulse play. ¿Desea pausar ahora?"
         confirmLabel="Sí, pausar"
         onConfirm={() => confirmPauseProductionTimer()}
       />
@@ -1843,7 +1860,7 @@ export default function WorkOrderPrintingControlPanel({
         open={previewTimerConfirmOpen}
         onOpenChange={setPreviewTimerConfirmOpen}
         icon={<FileSearch className="h-5 w-5" aria-hidden />}
-        title="Vista previa del temporizador"
+        title="Vista previa del cronómetro"
         description="Se abrirá una pestaña nueva con el reporte de tiempos y pausas registrados hasta este momento."
         confirmLabel="Abrir vista previa"
         onConfirm={() => confirmOpenTimerReportPreview()}
@@ -1857,7 +1874,7 @@ export default function WorkOrderPrintingControlPanel({
         title="Reiniciar impresión (OT)"
         description={
           <>
-            Esto borrará turnos, temporizador, entradas/salidas/scrap/merma/metraje registrados en Impresión para esta
+            Esto borrará turnos, cronómetro, entradas/salidas/scrap/merma/metraje registrados en Impresión para esta
             OT. También limpia el respaldo local del navegador. ¿Desea continuar?
           </>
         }
@@ -1888,7 +1905,7 @@ export default function WorkOrderPrintingControlPanel({
         onOpenChange={setCloseTurnConfirmOpen}
         icon={<LogOut className="h-5 w-5" aria-hidden />}
         title="Cerrar turno"
-        description="Se cerrará el turno en curso, se consolidará el temporizador y podrá iniciar otro turno después. ¿Confirma el cierre?"
+        description="Se cerrará el registro de turno de planta en curso y se consolidará el cronómetro en el historial. Podrá abrir otro turno de planta después. ¿Confirma el cierre?"
         confirmLabel="Sí, cerrar turno"
         onConfirm={() => confirmCloseTurnFirstStep()}
       />
@@ -1924,8 +1941,8 @@ export default function WorkOrderPrintingControlPanel({
         open={startTurnConfirmOpen}
         onOpenChange={setStartTurnConfirmOpen}
         icon={<Sparkles className="h-5 w-5" aria-hidden />}
-        title="Activar turno de impresión"
-        description="Confirme para habilitar el temporizador, el registro de bobinas y el resumen operativo del turno en curso."
+        title="Abrir turno de planta (registro)"
+        description="Confirme para abrir el registro de turno de planta (Diurno/Nocturno y grupo), habilitar el cronómetro, bobinas y resumen operativo del turno en curso."
         confirmLabel="Confirmar e iniciar"
         onConfirm={() => confirmIniciarTurno()}
       />

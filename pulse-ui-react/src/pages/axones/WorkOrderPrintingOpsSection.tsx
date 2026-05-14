@@ -384,12 +384,11 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
     !!props.impGrupo.trim()
   const doneInfoTurno = autoInfoTurno
 
-  const autoTemporizador =
-    props.timerState !== "pending" ||
-    props.effectiveSec > 0.01 ||
-    props.deadSec > 0.01 ||
-    props.pauseEntries.length > 0
-  const doneTemporizador = autoTemporizador
+  /** “Completo” solo cuando el cronómetro quedó detenido/cerrado (no mientras corre o está en pausa). */
+  const doneTemporizador =
+    props.areaFinalizada ||
+    props.timerState === "completed" ||
+    props.timerState === "stopped"
 
   const autoIngresoMaterial =
     props.entradaBobinas.some((v) => num(v) > 0) || props.entradaMeta.some((m) => hasMeta(m))
@@ -405,7 +404,14 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
   const [motivoComboOpen, setMotivoComboOpen] = useState(false)
   const [buenaComboOpen, setBuenaComboOpen] = useState(false)
   const [rechComboOpen, setRechComboOpen] = useState(false)
+  const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
   const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
+
+  const pauseParadaComboLabel = useMemo(() => {
+    const r = props.pauseReason.trim()
+    if (!r) return "Seleccionar motivo…"
+    return r
+  }, [props.pauseReason])
 
   const motivoComboLabel = useMemo(() => {
     if (motivoSelectDisabled) return "— (indique Kg rechazados primero)"
@@ -548,7 +554,9 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           >
             <p className="text-muted-foreground mb-3 text-xs leading-snug">
               Escriba nombre y rol, luego use <span className="font-semibold text-foreground">Guardar persona</span>.
-              La lista queda registrada aquí (historial de la cuadrilla) antes de iniciar el turno.
+              La lista queda aquí (cuadrilla en pantalla) antes de abrir el{" "}
+              <span className="font-semibold text-foreground">turno de planta</span> en la sección siguiente. No es el
+              cronómetro de máquina (eso va más abajo, tras abrir el registro).
             </p>
 
             <div className="rounded-lg border bg-background/60 p-3">
@@ -628,8 +636,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 <CollapsibleContent>
                   {props.draftPeople.length === 0 ? (
                     <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-                      Aún no hay personas en la lista. Guarde al menos un <strong>operador</strong> para poder iniciar
-                      el turno.
+                      Aún no hay personas en la lista. Guarde al menos un <strong>operador</strong> para poder abrir el
+                      turno de planta (botón siguiente).
                     </div>
                   ) : (
                     <ul className="space-y-1 border-t px-3 py-2">
@@ -662,21 +670,25 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
 
               {props.draftOperadorMissing ? (
                 <div className="mt-2 text-xs text-rose-700">
-                  Debe guardar al menos un operador para poder iniciar el turno (sección siguiente).
+                  Debe guardar al menos un operador para poder abrir el turno de planta (sección siguiente).
                 </div>
               ) : null}
             </div>
           </MesSectionShell>
 
           <MesSectionShell
-            title={mesSectionTitle(CalendarPlus, "Iniciar un turno")}
+            title={mesSectionTitle(CalendarPlus, "Turno de planta (apertura de registro)")}
             subtle
             bodyClassName="mes-section__body--flush"
           >
             <p className="text-muted-foreground mb-3 text-xs leading-snug">
-              Elija turno y grupo de planta. Cuando el personal del turno esté listo arriba, pulse{" "}
-              <span className="font-semibold text-foreground">Iniciar turno</span> para abrir el registro de
-              producción y habilitar el temporizador en este pedido.
+              Elija <span className="font-semibold text-foreground">Diurno / Nocturno</span> y{" "}
+              <span className="font-semibold text-foreground">grupo A / B / C</span>. Con el personal listo arriba, pulse{" "}
+              <span className="font-semibold text-foreground">Iniciar turno</span> para{" "}
+              <span className="font-semibold text-foreground">abrir el registro de producción</span> de esta OT. Eso{" "}
+              <span className="font-semibold text-foreground">no</span> arranca el cronómetro: el contador de tiempos
+              está en la sección <span className="font-semibold text-foreground">Cronómetro de producción</span> más
+              abajo (botón play allí).
             </p>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
@@ -739,7 +751,12 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             </div>
 
             <div className="mt-4 flex justify-center">
-              <Button type="button" onClick={props.onIniciarTurno} disabled={props.readOnlyOps}>
+              <Button
+                type="button"
+                onClick={props.onIniciarTurno}
+                disabled={props.readOnlyOps}
+                title="Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+              >
                 <CirclePlay className="mr-2 h-4 w-4 shrink-0" aria-hidden />
                 Iniciar turno
               </Button>
@@ -753,6 +770,14 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         title={mesSectionTitle(ClipboardList, "Información del turno")}
         headerRight={sectionHeaderExtras(doneInfoTurno)}
       >
+        <p className="text-muted-foreground mb-3 border-b border-border/50 pb-3 text-xs leading-snug">
+          Turno de planta (calendario y cuadrilla) y personal del registro actual. El{" "}
+          <span className="font-semibold text-foreground">cronómetro</span> (tiempo efectivo y{" "}
+          <span className="font-semibold text-foreground">paradas con motivo</span>) está en{" "}
+          <span className="font-semibold text-foreground">Cronómetro de producción</span> más abajo. Para terminar esta
+          sesión de registro use <span className="font-semibold text-foreground">Cerrar turno</span> en el cronómetro;{" "}
+          <span className="font-semibold text-foreground">Finalizar OT</span> es otro paso (área / orden).
+        </p>
         <div className="grid gap-2 md:grid-cols-2">
           <div className="space-y-1">
             {fieldLabel(Clock, "Turno")}
@@ -931,7 +956,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       ) : null}
 
       <MesSectionShell
-        title={mesSectionTitle(Timer, "Temporizador de producción")}
+        title={mesSectionTitle(Timer, "Cronómetro de producción")}
         headerRight={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <TooltipProvider delayDuration={200}>
@@ -957,31 +982,45 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 Completo
               </div>
             ) : null}
-            <Badge variant="secondary" className="text-xs">
+            <Badge variant="secondary" className="max-w-[14rem] text-xs leading-snug">
               {props.areaFinalizada
                 ? "Área finalizada"
-                : props.timerState === "running"
-                  ? "En producción"
-                  : props.timerState === "paused"
-                    ? "En pausa"
-                    : props.timerState === "completed"
-                      ? "Orden finalizada"
-                      : props.timerState === "stopped"
-                        ? "Turno cerrado"
-                        : "Pendiente"}
+                : !props.hasActiveTurno
+                  ? "Sin turno de planta abierto"
+                  : props.timerState === "running"
+                    ? "Cronómetro en marcha"
+                    : props.timerState === "paused"
+                      ? "Cronómetro en pausa"
+                      : props.timerState === "completed"
+                        ? "Orden finalizada"
+                        : props.timerState === "stopped"
+                          ? "Registro de turno cerrado"
+                          : "Cronómetro listo (sin iniciar)"}
             </Badge>
           </div>
         }
       >
+        {props.hasActiveTurno ? (
+          <div className="mb-3 rounded-md border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs leading-snug text-foreground">
+            <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
+            <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
+            <span className="font-semibold">no</span> cierra el turno de planta. Para cerrar la sesión de este
+            registro use <span className="font-semibold">Cerrar turno</span>.{" "}
+            <span className="font-semibold">Finalizar OT</span> es aparte (cierre en área / orden).
+          </div>
+        ) : null}
         {!props.hasActiveTurno ? (
           <div className="mb-3 rounded-md border border-dashed border-slate-400 bg-white px-3 py-2 text-xs text-slate-600">
-            Inicie un turno para habilitar el temporizador y registrar tiempos del turno.
+            Primero abra un <span className="font-semibold text-foreground">turno de planta</span> con{" "}
+            <span className="font-semibold text-foreground">Iniciar turno</span> en la sección superior. Después podrá
+            usar el <span className="font-semibold text-foreground">cronómetro</span> (play en esta sección) para
+            registrar tiempos y paradas con motivo.
           </div>
         ) : null}
         <div className="mes-timer-grid">
           <MesTimerFace
             elapsedLabel={props.formatTimerHms(props.effectiveSec)}
-            elapsedCaption="Tiempo efectivo (se detiene al pausar)"
+            elapsedCaption="Tiempo efectivo (se detiene al registrar parada)"
             deadHms={props.formatTimerHms(props.deadSec)}
             effectiveHms={props.formatTimerHms(props.totalSec)}
             productiveMetricLabel="Total (efectivo + paradas)"
@@ -998,7 +1037,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         variant="outline"
                         size="icon"
                         className="mes-timer-fab-btn mes-btn-primary shrink-0"
-                        aria-label="Iniciar temporizador de producción"
+                        aria-label="Iniciar cronómetro de producción"
                         onClick={props.startProductionTimer}
                         disabled={
                           props.readOnlyOps ||
@@ -1011,11 +1050,14 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         <CirclePlay className="shrink-0" aria-hidden />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="right">Iniciar temporizador de producción</TooltipContent>
+                    <TooltipContent side="right">Iniciar cronómetro (tiempo efectivo)</TooltipContent>
                   </Tooltip>
                 </div>
                 <div className="mes-timer-action-labeled">
-                  <span className="mes-timer-action-label">Pausar</span>
+                  <span className="mes-timer-action-label flex flex-col items-center gap-0 leading-tight">
+                    <span>Parada</span>
+                    <span className="text-[10px] font-normal text-muted-foreground">motivo</span>
+                  </span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1023,14 +1065,17 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         variant="outline"
                         size="icon"
                         className="mes-timer-fab-btn mes-btn-secondary shrink-0"
-                        aria-label="Pausar"
+                        aria-label="Pausar cronómetro y registrar motivo de parada"
                         onClick={props.pauseProductionTimer}
                         disabled={props.readOnlyOps || !props.timerRunning}
                       >
                         <CirclePause className="shrink-0" aria-hidden />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="right">Pausar temporizador</TooltipContent>
+                    <TooltipContent side="right" className="max-w-xs">
+                      Detiene el tiempo efectivo y solicita motivo de parada (tiempo muerto). No cierra el turno de
+                      planta.
+                    </TooltipContent>
                   </Tooltip>
                 </div>
                 <div className="mes-timer-action-labeled">
@@ -1051,8 +1096,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                     </TooltipTrigger>
                     <TooltipContent side="right">
                       {props.canPreviewTimerReport
-                        ? "Vista previa del reporte del temporizador"
-                        : "Inicie el temporizador para habilitar la vista previa"}
+                        ? "Vista previa del reporte del cronómetro"
+                        : "Inicie el cronómetro para habilitar la vista previa"}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -1073,7 +1118,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="right">
-                      Borra turnos, temporizador y checks para esta OT (Impresión)
+                      Borra turnos, cronómetro y checks para esta OT (Impresión)
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -1094,7 +1139,10 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                           <LogOut className="shrink-0" aria-hidden />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent side="right">Cerrar el turno actual</TooltipContent>
+                      <TooltipContent side="right" className="max-w-xs">
+                        Cierra el registro de turno de planta actual (sesión). No es una parada del cronómetro ni
+                        «Finalizar OT».
+                      </TooltipContent>
                     </Tooltip>
                   </div>
                 ) : null}
@@ -1115,7 +1163,10 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                           <Flag className="shrink-0" aria-hidden />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent side="right">Finalizar orden de trabajo en esta área</TooltipContent>
+                      <TooltipContent side="right" className="max-w-xs">
+                        Cierra el área de impresión en la orden (paso de gestión). No sustituye a «Cerrar turno» ni a
+                        «Parada» del cronómetro.
+                      </TooltipContent>
                     </Tooltip>
                   </div>
                 ) : null}
@@ -1853,29 +1904,95 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       </>
       ) : null}
 
-      <Dialog open={props.pauseMotivoDialogOpen} onOpenChange={props.onPauseMotivoDialogOpenChange}>
+      <Dialog
+        open={props.pauseMotivoDialogOpen}
+        onOpenChange={(open) => {
+          props.onPauseMotivoDialogOpenChange(open)
+          if (!open) setPauseParadaComboOpen(false)
+        }}
+      >
         <DialogContent className="max-w-md border-amber-300 bg-background shadow-xl">
           <DialogHeader>
             <DialogTitle>Registrar motivo de parada</DialogTitle>
             <DialogDescription>
-              Seleccione el motivo y continúe el temporizador. Si cierra este cuadro, el turno permanece en pausa.
+              Indique el motivo de esta parada y guárdelo. El cronómetro{" "}
+              <span className="font-medium text-foreground">sigue en pausa</span> hasta que pulse play para reanudar
+              el tiempo efectivo. Si cierra sin guardar, el cronómetro también sigue en pausa (sin registrar motivo
+              aún).
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="space-y-1">
               <Label>Motivo</Label>
-              <select
-                className="ot-select h-9 w-full"
-                value={props.pauseReason}
-                onChange={(e) => props.setPauseReason(e.target.value)}
-              >
-                <option value="">-- Seleccionar motivo --</option>
-                {props.pauseReasons.map((reason) => (
-                  <option key={reason} value={reason}>
-                    {reason}
-                  </option>
-                ))}
-              </select>
+              <Popover open={pauseParadaComboOpen} onOpenChange={setPauseParadaComboOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={pauseParadaComboOpen}
+                    className="h-9 w-full justify-between gap-2 rounded-md border border-input bg-background px-3 font-normal shadow-sm"
+                  >
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-sm",
+                        !props.pauseReason.trim() && "text-muted-foreground",
+                      )}
+                    >
+                      {pauseParadaComboLabel}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="z-[100] w-[var(--radix-popover-trigger-width)] min-w-[16rem] p-0"
+                  align="start"
+                >
+                  <Command>
+                    <CommandInput placeholder="Buscar motivo…" className="h-9" />
+                    <CommandList className="max-h-60">
+                      <CommandEmpty>Sin coincidencias.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="limpiar motivo parada"
+                          onSelect={() => {
+                            props.setPauseReason("")
+                            setPauseParadaComboOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4 shrink-0",
+                              !props.pauseReason.trim() ? "opacity-100" : "opacity-0",
+                            )}
+                            aria-hidden
+                          />
+                          <span className="text-muted-foreground">— (sin motivo)</span>
+                        </CommandItem>
+                        {props.pauseReasons.map((reason) => (
+                          <CommandItem
+                            key={reason}
+                            value={reason}
+                            onSelect={() => {
+                              props.setPauseReason(reason)
+                              setPauseParadaComboOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4 shrink-0",
+                                reason === props.pauseReason ? "opacity-100" : "opacity-0",
+                              )}
+                              aria-hidden
+                            />
+                            {reason}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="space-y-1">
               <Label>Observación (opcional)</Label>
@@ -1892,7 +2009,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
               Cerrar
             </Button>
             <Button type="button" onClick={props.confirmPauseAndResume}>
-              Registrar y continuar
+              Registrar parada
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1981,7 +2098,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           <DialogHeader>
             <DialogTitle>Turnos acumulativos</DialogTitle>
             <DialogDescription>
-              Turnos cerrados y turno en curso con tiempos registrados y personal involucrado.
+              Turnos de planta cerrados y turno en curso, con tiempos del cronómetro y personal involucrado. El
+              contador en vivo sigue en la sección «Cronómetro de producción».
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 text-sm">

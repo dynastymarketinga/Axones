@@ -13,6 +13,8 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderLine;
+use App\Models\WorkOrderTechnicalDocument;
+use App\Services\CortePlanillaDispatchSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -288,5 +290,129 @@ class CorteDispatchRulesTest extends TestCase
         $match = collect($history)->firstWhere('id', $noteId);
         $this->assertNotNull($match);
         $this->assertCount(2, $match['lines'] ?? []);
+    }
+
+    public function test_available_lists_ot_from_paletas_in_technical_document_without_prior_usage(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-PAL-'.$uniq,
+            'rif' => 'J-8'.$uniq,
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-PAL',
+            'cpe' => 'CPE-PAL',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PAL-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-PAL-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-01',
+                        'rollosKg' => ['10.500', '20.000'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertDatabaseMissing('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+        ]);
+
+        $rows = $this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows');
+        $match = collect($rows)->firstWhere('work_order_id', $wo->id);
+        $this->assertNotNull($match);
+        $this->assertEquals('30.500', $match['quantity_finished_kg']);
+        $this->assertEquals('30.500', $match['quantity_remaining_kg']);
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'quantity_finished_kg' => '30.500',
+            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+        ]);
+    }
+
+    public function test_available_lists_ot_from_paletas_using_material_from_existing_usage_when_line_missing(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-PAL2-'.$uniq,
+            'rif' => 'J-9'.$uniq,
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-PAL2',
+            'cpe' => 'CPE-PAL2',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PAL2-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-PAL2-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+
+        CorteBobinaUsage::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity_used_kg' => 0,
+            'quantity_finished_kg' => 0,
+            'notes' => 'manual',
+        ]);
+
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-01',
+                        'rollosKg' => ['15.250'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $rows = $this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows');
+        $match = collect($rows)->firstWhere('work_order_id', $wo->id);
+        $this->assertNotNull($match);
+        $this->assertEquals('15.250', $match['quantity_remaining_kg']);
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'quantity_finished_kg' => '15.250',
+            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+        ]);
     }
 }

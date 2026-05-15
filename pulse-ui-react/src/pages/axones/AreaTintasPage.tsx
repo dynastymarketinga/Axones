@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import {
   CheckCircle2,
   ChevronLeft,
@@ -15,6 +15,7 @@ import {
   Rows3,
   Search,
   SlidersHorizontal,
+  Timer,
   XCircle,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -47,6 +48,13 @@ import {
   areaRequestStatusLabel,
 } from "@/lib/axones-area-request-display"
 import { getStoredUser } from "@/lib/auth-storage"
+import { MesBandejaTimerCell } from "@/components/axones/MesBandejaTimerCell"
+import {
+  mesBandejaRowAccentClass,
+  mesBandejaStatePillClass,
+  mesBandejaWorkflowTitle,
+} from "@/lib/mes-timer-band-shared"
+import { tintasMesBandFromWorkOrderRow } from "@/lib/tintas-mes-band-status"
 import { cn } from "@/lib/utils"
 import type { LaravelPaginated, MaterialRow, WorkOrderListRow } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
@@ -75,12 +83,14 @@ import { Textarea } from "@/components/ui/textarea"
 type TintasBandejaTab = "activas" | "historial"
 
 const MI_AREA_TINTAS: MiAreaApi = "tintas"
+const TINTAS_BANDEJA_COLSPAN = 5
 
 function tintasWorkOrderProduccionUrl(woId: number): string {
   return `/ordenes-trabajo/${woId}/produccion?tab=tintas`
 }
 
 export default function AreaTintasPage() {
+  const navigate = useNavigate()
   const session = getStoredUser()
   const [mode, setMode] = useState<"list" | "consumo">("list")
   const [activeTab, setActiveTab] = useState<TintasBandejaTab>("activas")
@@ -93,6 +103,7 @@ export default function AreaTintasPage() {
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
   const [totalActivas, setTotalActivas] = useState(0)
   const [unseenActivas, setUnseenActivas] = useState(0)
+  const [mesBandNowMs, setMesBandNowMs] = useState(() => Date.now())
 
   const [workOrders, setWorkOrders] = useState<WorkOrderListRow[]>([])
   const [woId, setWoId] = useState<string>("")
@@ -221,8 +232,9 @@ export default function AreaTintasPage() {
     void markActivasBandejaSeen()
   }, [mode, activeTab, loading, rows, markActivasBandejaSeen])
 
-  const loadAreaRows = useCallback(async () => {
-    setLoading(true)
+  const loadAreaRows = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true
+    if (!silent) setLoading(true)
     try {
       const query: Record<string, string | number | undefined> = {
         page,
@@ -251,9 +263,23 @@ export default function AreaTintasPage() {
       setRows(null)
       setWorkOrders([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [activeTab, page, search, status, onlyPendingArea, historialIncludePending])
+
+  useEffect(() => {
+    if (mode !== "list" || activeTab !== "activas") return
+    const id = window.setInterval(() => setMesBandNowMs(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [mode, activeTab])
+
+  useEffect(() => {
+    if (mode !== "list" || activeTab !== "activas") return
+    const id = window.setInterval(() => {
+      void loadAreaRows({ silent: true })
+    }, 8000)
+    return () => window.clearInterval(id)
+  }, [mode, activeTab, loadAreaRows])
 
   const loadLists = useCallback(async () => {
     setLoading(true)
@@ -738,6 +764,12 @@ export default function AreaTintasPage() {
                     <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Estado
                     </TableHead>
+                    <TableHead className="h-10 min-w-[11.5rem] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Timer className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                        Temporizador
+                      </span>
+                    </TableHead>
                     <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Material
                     </TableHead>
@@ -750,7 +782,7 @@ export default function AreaTintasPage() {
                   {loading ? (
                     <TableRow className="border-border/50 hover:bg-transparent">
                       <TableCell
-                        colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                        colSpan={TINTAS_BANDEJA_COLSPAN}
                         className="text-muted-foreground py-10 text-center"
                       >
                         Cargando…
@@ -759,7 +791,7 @@ export default function AreaTintasPage() {
                   ) : !rows?.data.length ? (
                     <TableRow className="border-border/50 hover:bg-transparent">
                       <TableCell
-                        colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                        colSpan={TINTAS_BANDEJA_COLSPAN}
                         className="text-muted-foreground py-10 text-center"
                       >
                         Sin solicitudes.
@@ -769,25 +801,40 @@ export default function AreaTintasPage() {
                     rows.data.map((o, idx) => {
                       const reqStatus =
                         (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ?? "pending"
+                      const mesBand = tintasMesBandFromWorkOrderRow(o, mesBandNowMs)
+                      const rowAccent = mesBand ? mesBandejaRowAccentClass(mesBand.workflow) : ""
                       const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
                       return (
-                        <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx)}>
+                        <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
                           <TableCell className="pl-5 align-middle">
                             <Link to={tintasWorkOrderProduccionUrl(o.id)} className={insumosBandejaIdLinkClassName}>
                               {o.code}
                             </Link>
                           </TableCell>
                           <TableCell className="align-middle">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                areaRequestBadgeClass(reqStatus),
-                                "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
-                              )}
-                            >
-                              {areaRequestStatusGlyph(reqStatus)}
-                              {areaRequestStatusLabel(reqStatus)}
-                            </Badge>
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              {mesBand ? (
+                                <span className={mesBandejaStatePillClass(mesBand.workflow)} role="status">
+                                  {mesBandejaWorkflowTitle(mesBand.workflow)}
+                                </span>
+                              ) : null}
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  areaRequestBadgeClass(reqStatus),
+                                  "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
+                                )}
+                              >
+                                {areaRequestStatusGlyph(reqStatus)}
+                                {areaRequestStatusLabel(reqStatus)}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="min-w-[11.5rem] align-middle">
+                            <MesBandejaTimerCell
+                              mesBand={mesBand}
+                              onOpenDetail={() => navigate(tintasWorkOrderProduccionUrl(o.id))}
+                            />
                           </TableCell>
                           <TableCell className="max-w-md align-middle">
                             <p

@@ -9,11 +9,17 @@ use App\Models\AreaRequest;
 use App\Models\Client;
 use App\Models\ClientOrder;
 use App\Models\ClientOrderLine;
+use App\Enums\DeliveryNoteStatus;
+use App\Models\CorteBobinaUsage;
+use App\Models\DeliveryNote;
+use App\Models\DeliveryNoteLine;
 use App\Models\Material;
 use App\Models\OperationalAlert;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\WorkOrder;
+use App\Models\WorkOrderLine;
+use App\Services\CortePlanillaDispatchSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -353,6 +359,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
                 'impTurno' => '1',
                 'impGrupo' => 'A',
                 'impMetrajeProduccion' => '100',
+                'impTimerState' => 'running',
             ],
             'origin_area' => 'impresion',
             'notify_on_production_save' => true,
@@ -392,6 +399,35 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             WorkOrderBoardStage::Impresion->value,
             $wo->fresh()->board_stage?->value ?? (string) $wo->fresh()->board_stage
         );
+    }
+
+    public function test_production_save_with_notify_rejected_without_timer_started(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'impresion']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-GUARD-1',
+            'status' => 'in_progress',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impTurnoActual' => [
+                    'id' => 't1',
+                    'operador' => 'Op',
+                    'turno' => 'diurno',
+                    'grupo' => 'A',
+                ],
+                'impTimerState' => 'pending',
+            ],
+            'origin_area' => 'impresion',
+            'notify_on_production_save' => true,
+        ], $h)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['form']);
     }
 
     public function test_impresion_cannot_put_full_orden_trabajo(): void
@@ -543,6 +579,261 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
             ->assertOk()
             ->assertJsonPath('form.impEstadoArea', 'finalizada');
+    }
+
+    public function test_corte_can_get_orden_trabajo_and_patch_corte_control(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-PATCH',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)->assertOk();
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corOperador' => 'Pedro',
+                'corTurno' => 'diurno',
+                'corGrupo' => 'A',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.corOperador', 'Pedro');
+    }
+
+    public function test_corte_control_rejects_non_corte_keys(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-BAD-KEY',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'pedidoKg' => '50',
+            ],
+        ], $h)->assertUnprocessable();
+    }
+
+    public function test_corte_control_persists_turnos_and_paletas_json(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-JSON',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $paletas = [
+            [
+                'id' => 'p-01',
+                'label' => 'Paleta #01',
+                'rollosKg' => array_fill(0, 48, '12.5'),
+                'status' => 'en_progreso',
+            ],
+        ];
+        $actual = [
+            'id' => 't2',
+            'started_at' => '2026-05-07T16:01:00.000Z',
+            'closed_at' => null,
+            'operador' => 'Luis',
+            'turno' => 'diurno',
+            'grupo' => 'A',
+            'paletas' => $paletas,
+            'timer' => ['state' => 'running', 'effectiveAccSec' => 120],
+        ];
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_turnos' => [],
+                'corTurnoActual' => $actual,
+                'cor_paletas' => $paletas,
+                'kgSalidaCorte' => '600.00',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.corTurnoActual.id', 't2')
+            ->assertJsonPath('form.cor_paletas.0.label', 'Paleta #01')
+            ->assertJsonPath('form.kgSalidaCorte', '600.00');
+    }
+
+    public function test_corte_production_save_with_notify_rejected_without_timer_started(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-GUARD',
+            'status' => 'in_progress',
+            'board_stage' => WorkOrderBoardStage::Corte->value,
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corTurnoActual' => [
+                    'id' => 't1',
+                    'operador' => 'Op',
+                    'turno' => 'diurno',
+                    'grupo' => 'A',
+                ],
+                'corTimerState' => 'pending',
+            ],
+            'origin_area' => 'corte',
+            'notify_on_production_save' => true,
+        ], $h)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['form']);
+    }
+
+    public function test_corte_control_rejects_cor_estado_area_finalizada_for_non_boss(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-DENY-FIN',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertUnprocessable()
+            ->assertJsonValidationErrors(['form.corEstadoArea']);
+    }
+
+    public function test_corte_control_patch_syncs_finished_kg_to_dispatch(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+
+        $client = Client::query()->create([
+            'name' => 'C-SYNC',
+            'rif' => 'J-'.random_int(10000000, 99999999),
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-SYNC',
+            'cpe' => 'CPE-SYNC',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-SYNC-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-SYNC-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'kgSalidaCorte' => '12.00',
+            ],
+        ], $h)->assertOk();
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'quantity_finished_kg' => '12.000',
+            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+        ]);
+
+        $rows = $this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows');
+        $match = collect($rows)->firstWhere('work_order_id', $wo->id);
+        $this->assertNotNull($match);
+        $this->assertEquals('12.000', $match['quantity_remaining_kg']);
+    }
+
+    public function test_corte_control_patch_rejects_finished_kg_below_dispatched(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+
+        $client = Client::query()->create([
+            'name' => 'C-BLOCK',
+            'rif' => 'J-'.random_int(10000000, 99999999),
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-BLOCK',
+            'cpe' => 'CPE-BLOCK',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-BLOCK-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-BLOCK-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        $usage = CorteBobinaUsage::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity_used_kg' => 0,
+            'quantity_finished_kg' => '20.000',
+            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+        ]);
+
+        $dn = DeliveryNote::query()->create([
+            'code' => 'ND-BLOCK',
+            'status' => DeliveryNoteStatus::Draft->value,
+            'user_id' => $user->id,
+        ]);
+        DeliveryNoteLine::query()->create([
+            'delivery_note_id' => $dn->id,
+            'corte_bobina_usage_id' => $usage->id,
+            'work_order_id' => $wo->id,
+            'quantity_kg' => 10,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'kgSalidaCorte' => '5.00',
+            ],
+        ], $h)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['form.kgSalidaCorte']);
     }
 
     public function test_put_orden_trabajo_broadcasts_saved_to_all_areas(): void
@@ -799,6 +1090,63 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->assertNotContains($woPast->id, $ids);
     }
 
+    public function test_mi_area_montaje_active_excludes_impresion_stage_but_includes_nueva(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+
+        $woAtImpresion = WorkOrder::query()->create([
+            'code' => 'OT-MONT-ACT-IMP',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => 'OT creada',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woAtImpresion->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woNueva = WorkOrder::query()->create([
+            'code' => 'OT-MONT-ACT-NUEVA',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Nueva->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => 'OT creada',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woNueva->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woPendiente = WorkOrder::query()->create([
+            'code' => 'OT-MONT-ACT-PEND',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Pendiente->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => 'OT creada',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woPendiente->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=montaje&area_process_tag=active&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertNotContains($woAtImpresion->id, $ids);
+        $this->assertContains($woNueva->id, $ids);
+        $this->assertContains($woPendiente->id, $ids);
+    }
+
     public function test_historial_area_exclude_pending_omits_pending_area_requests(): void
     {
         $user = User::factory()->create(['role' => 'boss']);
@@ -838,5 +1186,52 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertNotContains($woPending->id, $ids);
         $this->assertContains($woDone->id, $ids);
+    }
+
+    public function test_mont_estado_area_finalizada_completes_pending_montaje_area_request(): void
+    {
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-MONT-FIN-AREA',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Montaje->value,
+            'created_by' => $boss->id,
+        ]);
+        $req = AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => sprintf('OT %s — asignada a Montaje', $wo->code),
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'requested_by' => $boss->id,
+        ]);
+
+        $baseForm = [
+            'pedidoKg' => '100',
+            'maquina' => 'M1',
+            'tipoImpresionEstructura' => 'superficie',
+            'montEstadoArea' => 'abierta',
+            'montTurnosMontaje' => [],
+            'montTurnoActual' => null,
+        ];
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", [
+            'form' => array_merge($baseForm, [
+                'montEstadoArea' => 'finalizada',
+            ]),
+            'origin_area' => 'montaje',
+        ], $h)->assertOk();
+
+        $this->assertSame(
+            AreaRequestStatus::Done->value,
+            (string) $req->fresh()->status,
+        );
+
+        $activas = $this->getJson('/api/work-orders?mi_area=montaje&area_process_tag=active&per_page=20', $h)->assertOk();
+        $this->assertNotContains($wo->id, collect($activas->json('data'))->pluck('id')->all());
+
+        $historial = $this->getJson('/api/work-orders?historial_area=montaje&historial_exclude_pending=1&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
     }
 }

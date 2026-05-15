@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\MergeCorteOrdenTrabajoRequest;
 use App\Http\Requests\MergePrintingOrdenTrabajoRequest;
 use App\Http\Requests\UpdateWorkOrderOrdenTrabajoRequest;
 use App\Models\WorkOrder;
 use App\Enums\WorkOrderPriority;
 use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderOrdenTrabajoService;
+use App\Support\MesProductionSaveGuard;
 use Illuminate\Http\JsonResponse;
 
 class WorkOrderOrdenTrabajoController extends Controller
@@ -41,6 +43,15 @@ class WorkOrderOrdenTrabajoController extends Controller
         $validated = $request->validated();
         $form = $validated['form'];
 
+        $originArea = strtolower(trim((string) $request->input('origin_area', '')));
+        $notifyOnProductionSave = filter_var(
+            $request->input('notify_on_production_save', false),
+            FILTER_VALIDATE_BOOLEAN,
+        );
+        if ($notifyOnProductionSave && $originArea !== '') {
+            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $form);
+        }
+
         if (
             array_key_exists('priority', $validated)
             && is_string($validated['priority'])
@@ -56,6 +67,8 @@ class WorkOrderOrdenTrabajoController extends Controller
             $request->user(),
             $saveFingerprint,
         );
+
+        $this->ordenTrabajo->syncAreaRequestsAfterProductionFinalize($work_order->fresh(), $form);
 
         $assignmentSummary = null;
         $assignedRaw = $validated['assigned_areas'] ?? null;
@@ -83,12 +96,6 @@ class WorkOrderOrdenTrabajoController extends Controller
             }
         }
 
-        $originArea = strtolower(trim((string) $request->input('origin_area', '')));
-        $notifyOnProductionSave = filter_var(
-            $request->input('notify_on_production_save', false),
-            FILTER_VALIDATE_BOOLEAN,
-        );
-
         $productionSummary = null;
         if ($notifyOnProductionSave && $originArea !== '') {
             $productionSummary = $this->productionNotifications->notifyOnProductionSave(
@@ -115,12 +122,58 @@ class WorkOrderOrdenTrabajoController extends Controller
     public function mergePrintingControl(MergePrintingOrdenTrabajoRequest $request, WorkOrder $work_order): JsonResponse
     {
         $form = $request->validated()['form'];
-        $doc = $this->ordenTrabajo->mergePrintingKeysIntoForm($work_order, $form, $request->user());
         $originArea = strtolower(trim((string) $request->input('origin_area', '')));
         $notifyOnProductionSave = filter_var(
             $request->input('notify_on_production_save', false),
             FILTER_VALIDATE_BOOLEAN,
         );
+        if ($notifyOnProductionSave && $originArea !== '') {
+            $doc = $this->ordenTrabajo->getDocumentPayload($work_order);
+            $existing = is_array($doc['form']) ? $doc['form'] : [];
+            $merged = array_merge($existing, $form);
+            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+        }
+
+        $doc = $this->ordenTrabajo->mergePrintingKeysIntoForm($work_order, $form, $request->user());
+
+        $productionSummary = null;
+        if ($notifyOnProductionSave && $originArea !== '') {
+            $productionSummary = $this->productionNotifications->notifyOnProductionSave(
+                $work_order->fresh(),
+                $request->user(),
+                $originArea,
+            );
+        }
+
+        return response()->json([
+            'work_order_id' => $work_order->getKey(),
+            'updated_at' => $doc->updated_at,
+            'notification_summary' => [
+                'broadcast' => null,
+                'production' => $productionSummary,
+            ],
+        ]);
+    }
+
+    /**
+     * Actualización parcial de campos de corte (prefijo cor / métricas Corte).
+     */
+    public function mergeCorteControl(MergeCorteOrdenTrabajoRequest $request, WorkOrder $work_order): JsonResponse
+    {
+        $form = $request->validated()['form'];
+        $originArea = strtolower(trim((string) $request->input('origin_area', '')));
+        $notifyOnProductionSave = filter_var(
+            $request->input('notify_on_production_save', false),
+            FILTER_VALIDATE_BOOLEAN,
+        );
+        if ($notifyOnProductionSave && $originArea !== '') {
+            $doc = $this->ordenTrabajo->getDocumentPayload($work_order);
+            $existing = is_array($doc['form']) ? $doc['form'] : [];
+            $merged = array_merge($existing, $form);
+            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+        }
+
+        $doc = $this->ordenTrabajo->mergeCorteKeysIntoForm($work_order, $form, $request->user());
 
         $productionSummary = null;
         if ($notifyOnProductionSave && $originArea !== '') {

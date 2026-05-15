@@ -15,7 +15,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { getStoredUser } from "@/lib/auth-storage"
-import { useAreaRequestCounts } from "@/hooks/useAreaRequestCounts"
+import { useAreaBandejaCounts } from "@/hooks/useAreaBandejaCounts"
 import { AXONES_MENU_TREE, getAccountLeaves } from "@/lib/axones-menu"
 import { filterAxonesMenuTree } from "@/lib/axones-roles"
 
@@ -41,9 +41,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     ? { name: session.name, email: session.email, avatar: "" }
     : data.user
 
-  const { data: areaCounts } = useAreaRequestCounts({
-    status: "pending",
-    areas: AREA_COUNT_AREAS as unknown as string[],
+  const { data: areaCounts } = useAreaBandejaCounts({
+    areas: [...AREA_COUNT_AREAS],
   })
 
   const axonesFiltered = React.useMemo(
@@ -52,7 +51,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   )
 
   const axonesWithCounts = React.useMemo(() => {
-    const counts = areaCounts?.counts ?? {}
+    const counts = areaCounts.counts
     const byUrl: Record<string, number> = {
       impresion: counts.impresion ?? 0,
       laminacion: counts.laminacion ?? 0,
@@ -72,7 +71,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       })
 
     return add(axonesFiltered as any)
-  }, [areaCounts?.counts, axonesFiltered])
+  }, [areaCounts.counts, axonesFiltered])
 
   const accountLeaves = React.useMemo(
     () => getAccountLeaves(session?.role, session?.id),

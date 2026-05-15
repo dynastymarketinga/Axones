@@ -269,6 +269,13 @@ export type WorkOrderListRow = {
     created_at?: string
   }>
   technical_document?: { form: Record<string, unknown> } | null
+  /** Resumen de segmentos de tiempo (bandeja corte/tintas). */
+  area_time_summary?: {
+    effective_seconds: number
+    dead_seconds: number
+    open_segment_type: string | null
+    open_started_at: string | null
+  } | null
   client?: Pick<ClientRecord, "id" | "name">
   product?: Pick<ProductRecord, "id" | "name">
   client_order?: { id: number; code?: string }

@@ -278,7 +278,23 @@ class WorkOrderController extends Controller
             }]);
         }
 
-        return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
+        $paginator = $query->paginate(min((int) $request->query('per_page', 20), 100));
+
+        if ($targetAreaForPayload !== null && in_array($targetAreaForPayload, ['corte', 'tintas'], true)) {
+            $summaries = app(\App\Services\AreaBandejaTimeService::class)
+                ->summariesForWorkOrderIds(
+                    $paginator->getCollection()->pluck('id'),
+                    $targetAreaForPayload,
+                );
+            $paginator->getCollection()->transform(function ($workOrder) use ($summaries) {
+                $id = (int) $workOrder->getKey();
+                $workOrder->setAttribute('area_time_summary', $summaries[$id] ?? null);
+
+                return $workOrder;
+            });
+        }
+
+        return response()->json($paginator);
     }
 
     /**

@@ -72,6 +72,14 @@ import {
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { latestRowInGroup } from "@/lib/axones-work-order-grouping"
+import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
+import { syncMontajeAutoFields, withMontajeAutoFields } from "@/lib/montaje-planilla-metrics"
+import { sumSalidaKgFromForm } from "@/pages/axones/corte-turnos"
+import {
+  canSaveProductionAreaForm,
+  MES_PRODUCTION_SAVE_CONFIG,
+  MES_SAVE_BLOCKED_MESSAGE,
+} from "@/lib/mes-timer-guards"
 import { getStoredUser } from "@/lib/auth-storage"
 import { cn } from "@/lib/utils"
 import type {
@@ -899,8 +907,6 @@ function buildRandomPlanillaPatch(prev: Record<string, unknown>): Record<string,
     numBandas: String(randomInt(1, 6)),
     anchoCorteMontaje: `${randomInt(300, 450)}±${randomInt(1, 4)}`,
     numRepeticion: String(randomInt(1, 8)),
-    desarrollo: String(randomInt(380, 520)),
-    anchoMontaje: String(randomInt(280, 440)),
     figuraEmbobinadoMontaje: String(randomInt(1, 8)),
     numColores: String(randomInt(1, 8)),
     obsMontaje: "Obs. montaje (relleno al azar)",
@@ -987,6 +993,8 @@ function computeRandomFill(
   const impAfter = getSustratosImp(next)
   next.sustratoVirgenImp1 = readString(impAfter[0]?.material_id)
   next.kgUtilizarImp1 = readString(impAfter[0]?.kg)
+
+  Object.assign(next, syncMontajeAutoFields(next))
 
   return { next, filled }
 }
@@ -1106,6 +1114,10 @@ export default function WorkOrderPlanillaPage() {
   const [pendingHeaderAction, setPendingHeaderAction] = useState<PendingHeaderAction | null>(null)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
+  const canSaveCorteProduction = useMemo(
+    () => canSaveProductionAreaForm(form, MES_PRODUCTION_SAVE_CONFIG.corte),
+    [form],
+  )
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [blurFieldMessages, setBlurFieldMessages] = useState<Record<string, string>>({})
   const fieldErrorsClearTimerRef = useRef<number | null>(null)
@@ -1242,7 +1254,7 @@ export default function WorkOrderPlanillaPage() {
           merged.programacionMotivo = ""
         }
       }
-      setForm(merged)
+      setForm(withCorteAutoFields(withMontajeAutoFields(merged)))
       clearAllBlurDismissTimers()
       setBlurFieldMessages({})
     } catch (e) {
@@ -1335,7 +1347,7 @@ export default function WorkOrderPlanillaPage() {
       setPrefill(p)
       setWoClientId(Number.isFinite(Number(co.client_id)) ? Number(co.client_id) : null)
       setWoProductId(productId)
-      setForm(merged)
+      setForm(withCorteAutoFields(withMontajeAutoFields(merged)))
       clearAllBlurDismissTimers()
       setBlurFieldMessages({})
     } catch (e) {
@@ -1438,6 +1450,33 @@ export default function WorkOrderPlanillaPage() {
       return { ...f, tipoImpresionMontaje: montajeLabel }
     })
   }, [tipoImpresion])
+
+  /** Desarrollo y ancho montaje: frecuencia×rep y ancho corte×bandas. */
+  useEffect(() => {
+    if (!canEditShared || !canViewMontaje) return
+    const patch = syncMontajeAutoFields(formRef.current)
+    if (!patch.desarrollo && !patch.anchoMontaje) return
+    setForm((f) => {
+      let changed = false
+      const next = { ...f }
+      if (patch.desarrollo && readString(f.desarrollo) !== patch.desarrollo) {
+        next.desarrollo = patch.desarrollo
+        changed = true
+      }
+      if (patch.anchoMontaje && readString(f.anchoMontaje) !== patch.anchoMontaje) {
+        next.anchoMontaje = patch.anchoMontaje
+        changed = true
+      }
+      return changed ? next : f
+    })
+  }, [
+    canEditShared,
+    canViewMontaje,
+    form.frecuencia,
+    form.numRepeticion,
+    form.anchoCorteMontaje,
+    form.numBandas,
+  ])
 
   const productComboLabel = useMemo(() => {
     const n = readString(form.producto) || readString(prefill.producto)
@@ -1664,12 +1703,24 @@ export default function WorkOrderPlanillaPage() {
       return
     }
     if (saving) return
+    if (activeScope === "corte" && !canSaveCorteProduction) {
+      toast.error(MES_SAVE_BLOCKED_MESSAGE)
+      return
+    }
+    const formToSave = withCorteAutoFields(withMontajeAutoFields(form))
+    const montajePatch = syncMontajeAutoFields(form)
+    if (
+      (montajePatch.desarrollo && readString(form.desarrollo) !== montajePatch.desarrollo) ||
+      (montajePatch.anchoMontaje && readString(form.anchoMontaje) !== montajePatch.anchoMontaje)
+    ) {
+      setForm(formToSave)
+    }
     const errors: Record<string, string> = {}
     const addError = (key: string, message: string) => {
       if (!errors[key]) errors[key] = message
     }
 
-    const pedidoKg = readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg)
+    const pedidoKg = readNumberString(formToSave.pedidoKg) || readNumberString(prefill.pedidoKg)
     if (!isDecimalLike(pedidoKg) || Number(pedidoKg.replace(",", ".")) <= 0) {
       addError("pedidoKg", "Cantidad solicitada (Kg) debe ser numérica y mayor a 0.")
     }
@@ -1700,31 +1751,31 @@ export default function WorkOrderPlanillaPage() {
     }
 
     if (canEditShared && canViewMontaje) {
-      if (!isMetricLike(readString(form.frecuencia))) {
+      if (!isMetricLike(readString(formToSave.frecuencia))) {
         addError("frecuencia", "Formato válido: 250, 250±2 o 250-252.")
       }
-      if (!isPositiveIntLike(form.numBandas)) {
+      if (!isPositiveIntLike(formToSave.numBandas)) {
         addError("numBandas", "Debe ser entero mayor a 0.")
       }
-      if (!isMetricLike(readString(form.anchoCorteMontaje))) {
+      if (!isMetricLike(readString(formToSave.anchoCorteMontaje))) {
         addError("anchoCorteMontaje", "Formato válido: 330±2, 330 o 329-331.")
       }
-      if (!isPositiveIntLike(form.numRepeticion)) {
+      if (!isPositiveIntLike(formToSave.numRepeticion)) {
         addError("numRepeticion", "Debe ser entero mayor a 0.")
       }
-      const desarrollo = readString(form.desarrollo).trim()
+      const desarrollo = readString(formToSave.desarrollo).trim()
       if (!desarrollo) {
-        addError("desarrollo", "Desarrollo (mm) es obligatorio.")
+        addError("desarrollo", "Desarrollo (mm) es obligatorio (complete frecuencia y N° repetición).")
       } else if (!isMetricLike(desarrollo)) {
         addError("desarrollo", "Formato válido: 330±2, 330 o 329-331.")
       }
-      const anchoMontaje = readString(form.anchoMontaje).trim()
+      const anchoMontaje = readString(formToSave.anchoMontaje).trim()
       if (!anchoMontaje) {
-        addError("anchoMontaje", "Ancho montaje (mm) es obligatorio.")
+        addError("anchoMontaje", "Ancho montaje (mm) es obligatorio (complete ancho corte y N° bandas).")
       } else if (!isMetricLike(anchoMontaje)) {
         addError("anchoMontaje", "Formato válido: 330±2, 330 o 329-331.")
       }
-      if (!isPositiveIntLike(form.numColores)) {
+      if (!isPositiveIntLike(formToSave.numColores)) {
         addError("numColores", "Debe ser entero mayor a 0.")
       }
     }
@@ -2076,19 +2127,15 @@ export default function WorkOrderPlanillaPage() {
         workOrderId = created.id
       }
 
-      const rowsImp = getSustratosImp(form)
+      const rowsImp = getSustratosImp(formToSave)
       const formOut: Record<string, unknown> = {
-        ...form,
+        ...formToSave,
         sustratosVirgenImp: rowsImp,
         sustratoVirgenImp1: rowsImp[0]?.material_id ?? "",
         kgUtilizarImp1: rowsImp[0]?.kg ?? "",
-        // Esta parte del código asegura que los campos "cliente", "clienteRif" y "producto" que se guardarán en el servidor
-        // siempre tengan el valor más actualizado y consistente. 
-        // Toma el valor que viene como "prefill.*" (es decir, el proporcionado desde el backend, usualmente válido y correcto),
-        // y si no existe, toma el valor actual que el usuario ha editado en el formulario ("form.*").
-        cliente: readString(prefill.cliente) || readString(form.cliente),
-        clienteRif: readString(prefill.clienteRif) || readString(form.clienteRif),
-        producto: readString(prefill.producto) || readString(form.producto),
+        cliente: readString(prefill.cliente) || readString(formToSave.cliente),
+        clienteRif: readString(prefill.clienteRif) || readString(formToSave.clienteRif),
+        producto: readString(prefill.producto) || readString(formToSave.producto),
 
         // Luego, realiza una petición HTTP (PUT) al backend para guardar el formulario actualizado.
         // La información enviada será el objeto "formOut", que contiene todos los datos del formulario incluyendo los campos anteriores.
@@ -2109,10 +2156,6 @@ export default function WorkOrderPlanillaPage() {
           assigned_areas: programacionAreas,
           assignment_reason: programacionMotivo,
         }),
-      })
-      await apiFetch(`work-orders/${workOrderId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ board_stage: "impresion" }),
       })
       const summary = saveRes.notification_summary?.broadcast
       const sentTo = summary?.sent_to ?? []
@@ -3090,10 +3133,11 @@ export default function WorkOrderPlanillaPage() {
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="desarrollo"
-                          className="ot-input"
+                          className="ot-input cursor-not-allowed bg-muted/40"
+                          readOnly
+                          tabIndex={-1}
+                          title="Calculado: frecuencia × N° repetición"
                           value={readString(form.desarrollo)}
-                          onChange={(e) => setKey(setForm, "desarrollo", sanitizeMetricInput(e.target.value))}
-                          inputMode="decimal"
                           placeholder="812±2"
                           aria-invalid={otInvalid("desarrollo")}
                         />
@@ -3105,11 +3149,12 @@ export default function WorkOrderPlanillaPage() {
                       <OtPlanillaInputIcon icon={Columns}>
                         <input
                           data-field="anchoMontaje"
-                          className="ot-input"
+                          className="ot-input cursor-not-allowed bg-muted/40"
+                          readOnly
+                          tabIndex={-1}
+                          title="Calculado: ancho corte × N° bandas"
                           value={readString(form.anchoMontaje)}
-                          onChange={(e) => setKey(setForm, "anchoMontaje", sanitizeMetricInput(e.target.value))}
                           placeholder="1040±2"
-                          inputMode="decimal"
                           aria-invalid={otInvalid("anchoMontaje")}
                         />
                       </OtPlanillaInputIcon>
@@ -4253,12 +4298,30 @@ export default function WorkOrderPlanillaPage() {
                           step="0.01"
                           min="0"
                           className="ot-input"
-                          value={readNumberString(form.kgSalidaCorte)}
-                          onChange={(e) => setKey(setForm, "kgSalidaCorte", e.target.value)}
+                          value={
+                            activeScope === "corte"
+                              ? sumSalidaKgFromForm(form).toFixed(2)
+                              : readNumberString(form.kgSalidaCorte)
+                          }
+                          readOnly={activeScope === "corte"}
+                          onChange={(e) => {
+                            if (activeScope === "corte") return
+                            setKey(setForm, "kgSalidaCorte", e.target.value)
+                          }}
                           placeholder="1185.00"
                           aria-invalid={otInvalid("kgSalidaCorte")}
+                          title={
+                            activeScope === "corte"
+                              ? "Calculado automáticamente desde los rollos de las paletas (sección Corte)"
+                              : undefined
+                          }
                         />
                       </OtPlanillaInputIcon>
+                      {activeScope === "corte" ? (
+                        <p className="text-muted-foreground mt-1 text-[11px]">
+                          Suma de rollos en paletas (solo lectura).
+                        </p>
+                      ) : null}
                       {renderError("kgSalidaCorte")}
                     </div>
                     <div className="ot-field">
@@ -4466,17 +4529,22 @@ export default function WorkOrderPlanillaPage() {
             ) : null}
           </form>
           {activeScope === "corte" ? (
-            <div className="no-print mt-6 space-y-3">
+            <div className="no-print ax-mes mt-6 space-y-4">
               <WorkOrderCorteOpsSection
                 form={form}
                 setForm={setForm}
                 pedidoTotalKg={Number(readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg) || "0")}
               />
+              {!canSaveCorteProduction ? (
+                <p className="max-w-md text-center text-xs text-muted-foreground">
+                  {MES_SAVE_BLOCKED_MESSAGE}
+                </p>
+              ) : null}
               <div className="mt-4 flex justify-center">
                 <Button
                   type="button"
                   onClick={() => setPendingHeaderAction("save")}
-                  disabled={saving || loading}
+                  disabled={saving || loading || !canSaveCorteProduction}
                 >
                   {saving ? "Guardando…" : "Guardar orden"}
                 </Button>

@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { apiFetch, ApiError } from "@/lib/api"
+import { CORTE_CONTROL_SAVED_EVENT } from "@/lib/corte-mes-band-status"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -198,7 +199,16 @@ export default function CorteDispatchPage() {
 
   useEffect(() => {
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- carga inicial; Consultar y evento de corte refrescan
   }, [])
+
+  useEffect(() => {
+    const onCorteSaved = () => {
+      void load()
+    }
+    window.addEventListener(CORTE_CONTROL_SAVED_EVENT, onCorteSaved)
+    return () => window.removeEventListener(CORTE_CONTROL_SAVED_EVENT, onCorteSaved)
+  }, [load])
 
   return (
     <div className="space-y-6 p-4 md:p-6">

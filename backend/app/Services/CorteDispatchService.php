@@ -6,10 +6,16 @@ use App\Enums\DeliveryNoteStatus;
 use App\Models\CorteBobinaUsage;
 use App\Models\DeliveryNoteLine;
 use App\Models\WorkOrder;
+use App\Models\WorkOrderTechnicalDocument;
+use App\Support\CortePlanillaSalida;
 use Illuminate\Validation\ValidationException;
 
 class CorteDispatchService
 {
+    public function __construct(
+        private readonly CortePlanillaDispatchSyncService $planillaDispatchSync,
+    ) {}
+
     /**
      * Suma de kg ya reservados o despachados contra esta línea de corte (notas no canceladas).
      */
@@ -128,6 +134,8 @@ class CorteDispatchService
      */
     public function listAvailableForDispatch(?int $workOrderId = null, ?int $productId = null, ?int $clientId = null): array
     {
+        $this->syncUsagesFromTechnicalDocuments($workOrderId, $productId, $clientId);
+
         $q = CorteBobinaUsage::query()
             ->with([
                 'workOrder:id,code,client_id,product_id,client_order_reference',
@@ -193,6 +201,8 @@ class CorteDispatchService
                 3,
             );
         }
+
+        $this->mergeFormOnlyRowsIntoByWo($byWo, $workOrderId, $productId, $clientId);
 
         $out = [];
         foreach ($byWo as $woId => $row) {
@@ -280,5 +290,134 @@ class CorteDispatchService
         });
 
         return array_values($groups);
+    }
+
+    /**
+     * Sincroniza corte_bobina_usages desde planillas con paletas o kg de salida (alineado con legacy).
+     */
+    private function syncUsagesFromTechnicalDocuments(
+        ?int $workOrderId,
+        ?int $productId,
+        ?int $clientId,
+    ): void {
+        $q = WorkOrderTechnicalDocument::query()->with([
+            'workOrder:id,code,client_id,product_id',
+        ]);
+
+        if ($workOrderId !== null) {
+            $q->where('work_order_id', $workOrderId);
+        }
+        if ($productId !== null) {
+            $q->whereHas('workOrder', fn ($w) => $w->where('product_id', $productId));
+        }
+        if ($clientId !== null) {
+            $q->whereHas('workOrder', fn ($w) => $w->where('client_id', $clientId));
+        }
+
+        foreach ($q->get() as $doc) {
+            $form = is_array($doc->form) ? $doc->form : [];
+            if (! $this->formHasDispatchableCorte($form)) {
+                continue;
+            }
+
+            $workOrder = $doc->workOrder;
+            if ($workOrder === null) {
+                continue;
+            }
+
+            try {
+                $this->planillaDispatchSync->syncFromForm($workOrder, $form);
+            } catch (ValidationException) {
+                // p. ej. terminado por debajo de lo ya en notas
+            }
+        }
+    }
+
+    /**
+     * OT con kg en planilla pero sin fila de uso (p. ej. sin material en líneas): aún listar saldo desde form.
+     *
+     * @param  array<int, array<string, mixed>>  $byWo
+     */
+    private function mergeFormOnlyRowsIntoByWo(
+        array &$byWo,
+        ?int $workOrderId,
+        ?int $productId,
+        ?int $clientId,
+    ): void {
+        $q = WorkOrderTechnicalDocument::query()->with([
+            'workOrder:id,code,client_id,product_id',
+            'workOrder.client:id,name',
+            'workOrder.product:id,name,cpe',
+        ]);
+
+        if ($workOrderId !== null) {
+            $q->where('work_order_id', $workOrderId);
+        }
+        if ($productId !== null) {
+            $q->whereHas('workOrder', fn ($w) => $w->where('product_id', $productId));
+        }
+        if ($clientId !== null) {
+            $q->whereHas('workOrder', fn ($w) => $w->where('client_id', $clientId));
+        }
+
+        foreach ($q->get() as $doc) {
+            $form = is_array($doc->form) ? $doc->form : [];
+            if (! $this->formHasDispatchableCorte($form)) {
+                continue;
+            }
+
+            $wo = $doc->workOrder;
+            if ($wo === null) {
+                continue;
+            }
+
+            $woId = (int) $wo->getKey();
+            $formFinished = CortePlanillaSalida::finishedKgFromForm($form);
+
+            if (isset($byWo[$woId])) {
+                if (bccomp((string) $byWo[$woId]['quantity_finished_kg'], $formFinished, 3) < 0) {
+                    $byWo[$woId]['quantity_finished_kg'] = $formFinished;
+                }
+                continue;
+            }
+
+            $usageId = (int) (CorteBobinaUsage::query()
+                ->where('work_order_id', $woId)
+                ->where('quantity_finished_kg', '>', 0)
+                ->orderByDesc('id')
+                ->value('id') ?? 0);
+
+            $byWo[$woId] = [
+                'corte_bobina_usage_id' => $usageId > 0 ? $usageId : null,
+                'work_order_id' => $woId,
+                'work_order_code' => $wo->code,
+                'client_id' => $wo->client_id,
+                'client_name' => $wo->client?->name,
+                'product_id' => $wo->product_id,
+                'product_name' => $wo->product?->name,
+                'product_cpe' => $wo->product?->cpe,
+                'material_id' => null,
+                'material_sku' => null,
+                'quantity_finished_kg' => $formFinished,
+                'quantity_dispatched_kg' => '0.000',
+                'quantity_remaining_kg' => '0.000',
+                'bobina_id' => null,
+                'bobina_code' => null,
+                'pallet_code' => null,
+                'bobbin_count' => null,
+            ];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     */
+    private function formHasDispatchableCorte(array $form): bool
+    {
+        if (CortePlanillaSalida::sumSalidaKgFromPaletasInForm($form) > 0) {
+            return true;
+        }
+
+        return bccomp(CortePlanillaSalida::finishedKgFromForm($form), '0', 3) > 0;
     }
 }

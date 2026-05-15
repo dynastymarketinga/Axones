@@ -1,51 +1,35 @@
 import { useCallback, useId, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
-import { Link } from "react-router-dom"
 import {
   AlarmClock,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  ArrowUpRight,
   BarChart3,
-  Boxes,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronsUpDown,
-  Clock,
   CirclePause,
   CirclePlay,
   ClipboardList,
+  Clock,
   Factory,
   FileSearch,
   Flag,
-  Hash,
   History,
   Hourglass,
   IdCard,
-  Layers,
   LogOut,
   Moon,
   Package,
-  PackageCheck,
-  PackageSearch,
-  PackageX,
-  Percent,
-  PieChart,
-  Printer,
-  Recycle,
   RotateCcw,
   Ruler,
   Sun,
   Timer,
   Trash2,
   TrendingDown,
-  Undo2,
   UserPlus,
   UserRound,
   Users,
-  Warehouse,
   Weight,
 } from "lucide-react"
 
@@ -83,7 +67,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -94,36 +77,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import type { MaterialRow } from "@/types/api"
 
 import {
-  PRINTING_REJECT_REASONS,
-  sumSalidaKg,
-  sumScrapKg,
-  type BobinaLabelMeta,
-  type PrintingTurnoEntry,
-  type WarehouseReturnDraft,
-} from "./printing-turnos"
+  MON_PAUSE_REASONS,
+  sumProduccionKg,
+  type MontajeTurnoEntry,
+} from "./montaje-turnos"
 
-export type { BobinaLabelMeta, WarehouseReturnDraft }
+type MontajePauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
 
-export type PrintingWarehouseReturnPanelProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  workOrderCode: string
-  draft: WarehouseReturnDraft
-  onDraftChange: (patch: Partial<WarehouseReturnDraft>) => void
-  materialOptionsGood: MaterialRow[]
-  materialOptionsBad: MaterialRow[]
-  loadingGood: boolean
-  loadingBad: boolean
-  submitting: boolean
-  onSubmit: () => void | Promise<void>
-}
-
-type PrintingPauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
-
-type LabelEditorMode = "entrada" | "salida"
 export type DraftPersonRole = "operador" | "ayudante" | "supervisor"
 export type DraftPerson = { id: string; role: DraftPersonRole; name: string }
 
@@ -133,7 +95,12 @@ function roleLabelEs(role: DraftPersonRole): string {
   return "Ayudante"
 }
 
-function personnelLinesFromPrintingTurno(t: PrintingTurnoEntry): string[] {
+function sumMermaKg(t: MontajeTurnoEntry): number {
+  const n = Number(String(t.mermaKg ?? "").replace(",", "."))
+  return Number.isFinite(n) ? n : 0
+}
+
+function personnelLinesFromMontajeTurno(t: MontajeTurnoEntry): string[] {
   const lines: string[] = []
   const op = t.operador.trim()
   if (op) lines.push(`${op} — Operador`)
@@ -154,7 +121,7 @@ function turnoGrupoLabel(turno: string, grupo: string): string {
 }
 
 /** Reconstruye la lista editable a partir de los tres campos persistidos en el turno. */
-function activePersonnelFromStrings(
+export function activePersonnelFromStrings(
   operador: string,
   ayudante: string,
   supervisor: string,
@@ -194,9 +161,9 @@ type Props = {
   producidoAcumuladoKg: number
   faltanteKg: number
   turnosRegistrados: number
-  totalEntradaAcumulada: number
-  totalEntradaTurno: number
-  totalScrap: number
+  totalProduccionAcumulada: number
+  kgProduccionTurno: number
+  totalMermaAcumulada: number
   ultimoTurnoLabel: string
   timerState: string
   totalSec: number
@@ -210,31 +177,15 @@ type Props = {
   pauseObs: string
   pauseMotivoDialogOpen: boolean
   onPauseMotivoDialogOpenChange: (open: boolean) => void
-  pauseEntries: PrintingPauseEntry[]
-  impTurno: string
-  impGrupo: string
-  impOperador: string
-  impAyudante: string
-  impSupervisor: string
-  entradaBobinas: string[]
-  entradaMeta: BobinaLabelMeta[]
-  devolucionBuenaRaw: string
-  devolucionRechazadaRaw: string
-  devolucionRechazadaMotivoRaw: string
-  salidaBobinas: string[]
-  salidaMeta: BobinaLabelMeta[]
-  mermaCalc: number
+  pauseEntries: MontajePauseEntry[]
+  montTurno: string
+  montGrupo: string
+  montOperador: string
+  montAyudante: string
+  montSupervisor: string
+  kgProduccionRaw: string
   mermaRaw: string
   metrajeRaw: string
-  scrapTransparenteRaw: string
-  scrapImpresoRaw: string
-  scrapImpresoDestino: "auto" | "bopp" | "transparente"
-  onSetScrapImpresoDestino: (v: "auto" | "bopp" | "transparente") => void
-  devolucionBuena: number
-  devolucionRechazada: number
-  materialConsumido: number
-  totalSalida: number
-  refilPct: number
   formatTimerHms: (s: number) => string
   setPauseReason: (v: string) => void
   setPauseObs: (v: string) => void
@@ -244,27 +195,9 @@ type Props = {
   onSetTurno: (v: "diurno" | "nocturno") => void
   onSetGrupo: (v: "A" | "B" | "C") => void
   onActivePersonnelApply: (people: DraftPerson[]) => void
-  onEntradaChange: (idx: number, v: string) => void
-  onOpenEntradaLabel: (idx: number) => void
-  onSetDevolucionBuena: (v: string) => void
-  onSetDevolucionRechazada: (v: string) => void
-  onSetDevolucionRechazadaMotivo: (v: string) => void
-  warehouseReturn: PrintingWarehouseReturnPanelProps
-  onSalidaChange: (idx: number, v: string) => void
-  onOpenSalidaLabel: (idx: number) => void
+  onSetKgProduccion: (v: string) => void
   onSetMerma: (v: string) => void
   onSetMetraje: (v: string) => void
-  onSetScrapTransparente: (v: string) => void
-  onSetScrapImpreso: (v: string) => void
-  labelEditorOpen: boolean
-  labelEditorMode: LabelEditorMode
-  labelEditorIndex: number
-  labelEditorDraft: BobinaLabelMeta
-  labelEditorError: string
-  onLabelOpenChange: (open: boolean) => void
-  onLabelDraftChange: (key: keyof BobinaLabelMeta, value: string) => void
-  onLabelClear: () => void
-  onLabelSave: () => void
   hasActiveTurno: boolean
   areaFinalizada: boolean
   readOnlyOps: boolean
@@ -283,18 +216,14 @@ type Props = {
   onDraftPersonRemove: (id: string) => void
   onIniciarTurno: () => void
   onCerrarTurnoActual: () => void
-  onFinalizarAreaImpresion: () => void | Promise<void>
-  closedTurnos: PrintingTurnoEntry[]
+  onFinalizarAreaMontaje: () => void | Promise<void>
+  closedTurnos: MontajeTurnoEntry[]
   canPreviewTimerReport: boolean
   onPreviewTimerReport: () => void
-  canPreviewDesperdicioReport: boolean
-  onPreviewDesperdicioReport: () => void
   canResetAll: boolean
   onResetAll: () => void
   /** Vista piso: solo play / parada / vista previa en el cronómetro. */
   simplifiedTimerActions?: boolean
-  /** true si hay Kg de devolución anotados y no coinciden con el último envío a almacén registrado en UI */
-  devolucionesPendienteAlmacen: boolean
 }
 
 function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
@@ -309,25 +238,25 @@ function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
   )
 }
 
-function hasMeta(meta: BobinaLabelMeta | undefined): boolean {
-  if (!meta) return false
-  return Object.values(meta).some((v) => v.trim() !== "")
-}
 
-function labelTooltipText(meta: BobinaLabelMeta | undefined): string {
-  if (!meta || !hasMeta(meta)) return "Sin etiqueta registrada"
-  const fecha = meta.fecha.trim() || "Sin fecha"
-  const referencia = meta.referencia.trim() || "Sin referencia"
-  return `Fecha: ${fecha} · Ref: ${referencia}`
-}
 
-export default function WorkOrderPrintingOpsSection(props: Props) {
+export default function WorkOrderMontajeOpsSection(props: Props) {
   const simplifiedTimer = props.simplifiedTimerActions !== false
   const [activeStageName, setActiveStageName] = useState("")
   const [activeStageRole, setActiveStageRole] = useState<DraftPersonRole>("operador")
+  const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
+  const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
+  const formFieldId = useId().replace(/:/g, "")
+  const mk = (suffix: string) => `${formFieldId}-${suffix}`
+
+  const pauseParadaComboLabel = useMemo(() => {
+    const r = props.pauseReason.trim()
+    if (!r) return "Seleccionar motivo…"
+    return r
+  }, [props.pauseReason])
   const activeSaved = useMemo(
-    () => activePersonnelFromStrings(props.impOperador, props.impAyudante, props.impSupervisor),
-    [props.impOperador, props.impAyudante, props.impSupervisor],
+    () => activePersonnelFromStrings(props.montOperador, props.montAyudante, props.montSupervisor),
+    [props.montOperador, props.montAyudante, props.montSupervisor],
   )
 
   const guardarPersonaTurnoActivo = useCallback(() => {
@@ -362,11 +291,11 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
     props.pedidoTotalKg > 0.01 && props.faltanteKg <= 0.01
 
   const autoInfoTurno =
-    !!props.impOperador.trim() ||
-    !!props.impAyudante.trim() ||
-    !!props.impSupervisor.trim() ||
-    !!props.impTurno.trim() ||
-    !!props.impGrupo.trim()
+    !!props.montOperador.trim() ||
+    !!props.montAyudante.trim() ||
+    !!props.montSupervisor.trim() ||
+    !!props.montTurno.trim() ||
+    !!props.montGrupo.trim()
   const doneInfoTurno = autoInfoTurno
 
   /** “Completo” solo cuando el cronómetro quedó detenido/cerrado (no mientras corre o está en pausa). */
@@ -375,71 +304,9 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
     props.timerState === "completed" ||
     props.timerState === "stopped"
 
-  const autoIngresoMaterial =
-    props.entradaBobinas.some((v) => num(v) > 0) || props.entradaMeta.some((m) => hasMeta(m))
-  const doneIngresoMaterial = autoIngresoMaterial
+  const doneProduccion =
+    num(props.kgProduccionRaw) > 0 || num(props.mermaRaw) > 0 || num(props.metrajeRaw) > 0
 
-  const rechDev = num(props.devolucionRechazadaRaw)
-  const buenaDev = num(props.devolucionBuenaRaw)
-  const autoDevoluciones =
-    (buenaDev > 0.01 || rechDev > 0.01) && (rechDev <= 0.01 || !!props.devolucionRechazadaMotivoRaw.trim())
-  const doneDevoluciones = autoDevoluciones
-  const motivoSelectDisabled = inputDisabled || rechDev <= 0.01
-
-  const [motivoComboOpen, setMotivoComboOpen] = useState(false)
-  const [buenaComboOpen, setBuenaComboOpen] = useState(false)
-  const [rechComboOpen, setRechComboOpen] = useState(false)
-  const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
-  const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
-
-  const formFieldId = useId().replace(/:/g, "")
-  const mk = (suffix: string) => `${formFieldId}-${suffix}`
-
-  const pauseParadaComboLabel = useMemo(() => {
-    const r = props.pauseReason.trim()
-    if (!r) return "Seleccionar motivo…"
-    return r
-  }, [props.pauseReason])
-
-  const motivoComboLabel = useMemo(() => {
-    if (motivoSelectDisabled) return "— (indique Kg rechazados primero)"
-    const id = props.devolucionRechazadaMotivoRaw.trim()
-    if (!id) return "Seleccione motivo (obligatorio si hay Kg rechazados)"
-    return PRINTING_REJECT_REASONS.find((r) => r.id === id)?.label ?? id
-  }, [motivoSelectDisabled, props.devolucionRechazadaMotivoRaw])
-
-  const buenaMaterialSelected = useMemo(
-    () =>
-      props.warehouseReturn.materialOptionsGood.find(
-        (m) => String(m.id) === props.warehouseReturn.draft.buenaMaterialId,
-      ),
-    [props.warehouseReturn.draft.buenaMaterialId, props.warehouseReturn.materialOptionsGood],
-  )
-  const rechMaterialSelected = useMemo(
-    () =>
-      props.warehouseReturn.materialOptionsBad.find(
-        (m) => String(m.id) === props.warehouseReturn.draft.rechazadaMaterialId,
-      ),
-    [props.warehouseReturn.draft.rechazadaMaterialId, props.warehouseReturn.materialOptionsBad],
-  )
-
-  const autoSalidaBobina =
-    props.salidaBobinas.some((v) => num(v) > 0) || props.salidaMeta.some((m) => hasMeta(m))
-  const doneSalidaBobina = autoSalidaBobina
-
-  const autoMermaMetraje = num(props.mermaRaw) > 0 || num(props.metrajeRaw) > 0
-  const doneMermaMetraje = autoMermaMetraje
-
-  const autoScrap = num(props.scrapTransparenteRaw) > 0 || num(props.scrapImpresoRaw) > 0
-  const doneScrap = autoScrap
-
-  const autoResumen =
-    props.totalEntradaTurno > 0.01 ||
-    props.totalSalida > 0.01 ||
-    props.totalScrap > 0.01 ||
-    props.devolucionBuena > 0.01 ||
-    props.devolucionRechazada > 0.01
-  const doneResumen = autoResumen
 
   const showPersonalTurnoSetup = !props.hasActiveTurno && !props.areaFinalizada
 
@@ -479,16 +346,16 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       </div>
       <div className="mes-footer-bar mes-footer-bar--3">
         <div className="mes-footer-bar__item flex items-start gap-2">
-          <ArrowDownToLine className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+          <Factory className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
           <span>
-            Total entrada acumulada:{" "}
-            <strong>{props.totalEntradaAcumulada.toFixed(2)} Kg</strong>
+            Producción acumulada:{" "}
+            <strong>{props.totalProduccionAcumulada.toFixed(2)} Kg</strong>
           </span>
         </div>
         <div className="mes-footer-bar__item flex items-start gap-2">
           <Trash2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
           <span>
-            Total scrap acumulado: <strong>{props.totalScrap.toFixed(2)} Kg</strong>
+            Merma acumulada (Kg): <strong>{props.totalMermaAcumulada.toFixed(2)} Kg</strong>
           </span>
         </div>
         <div className="mes-footer-bar__item flex items-start gap-2">
@@ -505,7 +372,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
     <>
       {props.areaFinalizada ? (
         <div className="rounded-lg border border-violet-300 bg-violet-100/80 p-3 text-sm text-violet-950 dark:bg-violet-950/40 dark:text-violet-100">
-          <span className="font-semibold">Área de impresión finalizada.</span>{" "}
+          <span className="font-semibold">Área de montaje finalizada.</span>{" "}
           {props.canFinalizeOrder
             ? "Puede revisar datos guardados. Use Guardar si realiza correcciones."
             : "Solo personal autorizado puede reabrir o corregir desde otro rol."}
@@ -615,7 +482,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         )}
                         <Input
                           id={mk("draft-person-name")}
-                          name="impDraftPersonName"
+                          name="montDraftPersonName"
                           className="ot-input-unified h-9 w-full min-w-0"
                           value={props.draftStagingName}
                           onChange={(e) => props.onDraftStagingName(e.target.value)}
@@ -709,8 +576,19 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
 
                   {props.draftOperadorMissing ? (
                     <div className="mt-2 text-xs text-rose-700">
-                      Debe guardar al menos un operador antes de pulsar <span className="font-semibold">Iniciar turno</span>{" "}
-                      en esta misma sección.
+                      {props.draftPeople.length > 0 ? (
+                        <>
+                          Hay personal en la lista, pero falta un{" "}
+                          <span className="font-semibold">Operador</span> (responsable del turno). En{" "}
+                          <span className="font-semibold">Rol</span> elija <span className="font-semibold">Operador</span>,
+                          escriba el nombre y pulse <span className="font-semibold">Guardar persona</span>.
+                        </>
+                      ) : (
+                        <>
+                          Debe guardar al menos un <span className="font-semibold">operador</span> antes de pulsar{" "}
+                          <span className="font-semibold">Iniciar turno</span> en esta misma sección.
+                        </>
+                      )}
                     </div>
                   ) : null}
                 </div>
@@ -719,8 +597,12 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   <Button
                     type="button"
                     onClick={props.onIniciarTurno}
-                    disabled={props.readOnlyOps}
-                    title="Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+                    disabled={props.readOnlyOps || props.draftOperadorMissing}
+                    title={
+                      props.draftOperadorMissing
+                        ? "Guarde al menos una persona con rol Operador en la cuadrilla"
+                        : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+                    }
                   >
                     <CirclePlay className="mr-2 h-4 w-4 shrink-0" aria-hidden />
                     Iniciar turno
@@ -754,7 +636,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                     · {t.turno || "?"} / {t.grupo || "?"} · {t.operador || "—"}
                   </div>
                   <div className="text-muted-foreground mt-1">
-                    Salida {sumSalidaKg(t).toFixed(2)} Kg · Scrap {sumScrapKg(t).toFixed(2)} Kg · Tiempo efectivo{" "}
+                    Producción {sumProduccionKg(t).toFixed(2)} Kg · Merma {sumMermaKg(t).toFixed(2)} Kg · Tiempo efectivo{" "}
                     {props.formatTimerHms(t.timer.effectiveAccSec)}
                   </div>
                 </li>
@@ -775,9 +657,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           {simplifiedTimer ? (
             <>
               {" "}
-              Al terminar la jornada de registro use{" "}
-              <span className="font-semibold text-foreground">Terminar turno de planta</span> (abajo en esta sección) y
-              luego <span className="font-semibold text-foreground">Guardar</span>.
+              Al terminar la jornada de registro use <span className="font-semibold text-foreground">Terminar turno de planta</span>{" "}
+              (abajo en esta sección) y luego <span className="font-semibold text-foreground">Guardar</span>.
             </>
           ) : (
             <>
@@ -795,7 +676,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 type="single"
                 variant="outline"
                 className="w-full"
-                value={props.impTurno}
+                value={props.montTurno}
                 onValueChange={(v) => {
                   if (!v) return
                   props.onSetTurno(v as "diurno" | "nocturno")
@@ -821,7 +702,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 type="single"
                 variant="outline"
                 className="w-full"
-                value={props.impGrupo}
+                value={props.montGrupo}
                 onValueChange={(v) => {
                   if (!v) return
                   props.onSetGrupo(v as "A" | "B" | "C")
@@ -868,7 +749,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   )}
                   <Input
                     id={mk("active-person-name")}
-                    name="impActivePersonName"
+                    name="montActivePersonName"
                     className="ot-input-unified h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900"
                     value={activeStageName}
                     onChange={(e) => setActiveStageName(e.target.value)}
@@ -963,7 +844,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             </Collapsible>
           </div>
           {simplifiedTimer && props.hasActiveTurno && !props.areaFinalizada ? (
-            <div className="mt-4 flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between md:col-span-2">
+            <div className="mt-4 flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-muted-foreground text-xs leading-snug">
                 Cierra el registro de este turno de planta (cuadrilla y datos del turno). Puede abrir otro turno
                 después.
@@ -1154,7 +1035,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="right">
-                      Borra turnos, cronómetro y checks para esta OT (Impresión)
+                      Borra turnos, cronómetro y checks para esta OT (Montaje)
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -1194,14 +1075,14 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                           size="icon"
                           className="mes-timer-fab-btn mes-btn-destructive-solid shrink-0"
                           aria-label="Finalizar OT"
-                          onClick={() => void props.onFinalizarAreaImpresion()}
+                          onClick={() => void props.onFinalizarAreaMontaje()}
                           disabled={props.readOnlyOps && !props.canFinalizeOrder}
                         >
                           <Flag className="shrink-0" aria-hidden />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="max-w-xs">
-                        Cierra el área de impresión en la orden (paso de gestión). No sustituye a «Cerrar turno» ni a
+                        Cierra el área de montaje en la orden (paso de gestión). No sustituye a «Cerrar turno» ni a
                         «Parada» del cronómetro.
                       </TooltipContent>
                     </Tooltip>
@@ -1240,761 +1121,50 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       {props.hasActiveTurno ? (
       <>
       <MesSectionShell
-        title={mesSectionTitle(Package, "Ingreso de material virgen")}
+        title={mesSectionTitle(Weight, "Producción del turno")}
         subtle
-        headerRight={<MesSectionHeaderExtras isDone={doneIngresoMaterial} />}
-        bodyClassName="mes-section__body--flush"
+        headerRight={<MesSectionHeaderExtras isDone={doneProduccion} />}
       >
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
-          {props.entradaBobinas.map((val, idx) => (
-            <div key={`ent-${idx}`} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label htmlFor={mk(`entrada-bobina-${idx}`)} className="ot-label">
-                  <span className="inline-flex items-center gap-1">
-                    <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                    {idx + 1}
-                  </span>
-                </Label>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant={hasMeta(props.entradaMeta[idx]) ? "default" : "outline"}
-                        className="h-5 w-5"
-                        onClick={() => props.onOpenEntradaLabel(idx)}
-                        disabled={inputDisabled}
-                        title={`Etiqueta bobina de entrada #${idx + 1}`}
-                      >
-                        <ArrowUpRight className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {labelTooltipText(props.entradaMeta[idx])}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
-                id={mk(`entrada-bobina-${idx}`)}
-                name={`impEntradaBobinaKg_${idx + 1}`}
-                className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                inputMode="decimal"
-                value={val}
-                onChange={(e) => props.onEntradaChange(idx, e.target.value)}
-                placeholder="0"
-                disabled={inputDisabled}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-2">
-          <MesStatTile
-            label="Total entrada"
-            value={`${props.totalEntradaTurno.toFixed(2)} Kg`}
-            icon={<Weight className="h-3.5 w-3.5" />}
-          />
-        </div>
-      </MesSectionShell>
-
-      <MesSectionShell
-        title={mesSectionTitle(Undo2, "Devoluciones de bobina")}
-        subtle
-        headerRight={<MesSectionHeaderExtras isDone={doneDevoluciones} />}
-      >
-        {props.devolucionesPendienteAlmacen ? (
-          <div className="-mt-1 mb-2 space-y-1.5">
-            <span className="inline-flex items-center rounded-full border border-amber-500/80 bg-amber-100/90 px-2.5 py-0.5 text-[11px] font-semibold text-amber-950">
-              Pendiente de registrar en almacén
-            </span>
-            <p className="text-[11px] leading-snug text-amber-950/90 dark:text-amber-100/90">
-              El formulario de envío se abre solo en este caso: elija materiales y pulse{" "}
-              <span className="font-semibold">Enviar a almacén</span>.
-            </p>
-          </div>
-        ) : null}
-        <p className="text-muted-foreground mb-3 text-[11px] leading-snug">
-          Capture kilos y motivo aquí; el resumen de producción usa los mismos valores. Al enviar, las filas aparecen
-          en{" "}
-          <Link to="/devoluciones" className="font-medium text-primary underline underline-offset-2">
-            Inventario → Devoluciones
-          </Link>{" "}
-          (Pendientes hasta que almacén acepte). La parte <span className="font-medium text-foreground">rechazada</span>{" "}
-          genera además una bobina en <span className="font-medium text-foreground">Inventario → Bobinas</span>.
-        </p>
-
-        <Collapsible
-          open={props.warehouseReturn.open}
-          onOpenChange={props.warehouseReturn.onOpenChange}
-          className="mt-1"
-        >
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              disabled={inputDisabled || props.warehouseReturn.submitting}
-              className={cn(
-                "group flex w-full items-center justify-between gap-2 rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5 text-left text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/35",
-                (inputDisabled || props.warehouseReturn.submitting) && "pointer-events-none opacity-50",
-              )}
-            >
-              <span className="inline-flex min-w-0 flex-1 items-center gap-2">
-                <Warehouse className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
-                <span className="min-w-0 truncate">
-                  Devolución del turno (impresión → almacén): kilos, motivo y materiales
-                </span>
-              </span>
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
-                  props.warehouseReturn.open && "rotate-180",
-                )}
-              />
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="mt-3 space-y-4 rounded-xl border border-border/70 bg-card/40 p-3 shadow-inner sm:p-4">
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs">
-                <span className="text-muted-foreground">Orden</span>
-                <span className="font-mono font-semibold text-foreground">{props.warehouseReturn.workOrderCode}</span>
-                <span className="text-muted-foreground">·</span>
-                <span className="text-muted-foreground">Impresión → Almacén</span>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2 rounded-lg border border-emerald-200/70 bg-emerald-50/25 p-3 dark:bg-emerald-950/15">
-                  {fieldLabel(mk("devolucion-buena-kg"), PackageCheck, "Devolución buena (Kg)")}
-                  <Input
-                    id={mk("devolucion-buena-kg")}
-                    name="impDevolucionBuenaKg"
-                    className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                    inputMode="decimal"
-                    value={props.devolucionBuenaRaw}
-                    onChange={(e) => props.onSetDevolucionBuena(e.target.value)}
-                    placeholder="0"
-                    disabled={inputDisabled}
-                  />
-                  <p className="text-muted-foreground text-[11px]">Material apto para reingreso a inventario.</p>
-                </div>
-                <div className="space-y-2 rounded-lg border border-rose-200/70 bg-rose-50/25 p-3 dark:bg-rose-950/15">
-                  {fieldLabel(mk("devolucion-rechazada-kg"), PackageX, "Devolución rechazada (Kg)")}
-                  <Input
-                    id={mk("devolucion-rechazada-kg")}
-                    name="impDevolucionRechazadaKg"
-                    className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                    inputMode="decimal"
-                    value={props.devolucionRechazadaRaw}
-                    onChange={(e) => props.onSetDevolucionRechazada(e.target.value)}
-                    placeholder="0"
-                    disabled={inputDisabled}
-                  />
-                  <p className="text-muted-foreground text-[11px]">Queda en bobinas rechazadas; indique motivo abajo.</p>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                {fieldLabel(mk("devolucion-rechazada-motivo"), FileSearch, "Motivo (devolución rechazada)")}
-                <Popover
-                  open={motivoComboOpen && !motivoSelectDisabled}
-                  onOpenChange={(o) => {
-                    if (!motivoSelectDisabled) setMotivoComboOpen(o)
-                  }}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      id={mk("devolucion-rechazada-motivo")}
-                      name="impDevolucionRechazadaMotivo"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={motivoComboOpen && !motivoSelectDisabled}
-                      disabled={motivoSelectDisabled}
-                      className={cn(
-                        "h-9 w-full justify-between gap-2 rounded-md border border-input bg-white px-3 font-normal shadow-sm dark:bg-white dark:text-slate-900",
-                        motivoSelectDisabled && "cursor-not-allowed opacity-60",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-left text-sm",
-                          (motivoSelectDisabled || !props.devolucionRechazadaMotivoRaw.trim()) &&
-                            "text-muted-foreground",
-                        )}
-                      >
-                        {motivoComboLabel}
-                      </span>
-                      <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[16rem] p-0" align="start">
-                    <Command>
-                      <CommandList className="max-h-60">
-                        <CommandGroup>
-                          <CommandItem
-                            value="limpiar motivo devolucion"
-                            onSelect={() => {
-                              props.onSetDevolucionRechazadaMotivo("")
-                              setMotivoComboOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4 shrink-0",
-                                !props.devolucionRechazadaMotivoRaw.trim() ? "opacity-100" : "opacity-0",
-                              )}
-                              aria-hidden
-                            />
-                            <span className="text-muted-foreground">— (sin motivo)</span>
-                          </CommandItem>
-                          {PRINTING_REJECT_REASONS.map((r) => (
-                            <CommandItem
-                              key={r.id}
-                              value={`${r.id} ${r.label}`}
-                              onSelect={() => {
-                                props.onSetDevolucionRechazadaMotivo(r.id)
-                                setMotivoComboOpen(false)
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4 shrink-0",
-                                  r.id === props.devolucionRechazadaMotivoRaw.trim()
-                                    ? "opacity-100"
-                                    : "opacity-0",
-                                )}
-                                aria-hidden
-                              />
-                              {r.label}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor={mk("warehouse-bobina-ref")} className="ot-label">
-                    Bobina / referencia
-                  </Label>
-                  <span className="text-[10px] text-muted-foreground">Opcional</span>
-                </div>
-                <Input
-                  id={mk("warehouse-bobina-ref")}
-                  name="impWarehouseBobinaRef"
-                  className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                  value={props.warehouseReturn.draft.bobinaCode}
-                  onChange={(e) => props.warehouseReturn.onDraftChange({ bobinaCode: e.target.value })}
-                  placeholder="Código de bobina, etiqueta o lote"
-                  disabled={inputDisabled}
-                />
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-emerald-300/60 bg-gradient-to-b from-emerald-50/80 to-background p-3 dark:border-emerald-800/50 dark:from-emerald-950/35">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">Buena</span>
-                    <Badge
-                      variant="outline"
-                      className="border-emerald-500/50 bg-emerald-600 text-[10px] text-white hover:bg-emerald-600"
-                    >
-                      Reingreso inventario
-                    </Badge>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="space-y-1">
-                      <Label htmlFor={mk("warehouse-material-buena")} className="text-xs text-emerald-900/90 dark:text-emerald-200/90">
-                        Material (área material)
-                      </Label>
-                      <Popover
-                        open={buenaComboOpen}
-                        onOpenChange={(o) => {
-                          setBuenaComboOpen(o)
-                        }}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            id={mk("warehouse-material-buena")}
-                            name="impWarehouseMaterialBuena"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={buenaComboOpen}
-                            disabled={inputDisabled || props.warehouseReturn.loadingGood}
-                            className="h-9 w-full justify-between gap-2 rounded-md border border-emerald-200/80 bg-white px-3 font-normal shadow-sm dark:bg-white dark:text-slate-900"
-                          >
-                            <span
-                              className={cn(
-                                "min-w-0 flex-1 truncate text-left text-sm",
-                                !buenaMaterialSelected && "text-muted-foreground",
-                              )}
-                            >
-                              {props.warehouseReturn.loadingGood
-                                ? "Cargando…"
-                                : buenaMaterialSelected
-                                  ? `${buenaMaterialSelected.sku} · ${buenaMaterialSelected.name}`
-                                  : "Seleccione material"}
-                            </span>
-                            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                          <Command shouldFilter>
-                            <CommandInput placeholder="Buscar por SKU o nombre…" />
-                            <CommandList className="max-h-60">
-                              <CommandEmpty>Sin coincidencias.</CommandEmpty>
-                              <CommandGroup>
-                                <CommandItem
-                                  value="limpiar material buena"
-                                  onSelect={() => {
-                                    props.warehouseReturn.onDraftChange({ buenaMaterialId: "" })
-                                    setBuenaComboOpen(false)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4 shrink-0",
-                                      !props.warehouseReturn.draft.buenaMaterialId ? "opacity-100" : "opacity-0",
-                                    )}
-                                    aria-hidden
-                                  />
-                                  <span className="text-muted-foreground">— (sin material)</span>
-                                </CommandItem>
-                                {props.warehouseReturn.materialOptionsGood.map((m) => (
-                                  <CommandItem
-                                    key={m.id}
-                                    value={`${m.id} ${m.sku} ${m.name}`}
-                                    onSelect={() => {
-                                      props.warehouseReturn.onDraftChange({ buenaMaterialId: String(m.id) })
-                                      setBuenaComboOpen(false)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4 shrink-0",
-                                        String(m.id) === props.warehouseReturn.draft.buenaMaterialId
-                                          ? "opacity-100"
-                                          : "opacity-0",
-                                      )}
-                                      aria-hidden
-                                    />
-                                    <span className="min-w-0 truncate">
-                                      {m.sku} · {m.name}
-                                    </span>
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-rose-300/60 bg-gradient-to-b from-rose-50/80 to-background p-3 dark:border-rose-800/50 dark:from-rose-950/35">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-rose-900 dark:text-rose-200">Rechazada</span>
-                    <Badge variant="destructive" className="text-[10px]">
-                      Bobinas rechazadas
-                    </Badge>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="space-y-1">
-                      <Label htmlFor={mk("warehouse-material-rechazada")} className="text-xs text-rose-900/90 dark:text-rose-200/90">
-                        Material (rechazadas)
-                      </Label>
-                      <Popover
-                        open={rechComboOpen}
-                        onOpenChange={(o) => {
-                          setRechComboOpen(o)
-                        }}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            id={mk("warehouse-material-rechazada")}
-                            name="impWarehouseMaterialRechazada"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={rechComboOpen}
-                            disabled={inputDisabled || props.warehouseReturn.loadingBad}
-                            className="h-9 w-full justify-between gap-2 rounded-md border border-rose-200/80 bg-white px-3 font-normal shadow-sm dark:bg-white dark:text-slate-900"
-                          >
-                            <span
-                              className={cn(
-                                "min-w-0 flex-1 truncate text-left text-sm",
-                                !rechMaterialSelected && "text-muted-foreground",
-                              )}
-                            >
-                              {props.warehouseReturn.loadingBad
-                                ? "Cargando…"
-                                : rechMaterialSelected
-                                  ? `${rechMaterialSelected.sku} · ${rechMaterialSelected.name}`
-                                  : "Seleccione material"}
-                            </span>
-                            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                          <Command shouldFilter>
-                            <CommandInput placeholder="Buscar por SKU o nombre…" />
-                            <CommandList className="max-h-60">
-                              <CommandEmpty>Sin coincidencias.</CommandEmpty>
-                              <CommandGroup>
-                                <CommandItem
-                                  value="limpiar material rechazada"
-                                  onSelect={() => {
-                                    props.warehouseReturn.onDraftChange({ rechazadaMaterialId: "" })
-                                    setRechComboOpen(false)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4 shrink-0",
-                                      !props.warehouseReturn.draft.rechazadaMaterialId ? "opacity-100" : "opacity-0",
-                                    )}
-                                    aria-hidden
-                                  />
-                                  <span className="text-muted-foreground">— (sin material)</span>
-                                </CommandItem>
-                                {props.warehouseReturn.materialOptionsBad.map((m) => (
-                                  <CommandItem
-                                    key={m.id}
-                                    value={`${m.id} ${m.sku} ${m.name}`}
-                                    onSelect={() => {
-                                      props.warehouseReturn.onDraftChange({ rechazadaMaterialId: String(m.id) })
-                                      setRechComboOpen(false)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4 shrink-0",
-                                        String(m.id) === props.warehouseReturn.draft.rechazadaMaterialId
-                                          ? "opacity-100"
-                                          : "opacity-0",
-                                      )}
-                                      aria-hidden
-                                    />
-                                    <span className="min-w-0 truncate">
-                                      {m.sku} · {m.name}
-                                    </span>
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor={mk("warehouse-rechazada-obs")} className="text-xs text-rose-900/90 dark:text-rose-200/90">
-                        Observación (opcional)
-                      </Label>
-                      <Textarea
-                        id={mk("warehouse-rechazada-obs")}
-                        name="impWarehouseRechazadaObs"
-                        className="min-h-[72px] bg-white text-sm dark:bg-white dark:text-slate-900"
-                        value={props.warehouseReturn.draft.rechazadaObs}
-                        onChange={(e) =>
-                          props.warehouseReturn.onDraftChange({ rechazadaObs: e.target.value })
-                        }
-                        placeholder="Detalle adicional (si aplica)"
-                        disabled={inputDisabled}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="sm:min-w-36"
-                  onClick={() => props.warehouseReturn.onOpenChange(false)}
-                  disabled={props.warehouseReturn.submitting}
-                >
-                  Cerrar panel
-                </Button>
-                <Button
-                  type="button"
-                  className="sm:min-w-48"
-                  onClick={() => void props.warehouseReturn.onSubmit()}
-                  disabled={inputDisabled || props.warehouseReturn.submitting}
-                >
-                  {props.warehouseReturn.submitting ? "Enviando…" : "Enviar a almacén"}
-                </Button>
-              </div>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </MesSectionShell>
-
-      <MesSectionShell
-        title={mesSectionTitle(PackageSearch, "Proceso — salida bobina impresa")}
-        subtle
-        headerRight={<MesSectionHeaderExtras isDone={doneSalidaBobina} />}
-        bodyClassName="mes-section__body--flush"
-      >
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
-          {props.salidaBobinas.map((val, idx) => (
-            <div key={`sal-${idx}`} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label htmlFor={mk(`salida-bobina-${idx}`)} className="ot-label">
-                  <span className="inline-flex items-center gap-1">
-                    <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                    {idx + 1}
-                  </span>
-                </Label>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant={hasMeta(props.salidaMeta[idx]) ? "default" : "outline"}
-                        className="h-5 w-5"
-                        onClick={() => props.onOpenSalidaLabel(idx)}
-                        disabled={inputDisabled}
-                        title={`Etiqueta bobina de salida #${idx + 1}`}
-                      >
-                        <ArrowUpRight className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {labelTooltipText(props.salidaMeta[idx])}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
-                id={mk(`salida-bobina-${idx}`)}
-                name={`impSalidaBobinaKg_${idx + 1}`}
-                className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                inputMode="decimal"
-                value={val}
-                onChange={(e) => props.onSalidaChange(idx, e.target.value)}
-                placeholder="0"
-                disabled={inputDisabled}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-2 mes-stat-grid mes-stat-grid--4">
-          <MesStatTile
-            label="N° bobinas"
-            value={props.salidaBobinas.filter((v) => Number(v) > 0).length}
-            icon={<Hash className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Peso total"
-            value={`${props.totalSalida.toFixed(2)} Kg`}
-            icon={<Weight className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Merma calculada"
-            value={`${props.mermaCalc.toFixed(2)} Kg`}
-            icon={<TrendingDown className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="% Refil"
-            value={`${props.refilPct.toFixed(2)}%`}
-            icon={<Percent className="h-3.5 w-3.5" />}
-          />
-        </div>
-      </MesSectionShell>
-
-      <MesSectionShell
-        title={mesSectionTitle(Ruler, "Merma y metraje")}
-        subtle
-        headerRight={<MesSectionHeaderExtras isDone={doneMermaMetraje} />}
-      >
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded border bg-background p-2 text-sm">
-            <Label
-              htmlFor={mk("merma-turno")}
-              className="inline-flex items-center gap-1.5 text-muted-foreground"
-            >
-              <TrendingDown className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
-              Merma
-            </Label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="space-y-1">
+            {fieldLabel(mk("kg-prod"), Weight, "Kg producción")}
             <Input
-              id={mk("merma-turno")}
-              name="impMermaKg"
-              className="ot-input-unified mt-1 h-9 bg-white dark:bg-white dark:text-slate-900"
+              id={mk("kg-prod")}
+              name="montKgProduccion"
+              className="ot-input-unified h-9"
+              inputMode="decimal"
+              value={props.kgProduccionRaw}
+              onChange={(e) => props.onSetKgProduccion(e.target.value)}
+              disabled={inputDisabled}
+              placeholder="0.00"
+            />
+          </div>
+          <div className="space-y-1">
+            {fieldLabel(mk("merma"), TrendingDown, "Merma (Kg)")}
+            <Input
+              id={mk("merma")}
+              name="montMermaKg"
+              className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.mermaRaw}
               onChange={(e) => props.onSetMerma(e.target.value)}
-              placeholder="0"
               disabled={inputDisabled}
+              placeholder="0.00"
             />
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              Calculada: <span className="font-semibold text-foreground">{props.mermaCalc.toFixed(2)} Kg</span>
-            </div>
           </div>
-          <div className="rounded border bg-background p-2 text-sm">
-            <Label
-              htmlFor={mk("metraje-turno")}
-              className="inline-flex items-center gap-1.5 text-muted-foreground"
-            >
-              <Ruler className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
-              Metraje
-            </Label>
+          <div className="space-y-1">
+            {fieldLabel(mk("metraje"), Ruler, "Metraje montaje")}
             <Input
-              id={mk("metraje-turno")}
-              name="impMetrajeM"
-              className="ot-input-unified mt-1 h-9 bg-white dark:bg-white dark:text-slate-900"
+              id={mk("metraje")}
+              name="montMetraje"
+              className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.metrajeRaw}
               onChange={(e) => props.onSetMetraje(e.target.value)}
-              placeholder="0"
               disabled={inputDisabled}
+              placeholder="0"
             />
           </div>
-        </div>
-      </MesSectionShell>
-
-      <MesSectionShell
-        title={mesSectionTitle(Recycle, "Scrap del turno (Kg)")}
-        subtle
-        headerRight={<MesSectionHeaderExtras isDone={doneScrap} />}
-      >
-        <div className="grid gap-2 sm:grid-cols-3">
-          <div>
-            {fieldLabel(mk("scrap-transparente"), Layers, "Transparente")}
-            <Input
-              id={mk("scrap-transparente")}
-              name="impScrapTransparenteKg"
-              className="ot-input-unified h-9"
-              inputMode="decimal"
-              value={props.scrapTransparenteRaw}
-              onChange={(e) => props.onSetScrapTransparente(e.target.value)}
-              placeholder="0"
-              disabled={inputDisabled}
-            />
-          </div>
-          <div className="space-y-2">
-            {fieldLabel(mk("scrap-impreso"), Printer, "Impreso")}
-            <Input
-              id={mk("scrap-impreso")}
-              name="impScrapImpresoKg"
-              className="ot-input-unified h-9"
-              inputMode="decimal"
-              value={props.scrapImpresoRaw}
-              onChange={(e) => props.onSetScrapImpreso(e.target.value)}
-              placeholder="0"
-              disabled={inputDisabled}
-            />
-              <div className="space-y-1">
-              <p className="inline-flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
-                <Warehouse className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
-                <span>Inventario destino (reporte desperdicio)</span>
-              </p>
-              <div className="mes-toggle-row">
-              <ToggleGroup
-                type="single"
-                className="flex flex-wrap justify-start gap-1"
-                value={props.scrapImpresoDestino}
-                onValueChange={(v) => {
-                  if (!v) return
-                  props.onSetScrapImpresoDestino(v as "auto" | "bopp" | "transparente")
-                }}
-                disabled={inputDisabled}
-              >
-                <ToggleGroupItem value="auto" className="text-xs">
-                  Auto
-                </ToggleGroupItem>
-                <ToggleGroupItem value="bopp" className="text-xs">
-                  BOPP
-                </ToggleGroupItem>
-                <ToggleGroupItem value="transparente" className="text-xs">
-                  Transparente
-                </ToggleGroupItem>
-              </ToggleGroup>
-              </div>
-              <p className="text-muted-foreground text-[11px] leading-snug">
-                Auto asigna el destino del impreso según la estructura del producto en la OT (reporte de desperdicio).
-              </p>
-            </div>
-          </div>
-          <MesStatTile
-            label="Total scrap"
-            value={`${props.totalScrap.toFixed(2)} Kg`}
-            icon={<Trash2 className="h-3.5 w-3.5" />}
-          />
-        </div>
-      </MesSectionShell>
-
-      <MesSectionShell
-        title={mesSectionTitle(PieChart, "Resumen de producción")}
-        subtle
-        headerRight={
-          <MesSectionHeaderExtras
-            isDone={doneResumen}
-            actions={
-              <Button
-                type="button"
-                variant="outline"
-                className="border-slate-400 text-slate-800 hover:bg-slate-100"
-                onClick={props.onPreviewDesperdicioReport}
-                disabled={!props.canPreviewDesperdicioReport}
-                title={
-                  props.canPreviewDesperdicioReport
-                    ? "Vista previa del reporte de desperdicio"
-                    : "Active un turno para habilitar la vista previa"
-                }
-              >
-                <FileSearch className="mr-1 h-4 w-4 shrink-0" aria-hidden />
-                Vista previa desperdicio
-              </Button>
-            }
-          />
-        }
-      >
-        <div className="mes-stat-grid sm:grid-cols-2">
-          <MesStatTile
-            label="Total material entrada"
-            value={`${props.totalEntradaTurno.toFixed(2)} Kg`}
-            icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Devolución buena"
-            value={`${props.devolucionBuena.toFixed(2)} Kg`}
-            icon={<PackageCheck className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Devolución rechazada"
-            value={`${props.devolucionRechazada.toFixed(2)} Kg`}
-            icon={<PackageX className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Material consumido"
-            value={`${props.materialConsumido.toFixed(2)} Kg`}
-            icon={<Boxes className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Total salida"
-            value={`${props.totalSalida.toFixed(2)} Kg`}
-            icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Total scrap"
-            value={`${props.totalScrap.toFixed(2)} Kg`}
-            icon={<Trash2 className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Merma calculada"
-            value={`${props.mermaCalc.toFixed(2)} Kg`}
-            icon={<TrendingDown className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="% Refil"
-            value={`${props.refilPct.toFixed(2)}%`}
-            icon={<Percent className="h-3.5 w-3.5" />}
-          />
         </div>
       </MesSectionShell>
       </>
@@ -2025,7 +1195,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   <Button
                     type="button"
                     id={mk("pause-motivo")}
-                    name="impPauseMotivo"
+                    name="montPauseMotivo"
                     variant="outline"
                     role="combobox"
                     aria-expanded={pauseParadaComboOpen}
@@ -2096,7 +1266,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
               <Label htmlFor={mk("pause-obs")}>Observación (opcional)</Label>
               <Input
                 id={mk("pause-obs")}
-                name="impPauseObs"
+                name="montPauseObs"
                 value={props.pauseObs}
                 onChange={(e) => props.setPauseObs(e.target.value)}
                 placeholder="Detalle breve (opcional)"
@@ -2111,158 +1281,6 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             <Button type="button" onClick={props.confirmPauseAndResume}>
               Registrar parada
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={props.labelEditorOpen} onOpenChange={props.onLabelOpenChange}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              Etiqueta bobina de {props.labelEditorMode === "entrada" ? "Entrada" : "Salida"} #{props.labelEditorIndex + 1}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-fecha")}>Fecha bobina</Label>
-              <Input
-                id={mk("label-fecha")}
-                name="impLabelFecha"
-                value={props.labelEditorDraft.fecha}
-                onChange={(e) => props.onLabelDraftChange("fecha", e.target.value)}
-                placeholder="dd/mm/aaaa"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-hora")}>Hora</Label>
-              <Input
-                id={mk("label-hora")}
-                name="impLabelHora"
-                value={props.labelEditorDraft.hora}
-                onChange={(e) => props.onLabelDraftChange("hora", e.target.value)}
-                placeholder="--:--"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-referencia")}>Referencia Bobina</Label>
-              <Input
-                id={mk("label-referencia")}
-                name="impLabelReferencia"
-                value={props.labelEditorDraft.referencia}
-                onChange={(e) => props.onLabelDraftChange("referencia", e.target.value)}
-                placeholder="Ref. o lote"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-pedido-lote")}>Pedido / Lote</Label>
-              <Input
-                id={mk("label-pedido-lote")}
-                name="impLabelPedidoLote"
-                value={props.labelEditorDraft.pedido_lote}
-                onChange={(e) => props.onLabelDraftChange("pedido_lote", e.target.value)}
-                placeholder="N° pedido o lote"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-proveedor")}>Proveedor</Label>
-              <Input
-                id={mk("label-proveedor")}
-                name="impLabelProveedor"
-                value={props.labelEditorDraft.proveedor}
-                onChange={(e) => props.onLabelDraftChange("proveedor", e.target.value)}
-                placeholder="Nombre proveedor"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-operador")}>Operador</Label>
-              <Input
-                id={mk("label-operador")}
-                name="impLabelOperador"
-                value={props.labelEditorDraft.operador}
-                onChange={(e) => props.onLabelDraftChange("operador", e.target.value)}
-                placeholder="Nombre operador"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-peso")}>Peso (Kg)</Label>
-              <Input
-                id={mk("label-peso")}
-                name="impLabelPeso"
-                value={props.labelEditorDraft.peso}
-                onChange={(e) => props.onLabelDraftChange("peso", e.target.value)}
-                placeholder="Ej: 120"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-metraje")}>Metraje</Label>
-              <Input
-                id={mk("label-metraje")}
-                name="impLabelMetraje"
-                value={props.labelEditorDraft.metraje}
-                onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)}
-                placeholder="Metros"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-medida-ancho")}>Medida / Ancho (mm)</Label>
-              <Input
-                id={mk("label-medida-ancho")}
-                name="impLabelMedidaAncho"
-                value={props.labelEditorDraft.medida_ancho}
-                onChange={(e) => props.onLabelDraftChange("medida_ancho", e.target.value)}
-                placeholder="Ej: 610"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-maquina-origen")}>Máquina origen</Label>
-              <Input
-                id={mk("label-maquina-origen")}
-                name="impLabelMaquinaOrigen"
-                value={props.labelEditorDraft.maquina_origen}
-                onChange={(e) => props.onLabelDraftChange("maquina_origen", e.target.value)}
-                placeholder="Máquina"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-trat-int")}>Tratamiento interno</Label>
-              <Input
-                id={mk("label-trat-int")}
-                name="impLabelTratamientoInterno"
-                value={props.labelEditorDraft.tratamiento_interno}
-                onChange={(e) => props.onLabelDraftChange("tratamiento_interno", e.target.value)}
-                placeholder="Dinas"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-trat-ext")}>Tratamiento externo</Label>
-              <Input
-                id={mk("label-trat-ext")}
-                name="impLabelTratamientoExterno"
-                value={props.labelEditorDraft.tratamiento_externo}
-                onChange={(e) => props.onLabelDraftChange("tratamiento_externo", e.target.value)}
-                placeholder="Dinas"
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor={mk("label-lote")}>Lote</Label>
-              <Input
-                id={mk("label-lote")}
-                name="impLabelLote"
-                value={props.labelEditorDraft.lote}
-                onChange={(e) => props.onLabelDraftChange("lote", e.target.value)}
-                placeholder="Lote"
-              />
-            </div>
-          </div>
-
-          {props.labelEditorError ? (
-            <p className="text-sm text-destructive">{props.labelEditorError}</p>
-          ) : null}
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={props.onLabelClear}>Limpiar</Button>
-            <Button type="button" onClick={props.onLabelSave}>Guardar etiqueta</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2297,7 +1315,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   Turno en curso
                 </p>
                 <p className="mt-2 text-xs">
-                  {turnoGrupoLabel(props.impTurno, props.impGrupo)}
+                  {turnoGrupoLabel(props.montTurno, props.montGrupo)}
                 </p>
                 <p className="mt-2 text-xs font-medium text-foreground">Personal</p>
                 {activeSaved.length === 0 ? (
@@ -2326,7 +1344,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 </p>
                 <ul className="max-h-[40vh] space-y-3 overflow-y-auto pr-1">
                   {props.closedTurnos.map((t) => {
-                    const people = personnelLinesFromPrintingTurno(t)
+                    const people = personnelLinesFromMontajeTurno(t)
                     return (
                       <li key={t.id} className="rounded-md border bg-background p-3 text-xs">
                         <p className="font-medium text-foreground">
@@ -2336,7 +1354,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                           · {turnoGrupoLabel(t.turno, t.grupo)}
                         </p>
                         <p className="text-muted-foreground mt-1">
-                          Salida {sumSalidaKg(t).toFixed(2)} Kg · Scrap {sumScrapKg(t).toFixed(2)} Kg · Efectivo{" "}
+                          Producción {sumProduccionKg(t).toFixed(2)} Kg · Merma {sumMermaKg(t).toFixed(2)} Kg · Efectivo{" "}
                           {props.formatTimerHms(t.timer.effectiveAccSec)} · Muerto{" "}
                           {props.formatTimerHms(t.timer.deadAccSec)}
                         </p>

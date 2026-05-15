@@ -25,7 +25,15 @@ import WorkOrderPrintingOpsSection, {
   type DraftPersonRole,
   stringsFromActivePersonnel,
 } from "./WorkOrderPrintingOpsSection"
+import { cumulativeEffectiveSeconds, formatHmsFromSeconds } from "@/lib/mes-timer-band-shared"
 import { PRINTING_CONTROL_SAVED_EVENT } from "@/lib/printing-mes-band-status"
+import {
+  canSaveProductionAreaForm,
+  hasProductionTimerStarted,
+  mesTimerFieldsFromForm,
+  MES_PRODUCTION_SAVE_CONFIG,
+  MES_SAVE_BLOCKED_MESSAGE,
+} from "@/lib/mes-timer-guards"
 import {
   IMP_ACTUAL_KEY,
   IMP_ESTADO_KEY,
@@ -651,6 +659,10 @@ export default function WorkOrderPrintingControlPanel({
   const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
   const deadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
   const totalSec = effectiveSec + deadSec
+  const otEffectiveAccSec = useMemo(
+    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, Date.now()),
+    [closedTurnos, activeTurno, timerTick],
+  )
   const kgHora = effectiveSec > 0 ? (totalSalida / (effectiveSec / 3600)).toFixed(2) : "0.00"
   const pauseEntries = useMemo<PrintingPauseEntry[]>(() => {
     const raw = form.impTimerPauses
@@ -689,11 +701,10 @@ export default function WorkOrderPrintingControlPanel({
     wasTimerPausedRef.current = timerPaused
   }, [timerPaused])
 
-  // Respaldo local inmediato del temporizador (evita pérdida al navegar atrás/recargar).
+  // Respaldo local del turno abierto (evita pérdida al navegar atrás/recargar antes del play).
   useEffect(() => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
     if (!hasActiveTurno) return
-    if (!(timerRunning || timerPaused)) return
     try {
       const cur = parsePrintingTurnoActual(form[IMP_ACTUAL_KEY])
       if (!cur) return
@@ -708,39 +719,44 @@ export default function WorkOrderPrintingControlPanel({
     } catch {
       // no-op
     }
-  }, [form, hasActiveTurno, timerPaused, timerRunning, workOrderId])
+  }, [form, hasActiveTurno, workOrderId])
 
   const canPreviewDesperdicioReport = useMemo(() => {
     return hasActiveTurno && !controlReadOnly && !areaFinalizada
   }, [areaFinalizada, controlReadOnly, hasActiveTurno])
 
+  const timerEverStarted = useMemo(
+    () => hasProductionTimerStarted(mesTimerFieldsFromForm(form, "imp")),
+    [form],
+  )
+
+  const canSaveProduction = useMemo(() => {
+    if (controlReadOnly) return false
+    return canSaveProductionAreaForm(form, MES_PRODUCTION_SAVE_CONFIG.impresion)
+  }, [controlReadOnly, form])
+
+  const canPersistShiftOpen = useMemo(() => {
+    if (controlReadOnly) return false
+    return hasActiveTurno
+  }, [controlReadOnly, hasActiveTurno])
+
+  const canClickGuardar = canSaveProduction || canPersistShiftOpen
+
+  const guardarHint = useMemo(() => {
+    if (controlReadOnly) return ""
+    if (canSaveProduction) return ""
+    if (canPersistShiftOpen) {
+      return "Turno abierto: puede guardar el registro. Para avisar a otras áreas, inicie el cronómetro (play) y vuelva a guardar."
+    }
+    return MES_SAVE_BLOCKED_MESSAGE
+  }, [canPersistShiftOpen, canSaveProduction, controlReadOnly])
+
   const canPreviewTimerReport = useMemo(() => {
     if (!hasActiveTurno) return false
     if (controlReadOnly) return false
     if (areaFinalizada) return false
-    const startedByState =
-      timerState === "running" ||
-      timerState === "paused" ||
-      timerState === "stopped" ||
-      timerState === "completed"
-    const startedByLegacy =
-      effectiveAcc > 0 ||
-      deadAcc > 0 ||
-      lastResumeAt > 0 ||
-      pauseAt > 0 ||
-      pauseEntries.length > 0
-    return startedByState || startedByLegacy
-  }, [
-    hasActiveTurno,
-    controlReadOnly,
-    areaFinalizada,
-    timerState,
-    effectiveAcc,
-    deadAcc,
-    lastResumeAt,
-    pauseAt,
-    pauseEntries.length,
-  ])
+    return timerEverStarted
+  }, [hasActiveTurno, controlReadOnly, areaFinalizada, timerEverStarted])
 
   function requestTakeover() {
     if (readOnlyOps) return
@@ -771,11 +787,17 @@ export default function WorkOrderPrintingControlPanel({
     patchActiveTurn(() => nextTurn)
     setTakeoverConfirmOpen(false)
     mesPrintingToastSuccess("Control tomado. Puede editar el turno.")
-    void persistPrintingForm({
-      ...form,
-      [IMP_ACTUAL_KEY]: nextTurn,
-      ...printingTurnoToMirror(nextTurn),
-    })
+    void persistPrintingForm(
+      {
+        ...form,
+        [IMP_ACTUAL_KEY]: nextTurn,
+        ...printingTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: timerEverStarted,
+      },
+    )
   }
 
   function runOpenTimerReportPreview() {
@@ -963,9 +985,35 @@ export default function WorkOrderPrintingControlPanel({
   ])
 
   const persistPrintingForm = useCallback(
-    async (srcBase?: Record<string, unknown>) => {
+    async (
+      srcBase?: Record<string, unknown>,
+      options?: {
+        skipProductionSaveGuard?: boolean
+        notifyProductionSave?: boolean
+        successMessage?: string
+      },
+    ) => {
       const src = srcBase ?? form
       if (!Number.isFinite(workOrderId) || workOrderId < 1) return
+      const notifyProductionSave = options?.notifyProductionSave !== false
+
+      if (
+        notifyProductionSave &&
+        !options?.skipProductionSaveGuard &&
+        !canSaveProductionAreaForm(src, MES_PRODUCTION_SAVE_CONFIG.impresion)
+      ) {
+        toast.error(MES_SAVE_BLOCKED_MESSAGE)
+        return
+      }
+
+      if (
+        !notifyProductionSave &&
+        !options?.skipProductionSaveGuard &&
+        !parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
+      ) {
+        toast.error("Abra un turno de planta antes de guardar.")
+        return
+      }
 
       const act = parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
       if (act) {
@@ -1041,10 +1089,15 @@ export default function WorkOrderPrintingControlPanel({
           body: JSON.stringify({
             form: printingOnlyForm,
             origin_area: "impresion",
-            notify_on_production_save: true,
+            notify_on_production_save: notifyProductionSave,
           }),
         })
-        mesPrintingToastSuccess("Control de impresión guardado.")
+        mesPrintingToastSuccess(
+          options?.successMessage ??
+            (notifyProductionSave
+              ? "Control de impresión guardado."
+              : "Turno de planta guardado en el servidor."),
+        )
         window.dispatchEvent(
           new CustomEvent(PRINTING_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
@@ -1229,18 +1282,48 @@ export default function WorkOrderPrintingControlPanel({
       ayudante: draftAyudantesLabel,
       supervisor: draftSupervisorName,
     }
-    setForm((prev) => ({
-      ...prev,
+    const nextForm: Record<string, unknown> = {
+      ...form,
       [IMP_ACTUAL_KEY]: turnoWithPeople,
       ...printingTurnoToMirror(turnoWithPeople),
-      [IMP_TURNOS_KEY]: parsePrintingTurnos(prev[IMP_TURNOS_KEY]),
-    }))
+      [IMP_TURNOS_KEY]: parsePrintingTurnos(form[IMP_TURNOS_KEY]),
+    }
+    setForm(nextForm)
     setDraftPeople([])
     setDraftStaging({ name: "", role: "operador" })
     setStartTurnConfirmOpen(false)
-    mesPrintingToastSuccess(
-      "Turno de planta abierto. Use Guardar para persistir. El cronómetro se inicia con el play en «Cronómetro de producción».",
-    )
+    void (async () => {
+      await persistPrintingForm(nextForm, {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage:
+          "Turno de planta abierto y guardado. Use play en «Cronómetro de producción» para iniciar tiempos.",
+      })
+      await tryAdvanceBoardStageToImpresion()
+    })()
+  }
+
+  async function tryAdvanceBoardStageToImpresion() {
+    const stageOrder: Record<string, number> = {
+      nueva: 0,
+      pendiente: 1,
+      montaje: 2,
+      impresion: 3,
+      laminacion: 4,
+      corte: 5,
+      completada: 6,
+    }
+    try {
+      const wo = await apiFetch<{ board_stage?: string | null }>(`work-orders/${workOrderId}`)
+      const bs = (wo.board_stage ?? "nueva").toLowerCase()
+      if ((stageOrder[bs] ?? -1) >= stageOrder.impresion) return
+      await apiFetch(`work-orders/${workOrderId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ board_stage: "impresion" }),
+      })
+    } catch {
+      /* sin permiso o red */
+    }
   }
 
   function applyCerrarTurno(cur: PrintingTurnoEntry, finalizedTimer: PrintingTurnTimer) {
@@ -1322,7 +1405,7 @@ export default function WorkOrderPrintingControlPanel({
       ...clearPrintingMirrorKeys(),
     }
     setForm(nextForm)
-    await persistPrintingForm(nextForm)
+    await persistPrintingForm(nextForm, { skipProductionSaveGuard: true })
     mesPrintingToastSuccess("Área de impresión finalizada.")
   }
 
@@ -1562,7 +1645,20 @@ export default function WorkOrderPrintingControlPanel({
   }
 
   async function guardar() {
-    await persistPrintingForm()
+    if (canSaveProduction) {
+      await persistPrintingForm()
+      return
+    }
+    if (canPersistShiftOpen) {
+      await persistPrintingForm(undefined, {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage:
+          "Turno guardado. Inicie el cronómetro (play) para habilitar el guardado de producción con aviso a otras áreas.",
+      })
+      return
+    }
+    toast.error(MES_SAVE_BLOCKED_MESSAGE)
   }
 
   function requestResetAll() {
@@ -1589,7 +1685,7 @@ export default function WorkOrderPrintingControlPanel({
     clearLocalPrintingDrafts(workOrderId)
     setForm(bootstrapPrintingFormState(cleared))
     mesPrintingToastSuccess("Impresión reiniciada localmente. Guardando en el servidor…")
-    await persistPrintingForm(cleared)
+    await persistPrintingForm(cleared, { skipProductionSaveGuard: true })
   }
 
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de impresión…</p>
@@ -1604,6 +1700,9 @@ export default function WorkOrderPrintingControlPanel({
               <div className="font-semibold">Turno en control de otro usuario</div>
               <div className="text-amber-950/80">
                 Control actual: <span className="font-semibold">{activeOwnerName ?? "—"}</span>
+                <span className="mt-1 block font-mono tabular-nums">
+                  Tiempo efectivo acumulado (OT): {formatHmsFromSeconds(otEffectiveAccSec)}
+                </span>
               </div>
             </div>
             <Button type="button" variant="outline" className="border-amber-300" onClick={requestTakeover}>
@@ -1785,6 +1884,7 @@ export default function WorkOrderPrintingControlPanel({
         onPreviewDesperdicioReport={openDesperdicioPreview}
         canResetAll={!saving && !controlReadOnly}
         onResetAll={requestResetAll}
+        simplifiedTimerActions
         devolucionesPendienteAlmacen={devolucionesPendienteAlmacen}
       />
 
@@ -1828,9 +1928,12 @@ export default function WorkOrderPrintingControlPanel({
         )
       })()}
 
-      <div className="no-print mb-12 flex justify-center">
+      <div className="no-print mb-12 flex flex-col items-center gap-2">
+        {guardarHint ? (
+          <p className="max-w-md text-center text-xs text-muted-foreground">{guardarHint}</p>
+        ) : null}
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button type="button" onClick={() => void guardar()} disabled={saving || controlReadOnly}>
+          <Button type="button" onClick={() => void guardar()} disabled={saving || !canClickGuardar}>
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>

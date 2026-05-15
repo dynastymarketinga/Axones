@@ -10,9 +10,11 @@ import { WorkOrderDocumentSheet } from "@/components/axones/WorkOrderDocumentShe
 import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import WorkOrderPrintingControlPanel from "@/pages/axones/WorkOrderPrintingControlPanel"
+import WorkOrderMontajeControlPanel from "@/pages/axones/WorkOrderMontajeControlPanel"
 import WorkOrderLaminacionControlPanel from "@/pages/axones/WorkOrderLaminacionControlPanel"
 import WorkOrderCorteControlPanel from "@/pages/axones/WorkOrderCorteControlPanel"
 import { WorkOrderPrintingPlanillaSnapshot } from "@/pages/axones/WorkOrderPrintingPlanillaSnapshot"
+import { WorkOrderMontajePlanillaSnapshot } from "@/pages/axones/WorkOrderMontajePlanillaSnapshot"
 import type { WorkOrderDetailRecord } from "@/types/api"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -32,7 +34,14 @@ export default function WorkOrderDetailPage() {
   const canUseMontajeOps = isBoss || role === "montaje" || role === "planificador" || role === "supervisor"
   const isPrintingOperator = role === "impresion" || role === "printing"
   const isMontajeOperator = role === "montaje"
-  const headerBackPath = isPrintingOperator ? "/impresion" : isMontajeOperator ? "/montaje" : "/ordenes-trabajo"
+  const isCorteOperator = role === "corte"
+  const headerBackPath = isPrintingOperator
+    ? "/impresion"
+    : isMontajeOperator
+      ? "/montaje"
+      : isCorteOperator
+        ? "/corte"
+        : "/ordenes-trabajo"
   const [searchParams] = useSearchParams()
   const tabParam = (searchParams.get("tab") ?? "").toLowerCase().trim()
   const initialTab = (() => {
@@ -86,8 +95,12 @@ export default function WorkOrderDetailPage() {
   const code = order?.code ?? `OT #${id}`
   const form = (order?.technical_document?.form ?? {}) as Record<string, unknown>
   const isPrintingFocusedView = tabParam === "printing" && canUsePrintingOps
+  const isMontajeFocusedView = tabParam === "montaje" && canUseMontajeOps
   const isCorteFocusedView = tabParam === "corte"
-  const showPrintingPrefill = isPrintingFocusedView
+  const showPrintingPrefill = isPrintingFocusedView && isBoss
+  const showMontajePrefill = isMontajeFocusedView && isBoss
+  const showMasterDataOnProduction =
+    !isMontajeFocusedView && !isPrintingFocusedView && !isCorteFocusedView
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -97,7 +110,13 @@ export default function WorkOrderDetailPage() {
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm shadow-sm transition-colors hover:border-primary/25 hover:bg-muted/70"
         >
           <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-          {isPrintingOperator ? "Área Impresión" : isMontajeOperator ? "Área Montaje" : "Órdenes de trabajo"}
+          {isPrintingOperator
+            ? "Área Impresión"
+            : isMontajeOperator
+              ? "Área Montaje"
+              : isCorteOperator
+                ? "Área Corte"
+                : "Órdenes de trabajo"}
         </Link>
       </div>
 
@@ -124,25 +143,43 @@ export default function WorkOrderDetailPage() {
             <p className="text-muted-foreground mt-3 flex gap-2 rounded-lg border border-primary/10 bg-primary/[0.04] px-3 py-2 text-xs leading-relaxed">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
               <span>
-                Seleccione una pestaña de fase para temporizadores, consumos y mermas. Los datos se guardan en el
-                sistema por área.
+                {isMontajeFocusedView ? (
+                  <>
+                    Registre turno de planta, cronómetro, kg y mermas. Pulse <strong>Guardar</strong> para enviar al
+                    sistema (base de datos de la empresa).
+                  </>
+                ) : isPrintingFocusedView ? (
+                  <>
+                    Registre turno, cronómetro y producción. Pulse <strong>Guardar</strong> para enviar al sistema.
+                  </>
+                ) : (
+                  <>
+                    Seleccione una pestaña de fase para temporizadores, consumos y mermas. Los datos se guardan en el
+                    sistema por área.
+                  </>
+                )}
               </span>
             </p>
           </div>
 
-          <WorkOrderDocumentSheet
-            workOrder={order}
-            workOrderId={id}
-            readOnly={isPrintingOperator && !isBoss}
-            onSaved={() => void loadOrder()}
-          />
+          {showMasterDataOnProduction ? (
+            <WorkOrderDocumentSheet
+              workOrder={order}
+              workOrderId={id}
+              readOnly={isPrintingOperator && !isBoss}
+              onSaved={() => void loadOrder()}
+            />
+          ) : null}
 
           {showPrintingPrefill ? <WorkOrderPrintingPlanillaSnapshot form={form} /> : null}
+          {showMontajePrefill ? <WorkOrderMontajePlanillaSnapshot form={form} /> : null}
 
           {isPrintingFocusedView ? (
             <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+          ) : isMontajeFocusedView ? (
+            <WorkOrderMontajeControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
           ) : isCorteFocusedView ? (
-            <WorkOrderCorteControlPanel workOrderId={id} />
+            <WorkOrderCorteControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
           ) : (
             <Tabs defaultValue={initialTab} className="w-full">
               {initialTab !== "laminacion" && initialTab !== "corte" ? (
@@ -160,12 +197,7 @@ export default function WorkOrderDetailPage() {
               ) : null}
               <TabsContent value="montaje" className="mt-4">
                 {canUseMontajeOps ? (
-                  <ProductionAreaPanel
-                    workOrderId={id}
-                    title="Montaje"
-                    areaPath="montaje"
-                    usageMode="montaje"
-                  />
+                  <WorkOrderMontajeControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
                 ) : null}
               </TabsContent>
               {canUsePrintingOps ? (
@@ -189,7 +221,7 @@ export default function WorkOrderDetailPage() {
                 </TabsContent>
               ) : null}
               <TabsContent value="corte" className="mt-4">
-                <WorkOrderCorteControlPanel workOrderId={id} />
+                <WorkOrderCorteControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
               </TabsContent>
             </Tabs>
           )}

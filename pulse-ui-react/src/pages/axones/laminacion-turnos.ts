@@ -973,7 +973,7 @@ function historialToClosedTurnos(hist: LamArchivedTurnEntry[]): LaminacionTurnoE
 
 export function bootstrapLaminacionFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   let turnos = parseLaminacionTurnos(mergedForm[LAM_TURNOS_KEY])
-  let actual = parseLaminacionTurnoActual(mergedForm[LAM_ACTUAL_KEY])
+  const actual = parseLaminacionTurnoActual(mergedForm[LAM_ACTUAL_KEY])
   const estado = readLaminacionEstadoArea(mergedForm[LAM_ESTADO_KEY])
 
   let next: Record<string, unknown> = { ...mergedForm }
@@ -1006,6 +1006,12 @@ export function bootstrapLaminacionFormState(mergedForm: Record<string, unknown>
 
   if (actual) {
     next = { ...next, ...laminacionTurnoToMirror(actual) }
+  } else if (estado === "finalizada") {
+    next = {
+      ...next,
+      ...clearLaminacionMirrorKeys(),
+      ...laminacionAggregatedTimerMirrorFromTurnos(turnos),
+    }
   } else {
     next = { ...next, ...clearLaminacionMirrorKeys() }
   }
@@ -1067,6 +1073,24 @@ export function accumulateLaminacionFromJson(
     turnosRegistrados: cerrados.length + (actual ? 1 : 0),
     ultimoCierreLabel,
   }
+}
+
+/** Espejo plano con tiempos acumulados de turnos cerrados (área finalizada / sin turno actual). */
+export function laminacionAggregatedTimerMirrorFromTurnos(
+  turnos: LaminacionTurnoEntry[],
+): Record<string, unknown> {
+  let effectiveAccSec = 0
+  let deadAccSec = 0
+  for (const t of turnos) {
+    effectiveAccSec += readLamNumber(t.timer.effectiveAccSec)
+    deadAccSec += readLamNumber(t.timer.deadAccSec)
+  }
+  return timerToLegacyFlat({
+    ...emptyLaminacionTurnTimer(),
+    state: "completed",
+    effectiveAccSec,
+    deadAccSec,
+  })
 }
 
 export function finalizeLaminacionTurnTimerNow(timer: LaminacionTurnTimer): LaminacionTurnTimer {

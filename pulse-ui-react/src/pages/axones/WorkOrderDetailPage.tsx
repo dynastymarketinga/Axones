@@ -9,6 +9,7 @@ import { ProductionAreaPanel } from "@/components/axones/ProductionAreaPanel"
 import { WorkOrderDocumentSheet } from "@/components/axones/WorkOrderDocumentSheet"
 import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
+import { isAxonesFullAccess } from "@/lib/axones-roles"
 import WorkOrderPrintingControlPanel from "@/pages/axones/WorkOrderPrintingControlPanel"
 import WorkOrderMontajeControlPanel from "@/pages/axones/WorkOrderMontajeControlPanel"
 import WorkOrderLaminacionControlPanel from "@/pages/axones/WorkOrderLaminacionControlPanel"
@@ -23,11 +24,7 @@ export default function WorkOrderDetailPage() {
   const id = Number(woId)
   const session = getStoredUser()
   const role = (session?.role ?? "").toLowerCase().trim()
-  const isBoss =
-    role === "boss" ||
-    role === "admin" ||
-    role === "jefe_supremo" ||
-    role === "superadmin"
+  const isBoss = isAxonesFullAccess(role)
   const canUsePrintingOps = isBoss || role === "impresion" || role === "printing"
   const canUseLaminacionOps = isBoss || role === "laminacion"
   const canUseTintasOps = isBoss || role === "tintas"
@@ -207,7 +204,7 @@ export default function WorkOrderDetailPage() {
               ) : null}
               {canUseLaminacionOps ? (
                 <TabsContent value="laminacion" className="mt-4">
-                  <WorkOrderLaminacionControlPanel workOrderId={id} />
+                  <WorkOrderLaminacionControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
                 </TabsContent>
               ) : null}
               {canUseTintasOps ? (

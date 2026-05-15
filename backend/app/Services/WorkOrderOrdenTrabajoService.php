@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderTechnicalDocument;
 use App\Http\Requests\MergeCorteOrdenTrabajoRequest;
+use App\Support\BossAccess;
 use App\Support\MontajePlanillaMetrics;
 use Illuminate\Validation\ValidationException;
 
@@ -116,8 +117,16 @@ class WorkOrderOrdenTrabajoService
     /**
      * @param  array<string, mixed>  $form
      */
-    public function syncForm(WorkOrder $workOrder, array $form): WorkOrderTechnicalDocument
+    public function syncForm(WorkOrder $workOrder, array $form, ?User $user = null): WorkOrderTechnicalDocument
     {
+        $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
+        /** @var array<string, mixed> $existing */
+        $existing = is_array($doc?->form) ? $doc->form : [];
+
+        $this->assertPrintingEstadoAreaAllowed($existing, $form, $user);
+        $this->assertLaminacionEstadoAreaAllowed($existing, $form, $user);
+        $this->assertCorteEstadoAreaAllowed($existing, $form, $user);
+
         $form = MontajePlanillaMetrics::applyAutoFields($form);
 
         $doc = WorkOrderTechnicalDocument::query()->updateOrCreate(
@@ -176,6 +185,35 @@ class WorkOrderOrdenTrabajoService
         foreach ($incoming as $key => $value) {
             $k = (string) $key;
             if ($k !== '' && str_starts_with($k, 'imp')) {
+                $existing[$k] = $value;
+            }
+        }
+
+        $doc = WorkOrderTechnicalDocument::query()->updateOrCreate(
+            ['work_order_id' => $workOrder->getKey()],
+            ['form' => $existing],
+        );
+        $this->syncAreaRequestsAfterProductionFinalize($workOrder->fresh(), $existing);
+
+        return $doc;
+    }
+
+    /**
+     * Fusiona solo claves del control de laminación (prefijo lam) sobre el formulario guardado.
+     *
+     * @param  array<string, mixed>  $incoming
+     */
+    public function mergeLaminacionKeysIntoForm(WorkOrder $workOrder, array $incoming, ?User $user = null): WorkOrderTechnicalDocument
+    {
+        $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
+        /** @var array<string, mixed> $existing */
+        $existing = is_array($doc?->form) ? $doc->form : [];
+
+        $this->assertLaminacionEstadoAreaAllowed($existing, $incoming, $user);
+
+        foreach ($incoming as $key => $value) {
+            $k = (string) $key;
+            if ($k !== '' && str_starts_with($k, 'lam')) {
                 $existing[$k] = $value;
             }
         }
@@ -255,7 +293,7 @@ class WorkOrderOrdenTrabajoService
             return;
         }
 
-        if ($this->userCanFinalizePrintingArea($user)) {
+        if ($this->userCanFinalizeProductionArea($user)) {
             return;
         }
 
@@ -285,7 +323,7 @@ class WorkOrderOrdenTrabajoService
             return;
         }
 
-        if ($this->userCanFinalizePrintingArea($user)) {
+        if ($this->userCanFinalizeProductionArea($user)) {
             return;
         }
 
@@ -294,14 +332,38 @@ class WorkOrderOrdenTrabajoService
         ]);
     }
 
-    private function userCanFinalizePrintingArea(?User $user): bool
+    /**
+     * Solo roles de jefe pueden cambiar `lamEstadoArea` (abierta / finalizada).
+     *
+     * @param  array<string, mixed>  $existing
+     * @param  array<string, mixed>  $incoming
+     */
+    private function assertLaminacionEstadoAreaAllowed(array $existing, array $incoming, ?User $user): void
     {
-        if ($user === null) {
-            return false;
+        if (! array_key_exists('lamEstadoArea', $incoming)) {
+            return;
         }
 
-        $role = strtolower(trim((string) ($user->role ?? '')));
+        $new = strtolower(trim((string) $incoming['lamEstadoArea']));
+        $old = isset($existing['lamEstadoArea'])
+            ? strtolower(trim((string) $existing['lamEstadoArea']))
+            : 'abierta';
 
-        return in_array($role, ['boss', 'admin', 'jefe_supremo', 'superadmin'], true);
+        if ($new === '' || $new === $old) {
+            return;
+        }
+
+        if ($this->userCanFinalizeProductionArea($user)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'form.lamEstadoArea' => ['Solo personal autorizado puede cambiar el estado del área de laminación.'],
+        ]);
+    }
+
+    private function userCanFinalizeProductionArea(?User $user): bool
+    {
+        return BossAccess::allows($user);
     }
 }

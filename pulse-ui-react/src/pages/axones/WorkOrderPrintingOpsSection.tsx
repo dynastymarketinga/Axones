@@ -963,21 +963,37 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             </Collapsible>
           </div>
           {simplifiedTimer && props.hasActiveTurno && !props.areaFinalizada ? (
-            <div className="mt-4 flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between md:col-span-2">
+            <div className="mt-4 flex flex-col gap-3 border-t border-border/50 pt-4 md:col-span-2">
               <p className="text-muted-foreground text-xs leading-snug">
                 Cierra el registro de este turno de planta (cuadrilla y datos del turno). Puede abrir otro turno
-                después.
+                después. Para cerrar toda el área de impresión en la OT, use{" "}
+                <span className="font-semibold text-foreground">Finalizar área de impresión</span> (jefatura, al final
+                de la página o aquí).
               </p>
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0 border-orange-300 text-orange-950 hover:bg-orange-50"
-                onClick={props.onCerrarTurnoActual}
-                disabled={props.readOnlyOps}
-              >
-                <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-                Terminar turno de planta
-              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 border-orange-300 text-orange-950 hover:bg-orange-50"
+                  onClick={props.onCerrarTurnoActual}
+                  disabled={props.readOnlyOps}
+                >
+                  <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                  Terminar turno de planta
+                </Button>
+                {props.canFinalizeOrder ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="shrink-0"
+                    onClick={() => void props.onFinalizarAreaImpresion()}
+                    disabled={props.readOnlyOps && !props.canFinalizeOrder}
+                  >
+                    <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                    Finalizar área de impresión
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>

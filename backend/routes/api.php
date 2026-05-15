@@ -162,6 +162,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('area.role:planilla_write');
     Route::patch('/work-orders/{work_order}/orden-trabajo/printing-control', [WorkOrderOrdenTrabajoController::class, 'mergePrintingControl'])
         ->middleware('area.role:printing');
+    Route::patch('/work-orders/{work_order}/orden-trabajo/laminacion-control', [WorkOrderOrdenTrabajoController::class, 'mergeLaminacionControl'])
+        ->middleware('area.role:laminacion');
     Route::patch('/work-orders/{work_order}/orden-trabajo/corte-control', [WorkOrderOrdenTrabajoController::class, 'mergeCorteControl'])
         ->middleware('area.role:corte');
     Route::patch('/work-orders/{work_order}', [WorkOrderController::class, 'update'])

@@ -83,6 +83,7 @@ import {
   sumSalidaKgFromClosedTurno,
   sumSalidaKgFromForm,
   syncCorteFormMetrics,
+  syncCorteSalidaFields,
   sumEntradaKgFromForm,
   timerFromLegacyFlatForm,
   type CorPaleta,
@@ -125,8 +126,13 @@ type Props = {
   form: Record<string, unknown>
   setForm: React.Dispatch<React.SetStateAction<Record<string, unknown>>>
   pedidoTotalKg: number
+  readOnly?: boolean
   /** Tras cerrar turno u otras acciones críticas, persistir en servidor. */
   onRequestSave?: (srcBase?: Record<string, unknown>) => void
+  /** Cierre de turno con persistencia (panel padre). */
+  onApplyCerrarTurno?: (cur: CorteTurnoEntry) => void | Promise<void>
+  /** Abre confirmación de cierre en el panel padre. */
+  onRequestCerrarTurno?: () => void
 }
 
 const MIN_PALETAS = 1
@@ -147,7 +153,10 @@ export default function WorkOrderCorteOpsSection({
   form,
   setForm,
   pedidoTotalKg,
+  readOnly = false,
   onRequestSave,
+  onApplyCerrarTurno,
+  onRequestCerrarTurno,
 }: Props) {
   const mk = useId().replace(/:/g, "")
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -266,14 +275,17 @@ export default function WorkOrderCorteOpsSection({
   }, [timerPaused, timerRunning])
 
   function setKey(key: string, value: unknown) {
+    if (readOnly) return
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   function setNumericSeries(key: string, values: string[]) {
+    if (readOnly) return
     setForm((prev) => ({ ...prev, [key]: values }))
   }
 
   function writeEntradaBobinasKg(next: string[]) {
+    if (readOnly) return
     setForm((prev) => {
       const base = { ...prev, corEntradaBobinasKg: next }
       const synced = syncCorteFormMetrics(base)
@@ -298,6 +310,7 @@ export default function WorkOrderCorteOpsSection({
   }
 
   const patchActiveTurn = useCallback((updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
+    if (readOnly) return
     setForm((prev) => {
       const cur = parseCorteTurnoActual(prev[COR_ACTUAL_KEY], prev)
       if (!cur) return prev
@@ -309,9 +322,10 @@ export default function WorkOrderCorteOpsSection({
         ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
       }
     })
-  }, [setForm])
+  }, [readOnly, setForm])
 
   function writePaletas(nextPaletas: CorPaleta[]) {
+    if (readOnly) return
     setForm((prev) => {
       const patch = {
         cor_paletas: nextPaletas,
@@ -384,6 +398,7 @@ export default function WorkOrderCorteOpsSection({
   }
 
   function onIniciarTurno() {
+    if (readOnly) return
     if (hasActiveTurno) return
     if (draftOperadorMissing) {
       toast.error("Guarde al menos un operador antes de iniciar el turno.")
@@ -448,10 +463,19 @@ export default function WorkOrderCorteOpsSection({
   }
 
   function cerrarTurnoActual() {
+    if (readOnly) return
     const cur = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
     if (!cur) return
     if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
       toast.error("Complete turno, grupo y operador.")
+      return
+    }
+    if (onRequestCerrarTurno) {
+      onRequestCerrarTurno()
+      return
+    }
+    if (onApplyCerrarTurno) {
+      void onApplyCerrarTurno(cur)
       return
     }
     applyCerrarTurno(cur)
@@ -519,6 +543,7 @@ export default function WorkOrderCorteOpsSection({
   }
 
   function startProductionTimer() {
+    if (readOnly) return
     if (!hasActiveTurno) {
       toast.error("Primero inicie un turno de planta.")
       return
@@ -689,7 +714,7 @@ export default function WorkOrderCorteOpsSection({
                       <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDraftPeople((prev) => prev.filter((x) => x.id !== p.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   ))}
-                  <Button type="button" className="w-full" onClick={onIniciarTurno} disabled={draftOperadorMissing}><CirclePlay className="mr-2 h-4 w-4" />Iniciar turno</Button>
+                  <Button type="button" className="w-full" onClick={onIniciarTurno} disabled={readOnly || draftOperadorMissing}><CirclePlay className="mr-2 h-4 w-4" />Iniciar turno</Button>
                 </div>
               </div>
             </MesSectionShell>
@@ -777,7 +802,7 @@ export default function WorkOrderCorteOpsSection({
                         className="mes-timer-fab-btn mes-btn-primary shrink-0"
                         aria-label="Iniciar cronómetro de producción"
                         onClick={startProductionTimer}
-                        disabled={!hasActiveTurno || timerRunning}
+                        disabled={readOnly || !hasActiveTurno || timerRunning}
                       >
                         <CirclePlay className="shrink-0" aria-hidden />
                       </Button>
@@ -795,7 +820,7 @@ export default function WorkOrderCorteOpsSection({
                         className="mes-timer-fab-btn mes-btn-secondary shrink-0"
                         aria-label="Pausar cronómetro y registrar motivo de parada"
                         onClick={pauseProductionTimer}
-                        disabled={!hasActiveTurno || !timerRunning}
+                        disabled={readOnly || !hasActiveTurno || !timerRunning}
                       >
                         <CirclePause className="shrink-0" aria-hidden />
                       </Button>
@@ -813,7 +838,7 @@ export default function WorkOrderCorteOpsSection({
                         className="mes-timer-fab-btn mes-btn-danger-outline shrink-0"
                         aria-label="Fin turno"
                         onClick={cerrarTurnoActual}
-                        disabled={!hasActiveTurno}
+                        disabled={readOnly || !hasActiveTurno}
                       >
                         <LogOut className="shrink-0" aria-hidden />
                       </Button>

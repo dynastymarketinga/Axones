@@ -43,6 +43,7 @@ import {
   clearPrintingMirrorKeys,
   createNewPrintingTurno,
   finalizeTurnTimerNow,
+  printingAggregatedTimerMirrorFromTurnos,
   IMP_BOBINAS_SLOTS,
   parsePrintingTurnoActual,
   parsePrintingTurnos,
@@ -225,10 +226,10 @@ function MesPrintingConfirmDialog(props: MesPrintingConfirmDialogProps) {
 
 const MES_PRINTING_SUCCESS_TOAST_CLASSNAMES = {
   toast:
-    "border-violet-200/70 bg-gradient-to-b from-violet-50/50 to-background text-foreground shadow-lg dark:from-violet-950/25 dark:to-background",
-  title: "text-foreground text-sm font-medium",
-  success: "!bg-transparent !border-transparent",
-  description: "text-muted-foreground text-sm",
+    "!border !border-slate-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
+  title: "!text-slate-900 text-sm font-medium",
+  success: "!bg-white !border-slate-200 !text-slate-900",
+  description: "!text-slate-600 text-sm leading-snug",
   icon: "text-violet-600",
 } as const
 
@@ -245,7 +246,8 @@ function mesPrintingToastWarning(message: string) {
     richColors: false,
     classNames: {
       ...MES_PRINTING_SUCCESS_TOAST_CLASSNAMES,
-      warning: "!bg-transparent !border-transparent",
+      toast: "!border !border-amber-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
+      warning: "!bg-white !border-amber-200 !text-slate-900",
       icon: "text-amber-600",
     },
     icon: createElement(AlertCircle, { className: "h-4 w-4 shrink-0 text-amber-600", "aria-hidden": true }),
@@ -991,10 +993,12 @@ export default function WorkOrderPrintingControlPanel({
         skipProductionSaveGuard?: boolean
         notifyProductionSave?: boolean
         successMessage?: string
+        /** Evita toast por defecto cuando el llamador muestra uno propio. */
+        suppressSuccessToast?: boolean
       },
-    ) => {
+    ): Promise<boolean> => {
       const src = srcBase ?? form
-      if (!Number.isFinite(workOrderId) || workOrderId < 1) return
+      if (!Number.isFinite(workOrderId) || workOrderId < 1) return false
       const notifyProductionSave = options?.notifyProductionSave !== false
 
       if (
@@ -1003,7 +1007,7 @@ export default function WorkOrderPrintingControlPanel({
         !canSaveProductionAreaForm(src, MES_PRODUCTION_SAVE_CONFIG.impresion)
       ) {
         toast.error(MES_SAVE_BLOCKED_MESSAGE)
-        return
+        return false
       }
 
       if (
@@ -1012,7 +1016,7 @@ export default function WorkOrderPrintingControlPanel({
         !parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
       ) {
         toast.error("Abra un turno de planta antes de guardar.")
-        return
+        return false
       }
 
       const act = parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
@@ -1022,7 +1026,7 @@ export default function WorkOrderPrintingControlPanel({
         const grupo = act.grupo
         if (!operador || !turno || !grupo) {
           toast.error("Impresión: complete turno, grupo y operador antes de guardar.")
-          return
+          return false
         }
       }
 
@@ -1034,7 +1038,7 @@ export default function WorkOrderPrintingControlPanel({
         : readString(src.impDevolucionRechazadaMotivo).trim()
       if (rechKgValidar > 0 && !motivoRechValidar) {
         toast.error("Devolución rechazada: indique un motivo antes de guardar.")
-        return
+        return false
       }
 
       if (outlierWarnings.length > 0) {
@@ -1092,18 +1096,23 @@ export default function WorkOrderPrintingControlPanel({
             notify_on_production_save: notifyProductionSave,
           }),
         })
-        mesPrintingToastSuccess(
-          options?.successMessage ??
-            (notifyProductionSave
-              ? "Control de impresión guardado."
-              : "Turno de planta guardado en el servidor."),
-        )
+        setForm(bootstrapPrintingFormState(normalizedForm))
+        if (!options?.suppressSuccessToast) {
+          mesPrintingToastSuccess(
+            options?.successMessage ??
+              (notifyProductionSave
+                ? "Control de impresión guardado."
+                : "Turno de planta guardado en el servidor."),
+          )
+        }
         window.dispatchEvent(
           new CustomEvent(PRINTING_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
+        return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
         else toast.error("No se pudo guardar control de impresión.")
+        return false
       } finally {
         setSaving(false)
       }
@@ -1403,10 +1412,21 @@ export default function WorkOrderPrintingControlPanel({
       [IMP_ACTUAL_KEY]: null,
       [IMP_ESTADO_KEY]: "finalizada",
       ...clearPrintingMirrorKeys(),
+      ...printingAggregatedTimerMirrorFromTurnos(turnos),
     }
-    setForm(nextForm)
-    await persistPrintingForm(nextForm, { skipProductionSaveGuard: true })
-    mesPrintingToastSuccess("Área de impresión finalizada.")
+    clearLocalPrintingDrafts(workOrderId)
+    setForm(bootstrapPrintingFormState(nextForm))
+    const ok = await persistPrintingForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      suppressSuccessToast: true,
+    })
+    if (ok) {
+      mesPrintingToastSuccess(
+        "Área de impresión finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
+      )
+      await load()
+    }
   }
 
   function openLabelEditor(mode: "entrada" | "salida", idx: number) {
@@ -1937,7 +1957,48 @@ export default function WorkOrderPrintingControlPanel({
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
+          {!controlReadOnly && !areaFinalizada ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-amber-300 text-amber-950 hover:bg-amber-50"
+              disabled={saving}
+              onClick={requestResetAll}
+            >
+              <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Empezar de cero
+            </Button>
+          ) : null}
+          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-orange-300 text-orange-950 hover:bg-orange-50"
+              disabled={saving}
+              onClick={requestCerrarTurnoActual}
+            >
+              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Terminar turno de planta
+            </Button>
+          ) : null}
+          {canFinalizeOrder && !areaFinalizada ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saving}
+              onClick={requestFinalizarAreaImpresion}
+            >
+              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Finalizar área de impresión
+            </Button>
+          ) : null}
         </div>
+        {!canFinalizeOrder && !areaFinalizada ? (
+          <p className="max-w-lg text-center text-xs text-muted-foreground">
+            Para cerrar el área de impresión en la OT (historial en bandeja), hace falta rol de jefatura (
+            <span className="font-medium text-foreground/90">Finalizar área de impresión</span>).
+          </p>
+        ) : null}
       </div>
 
       <MesPrintingConfirmDialog

@@ -599,6 +599,24 @@ export function accumulatePrintingFromJson(
   }
 }
 
+/** Espejo plano con tiempos acumulados de turnos cerrados (área finalizada / sin turno actual). */
+export function printingAggregatedTimerMirrorFromTurnos(
+  turnos: PrintingTurnoEntry[],
+): Record<string, unknown> {
+  let effectiveAccSec = 0
+  let deadAccSec = 0
+  for (const t of turnos) {
+    effectiveAccSec += readNumber(t.timer.effectiveAccSec)
+    deadAccSec += readNumber(t.timer.deadAccSec)
+  }
+  return timerToLegacyFlat({
+    ...emptyPrintingTurnTimer(),
+    state: "completed",
+    effectiveAccSec,
+    deadAccSec,
+  })
+}
+
 export function finalizeTurnTimerNow(timer: PrintingTurnTimer): PrintingTurnTimer {
   const now = Date.now()
   let effective = timer.effectiveAccSec

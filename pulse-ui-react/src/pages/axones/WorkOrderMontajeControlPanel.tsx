@@ -21,6 +21,16 @@ import WorkOrderMontajeOpsSection, {
   type DraftPersonRole,
   stringsFromActivePersonnel,
 } from "./WorkOrderMontajeOpsSection"
+import WorkOrderMontajeClicheMaterialSection from "./WorkOrderMontajeClicheMaterialSection"
+import {
+  clearMontajeClicheMaterialKeys,
+  MON_CLICHE_KEY,
+  MON_CILINDRO_KEY,
+  MON_MATERIALES_KEY,
+  montajeMaterialesForSave,
+  parseMontajeMateriales,
+  type MontajeMaterialRow,
+} from "./montaje-cliche-material"
 import {
   deriveMontajeOperativoEstado,
   MONTAJE_CONTROL_SAVED_EVENT,
@@ -475,6 +485,10 @@ export default function WorkOrderMontajeControlPanel({
     () => deriveMontajeOperativoEstado(form, Date.now()),
     [form],
   )
+  const montajeMateriales = useMemo(
+    () => parseMontajeMateriales(form[MON_MATERIALES_KEY]),
+    [form],
+  )
   const hasActiveTurno = activeTurno !== null
   const jsonAccum = useMemo(
     () => accumulateMontajeFromJson(closedTurnos, activeTurno),
@@ -852,6 +866,9 @@ export default function WorkOrderMontajeControlPanel({
         montTimerDeadAccSec: normalizeNumericString(src.montTimerDeadAccSec),
         montRegistrosTurnos: String(accFromJson.turnosRegistrados),
         montAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
+        [MON_CLICHE_KEY]: readString(src[MON_CLICHE_KEY]).trim(),
+        [MON_CILINDRO_KEY]: readString(src[MON_CILINDRO_KEY]).trim(),
+        [MON_MATERIALES_KEY]: montajeMaterialesForSave(parseMontajeMateriales(src[MON_MATERIALES_KEY])),
       }
 
       setSaving(true)
@@ -1272,6 +1289,7 @@ export default function WorkOrderMontajeControlPanel({
       [MON_ACTUAL_KEY]: null,
       [MON_ESTADO_KEY]: "abierta",
       ...clearMontajeMirrorKeys(),
+      ...clearMontajeClicheMaterialKeys(),
     }
     for (const k of Object.keys(cleared)) {
       if (k.startsWith("montBlockDone.")) delete cleared[k]
@@ -1433,6 +1451,18 @@ export default function WorkOrderMontajeControlPanel({
         canResetAll={!saving && !controlReadOnly}
         onResetAll={requestResetAll}
         simplifiedTimerActions
+      />
+
+      <WorkOrderMontajeClicheMaterialSection
+        numCliche={readString(form[MON_CLICHE_KEY])}
+        numCilindro={readString(form[MON_CILINDRO_KEY])}
+        materiales={montajeMateriales}
+        readOnly={controlReadOnly}
+        onNumClicheChange={(v) => setForm((prev) => ({ ...prev, [MON_CLICHE_KEY]: v }))}
+        onNumCilindroChange={(v) => setForm((prev) => ({ ...prev, [MON_CILINDRO_KEY]: v }))}
+        onMaterialesChange={(rows: MontajeMaterialRow[]) =>
+          setForm((prev) => ({ ...prev, [MON_MATERIALES_KEY]: rows }))
+        }
       />
 
       {(() => {

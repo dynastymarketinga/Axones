@@ -106,15 +106,25 @@ function labelForWorkflow(wf: PrintingBandejaWorkflow): string {
   return "Finalizado"
 }
 
+function hasPrintingMesActivity(form: Record<string, unknown> | null): boolean {
+  if (!form) return false
+  const cerrados = parsePrintingTurnos(form[IMP_TURNOS_KEY])
+  const actual = parsePrintingTurnoActual(form[IMP_ACTUAL_KEY])
+  if (actual !== null || cerrados.length > 0) return true
+  return readEstadoArea(form[IMP_ESTADO_KEY]) === "finalizada"
+}
+
 /**
- * Estado MES para la bandeja de impresión (solo si la OT está en etapa impresión).
+ * Estado MES para la bandeja de impresión.
+ * Incluye OT con datos MES aunque el tablero aún no esté en columna «impresion».
  */
 export function printingMesBandFromWorkOrderRow(
   row: { technical_document?: { form?: Record<string, unknown> } | null; board_stage?: string | null },
   nowMs: number,
 ): PrintingBandejaMes | null {
-  if ((row.board_stage ?? "").toLowerCase() !== "impresion") return null
   const form = technicalForm(row)
+  const bs = (row.board_stage ?? "").toLowerCase()
+  if (bs !== "impresion" && !hasPrintingMesActivity(form)) return null
   const cerrados = form ? parsePrintingTurnos(form[IMP_TURNOS_KEY]) : []
   const actual = form ? parsePrintingTurnoActual(form[IMP_ACTUAL_KEY]) : null
   const estado = form ? readEstadoArea(form[IMP_ESTADO_KEY]) : "abierta"
@@ -279,4 +289,27 @@ export function printingBandejaStatePillClass(wf: PrintingBandejaWorkflow): stri
 
 export function printingBandejaWorkflowTitle(wf: PrintingBandejaWorkflow): string {
   return labelForWorkflow(wf)
+}
+
+export type PrintingActivasSubTab = "pendientes" | "produccion" | "finalizadas"
+
+/**
+ * Subpestaña En curso (impresión):
+ * - pendientes: primera vez / sin producción iniciada
+ * - produccion: turno o cronómetro en uso (incl. entre turnos)
+ * - finalizadas: área MES finalizada (`impEstadoArea`)
+ */
+export function printingActivasBucketFromRow(
+  row: { technical_document?: { form?: Record<string, unknown> } | null; board_stage?: string | null },
+  nowMs: number,
+): PrintingActivasSubTab {
+  const mes = printingMesBandFromWorkOrderRow(row, nowMs)
+  if (!mes) return "pendientes"
+  if (mes.workflow === "finalizado") return "finalizadas"
+  if (mes.workflow === "iniciado" || mes.workflow === "pausado") return "produccion"
+  const form = technicalForm(row)
+  const cerrados = form ? parsePrintingTurnos(form[IMP_TURNOS_KEY]) : []
+  const actual = form ? parsePrintingTurnoActual(form[IMP_ACTUAL_KEY]) : null
+  if (cerrados.length > 0 || actual) return "produccion"
+  return "pendientes"
 }

@@ -217,7 +217,6 @@ export default function ProgramacionBoardPage() {
   function quickMovesForStage(stage: string): { stage: string; label: string }[] {
     if (stage === "nueva") return [{ stage: "pendiente", label: "Enviar a programación" }]
     if (stage === "pendiente") return [{ stage: "montaje", label: "Pasar a Montaje" }]
-    if (stage === "montaje") return [{ stage: "impresion", label: "Pasar a Impresión" }]
     if (stage === "impresion") return [{ stage: "laminacion", label: "Pasar a Laminación" }]
     if (stage === "laminacion") return [{ stage: "corte", label: "Pasar a Corte" }]
     if (stage === "corte") return [{ stage: "completada", label: "Marcar completada" }]

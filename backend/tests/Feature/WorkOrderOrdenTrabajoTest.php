@@ -581,6 +581,149 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             ->assertJsonPath('form.impEstadoArea', 'finalizada');
     }
 
+    public function test_printing_control_allows_imp_estado_area_finalizada_for_jefe_operaciones(): void
+    {
+        User::factory()->create();
+        $jefe = User::factory()->create(['role' => 'jefe_operaciones']);
+        $h = $this->auth($jefe);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-JEFE-FIN',
+            'status' => 'open',
+            'created_by' => $jefe->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.impEstadoArea', 'finalizada');
+    }
+
+    public function test_printing_control_finalize_without_active_turno_when_notify_production_save_false(): void
+    {
+        User::factory()->create();
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-FIN-NO-TURNO',
+            'status' => 'open',
+            'created_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impTurnoActual' => null,
+                'impTurnosImpresion' => [
+                    [
+                        'id' => 't1',
+                        'operador' => 'Ana',
+                        'turno' => 'diurno',
+                        'grupo' => 'A',
+                        'closed_at' => now()->toIso8601String(),
+                        'timer' => ['state' => 'stopped', 'effectiveAccSec' => 120, 'deadAccSec' => 5],
+                    ],
+                ],
+                'impEstadoArea' => 'finalizada',
+                'impOperador' => '',
+                'impTurno' => '',
+                'impGrupo' => '',
+                'impTimerState' => 'completed',
+            ],
+            'origin_area' => 'impresion',
+            'notify_on_production_save' => false,
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.impEstadoArea', 'finalizada')
+            ->assertJsonPath('form.impTurnoActual', null);
+    }
+
+    public function test_laminacion_control_rejects_lam_estado_area_finalizada_for_non_boss(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'laminacion']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-LAM-DENY-FIN',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/laminacion-control", [
+            'form' => [
+                'lamEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertUnprocessable()
+            ->assertJsonValidationErrors(['form.lamEstadoArea']);
+    }
+
+    public function test_laminacion_control_allows_lam_estado_area_finalizada_for_boss(): void
+    {
+        User::factory()->create();
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-LAM-ALLOW-FIN',
+            'status' => 'open',
+            'created_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/laminacion-control", [
+            'form' => [
+                'lamEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.lamEstadoArea', 'finalizada');
+    }
+
+    public function test_laminacion_control_finalize_without_active_turno_when_notify_production_save_false(): void
+    {
+        User::factory()->create();
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-LAM-FIN-NO-TURNO',
+            'status' => 'open',
+            'created_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/laminacion-control", [
+            'form' => [
+                'lamTurnoActual' => null,
+                'lamTurnosLaminacion' => [
+                    [
+                        'id' => 't1',
+                        'operador' => 'Ana',
+                        'turno' => 'diurno',
+                        'grupo' => 'A',
+                        'closed_at' => now()->toIso8601String(),
+                        'timer' => ['state' => 'stopped', 'effectiveAccSec' => 90, 'deadAccSec' => 0],
+                    ],
+                ],
+                'lamEstadoArea' => 'finalizada',
+                'lamOperador' => '',
+                'lamTurno' => '',
+                'lamGrupo' => '',
+                'lamTimerState' => 'completed',
+            ],
+            'origin_area' => 'laminacion',
+            'notify_on_production_save' => false,
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.lamEstadoArea', 'finalizada')
+            ->assertJsonPath('form.lamTurnoActual', null);
+    }
+
     public function test_corte_can_get_orden_trabajo_and_patch_corte_control(): void
     {
         User::factory()->create();
@@ -717,6 +860,68 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             ],
         ], $h)->assertUnprocessable()
             ->assertJsonValidationErrors(['form.corEstadoArea']);
+    }
+
+    public function test_corte_control_allows_cor_estado_area_finalizada_for_boss(): void
+    {
+        User::factory()->create();
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-ALLOW-FIN',
+            'status' => 'open',
+            'created_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corEstadoArea' => 'finalizada',
+            ],
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.corEstadoArea', 'finalizada');
+    }
+
+    public function test_corte_control_finalize_without_active_turno_when_notify_production_save_false(): void
+    {
+        User::factory()->create();
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-FIN-NO-TURNO',
+            'status' => 'open',
+            'created_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corTurnoActual' => null,
+                'cor_turnos' => [
+                    [
+                        'id' => 't1',
+                        'operador' => 'Ana',
+                        'turno' => 'diurno',
+                        'grupo' => 'A',
+                        'closed_at' => now()->toIso8601String(),
+                        'timer' => ['state' => 'stopped', 'effectiveAccSec' => 90, 'deadAccSec' => 0],
+                    ],
+                ],
+                'corEstadoArea' => 'finalizada',
+                'corOperador' => '',
+                'corTurno' => '',
+                'corGrupo' => '',
+                'corTimerState' => 'completed',
+            ],
+            'origin_area' => 'corte',
+            'notify_on_production_save' => false,
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.corEstadoArea', 'finalizada')
+            ->assertJsonPath('form.corTurnoActual', null);
     }
 
     public function test_corte_control_patch_syncs_finished_kg_to_dispatch(): void
@@ -1232,6 +1437,75 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->assertNotContains($wo->id, collect($activas->json('data'))->pluck('id')->all());
 
         $historial = $this->getJson('/api/work-orders?historial_area=montaje&historial_exclude_pending=1&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
+    }
+
+    public function test_historial_montaje_includes_mes_finalizada_without_closed_area_request(): void
+    {
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-MONT-HIST-MES',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Montaje->value,
+            'created_by' => $boss->id,
+        ]);
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", [
+            'form' => [
+                'pedidoKg' => '100',
+                'maquina' => 'M1',
+                'tipoImpresionEstructura' => 'superficie',
+                'montEstadoArea' => 'finalizada',
+                'montTurnosMontaje' => [],
+                'montTurnoActual' => null,
+            ],
+            'origin_area' => 'montaje',
+        ], $h)->assertOk();
+
+        $historial = $this->getJson('/api/work-orders?historial_area=montaje&historial_exclude_pending=1&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
+    }
+
+    public function test_impresion_finalizada_excluded_from_activas_and_in_historial(): void
+    {
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-FIN',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $boss->id,
+        ]);
+
+        AreaRequest::query()->create([
+            'area' => 'impresion',
+            'title' => sprintf('OT %s — impresión', $wo->code),
+            'body' => 'test',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'requested_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impEstadoArea' => 'finalizada',
+                'impTurnosImpresion' => [],
+                'impTurnoActual' => null,
+            ],
+            'origin_area' => 'impresion',
+            'notify_on_production_save' => false,
+        ], $h)->assertOk();
+
+        $this->assertSame(
+            AreaRequestStatus::Done->value,
+            (string) AreaRequest::query()->where('work_order_id', $wo->id)->where('area', 'impresion')->value('status'),
+        );
+
+        $activas = $this->getJson('/api/work-orders?mi_area=impresion&area_process_tag=active&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($activas->json('data'))->pluck('id')->all());
+
+        $historial = $this->getJson('/api/work-orders?historial_area=impresion&historial_exclude_pending=1&per_page=20', $h)->assertOk();
         $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
     }
 }

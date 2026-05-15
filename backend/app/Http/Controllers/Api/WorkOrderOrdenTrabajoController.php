@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\MergeCorteOrdenTrabajoRequest;
+use App\Http\Requests\MergeLaminacionOrdenTrabajoRequest;
 use App\Http\Requests\MergePrintingOrdenTrabajoRequest;
 use App\Http\Requests\UpdateWorkOrderOrdenTrabajoRequest;
 use App\Models\WorkOrder;
@@ -60,7 +61,7 @@ class WorkOrderOrdenTrabajoController extends Controller
             $work_order->update(['priority' => $validated['priority']]);
         }
 
-        $doc = $this->ordenTrabajo->syncForm($work_order->fresh(), $form);
+        $doc = $this->ordenTrabajo->syncForm($work_order->fresh(), $form, $request->user());
         $saveFingerprint = $doc->updated_at?->toIso8601String() ?? (string) time();
         $broadcastSummary = $this->productionNotifications->notifyOnWorkOrderSavedBroadcast(
             $work_order->fresh(),
@@ -135,6 +136,45 @@ class WorkOrderOrdenTrabajoController extends Controller
         }
 
         $doc = $this->ordenTrabajo->mergePrintingKeysIntoForm($work_order, $form, $request->user());
+
+        $productionSummary = null;
+        if ($notifyOnProductionSave && $originArea !== '') {
+            $productionSummary = $this->productionNotifications->notifyOnProductionSave(
+                $work_order->fresh(),
+                $request->user(),
+                $originArea,
+            );
+        }
+
+        return response()->json([
+            'work_order_id' => $work_order->getKey(),
+            'updated_at' => $doc->updated_at,
+            'notification_summary' => [
+                'broadcast' => null,
+                'production' => $productionSummary,
+            ],
+        ]);
+    }
+
+    /**
+     * Actualización parcial de campos `lam*` para operadores de laminación (control MES).
+     */
+    public function mergeLaminacionControl(MergeLaminacionOrdenTrabajoRequest $request, WorkOrder $work_order): JsonResponse
+    {
+        $form = $request->validated()['form'];
+        $originArea = strtolower(trim((string) $request->input('origin_area', '')));
+        $notifyOnProductionSave = filter_var(
+            $request->input('notify_on_production_save', false),
+            FILTER_VALIDATE_BOOLEAN,
+        );
+        if ($notifyOnProductionSave && $originArea !== '') {
+            $doc = $this->ordenTrabajo->getDocumentPayload($work_order);
+            $existing = is_array($doc['form']) ? $doc['form'] : [];
+            $merged = array_merge($existing, $form);
+            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+        }
+
+        $doc = $this->ordenTrabajo->mergeLaminacionKeysIntoForm($work_order, $form, $request->user());
 
         $productionSummary = null;
         if ($notifyOnProductionSave && $originArea !== '') {

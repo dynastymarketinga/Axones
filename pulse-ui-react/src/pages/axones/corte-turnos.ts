@@ -3,6 +3,9 @@
 export const COR_TURNOS_KEY = "cor_turnos"
 export const COR_ACTUAL_KEY = "corTurnoActual"
 export const COR_LEGACY_ACTUAL_KEY = "cor_turno_actual"
+export const COR_ESTADO_KEY = "corEstadoArea"
+
+export type CorteEstadoArea = "abierta" | "finalizada"
 
 /** Bobinas impresa de ingreso al área (paridad operativa con impresión: 30 posiciones). */
 export const COR_ENTRADA_SLOTS = 30
@@ -450,21 +453,51 @@ export function syncCorteFormMetrics(form: Record<string, unknown>): Record<stri
   return { ...withEntrada, ...syncCorteSalidaFields(withEntrada) }
 }
 
+export function readCorteEstadoArea(raw: unknown): CorteEstadoArea {
+  const s = readString(raw).toLowerCase().trim()
+  if (s === "finalizada") return "finalizada"
+  return "abierta"
+}
+
+export function corteAggregatedTimerMirrorFromTurnos(turnos: CorteTurnoEntry[]): Record<string, unknown> {
+  let effectiveAccSec = 0
+  let deadAccSec = 0
+  for (const t of turnos) {
+    effectiveAccSec += readNumber(t.timer.effectiveAccSec)
+    deadAccSec += readNumber(t.timer.deadAccSec)
+  }
+  return timerToLegacyFlat({
+    ...emptyCorteTurnTimer(),
+    state: "completed",
+    effectiveAccSec,
+    deadAccSec,
+  })
+}
+
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   let actual =
     parseCorteTurnoActual(mergedForm[COR_ACTUAL_KEY], mergedForm) ??
     legacyActiveTurnoFromForm(mergedForm)
   const turnos = parseCorteTurnos(mergedForm[COR_TURNOS_KEY], mergedForm)
+  const estado = readCorteEstadoArea(mergedForm[COR_ESTADO_KEY])
 
   let next: Record<string, unknown> = {
     ...mergedForm,
     ...syncCorteFormMetrics(mergedForm),
     [COR_TURNOS_KEY]: turnos,
     [COR_ACTUAL_KEY]: actual,
+    [COR_ESTADO_KEY]: estado,
   }
 
   if (actual) {
     next = { ...next, ...corteTurnoToMirror(actual) }
+  } else if (estado === "finalizada") {
+    next = {
+      ...next,
+      ...clearCorteMirrorKeys(),
+      ...corteAggregatedTimerMirrorFromTurnos(turnos),
+      [COR_ACTUAL_KEY]: null,
+    }
   } else if (!readString(mergedForm.corTurno) && !readString(mergedForm.corOperador)) {
     next = { ...next, ...clearCorteMirrorKeys(), [COR_ACTUAL_KEY]: null }
   }

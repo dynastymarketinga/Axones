@@ -44,6 +44,7 @@ import {
   clearLaminacionMirrorKeys,
   createNewLaminacionTurno,
   finalizeLaminacionTurnTimerNow,
+  laminacionAggregatedTimerMirrorFromTurnos,
   formatTimerHms,
   laminacionTurnoToMirror,
   parseLaminacionTurnoActual,
@@ -360,6 +361,10 @@ export default function WorkOrderLaminacionControlPanel({
       setPrefill(payload.prefill ?? {})
       const mergedForm = mergePrefill(payload.prefill ?? {}, payload.form)
       const boot = bootstrapLaminacionFormState(mergedForm)
+      if (readLaminacionEstadoArea(boot[LAM_ESTADO_KEY]) === "finalizada") {
+        setForm(boot)
+        return
+      }
       // Rehidratar desde respaldo local si hay un temporizador más reciente.
       try {
         const raw = localStorage.getItem(`${LOCAL_LAMINACION_DRAFT_PREFIX}${workOrderId}`)
@@ -789,10 +794,11 @@ export default function WorkOrderLaminacionControlPanel({
         skipProductionSaveGuard?: boolean
         notifyProductionSave?: boolean
         successMessage?: string
+        suppressSuccessToast?: boolean
       },
-    ) => {
+    ): Promise<boolean> => {
       const src = srcBase ?? form
-      if (!Number.isFinite(workOrderId) || workOrderId < 1) return
+      if (!Number.isFinite(workOrderId) || workOrderId < 1) return false
       const notifyProductionSave = options?.notifyProductionSave !== false
 
       if (
@@ -801,16 +807,18 @@ export default function WorkOrderLaminacionControlPanel({
         !canSaveProductionAreaForm(src, MES_PRODUCTION_SAVE_CONFIG.laminacion)
       ) {
         toast.error(MES_SAVE_BLOCKED_MESSAGE)
-        return
+        return false
       }
 
+      const finalizingArea = readLaminacionEstadoArea(src[LAM_ESTADO_KEY]) === "finalizada"
       if (
+        !finalizingArea &&
         !notifyProductionSave &&
         !options?.skipProductionSaveGuard &&
         !parseLaminacionTurnoActual(src[LAM_ACTUAL_KEY])
       ) {
         toast.error("Abra un turno de planta antes de guardar.")
-        return
+        return false
       }
 
       const act = parseLaminacionTurnoActual(src[LAM_ACTUAL_KEY])
@@ -820,7 +828,7 @@ export default function WorkOrderLaminacionControlPanel({
         const grupo = act.grupo
         if (!operador || !turno || !grupo) {
           toast.error("Laminación: complete turno, grupo y operador antes de guardar.")
-          return
+          return false
         }
       }
 
@@ -864,28 +872,37 @@ export default function WorkOrderLaminacionControlPanel({
         seriesBase,
       )
 
+      const laminacionOnlyForm: Record<string, unknown> = Object.fromEntries(
+        Object.entries(normalizedForm).filter(([k]) => k && k.startsWith("lam")),
+      )
+
       setSaving(true)
       try {
-        await apiFetch(`work-orders/${workOrderId}/orden-trabajo`, {
-          method: "PUT",
+        await apiFetch(`work-orders/${workOrderId}/orden-trabajo/laminacion-control`, {
+          method: "PATCH",
           body: JSON.stringify({
-            form: normalizedForm,
+            form: laminacionOnlyForm,
             origin_area: "laminacion",
             notify_on_production_save: notifyProductionSave,
           }),
         })
-        mesLaminacionToastSuccess(
-          options?.successMessage ??
-            (notifyProductionSave
-              ? "Control de laminación guardado."
-              : "Turno de planta guardado en el servidor."),
-        )
+        setForm(bootstrapLaminacionFormState(normalizedForm))
+        if (!options?.suppressSuccessToast) {
+          mesLaminacionToastSuccess(
+            options?.successMessage ??
+              (notifyProductionSave
+                ? "Control de laminación guardado."
+                : "Turno de planta guardado en el servidor."),
+          )
+        }
         window.dispatchEvent(
           new CustomEvent(LAMINACION_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
+        return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
         else toast.error("No se pudo guardar control de laminación.")
+        return false
       } finally {
         setSaving(false)
       }
@@ -1116,7 +1133,7 @@ export default function WorkOrderLaminacionControlPanel({
     }
   }
 
-  function applyCerrarTurno(cur: LaminacionTurnoEntry, finalizedTimer: LaminacionTurnTimer) {
+  async function applyCerrarTurno(cur: LaminacionTurnoEntry, finalizedTimer: LaminacionTurnTimer) {
     const u = getStoredUser()
     const closed: LaminacionTurnoEntry = {
       ...cur,
@@ -1124,13 +1141,23 @@ export default function WorkOrderLaminacionControlPanel({
       closed_at: new Date().toISOString(),
       closed_by: u ? { id: u.id, name: u.name } : null,
     }
-    setForm((prev) => ({
-      ...prev,
-      [LAM_TURNOS_KEY]: [...parseLaminacionTurnos(prev[LAM_TURNOS_KEY]), closed],
+    const nextForm: Record<string, unknown> = {
+      ...form,
+      [LAM_TURNOS_KEY]: [...parseLaminacionTurnos(form[LAM_TURNOS_KEY]), closed],
       [LAM_ACTUAL_KEY]: null,
       ...clearLaminacionMirrorKeys(),
-    }))
-    mesLaminacionToastSuccess("Turno cerrado. Puede iniciar otro turno cuando corresponda.")
+      ...laminacionAggregatedTimerMirrorFromTurnos([...parseLaminacionTurnos(form[LAM_TURNOS_KEY]), closed]),
+    }
+    setForm(bootstrapLaminacionFormState(nextForm))
+    const ok = await persistLaminacionForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      suppressSuccessToast: true,
+    })
+    if (ok) {
+      mesLaminacionToastSuccess("Turno de planta cerrado y guardado.")
+      await load()
+    }
   }
 
   function confirmEmptyShiftClose() {
@@ -1138,7 +1165,7 @@ export default function WorkOrderLaminacionControlPanel({
     pendingEmptyShiftCloseRef.current = null
     setEmptyShiftCloseDialogOpen(false)
     if (!p) return
-    applyCerrarTurno(p.cur, p.finalizedTimer)
+    void applyCerrarTurno(p.cur, p.finalizedTimer)
   }
 
   function cerrarTurnoActual() {
@@ -1155,11 +1182,14 @@ export default function WorkOrderLaminacionControlPanel({
       setEmptyShiftCloseDialogOpen(true)
       return
     }
-    applyCerrarTurno(cur, finalizedTimer)
+    void applyCerrarTurno(cur, finalizedTimer)
   }
 
   async function finalizarAreaLaminacion() {
-    if (!canFinalizeOrder) return
+    if (!canFinalizeOrder) {
+      toast.error("Solo jefatura puede finalizar el área de laminación.")
+      return
+    }
     const prev = form
     let turnos = parseLaminacionTurnos(prev[LAM_TURNOS_KEY])
     const cur = parseLaminacionTurnoActual(prev[LAM_ACTUAL_KEY])
@@ -1179,10 +1209,23 @@ export default function WorkOrderLaminacionControlPanel({
       [LAM_ACTUAL_KEY]: null,
       [LAM_ESTADO_KEY]: "finalizada",
       ...clearLaminacionMirrorKeys(),
+      ...laminacionAggregatedTimerMirrorFromTurnos(turnos),
     }
-    setForm(nextForm)
-    await persistLaminacionForm(nextForm, { skipProductionSaveGuard: true })
-    mesLaminacionToastSuccess("Área de laminación finalizada.")
+    clearLocalLaminacionDrafts(workOrderId)
+    setForm(bootstrapLaminacionFormState(nextForm))
+    const ok = await persistLaminacionForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      suppressSuccessToast: true,
+    })
+    if (ok) {
+      mesLaminacionToastSuccess(
+        "Área de laminación finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
+      )
+      await load()
+    } else {
+      toast.error("No se pudo finalizar el área de laminación. Revise su conexión o permisos de jefatura.")
+    }
   }
 
   function openLabelEditor(mode: LamLabelEditorMode, idx: number) {
@@ -1621,6 +1664,41 @@ export default function WorkOrderLaminacionControlPanel({
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
+          {!controlReadOnly && !areaFinalizada ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-amber-300 text-amber-950 hover:bg-amber-50"
+              disabled={saving}
+              onClick={requestResetAll}
+            >
+              <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Empezar de cero
+            </Button>
+          ) : null}
+          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-orange-300 text-orange-950 hover:bg-orange-50"
+              disabled={saving}
+              onClick={requestCerrarTurnoActual}
+            >
+              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Terminar turno de planta
+            </Button>
+          ) : null}
+          {canFinalizeOrder && !areaFinalizada ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saving}
+              onClick={requestFinalizarAreaLaminacion}
+            >
+              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Finalizar área de laminación
+            </Button>
+          ) : null}
         </div>
       </div>
 

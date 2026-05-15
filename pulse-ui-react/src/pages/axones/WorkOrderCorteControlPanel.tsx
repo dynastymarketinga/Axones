@@ -1,12 +1,23 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Save, Scissors } from "lucide-react"
+import { Flag, LogOut, RotateCcw, Save, Scissors } from "lucide-react"
 import { toast } from "sonner"
 
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { apiFetch, ApiError } from "@/lib/api"
+import { getStoredUser } from "@/lib/auth-storage"
 import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
 import { filterCorteControlForm } from "@/lib/corte-control-keys"
 import { CORTE_CONTROL_SAVED_EVENT } from "@/lib/corte-mes-band-status"
@@ -19,12 +30,21 @@ import {
 } from "@/lib/mes-timer-guards"
 import {
   bootstrapCorteFormState,
+  clearCorteMirrorKeys,
   COR_ACTUAL_KEY,
+  COR_ESTADO_KEY,
   COR_TURNOS_KEY,
+  corteAggregatedTimerMirrorFromTurnos,
+  finalizeTurnTimerNow,
   parseCorteTurnoActual,
   parseCorteTurnos,
+  readCorteEstadoArea,
+  snapshotCorteTurnMetrics,
   accumulateCorteFromJson,
+  sumEntradaKgFromForm,
   sumSalidaKgFromForm,
+  syncCorteSalidaFields,
+  type CorteTurnoEntry,
 } from "./corte-turnos"
 import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
 import { WindingFigurePicker } from "./WindingFigurePicker"
@@ -78,7 +98,7 @@ function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, un
 
 export default function WorkOrderCorteControlPanel({
   workOrderId,
-  canFinalizeOrder: _canFinalizeOrder = false,
+  canFinalizeOrder = false,
 }: {
   workOrderId: number
   canFinalizeOrder?: boolean
@@ -87,6 +107,9 @@ export default function WorkOrderCorteControlPanel({
   const [saving, setSaving] = useState(false)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
+  const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
+  const [finalizeAreaConfirmOpen, setFinalizeAreaConfirmOpen] = useState(false)
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -97,6 +120,10 @@ export default function WorkOrderCorteControlPanel({
       setPrefill(basePrefill)
       const mergedForm = mergePrefill(basePrefill, payload.form)
       const boot = bootstrapCorteFormState(mergedForm)
+      if (readCorteEstadoArea(boot[COR_ESTADO_KEY]) === "finalizada") {
+        setForm(boot)
+        return
+      }
 
       try {
         const raw = localStorage.getItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
@@ -146,6 +173,9 @@ export default function WorkOrderCorteControlPanel({
   }, [load])
 
   const pedidoTotalKg = readNumber(form.pedidoKg ?? prefill.pedidoKg)
+  const areaEstado = readCorteEstadoArea(form[COR_ESTADO_KEY])
+  const areaFinalizada = areaEstado === "finalizada"
+  const controlReadOnly = areaFinalizada && !canFinalizeOrder
   const activeTurno = useMemo(() => parseCorteTurnoActual(form[COR_ACTUAL_KEY], form), [form])
   const timerState = readString(form.corTimerState) || "pending"
   const timerRunning = timerState === "running"
@@ -164,24 +194,43 @@ export default function WorkOrderCorteControlPanel({
   const persistCorteForm = useCallback(
     async (
       srcBase?: Record<string, unknown>,
-      options?: { skipProductionSaveGuard?: boolean },
-    ) => {
+      options?: {
+        skipProductionSaveGuard?: boolean
+        notifyProductionSave?: boolean
+        successMessage?: string
+        suppressSuccessToast?: boolean
+      },
+    ): Promise<boolean> => {
       const src = withCorteAutoFields(srcBase ?? form)
-      if (!Number.isFinite(workOrderId) || workOrderId < 1) return
+      if (!Number.isFinite(workOrderId) || workOrderId < 1) return false
+
+      const notifyProductionSave = options?.notifyProductionSave !== false
 
       if (
+        notifyProductionSave &&
         !options?.skipProductionSaveGuard &&
         !canSaveProductionAreaForm(src, MES_PRODUCTION_SAVE_CONFIG.corte)
       ) {
         toast.error(MES_SAVE_BLOCKED_MESSAGE)
-        return
+        return false
+      }
+
+      const finalizingArea = readCorteEstadoArea(src[COR_ESTADO_KEY]) === "finalizada"
+      if (
+        !finalizingArea &&
+        !notifyProductionSave &&
+        !options?.skipProductionSaveGuard &&
+        !parseCorteTurnoActual(src[COR_ACTUAL_KEY], src)
+      ) {
+        toast.error("Abra un turno de planta antes de guardar.")
+        return false
       }
 
       const act = parseCorteTurnoActual(src[COR_ACTUAL_KEY], src)
       if (act) {
         if (!act.operador.trim() || !act.turno || !act.grupo) {
           toast.error("Corte: complete turno, grupo y operador antes de guardar.")
-          return
+          return false
         }
       }
 
@@ -194,6 +243,7 @@ export default function WorkOrderCorteControlPanel({
         ...src,
         [COR_TURNOS_KEY]: closedP,
         [COR_ACTUAL_KEY]: actualP,
+        [COR_ESTADO_KEY]: readCorteEstadoArea(src[COR_ESTADO_KEY]),
         kgIngresadosCorte: normalizeNumericString(src.kgIngresadosCorte),
         kgSalidaCorte: normalizeNumericString(src.kgSalidaCorte),
         kgMermaCorte: normalizeNumericString(src.kgMermaCorte),
@@ -216,10 +266,12 @@ export default function WorkOrderCorteControlPanel({
           body: JSON.stringify({
             form: corteOnlyForm,
             origin_area: "corte",
-            notify_on_production_save: timerEverStarted,
+            notify_on_production_save: notifyProductionSave && timerEverStarted,
           }),
         })
-        toast.success("Control de corte guardado.")
+        if (!options?.suppressSuccessToast) {
+          toast.success(options?.successMessage ?? "Control de corte guardado.")
+        }
         window.dispatchEvent(
           new CustomEvent(CORTE_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
@@ -228,9 +280,11 @@ export default function WorkOrderCorteControlPanel({
         } catch {
           // no-op
         }
+        return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
         else toast.error("No se pudo guardar control de corte.")
+        return false
       } finally {
         setSaving(false)
       }
@@ -244,6 +298,130 @@ export default function WorkOrderCorteControlPanel({
     },
     [persistCorteForm],
   )
+
+  const applyCerrarTurno = useCallback(
+    async (cur: CorteTurnoEntry) => {
+      const finalizedTimer = finalizeTurnTimerNow(cur.timer)
+      const u = getStoredUser()
+      const closed: CorteTurnoEntry = {
+        ...cur,
+        timer: finalizedTimer,
+        closed_at: new Date().toISOString(),
+        closed_by: u ? { id: u.id, name: u.name } : null,
+        metrics: snapshotCorteTurnMetrics({
+          ...form,
+          cor_paletas: cur.paletas,
+          corEntradaBobinasKg: cur.entradaBobinasKg,
+          kgIngresadosCorte: sumEntradaKgFromForm({
+            ...form,
+            corEntradaBobinasKg: cur.entradaBobinasKg,
+          }).toFixed(2),
+          kgMermaCorte: cur.kgMerma || form.kgMermaCorte,
+          metrajeCorte: cur.metraje || form.metrajeCorte,
+          corObservaciones: cur.observaciones || form.corObservaciones,
+        }),
+        observaciones: readString(form.corObservaciones),
+        paletas: cur.paletas,
+        entradaBobinasKg: cur.entradaBobinasKg,
+      }
+      const turnosClosed = [...parseCorteTurnos(form[COR_TURNOS_KEY], form), closed]
+      const nextForm: Record<string, unknown> = {
+        ...form,
+        [COR_TURNOS_KEY]: turnosClosed,
+        [COR_ACTUAL_KEY]: null,
+        corRegistrosTurnos: turnosClosed.length,
+        ...clearCorteMirrorKeys(),
+        ...corteAggregatedTimerMirrorFromTurnos(turnosClosed),
+        ...syncCorteSalidaFields({ ...form, cor_paletas: clearCorteMirrorKeys().cor_paletas }),
+      }
+      setForm(bootstrapCorteFormState(nextForm))
+      const ok = await persistCorteForm(nextForm, {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        suppressSuccessToast: true,
+      })
+      if (ok) {
+        toast.success("Turno de planta cerrado y guardado.")
+        await load()
+      }
+    },
+    [form, persistCorteForm, load],
+  )
+
+  async function finalizarAreaCorte() {
+    if (!canFinalizeOrder) {
+      toast.error("Solo jefatura puede finalizar el área de corte.")
+      return
+    }
+    const prev = form
+    let turnos = parseCorteTurnos(prev[COR_TURNOS_KEY], prev)
+    const cur = parseCorteTurnoActual(prev[COR_ACTUAL_KEY], prev)
+    const u = getStoredUser()
+    if (cur) {
+      const finalizedTimer = finalizeTurnTimerNow(cur.timer)
+      const closed: CorteTurnoEntry = {
+        ...cur,
+        timer: finalizedTimer,
+        closed_at: new Date().toISOString(),
+        closed_by: u ? { id: u.id, name: u.name } : null,
+        metrics: snapshotCorteTurnMetrics({
+          ...prev,
+          cor_paletas: cur.paletas,
+          corEntradaBobinasKg: cur.entradaBobinasKg,
+        }),
+        paletas: cur.paletas,
+        entradaBobinasKg: cur.entradaBobinasKg,
+      }
+      turnos = [...turnos, closed]
+    }
+    const nextForm: Record<string, unknown> = {
+      ...prev,
+      [COR_TURNOS_KEY]: turnos,
+      [COR_ACTUAL_KEY]: null,
+      [COR_ESTADO_KEY]: "finalizada",
+      ...clearCorteMirrorKeys(),
+      ...corteAggregatedTimerMirrorFromTurnos(turnos),
+    }
+    try {
+      localStorage.removeItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
+    } catch {
+      // no-op
+    }
+    setForm(bootstrapCorteFormState(nextForm))
+    const ok = await persistCorteForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      suppressSuccessToast: true,
+    })
+    if (ok) {
+      toast.success(
+        "Área de corte finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
+      )
+      await load()
+    } else {
+      toast.error("No se pudo finalizar el área de corte. Revise su conexión o permisos de jefatura.")
+    }
+  }
+
+  async function confirmResetAll() {
+    if (saving || controlReadOnly) return
+    setResetConfirmOpen(false)
+    const cleared: Record<string, unknown> = {
+      ...form,
+      [COR_TURNOS_KEY]: [],
+      [COR_ACTUAL_KEY]: null,
+      [COR_ESTADO_KEY]: "abierta",
+      ...clearCorteMirrorKeys(),
+    }
+    try {
+      localStorage.removeItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
+    } catch {
+      // no-op
+    }
+    setForm(bootstrapCorteFormState(cleared))
+    toast.success("Corte reiniciado localmente. Guardando en el servidor…")
+    await persistCorteForm(cleared, { skipProductionSaveGuard: true, notifyProductionSave: false })
+  }
 
   useEffect(() => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -301,7 +479,7 @@ export default function WorkOrderCorteControlPanel({
             type="button"
             size="sm"
             onClick={() => void persistCorteForm()}
-            disabled={saving || !canSaveProduction}
+            disabled={saving || controlReadOnly || (!areaFinalizada && !canSaveProduction)}
           >
             <Save className="mr-1.5 h-4 w-4" />
             {saving ? "Guardando…" : "Guardar"}
@@ -435,12 +613,138 @@ export default function WorkOrderCorteControlPanel({
         </div>
       </div>
 
+      {areaFinalizada ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          Área de corte finalizada en el sistema. Los datos quedan en solo lectura salvo jefatura.
+        </p>
+      ) : null}
+
       <WorkOrderCorteOpsSection
         form={form}
         setForm={setForm}
         pedidoTotalKg={pedidoTotalKg}
+        readOnly={controlReadOnly}
         onRequestSave={persistCorteFormCb}
+        onApplyCerrarTurno={applyCerrarTurno}
+        onRequestCerrarTurno={() => setCloseTurnConfirmOpen(true)}
       />
+
+      <div className="no-print mb-12 flex flex-col items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            type="button"
+            onClick={() => void persistCorteForm()}
+            disabled={saving || controlReadOnly || (!areaFinalizada && !canSaveProduction)}
+          >
+            <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            {saving ? "Guardando…" : "Guardar"}
+          </Button>
+          {!controlReadOnly && !areaFinalizada ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-amber-300 text-amber-950 hover:bg-amber-50"
+              disabled={saving}
+              onClick={() => setResetConfirmOpen(true)}
+            >
+              <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Empezar de cero
+            </Button>
+          ) : null}
+          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-orange-300 text-orange-950 hover:bg-orange-50"
+              disabled={saving}
+              onClick={() => setCloseTurnConfirmOpen(true)}
+            >
+              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Terminar turno de planta
+            </Button>
+          ) : null}
+          {canFinalizeOrder && !areaFinalizada ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saving}
+              onClick={() => setFinalizeAreaConfirmOpen(true)}
+            >
+              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Finalizar área de corte
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <AlertDialog open={closeTurnConfirmOpen} onOpenChange={setCloseTurnConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cerrar turno</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se cerrará el registro de turno de planta en curso y se consolidará el cronómetro en el historial. Podrá
+              abrir otro turno después. ¿Confirma el cierre?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setCloseTurnConfirmOpen(false)
+                const cur = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
+                if (!cur) return
+                if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
+                  toast.error("Complete turno, grupo y operador.")
+                  return
+                }
+                void applyCerrarTurno(cur)
+              }}
+            >
+              Sí, cerrar turno
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={finalizeAreaConfirmOpen} onOpenChange={setFinalizeAreaConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Finalizar área de corte (OT)</AlertDialogTitle>
+            <AlertDialogDescription>
+              Marcará el área de corte como finalizada en la orden. Revise que los datos del turno estén completos antes
+              de continuar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setFinalizeAreaConfirmOpen(false)
+                void finalizarAreaCorte()
+              }}
+            >
+              Sí, finalizar área
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reiniciar corte (OT)</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esto borrará turnos, cronómetro, bobinas, paletas y métricas registradas en Corte para esta OT. También
+              limpia el respaldo local del navegador. ¿Desea continuar?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmResetAll()}>Confirmar reinicio</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -140,14 +140,39 @@ class WorkOrderController extends Controller
 
         if ($miArea !== '' && in_array($miArea, $allowedAreaKeys, true)) {
             $targetAreaForPayload = $miArea;
-            $query->whereHas('areaRequests', function ($q) use ($miArea, $areaRequestedFrom, $areaRequestedTo) {
-                $q->where('area', $miArea)
-                    ->where('status', AreaRequestStatus::Pending->value);
-                if ($areaRequestedFrom !== null) {
-                    $q->where('created_at', '>=', $areaRequestedFrom);
-                }
-                if ($areaRequestedTo !== null) {
-                    $q->where('created_at', '<=', $areaRequestedTo);
+            $mesEstadoKeyActivas = match ($miArea) {
+                'montaje' => 'montEstadoArea',
+                'impresion' => 'impEstadoArea',
+                'laminacion' => 'lamEstadoArea',
+                default => null,
+            };
+            $query->where(function ($outer) use (
+                $miArea,
+                $areaRequestedFrom,
+                $areaRequestedTo,
+                $mesEstadoKeyActivas,
+            ) {
+                $outer->where(function ($active) use ($miArea, $areaRequestedFrom, $areaRequestedTo, $mesEstadoKeyActivas) {
+                    $active->whereHas('areaRequests', function ($q) use ($miArea, $areaRequestedFrom, $areaRequestedTo) {
+                        $q->where('area', $miArea)
+                            ->where('status', AreaRequestStatus::Pending->value);
+                        if ($areaRequestedFrom !== null) {
+                            $q->where('created_at', '>=', $areaRequestedFrom);
+                        }
+                        if ($areaRequestedTo !== null) {
+                            $q->where('created_at', '<=', $areaRequestedTo);
+                        }
+                    });
+                    if ($mesEstadoKeyActivas !== null) {
+                        $active->whereDoesntHave('technicalDocument', function ($td) use ($mesEstadoKeyActivas) {
+                            $td->where("form->{$mesEstadoKeyActivas}", 'finalizada');
+                        });
+                    }
+                });
+                if ($mesEstadoKeyActivas !== null) {
+                    $outer->orWhereHas('technicalDocument', function ($td) use ($mesEstadoKeyActivas) {
+                        $td->where("form->{$mesEstadoKeyActivas}", 'finalizada');
+                    });
                 }
             });
 
@@ -185,27 +210,55 @@ class WorkOrderController extends Controller
             }
         } elseif ($historialArea !== '' && in_array($historialArea, $allowedAreaKeys, true)) {
             $targetAreaForPayload = $historialArea;
-            $query->whereHas('areaRequests', function ($q) use ($historialArea, $areaRequestedFrom, $areaRequestedTo, $areaReqStatus, $onlyPendingArea, $historialExcludePending) {
-                $q->where('area', $historialArea);
-                if ($onlyPendingArea) {
-                    $q->where('status', AreaRequestStatus::Pending->value);
-                } elseif ($historialExcludePending) {
-                    $q->where('status', '!=', AreaRequestStatus::Pending->value);
-                } elseif ($areaReqStatus !== '' && $areaReqStatus !== 'all') {
-                    $allowed = [
-                        AreaRequestStatus::Pending->value,
-                        AreaRequestStatus::Done->value,
-                        AreaRequestStatus::Cancelled->value,
-                    ];
-                    if (in_array($areaReqStatus, $allowed, true)) {
-                        $q->where('status', $areaReqStatus);
+            $mesEstadoKey = match ($historialArea) {
+                'montaje' => 'montEstadoArea',
+                'impresion' => 'impEstadoArea',
+                'laminacion' => 'lamEstadoArea',
+                default => null,
+            };
+            $query->where(function ($outer) use (
+                $historialArea,
+                $areaRequestedFrom,
+                $areaRequestedTo,
+                $areaReqStatus,
+                $onlyPendingArea,
+                $historialExcludePending,
+                $mesEstadoKey,
+            ) {
+                $outer->whereHas('areaRequests', function ($q) use (
+                    $historialArea,
+                    $areaRequestedFrom,
+                    $areaRequestedTo,
+                    $areaReqStatus,
+                    $onlyPendingArea,
+                    $historialExcludePending,
+                ) {
+                    $q->where('area', $historialArea);
+                    if ($onlyPendingArea) {
+                        $q->where('status', AreaRequestStatus::Pending->value);
+                    } elseif ($historialExcludePending) {
+                        $q->where('status', '!=', AreaRequestStatus::Pending->value);
+                    } elseif ($areaReqStatus !== '' && $areaReqStatus !== 'all') {
+                        $allowed = [
+                            AreaRequestStatus::Pending->value,
+                            AreaRequestStatus::Done->value,
+                            AreaRequestStatus::Cancelled->value,
+                        ];
+                        if (in_array($areaReqStatus, $allowed, true)) {
+                            $q->where('status', $areaReqStatus);
+                        }
                     }
-                }
-                if ($areaRequestedFrom !== null) {
-                    $q->where('created_at', '>=', $areaRequestedFrom);
-                }
-                if ($areaRequestedTo !== null) {
-                    $q->where('created_at', '<=', $areaRequestedTo);
+                    if ($areaRequestedFrom !== null) {
+                        $q->where('created_at', '>=', $areaRequestedFrom);
+                    }
+                    if ($areaRequestedTo !== null) {
+                        $q->where('created_at', '<=', $areaRequestedTo);
+                    }
+                });
+                if ($mesEstadoKey !== null && $historialExcludePending) {
+                    $outer->orWhereHas('technicalDocument', function ($td) use ($mesEstadoKey) {
+                        $td->where("form->{$mesEstadoKey}", 'finalizada');
+                    });
                 }
             });
         } elseif (($rawIn = $request->query('board_stage_in')) !== null && $rawIn !== '') {
@@ -274,6 +327,9 @@ class WorkOrderController extends Controller
             $query->with(['areaRequests' => function ($q) use ($targetAreaForPayload) {
                 $q->select(['id', 'area', 'status', 'work_order_id', 'created_at'])
                     ->where('area', $targetAreaForPayload)
+                    ->orderByRaw(
+                        "CASE status WHEN 'done' THEN 0 WHEN 'cancelled' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END",
+                    )
                     ->orderByDesc('created_at');
             }]);
         }

@@ -78,7 +78,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { apiFetch, ApiError } from "@/lib/api"
 import {
@@ -110,12 +109,27 @@ import {
   type MesBandejaMes,
   type MesBandejaWorkflow,
 } from "@/lib/mes-timer-band-shared"
-import { printingMesBandFromWorkOrderRow } from "@/lib/printing-mes-band-status"
+import {
+  corteActivasBucketFromRow,
+  type CorteActivasSubTab,
+} from "@/lib/corte-mes-band-status"
+import {
+  laminacionActivasBucketFromRow,
+  type LaminacionActivasSubTab,
+} from "@/lib/laminacion-mes-band-status"
+import {
+  printingActivasBucketFromRow,
+  type PrintingActivasSubTab,
+} from "@/lib/printing-mes-band-status"
 import {
   areaRequestBadgeClass,
   areaRequestStatusGlyph,
   areaRequestStatusLabel,
 } from "@/lib/axones-area-request-display"
+import {
+  areaRequestCreatedAtFromRow,
+  resolveAreaRequestStatusForTab,
+} from "@/lib/area-request-for-row"
 import { cn } from "@/lib/utils"
 import {
   IMP_ACTUAL_KEY,
@@ -178,6 +192,12 @@ function areaTitle(area: AreaKey): string {
 function areaSubtitle(area: AreaKey): string {
   if (area === "printing") {
     return "Bandeja de OT activas. Las vistas filtran por temporizador de impresión. Historial: solicitudes del área ya cerradas."
+  }
+  if (area === "laminacion") {
+    return "Bandeja de OT activas. Las vistas filtran por temporizador de laminación. Historial: solicitudes del área ya cerradas."
+  }
+  if (area === "corte") {
+    return "Bandeja de OT activas. Las vistas filtran por temporizador de corte. Historial: solicitudes del área ya cerradas."
   }
   if (areaHasMesTimerColumn(area)) {
     return `En curso: solicitudes pendientes y OT en cola o en ${areaTitle(area).replace("Área: ", "")}. El badge de color refleja producción (turno y cronómetro); «Pendiente» naranja es solo la solicitud al área. Historial: solicitudes cerradas.`
@@ -395,24 +415,23 @@ function PrintingMesModalTurnosSection({ row }: { row: WorkOrderListRow }) {
 
 type AreaBandejaTab = "activas" | "historial"
 
-/** Sub-vistas dentro de «En curso» solo para bandeja de impresión. */
-type PrintingActivasSubTab = "pendientes" | "produccion" | "finalizadas"
+type MesActivasSubTab = PrintingActivasSubTab | LaminacionActivasSubTab | CorteActivasSubTab
 
-const PRINTING_SUB_TAB_LABEL: Record<PrintingActivasSubTab, string> = {
+/** Sub-vistas dentro de «En curso» (impresión y laminación). */
+const MES_ACTIVAS_SUB_TAB_LABEL: Record<MesActivasSubTab, string> = {
   pendientes: "Pendientes",
   produccion: "En producción",
   finalizadas: "Finalizadas",
 }
 
-function printingActivasBucket(
-  row: WorkOrderListRow,
-  nowMs: number,
-): PrintingActivasSubTab {
-  const mes = printingMesBandFromWorkOrderRow(row, nowMs)
-  if (!mes) return "pendientes"
-  if (mes.workflow === "finalizado") return "finalizadas"
-  if (mes.workflow === "iniciado" || mes.workflow === "pausado") return "produccion"
-  return "pendientes"
+function areaUsesMesActivasSubTabs(area: AreaKey): boolean {
+  return area === "printing" || area === "laminacion" || area === "corte"
+}
+
+function mesActivasBucketFromRow(area: AreaKey, row: WorkOrderListRow, nowMs: number): MesActivasSubTab {
+  if (area === "laminacion") return laminacionActivasBucketFromRow(row, nowMs)
+  if (area === "corte") return corteActivasBucketFromRow(row, nowMs)
+  return printingActivasBucketFromRow(row, nowMs)
 }
 
 export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
@@ -443,9 +462,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [mesModalId, setMesModalId] = useState<number | null>(null)
   const hasTimerColumn = areaHasMesTimerColumn(area)
   const bandejaActivasColSpan = hasTimerColumn ? 5 : INSUMOS_BANDEJA_TABLE_COLSPAN
-  /** Filtro de bandeja impresión dentro de «En curso». */
-  const [printingActivasSubTab, setPrintingActivasSubTab] =
-    useState<PrintingActivasSubTab>("pendientes")
+  const bandejaHistorialColSpan = hasTimerColumn ? 5 : INSUMOS_BANDEJA_TABLE_COLSPAN
+  /** Filtro de bandeja MES (impresión / laminación) dentro de «En curso». */
+  const [mesActivasSubTab, setMesActivasSubTab] = useState<MesActivasSubTab>("pendientes")
 
   const queryStatus = status !== "all" ? status : undefined
   const queryPriority = priority !== "all" ? priority : undefined
@@ -612,10 +631,10 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   }, [load])
 
   useEffect(() => {
-    if (!hasTimerColumn || activeTab !== "activas") return
+    if (!hasTimerColumn) return
     const id = window.setInterval(() => setMesBandNowMs(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [hasTimerColumn, activeTab])
+  }, [hasTimerColumn])
 
   useEffect(() => {
     if (!hasTimerColumn || activeTab !== "activas") return
@@ -648,34 +667,32 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   const mesModalReqStatus = useMemo(() => {
     if (!mesModalRow) return "pending"
-    return (
-      (mesModalRow.areaRequests && mesModalRow.areaRequests.length
-        ? mesModalRow.areaRequests[0]?.status
-        : null) ?? "pending"
-    )
-  }, [mesModalRow])
+    return resolveAreaRequestStatusForTab(mesModalRow, activeTab) ?? "pending"
+  }, [mesModalRow, activeTab])
 
   const displayActivasRows = useMemo((): WorkOrderListRow[] => {
     if (!rows?.data.length) return []
-    if (area === "printing") {
-      return rows.data.filter((o) => printingActivasBucket(o, mesBandNowMs) === printingActivasSubTab)
+    if (areaUsesMesActivasSubTabs(area)) {
+      return rows.data.filter(
+        (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === mesActivasSubTab,
+      )
     }
-    if (area === "montaje" || area === "laminacion") {
+    if (area === "montaje") {
       return rows.data.filter((o) => {
         const mes = mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)
         return mes?.workflow !== "finalizado"
       })
     }
     return rows.data
-  }, [rows, area, mesBandNowMs, printingActivasSubTab])
+  }, [rows, area, mesBandNowMs, mesActivasSubTab])
 
-  const printingActivasBucketCounts = useMemo(() => {
-    if (area !== "printing" || !rows?.data.length) return null
+  const mesActivasBucketCounts = useMemo(() => {
+    if (!areaUsesMesActivasSubTabs(area) || !rows?.data.length) return null
     let pendientes = 0
     let produccion = 0
     let finalizadas = 0
     for (const o of rows.data) {
-      const b = printingActivasBucket(o, mesBandNowMs)
+      const b = mesActivasBucketFromRow(area, o, mesBandNowMs)
       if (b === "pendientes") pendientes++
       else if (b === "produccion") produccion++
       else finalizadas++
@@ -683,15 +700,23 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     return { pendientes, produccion, finalizadas }
   }, [area, rows, mesBandNowMs])
 
+  /** En curso (N): impresión/laminación cuentan solo pendientes + producción; finalizadas van aparte. */
+  const displayTotalActivas = useMemo(() => {
+    if (areaUsesMesActivasSubTabs(area) && mesActivasBucketCounts) {
+      return mesActivasBucketCounts.pendientes + mesActivasBucketCounts.produccion
+    }
+    return totalActivas
+  }, [area, mesActivasBucketCounts, totalActivas])
+
   useEffect(() => {
     if (activeTab !== "activas") {
-      setPrintingActivasSubTab("pendientes")
+      setMesActivasSubTab("pendientes")
     }
   }, [activeTab])
 
   useEffect(() => {
-    if (area !== "printing") {
-      setPrintingActivasSubTab("pendientes")
+    if (!areaUsesMesActivasSubTabs(area)) {
+      setMesActivasSubTab("pendientes")
     }
   }, [area])
 
@@ -717,15 +742,15 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   }, [rows, mesModalId])
 
   useEffect(() => {
-    if (area !== "printing" || activeTab !== "activas" || !rows?.data.length) return
-    if (printingActivasSubTab !== "pendientes") return
+    if (!areaUsesMesActivasSubTabs(area) || activeTab !== "activas" || !rows?.data.length) return
+    if (mesActivasSubTab !== "pendientes") return
     const hasProduccion = rows.data.some(
-      (o) => printingActivasBucket(o, mesBandNowMs) === "produccion",
+      (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === "produccion",
     )
     if (hasProduccion) {
-      setPrintingActivasSubTab("produccion")
+      setMesActivasSubTab("produccion")
     }
-  }, [area, activeTab, rows, mesBandNowMs, printingActivasSubTab])
+  }, [area, activeTab, rows, mesBandNowMs, mesActivasSubTab])
 
   const stageLabel: Record<string, string> = {
     nueva: "Pendiente por OT",
@@ -794,7 +819,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   const nextStageByArea: Record<AreaKey, string | null> = {
     printing: null,
-    montaje: "impresion",
+    // Montaje: sin «Pasar a Impresión»; cierre/avance de etapa vía MES (Finalizar área) u otros flujos.
+    montaje: null,
     laminacion: "corte",
     // En Corte no exponemos botón "Pasar a Completada" desde la bandeja del área.
     // El cierre/completado se maneja por despacho/nota de entrega u otro flujo.
@@ -822,7 +848,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     if (bs !== here) return false
 
     if (area === "printing") return isBoss || role === "printing" || role === "impresion"
-    if (area === "montaje") return isBoss || role === "montaje"
     if (area === "laminacion") return isBoss || role === "laminacion"
     if (area === "corte") return isBoss || role === "corte"
     return false
@@ -894,16 +919,22 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       </div>
     ) : null
 
-  const printingSubTabHint = useMemo(() => {
-    if (area !== "printing") return ""
-    if (printingActivasSubTab === "pendientes") {
-      return "Cola u obra en impresión sin temporizador en marcha. Abra la OT para iniciar turno."
+  const mesActivasSubTabHint = useMemo(() => {
+    if (!areaUsesMesActivasSubTabs(area)) return ""
+    const finalizeLabel =
+      area === "laminacion"
+        ? "Finalizar área de laminación"
+        : area === "corte"
+          ? "Finalizar área de corte"
+          : "Finalizar área de impresión"
+    if (mesActivasSubTab === "pendientes") {
+      return "Primera vez en el área o sin turno iniciado. Abra la OT, arme cuadrilla e inicie turno de planta."
     }
-    if (printingActivasSubTab === "produccion") {
-      return "Temporizador activo o en pausa. Use «Tiempos y detalle» o el icono de reloj para ver el modal con turnos y personal."
+    if (mesActivasSubTab === "produccion") {
+      return `Turno en curso, entre turnos o cronómetro activo/pausado. Al cerrar la jornada use «Terminar turno» y luego «${finalizeLabel}».`
     }
-    return "Área de impresión finalizada para estas OT. Use Historial para solicitudes cerradas del área."
-  }, [area, printingActivasSubTab])
+    return "Área MES finalizada. También aparecen en la pestaña Historial."
+  }, [area, mesActivasSubTab])
 
   return (
     <CatalogPageShell
@@ -987,7 +1018,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
           >
             <Rows3 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
             <span>En curso</span>
-            <span className="text-muted-foreground font-normal tabular-nums">({totalActivas})</span>
+            <span className="text-muted-foreground font-normal tabular-nums">({displayTotalActivas})</span>
             {unseenActivas > 0 ? (
               <Badge
                 variant="destructive"
@@ -1004,20 +1035,22 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
         </TabsList>
 
         <TabsContent value="activas" className="mt-4 space-y-4">
-          {area === "printing" ? (
+          {areaUsesMesActivasSubTabs(area) ? (
             <div className="space-y-2">
               <ToggleGroup
                 type="single"
-                value={printingActivasSubTab}
+                value={mesActivasSubTab}
                 onValueChange={(v) => {
                   if (!v) return
-                  setPrintingActivasSubTab(v as PrintingActivasSubTab)
+                  setMesActivasSubTab(v as MesActivasSubTab)
                   setMesModalId(null)
                 }}
                 variant="outline"
                 size="sm"
                 className="flex h-auto w-full flex-wrap justify-stretch gap-1.5 rounded-xl border border-border/60 bg-muted/30 p-1.5 sm:justify-start"
-                aria-label="Vista de bandeja de impresión"
+                aria-label={`Vista de bandeja de ${
+                  area === "laminacion" ? "laminación" : area === "corte" ? "corte" : "impresión"
+                }`}
               >
                 <ToggleGroupItem
                   value="pendientes"
@@ -1026,7 +1059,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <Inbox className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                   <span className="font-medium">Pendientes</span>
                   <span className="text-muted-foreground font-normal tabular-nums">
-                    ({printingActivasBucketCounts?.pendientes ?? 0})
+                    ({mesActivasBucketCounts?.pendientes ?? 0})
                   </span>
                 </ToggleGroupItem>
                 <ToggleGroupItem
@@ -1036,7 +1069,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <PlayCircle className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                   <span className="font-medium">En producción</span>
                   <span className="text-muted-foreground font-normal tabular-nums">
-                    ({printingActivasBucketCounts?.produccion ?? 0})
+                    ({mesActivasBucketCounts?.produccion ?? 0})
                   </span>
                 </ToggleGroupItem>
                 <ToggleGroupItem
@@ -1046,24 +1079,24 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                   <span className="font-medium">Finalizadas</span>
                   <span className="text-muted-foreground font-normal tabular-nums">
-                    ({printingActivasBucketCounts?.finalizadas ?? 0})
+                    ({mesActivasBucketCounts?.finalizadas ?? 0})
                   </span>
                 </ToggleGroupItem>
               </ToggleGroup>
               <p className="text-muted-foreground flex items-start gap-2 text-xs leading-relaxed sm:text-sm">
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <span>{printingSubTabHint}</span>
+                <span>{mesActivasSubTabHint}</span>
               </p>
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            {area === "printing" ? (
+            {areaUsesMesActivasSubTabs(area) ? (
               <p className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm">
                 <ClipboardList className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                 <span>
                   <span className="tabular-nums text-foreground/90">{displayActivasRows.length}</span> OT en esta
                   página · Bandeja del área:{" "}
-                  <span className="tabular-nums text-foreground/90">{totalActivas}</span>
+                  <span className="tabular-nums text-foreground/90">{displayTotalActivas}</span>
                 </span>
               </p>
             ) : hasTimerColumn ? (
@@ -1085,7 +1118,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             {area === "printing" ? null : (
               <Badge variant="outline" className={cn(areaRequestBadgeClass("pending"), "inline-flex items-center gap-1.5")}>
                 <ClipboardList className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-                {`En curso: ${totalActivas}`}
+                {`En curso: ${displayTotalActivas}`}
               </Badge>
             )}
           </div>
@@ -1254,24 +1287,22 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       Sin solicitudes.
                     </TableCell>
                   </TableRow>
-                ) : area === "printing" && displayActivasRows.length === 0 ? (
+                ) : areaUsesMesActivasSubTabs(area) && displayActivasRows.length === 0 ? (
                   <TableRow className="border-border/50 hover:bg-transparent">
                     <TableCell
                       colSpan={5}
                       className="text-muted-foreground py-10 text-center"
                     >
-                      Ninguna OT en «{PRINTING_SUB_TAB_LABEL[printingActivasSubTab]}» en esta página. Pruebe otra
+                      Ninguna OT en «{MES_ACTIVAS_SUB_TAB_LABEL[mesActivasSubTab]}» en esta página. Pruebe otra
                       vista o otra página del listado.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  (area === "printing" || area === "montaje" || area === "laminacion"
+                  (areaUsesMesActivasSubTabs(area) || area === "montaje"
                     ? displayActivasRows
                     : rows.data
                   ).map((o, idx) => {
-                    const reqStatus =
-                      (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ??
-                      "pending"
+                    const reqStatus = resolveAreaRequestStatusForTab(o, "activas") ?? "pending"
                     const mesBand = hasTimerColumn
                       ? mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)
                       : null
@@ -1389,8 +1420,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             <p className="text-muted-foreground flex items-start gap-2 text-sm">
               <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
               <span>
-                Archivo de solicitudes cerradas en el área (hechas o canceladas). Busque por cliente o producto entre
-                el historial.
+                Archivo de OT con solicitud cerrada al área o área MES finalizada. Misma etiqueta de producción que
+                en En curso (p. ej. Finalizado). Busque por cliente o producto.
               </span>
             </p>
             <Badge
@@ -1424,8 +1455,16 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                     ID
                   </TableHead>
                   <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Estado
+                    {hasTimerColumn ? "Estado producción" : "Estado"}
                   </TableHead>
+                  {hasTimerColumn ? (
+                    <TableHead className="h-10 min-w-[11.5rem] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Timer className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                        Temporizador
+                      </span>
+                    </TableHead>
+                  ) : null}
                   <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Material
                   </TableHead>
@@ -1438,7 +1477,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 {loading ? (
                   <TableRow className="border-border/50 hover:bg-transparent">
                     <TableCell
-                      colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                      colSpan={bandejaHistorialColSpan}
                       className="text-muted-foreground py-10 text-center"
                     >
                       Cargando…
@@ -1447,7 +1486,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 ) : !rows?.data.length ? (
                   <TableRow className="border-border/50 hover:bg-transparent">
                     <TableCell
-                      colSpan={INSUMOS_BANDEJA_TABLE_COLSPAN}
+                      colSpan={bandejaHistorialColSpan}
                       className="text-muted-foreground py-10 text-center"
                     >
                       Sin solicitudes.
@@ -1455,50 +1494,102 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   </TableRow>
                 ) : (
                   rows.data.map((o, idx) => {
-                    const reqStatus =
-                      (o.areaRequests && o.areaRequests.length ? o.areaRequests[0]?.status : null) ??
-                      null
-                    const reqCreatedAt =
-                      o.areaRequests && o.areaRequests.length
-                        ? (o.areaRequests[0]?.created_at ?? null)
-                        : null
+                    const reqStatus = resolveAreaRequestStatusForTab(o, "historial")
+                    const reqCreatedAt = areaRequestCreatedAtFromRow(o)
+                    const mesBand = hasTimerColumn
+                      ? mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)
+                      : null
+                    const rowAccent = mesBand ? mesBandejaRowAccentClass(mesBand.workflow) : ""
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
                     return (
-                      <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx)}>
+                      <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
                         <TableCell className="pl-5 align-middle">
                           <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
                             {o.code}
                           </Link>
                         </TableCell>
                         <TableCell className="align-middle">
-                          <div className="flex flex-col gap-2">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                areaRequestBadgeClass(reqStatus),
-                                "inline-flex w-fit items-center gap-1",
-                              )}
-                            >
-                              {areaRequestStatusGlyph(reqStatus)}
-                              {areaRequestStatusLabel(reqStatus)}
-                            </Badge>
-                            <div className="text-muted-foreground text-xs leading-snug">
-                              <span className="text-foreground/90">{processStateForArea(o.board_stage)}</span>
-                              {o.created_at ? (
-                                <span>
-                                  {" "}
-                                  · OT {new Date(o.created_at).toLocaleDateString()}
-                                </span>
-                              ) : null}
-                              {reqCreatedAt ? (
-                                <span>
-                                  {" "}
-                                  · Sol. {new Date(reqCreatedAt).toLocaleDateString()}
-                                </span>
+                          {hasTimerColumn ? (
+                            <div className="flex min-w-0 max-w-[20rem] flex-col gap-2">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                {mesBand ? (
+                                  <span
+                                    className={mesBandejaStatePillClass(mesBand.workflow)}
+                                    role="status"
+                                  >
+                                    {mesWorkflowPillGlyph(mesBand.workflow)}
+                                    {mesBandejaWorkflowTitle(mesBand.workflow)}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={printingTrayMesStickerClass(o.board_stage)}
+                                    title={`La OT aún no está en etapa ${mesAreaDisplayName(area as MesBandejaAreaKey)} en el tablero.`}
+                                  >
+                                    <CircleDashed className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                                    <span className="min-w-0">{processStateForArea(o.board_stage)}</span>
+                                  </span>
+                                )}
+                                {reqStatus ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      areaRequestBadgeClass(reqStatus),
+                                      "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
+                                    )}
+                                    title="Solicitud al área"
+                                  >
+                                    <span className="sr-only">Solicitud: </span>
+                                    {areaRequestStatusGlyph(reqStatus)}
+                                    {areaRequestStatusLabel(reqStatus)}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              {mesBand?.workflow === "finalizado" || reqCreatedAt ? (
+                                <p className="text-muted-foreground text-[11px] leading-snug">
+                                  {mesBand?.workflow === "finalizado"
+                                    ? "Área MES finalizada en esta OT."
+                                    : null}
+                                  {reqCreatedAt ? (
+                                    <span>
+                                      {mesBand?.workflow === "finalizado" ? " " : null}
+                                      Sol. {new Date(reqCreatedAt).toLocaleDateString()}
+                                    </span>
+                                  ) : null}
+                                </p>
                               ) : null}
                             </div>
-                          </div>
+                          ) : (
+                            <div className="flex flex-col gap-2">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  areaRequestBadgeClass(reqStatus),
+                                  "inline-flex w-fit items-center gap-1",
+                                )}
+                              >
+                                {areaRequestStatusGlyph(reqStatus)}
+                                {areaRequestStatusLabel(reqStatus)}
+                              </Badge>
+                              <div className="text-muted-foreground text-xs leading-snug">
+                                <span className="text-foreground/90">{processStateForArea(o.board_stage)}</span>
+                                {reqCreatedAt ? (
+                                  <span>
+                                    {" "}
+                                    · Sol. {new Date(reqCreatedAt).toLocaleDateString()}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
                         </TableCell>
+                        {hasTimerColumn ? (
+                          <TableCell className="min-w-[11.5rem] align-middle">
+                            <MesBandejaTimerCell
+                              mesBand={mesBand}
+                              onOpenDetail={() => setMesModalId(o.id)}
+                            />
+                          </TableCell>
+                        ) : null}
                         <TableCell className="max-w-md align-middle">
                           <p
                             className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
@@ -1518,25 +1609,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                                 Abrir
                               </Link>
                             </Button>
-                            {canMoveFromHere(o.board_stage) && nextStageByArea[area] ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                className="gap-1.5"
-                                disabled={movingId === o.id}
-                                onClick={() => void moveToNextStage(o.id)}
-                              >
-                                {movingId === o.id ? (
-                                  "…"
-                                ) : (
-                                  <>
-                                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-                                    {`Pasar a ${stageLabel[nextStageByArea[area]!]}`}
-                                  </>
-                                )}
-                              </Button>
-                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>

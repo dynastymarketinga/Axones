@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useId, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -9,7 +9,6 @@ import {
   ArrowUpRight,
   BarChart3,
   Boxes,
-  CalendarPlus,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -299,10 +298,23 @@ function mesSectionTitle(icon: LucideIcon, text: string) {
   )
 }
 
-function fieldLabel(icon: LucideIcon, text: ReactNode) {
+/** Texto de sección junto a grupos de controles (no es etiqueta de un solo campo). */
+function fieldLegend(icon: LucideIcon, text: ReactNode) {
   const I = icon
   return (
-    <Label className="ot-label">
+    <div className="ot-label text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+      <span className="inline-flex items-center gap-1.5">
+        <I className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span>{text}</span>
+      </span>
+    </div>
+  )
+}
+
+function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
+  const I = icon
+  return (
+    <Label htmlFor={htmlFor} className="ot-label">
       <span className="inline-flex items-center gap-1.5">
         <I className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span>{text}</span>
@@ -407,6 +419,9 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
   const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
   const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
 
+  const formFieldId = useId().replace(/:/g, "")
+  const mk = (suffix: string) => `${formFieldId}-${suffix}`
+
   const pauseParadaComboLabel = useMemo(() => {
     const r = props.pauseReason.trim()
     if (!r) return "Seleccionar motivo…"
@@ -453,6 +468,66 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
     props.devolucionRechazada > 0.01
   const doneResumen = autoResumen
 
+  const showPersonalTurnoSetup = !props.hasActiveTurno && !props.areaFinalizada
+
+  const acumuladoOrdenSection = (
+    <MesSectionShell
+      title={mesSectionTitle(BarChart3, "Acumulado de la orden (todos los turnos)")}
+      headerRight={sectionHeaderExtras(doneAcumulado)}
+    >
+      <div
+        className={cn(
+          "mes-stat-grid mes-stat-grid--4",
+          showPersonalTurnoSetup && "is-compact-tiles",
+        )}
+      >
+        <MesStatTile
+          label="Pedido total"
+          value={`${props.pedidoTotalKg.toFixed(2)} Kg`}
+          icon={<Package className="h-3.5 w-3.5" />}
+        />
+        <MesStatTile
+          label="Producido"
+          value={`${props.producidoAcumuladoKg.toFixed(2)} Kg`}
+          tone="positive"
+          icon={<Factory className="h-3.5 w-3.5" />}
+        />
+        <MesStatTile
+          label="Falta por producir"
+          value={`${props.faltanteKg.toFixed(2)} Kg`}
+          tone="negative"
+          icon={<Hourglass className="h-3.5 w-3.5" />}
+        />
+        <MesStatTile
+          label="Registros / turnos"
+          value={props.turnosRegistrados}
+          icon={<ClipboardList className="h-3.5 w-3.5" />}
+        />
+      </div>
+      <div className="mes-footer-bar mes-footer-bar--3">
+        <div className="mes-footer-bar__item flex items-start gap-2">
+          <ArrowDownToLine className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+          <span>
+            Total entrada acumulada:{" "}
+            <strong>{props.totalEntradaAcumulada.toFixed(2)} Kg</strong>
+          </span>
+        </div>
+        <div className="mes-footer-bar__item flex items-start gap-2">
+          <Trash2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+          <span>
+            Total scrap acumulado: <strong>{props.totalScrap.toFixed(2)} Kg</strong>
+          </span>
+        </div>
+        <div className="mes-footer-bar__item flex items-start gap-2">
+          <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+          <span>
+            Último turno: <strong>{props.ultimoTurnoLabel}</strong>
+          </span>
+        </div>
+      </div>
+    </MesSectionShell>
+  )
+
   return (
     <>
       {props.areaFinalizada ? (
@@ -464,56 +539,227 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         </div>
       ) : null}
 
-      <MesSectionShell
-        title={mesSectionTitle(BarChart3, "Acumulado de la orden (todos los turnos)")}
-        headerRight={sectionHeaderExtras(doneAcumulado)}
-      >
-        <div className="mes-stat-grid mes-stat-grid--4">
-          <MesStatTile
-            label="Pedido total"
-            value={`${props.pedidoTotalKg.toFixed(2)} Kg`}
-            icon={<Package className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Producido"
-            value={`${props.producidoAcumuladoKg.toFixed(2)} Kg`}
-            tone="positive"
-            icon={<Factory className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Falta por producir"
-            value={`${props.faltanteKg.toFixed(2)} Kg`}
-            tone="negative"
-            icon={<Hourglass className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Registros / turnos"
-            value={props.turnosRegistrados}
-            icon={<ClipboardList className="h-3.5 w-3.5" />}
-          />
+      {showPersonalTurnoSetup ? (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start xl:gap-5">
+          <div className="min-w-0">{acumuladoOrdenSection}</div>
+          <div className="min-w-0">
+            <MesSectionShell
+              title={mesSectionTitle(Users, "Personal y turno de planta")}
+              subtle
+              bodyClassName="mes-section__body--flush"
+            >
+              <p className="text-muted-foreground mb-3 text-xs leading-snug">
+                Elija <span className="font-semibold text-foreground">Diurno / Nocturno</span> y{" "}
+                <span className="font-semibold text-foreground">grupo A / B / C</span>. Arme la cuadrilla con nombre y
+                rol usando <span className="font-semibold text-foreground">Guardar persona</span> (al menos un{" "}
+                <span className="font-semibold text-foreground">operador</span>). Luego pulse{" "}
+                <span className="font-semibold text-foreground">Iniciar turno</span> para abrir el registro de
+                producción de esta OT. Eso <span className="font-semibold text-foreground">no</span> arranca el
+                cronómetro de máquina: el contador está en{" "}
+                <span className="font-semibold text-foreground">Cronómetro de producción</span> más abajo (botón play
+                allí).
+              </p>
+
+              <div className="rounded-lg border bg-background/60 p-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    {fieldLegend(Clock, "Turno")}
+                    <div className="mes-toggle-row mes-toggle-turno">
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        className="w-full"
+                        value={props.draftTurno}
+                        onValueChange={(v) => {
+                          if (!v) return
+                          props.onDraftTurno(v as "diurno" | "nocturno")
+                        }}
+                      >
+                        <ToggleGroupItem value="diurno" className="flex-1 gap-2">
+                          <Sun className="h-4 w-4 shrink-0" aria-hidden />
+                          Diurno
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
+                          <Moon className="h-4 w-4 shrink-0" aria-hidden />
+                          Nocturno
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </div>
+                    <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
+                  </div>
+                  <div className="space-y-1">
+                    {fieldLegend(Users, "Grupo")}
+                    <div className="mes-toggle-row mes-toggle-grupo">
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        className="w-full"
+                        value={props.draftGrupo}
+                        onValueChange={(v) => {
+                          if (!v) return
+                          props.onDraftGrupo(v as "A" | "B" | "C")
+                        }}
+                      >
+                        {(["A", "B", "C"] as const).map((g) => (
+                          <ToggleGroupItem
+                            key={g}
+                            value={g}
+                            className={cn(
+                              "flex-1 gap-1",
+                              g === "A" && "mes-grupo-a",
+                              g === "B" && "mes-grupo-b",
+                              g === "C" && "mes-grupo-c",
+                            )}
+                          >
+                            <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                            {g}
+                          </ToggleGroupItem>
+                        ))}
+                      </ToggleGroup>
+                    </div>
+                    <p className="mes-field-hint">
+                      Cuadrilla o equipo asignado a la máquina (rotación interna A / B / C).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t border-border/60 pt-4">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Cuadrilla (antes de iniciar)
+                  </div>
+                  <div className="space-y-3 rounded-md border bg-background p-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
+                      <div className="min-w-0 space-y-1">
+                        {fieldLabel(
+                          mk("draft-person-name"),
+                          UserRound,
+                          <>
+                            Nombre
+                            {props.draftStagingRole === "operador" ? (
+                              <span className="text-muted-foreground"> (operador)</span>
+                            ) : null}
+                          </>,
+                        )}
+                        <Input
+                          id={mk("draft-person-name")}
+                          name="impDraftPersonName"
+                          className="ot-input-unified h-9 w-full min-w-0"
+                          value={props.draftStagingName}
+                          onChange={(e) => props.onDraftStagingName(e.target.value)}
+                          placeholder="Nombre"
+                          disabled={props.readOnlyOps}
+                        />
+                      </div>
+
+                      <div className="min-w-0 space-y-1">
+                        {fieldLabel(mk("draft-person-role"), IdCard, "Rol")}
+                        <Select
+                          value={props.draftStagingRole}
+                          onValueChange={(v) => props.onDraftStagingRole(v as DraftPersonRole)}
+                          disabled={props.readOnlyOps}
+                        >
+                          <SelectTrigger id={mk("draft-person-role")} className="h-9 w-full min-w-0">
+                            <SelectValue placeholder="Seleccione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="operador">Operador</SelectItem>
+                            <SelectItem value="ayudante">Ayudante</SelectItem>
+                            <SelectItem value="supervisor">Supervisor</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <div className="text-[11px] text-muted-foreground">
+                          {props.draftStagingRole === "operador"
+                            ? "Responsable del turno"
+                            : props.draftStagingRole === "supervisor"
+                              ? "Máximo 1 por turno"
+                              : "Apoyo operativo"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-9 w-full gap-1.5 sm:w-auto sm:shrink-0"
+                      onClick={() =>
+                        props.onDraftPersonGuardar(props.draftStagingName, props.draftStagingRole)
+                      }
+                      disabled={props.readOnlyOps}
+                    >
+                      <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
+                      Guardar persona
+                    </Button>
+                  </div>
+
+                  <Collapsible defaultOpen className="mt-3 rounded-md border border-dashed bg-muted/20">
+                    <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/40">
+                      <span className="inline-flex items-center gap-2">
+                        <Users className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+                        Personal guardado ({props.draftPeople.length})
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      {props.draftPeople.length === 0 ? (
+                        <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
+                          Aún no hay personas en la lista. Guarde al menos un <strong>operador</strong> antes de pulsar{" "}
+                          <strong>Iniciar turno</strong>.
+                        </div>
+                      ) : (
+                        <ul className="space-y-1 border-t px-3 py-2">
+                          {props.draftPeople.map((p) => (
+                            <li
+                              key={p.id}
+                              className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs"
+                            >
+                              <span>
+                                <span className="font-medium text-foreground">{p.name}</span>
+                                <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0"
+                                onClick={() => props.onDraftPersonRemove(p.id)}
+                                disabled={props.readOnlyOps}
+                                title="Quitar de la lista"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {props.draftOperadorMissing ? (
+                    <div className="mt-2 text-xs text-rose-700">
+                      Debe guardar al menos un operador antes de pulsar <span className="font-semibold">Iniciar turno</span>{" "}
+                      en esta misma sección.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 flex justify-center border-t border-border/60 pt-4">
+                  <Button
+                    type="button"
+                    onClick={props.onIniciarTurno}
+                    disabled={props.readOnlyOps}
+                    title="Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+                  >
+                    <CirclePlay className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                    Iniciar turno
+                  </Button>
+                </div>
+              </div>
+            </MesSectionShell>
+          </div>
         </div>
-        <div className="mes-footer-bar mes-footer-bar--3">
-          <div className="mes-footer-bar__item flex items-start gap-2">
-            <ArrowDownToLine className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-            <span>
-              Total entrada acumulada:{" "}
-              <strong>{props.totalEntradaAcumulada.toFixed(2)} Kg</strong>
-            </span>
-          </div>
-          <div className="mes-footer-bar__item flex items-start gap-2">
-            <Trash2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-            <span>
-              Total scrap acumulado: <strong>{props.totalScrap.toFixed(2)} Kg</strong>
-            </span>
-          </div>
-          <div className="mes-footer-bar__item flex items-start gap-2">
-            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-            <span>
-              Último turno: <strong>{props.ultimoTurnoLabel}</strong>
-            </span>
-          </div>
-        </div>
-      </MesSectionShell>
+      ) : (
+        acumuladoOrdenSection
+      )}
 
       {props.closedTurnos.length > 0 ? (
         <Collapsible className="rounded-lg border border-slate-300 bg-white shadow-sm">
@@ -545,226 +791,6 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         </Collapsible>
       ) : null}
 
-      {!props.hasActiveTurno && !props.areaFinalizada ? (
-        <>
-          <MesSectionShell
-            title={mesSectionTitle(UserRound, "Personal del turno")}
-            subtle
-            bodyClassName="mes-section__body--flush"
-          >
-            <p className="text-muted-foreground mb-3 text-xs leading-snug">
-              Escriba nombre y rol, luego use <span className="font-semibold text-foreground">Guardar persona</span>.
-              La lista queda aquí (cuadrilla en pantalla) antes de abrir el{" "}
-              <span className="font-semibold text-foreground">turno de planta</span> en la sección siguiente. No es el
-              cronómetro de máquina (eso va más abajo, tras abrir el registro).
-            </p>
-
-            <div className="rounded-lg border bg-background/60 p-3">
-              <div className="grid gap-2 rounded-md border bg-background p-2 md:grid-cols-[1fr_12rem_auto]">
-                <div className="space-y-1">
-                  {fieldLabel(
-                    UserRound,
-                    <>
-                      Nombre
-                      {props.draftStagingRole === "operador" ? (
-                        <span className="text-muted-foreground"> (operador)</span>
-                      ) : null}
-                    </>,
-                  )}
-                  <Input
-                    className="ot-input-unified h-9"
-                    value={props.draftStagingName}
-                    onChange={(e) => props.onDraftStagingName(e.target.value)}
-                    placeholder="Nombre"
-                    disabled={props.readOnlyOps}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  {fieldLabel(IdCard, "Rol")}
-                  <Select
-                    value={props.draftStagingRole}
-                    onValueChange={(v) => props.onDraftStagingRole(v as DraftPersonRole)}
-                    disabled={props.readOnlyOps}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Seleccione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="operador">Operador</SelectItem>
-                      <SelectItem value="ayudante">Ayudante</SelectItem>
-                      <SelectItem value="supervisor">Supervisor</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="text-[11px] text-muted-foreground">
-                    {props.draftStagingRole === "operador"
-                      ? "Responsable del turno"
-                      : props.draftStagingRole === "supervisor"
-                        ? "Máximo 1 por turno"
-                        : "Apoyo operativo"}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <div className="h-5 shrink-0" aria-hidden />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="h-9 shrink-0 gap-1.5 whitespace-nowrap"
-                    onClick={() =>
-                      props.onDraftPersonGuardar(props.draftStagingName, props.draftStagingRole)
-                    }
-                    disabled={props.readOnlyOps}
-                  >
-                    <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
-                    Guardar persona
-                  </Button>
-                  <div className="text-[11px] leading-snug text-transparent select-none" aria-hidden>
-                    &nbsp;
-                  </div>
-                </div>
-              </div>
-
-              <Collapsible defaultOpen className="mt-3 rounded-md border border-dashed bg-muted/20">
-                <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/40">
-                  <span className="inline-flex items-center gap-2">
-                    <Users className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
-                    Personal guardado ({props.draftPeople.length})
-                  </span>
-                  <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  {props.draftPeople.length === 0 ? (
-                    <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-                      Aún no hay personas en la lista. Guarde al menos un <strong>operador</strong> para poder abrir el
-                      turno de planta (botón siguiente).
-                    </div>
-                  ) : (
-                    <ul className="space-y-1 border-t px-3 py-2">
-                      {props.draftPeople.map((p) => (
-                        <li
-                          key={p.id}
-                          className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs"
-                        >
-                          <span>
-                            <span className="font-medium text-foreground">{p.name}</span>
-                            <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
-                          </span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            onClick={() => props.onDraftPersonRemove(p.id)}
-                            disabled={props.readOnlyOps}
-                            title="Quitar de la lista"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </CollapsibleContent>
-              </Collapsible>
-
-              {props.draftOperadorMissing ? (
-                <div className="mt-2 text-xs text-rose-700">
-                  Debe guardar al menos un operador para poder abrir el turno de planta (sección siguiente).
-                </div>
-              ) : null}
-            </div>
-          </MesSectionShell>
-
-          <MesSectionShell
-            title={mesSectionTitle(CalendarPlus, "Turno de planta (apertura de registro)")}
-            subtle
-            bodyClassName="mes-section__body--flush"
-          >
-            <p className="text-muted-foreground mb-3 text-xs leading-snug">
-              Elija <span className="font-semibold text-foreground">Diurno / Nocturno</span> y{" "}
-              <span className="font-semibold text-foreground">grupo A / B / C</span>. Con el personal listo arriba, pulse{" "}
-              <span className="font-semibold text-foreground">Iniciar turno</span> para{" "}
-              <span className="font-semibold text-foreground">abrir el registro de producción</span> de esta OT. Eso{" "}
-              <span className="font-semibold text-foreground">no</span> arranca el cronómetro: el contador de tiempos
-              está en la sección <span className="font-semibold text-foreground">Cronómetro de producción</span> más
-              abajo (botón play allí).
-            </p>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1">
-                {fieldLabel(Clock, "Turno")}
-                <div className="mes-toggle-row mes-toggle-turno">
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    className="w-full"
-                    value={props.draftTurno}
-                    onValueChange={(v) => {
-                      if (!v) return
-                      props.onDraftTurno(v as "diurno" | "nocturno")
-                    }}
-                  >
-                    <ToggleGroupItem value="diurno" className="flex-1 gap-2">
-                      <Sun className="h-4 w-4 shrink-0" aria-hidden />
-                      Diurno
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
-                      <Moon className="h-4 w-4 shrink-0" aria-hidden />
-                      Nocturno
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
-                <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
-              </div>
-              <div className="space-y-1">
-                {fieldLabel(Users, "Grupo")}
-                <div className="mes-toggle-row mes-toggle-grupo">
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    className="w-full"
-                    value={props.draftGrupo}
-                    onValueChange={(v) => {
-                      if (!v) return
-                      props.onDraftGrupo(v as "A" | "B" | "C")
-                    }}
-                  >
-                    {(["A", "B", "C"] as const).map((g) => (
-                      <ToggleGroupItem
-                        key={g}
-                        value={g}
-                        className={cn(
-                          "flex-1 gap-1",
-                          g === "A" && "mes-grupo-a",
-                          g === "B" && "mes-grupo-b",
-                          g === "C" && "mes-grupo-c",
-                        )}
-                      >
-                        <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
-                        {g}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </div>
-                <p className="mes-field-hint">Cuadrilla o equipo asignado a la máquina (rotación interna A / B / C).</p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex justify-center">
-              <Button
-                type="button"
-                onClick={props.onIniciarTurno}
-                disabled={props.readOnlyOps}
-                title="Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
-              >
-                <CirclePlay className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-                Iniciar turno
-              </Button>
-            </div>
-          </MesSectionShell>
-        </>
-      ) : null}
-
       {props.hasActiveTurno ? (
       <MesSectionShell
         title={mesSectionTitle(ClipboardList, "Información del turno")}
@@ -780,7 +806,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
         </p>
         <div className="grid gap-2 md:grid-cols-2">
           <div className="space-y-1">
-            {fieldLabel(Clock, "Turno")}
+            {fieldLegend(Clock, "Turno")}
             <div className="mes-toggle-row mes-toggle-turno">
               <ToggleGroup
                 type="single"
@@ -806,7 +832,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
           </div>
           <div className="space-y-1">
-            {fieldLabel(Users, "Grupo")}
+            {fieldLegend(Users, "Grupo")}
             <div className="mes-toggle-row mes-toggle-grupo">
               <ToggleGroup
                 type="single"
@@ -844,67 +870,69 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
               Personal del turno
             </div>
 
-            <div className="grid gap-2 rounded-md border bg-background p-2 md:grid-cols-[1fr_12rem_auto]">
-              <div className="space-y-1">
-                {fieldLabel(
-                  UserRound,
-                  <>
-                    Nombre
-                    {activeStageRole === "operador" ? (
-                      <span className="text-muted-foreground"> (operador)</span>
-                    ) : null}
-                  </>,
-                )}
-                <Input
-                  className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                  value={activeStageName}
-                  onChange={(e) => setActiveStageName(e.target.value)}
-                  placeholder="Nombre"
-                  disabled={props.readOnlyOps}
-                />
-              </div>
+            <div className="space-y-3 rounded-md border bg-background p-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
+                <div className="min-w-0 space-y-1">
+                  {fieldLabel(
+                    mk("active-person-name"),
+                    UserRound,
+                    <>
+                      Nombre
+                      {activeStageRole === "operador" ? (
+                        <span className="text-muted-foreground"> (operador)</span>
+                      ) : null}
+                    </>,
+                  )}
+                  <Input
+                    id={mk("active-person-name")}
+                    name="impActivePersonName"
+                    className="ot-input-unified h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900"
+                    value={activeStageName}
+                    onChange={(e) => setActiveStageName(e.target.value)}
+                    placeholder="Nombre"
+                    disabled={props.readOnlyOps}
+                  />
+                </div>
 
-              <div className="space-y-1">
-                {fieldLabel(IdCard, "Rol")}
-                <Select
-                  value={activeStageRole}
-                  onValueChange={(v) => setActiveStageRole(v as DraftPersonRole)}
-                  disabled={props.readOnlyOps}
-                >
-                  <SelectTrigger className="h-9 bg-white dark:bg-white dark:text-slate-900">
-                    <SelectValue placeholder="Seleccione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="operador">Operador</SelectItem>
-                    <SelectItem value="ayudante">Ayudante</SelectItem>
-                    <SelectItem value="supervisor">Supervisor</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="text-[11px] text-muted-foreground">
-                  {activeStageRole === "operador"
-                    ? "Responsable del turno"
-                    : activeStageRole === "supervisor"
-                      ? "Máximo 1 por turno"
-                      : "Apoyo operativo"}
+                <div className="min-w-0 space-y-1">
+                  {fieldLabel(mk("active-person-role"), IdCard, "Rol")}
+                  <Select
+                    value={activeStageRole}
+                    onValueChange={(v) => setActiveStageRole(v as DraftPersonRole)}
+                    disabled={props.readOnlyOps}
+                  >
+                    <SelectTrigger
+                      id={mk("active-person-role")}
+                      className="h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900"
+                    >
+                      <SelectValue placeholder="Seleccione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="operador">Operador</SelectItem>
+                      <SelectItem value="ayudante">Ayudante</SelectItem>
+                      <SelectItem value="supervisor">Supervisor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="text-[11px] text-muted-foreground">
+                    {activeStageRole === "operador"
+                      ? "Responsable del turno"
+                      : activeStageRole === "supervisor"
+                        ? "Máximo 1 por turno"
+                        : "Apoyo operativo"}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <div className="h-5 shrink-0" aria-hidden />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="h-9 shrink-0 gap-1.5 whitespace-nowrap"
-                  onClick={guardarPersonaTurnoActivo}
-                  disabled={props.readOnlyOps}
-                >
-                  <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
-                  Guardar persona
-                </Button>
-                <div className="text-[11px] leading-snug text-transparent select-none" aria-hidden>
-                  &nbsp;
-                </div>
-              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-9 w-full gap-1.5 sm:w-auto sm:shrink-0"
+                onClick={guardarPersonaTurnoActivo}
+                disabled={props.readOnlyOps}
+              >
+                <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
+                Guardar persona
+              </Button>
             </div>
 
             <Collapsible defaultOpen className="mt-3 rounded-md border border-dashed bg-muted/20">
@@ -1212,7 +1240,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           {props.entradaBobinas.map((val, idx) => (
             <div key={`ent-${idx}`} className="space-y-1">
               <div className="flex items-center justify-between">
-                <Label className="ot-label">
+                <Label htmlFor={mk(`entrada-bobina-${idx}`)} className="ot-label">
                   <span className="inline-flex items-center gap-1">
                     <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                     {idx + 1}
@@ -1240,6 +1268,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 </TooltipProvider>
               </div>
               <Input
+                id={mk(`entrada-bobina-${idx}`)}
+                name={`impEntradaBobinaKg_${idx + 1}`}
                 className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                 inputMode="decimal"
                 value={val}
@@ -1324,8 +1354,10 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2 rounded-lg border border-emerald-200/70 bg-emerald-50/25 p-3 dark:bg-emerald-950/15">
-                  {fieldLabel(PackageCheck, "Devolución buena (Kg)")}
+                  {fieldLabel(mk("devolucion-buena-kg"), PackageCheck, "Devolución buena (Kg)")}
                   <Input
+                    id={mk("devolucion-buena-kg")}
+                    name="impDevolucionBuenaKg"
                     className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                     inputMode="decimal"
                     value={props.devolucionBuenaRaw}
@@ -1336,8 +1368,10 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   <p className="text-muted-foreground text-[11px]">Material apto para reingreso a inventario.</p>
                 </div>
                 <div className="space-y-2 rounded-lg border border-rose-200/70 bg-rose-50/25 p-3 dark:bg-rose-950/15">
-                  {fieldLabel(PackageX, "Devolución rechazada (Kg)")}
+                  {fieldLabel(mk("devolucion-rechazada-kg"), PackageX, "Devolución rechazada (Kg)")}
                   <Input
+                    id={mk("devolucion-rechazada-kg")}
+                    name="impDevolucionRechazadaKg"
                     className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                     inputMode="decimal"
                     value={props.devolucionRechazadaRaw}
@@ -1350,7 +1384,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
               </div>
 
               <div className="space-y-1">
-                {fieldLabel(FileSearch, "Motivo (devolución rechazada)")}
+                {fieldLabel(mk("devolucion-rechazada-motivo"), FileSearch, "Motivo (devolución rechazada)")}
                 <Popover
                   open={motivoComboOpen && !motivoSelectDisabled}
                   onOpenChange={(o) => {
@@ -1360,6 +1394,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
+                      id={mk("devolucion-rechazada-motivo")}
+                      name="impDevolucionRechazadaMotivo"
                       variant="outline"
                       role="combobox"
                       aria-expanded={motivoComboOpen && !motivoSelectDisabled}
@@ -1431,10 +1467,14 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="ot-label">Bobina / referencia</Label>
+                  <Label htmlFor={mk("warehouse-bobina-ref")} className="ot-label">
+                    Bobina / referencia
+                  </Label>
                   <span className="text-[10px] text-muted-foreground">Opcional</span>
                 </div>
                 <Input
+                  id={mk("warehouse-bobina-ref")}
+                  name="impWarehouseBobinaRef"
                   className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                   value={props.warehouseReturn.draft.bobinaCode}
                   onChange={(e) => props.warehouseReturn.onDraftChange({ bobinaCode: e.target.value })}
@@ -1456,7 +1496,9 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   </div>
                   <div className="space-y-2">
                     <div className="space-y-1">
-                      <Label className="text-xs text-emerald-900/90 dark:text-emerald-200/90">Material (área material)</Label>
+                      <Label htmlFor={mk("warehouse-material-buena")} className="text-xs text-emerald-900/90 dark:text-emerald-200/90">
+                        Material (área material)
+                      </Label>
                       <Popover
                         open={buenaComboOpen}
                         onOpenChange={(o) => {
@@ -1466,6 +1508,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         <PopoverTrigger asChild>
                           <Button
                             type="button"
+                            id={mk("warehouse-material-buena")}
+                            name="impWarehouseMaterialBuena"
                             variant="outline"
                             role="combobox"
                             aria-expanded={buenaComboOpen}
@@ -1550,7 +1594,9 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                   </div>
                   <div className="space-y-2">
                     <div className="space-y-1">
-                      <Label className="text-xs text-rose-900/90 dark:text-rose-200/90">Material (rechazadas)</Label>
+                      <Label htmlFor={mk("warehouse-material-rechazada")} className="text-xs text-rose-900/90 dark:text-rose-200/90">
+                        Material (rechazadas)
+                      </Label>
                       <Popover
                         open={rechComboOpen}
                         onOpenChange={(o) => {
@@ -1560,6 +1606,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                         <PopoverTrigger asChild>
                           <Button
                             type="button"
+                            id={mk("warehouse-material-rechazada")}
+                            name="impWarehouseMaterialRechazada"
                             variant="outline"
                             role="combobox"
                             aria-expanded={rechComboOpen}
@@ -1633,8 +1681,12 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                       </Popover>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-rose-900/90 dark:text-rose-200/90">Observación (opcional)</Label>
+                      <Label htmlFor={mk("warehouse-rechazada-obs")} className="text-xs text-rose-900/90 dark:text-rose-200/90">
+                        Observación (opcional)
+                      </Label>
                       <Textarea
+                        id={mk("warehouse-rechazada-obs")}
+                        name="impWarehouseRechazadaObs"
                         className="min-h-[72px] bg-white text-sm dark:bg-white dark:text-slate-900"
                         value={props.warehouseReturn.draft.rechazadaObs}
                         onChange={(e) =>
@@ -1682,7 +1734,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           {props.salidaBobinas.map((val, idx) => (
             <div key={`sal-${idx}`} className="space-y-1">
               <div className="flex items-center justify-between">
-                <Label className="ot-label">
+                <Label htmlFor={mk(`salida-bobina-${idx}`)} className="ot-label">
                   <span className="inline-flex items-center gap-1">
                     <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                     {idx + 1}
@@ -1710,6 +1762,8 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
                 </TooltipProvider>
               </div>
               <Input
+                id={mk(`salida-bobina-${idx}`)}
+                name={`impSalidaBobinaKg_${idx + 1}`}
                 className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                 inputMode="decimal"
                 value={val}
@@ -1751,11 +1805,16 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       >
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <Label
+              htmlFor={mk("merma-turno")}
+              className="inline-flex items-center gap-1.5 text-muted-foreground"
+            >
               <TrendingDown className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
               Merma
-            </span>
+            </Label>
             <Input
+              id={mk("merma-turno")}
+              name="impMermaKg"
               className="ot-input-unified mt-1 h-9 bg-white dark:bg-white dark:text-slate-900"
               inputMode="decimal"
               value={props.mermaRaw}
@@ -1768,11 +1827,16 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
             </div>
           </div>
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <Label
+              htmlFor={mk("metraje-turno")}
+              className="inline-flex items-center gap-1.5 text-muted-foreground"
+            >
               <Ruler className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
               Metraje
-            </span>
+            </Label>
             <Input
+              id={mk("metraje-turno")}
+              name="impMetrajeM"
               className="ot-input-unified mt-1 h-9 bg-white dark:bg-white dark:text-slate-900"
               inputMode="decimal"
               value={props.metrajeRaw}
@@ -1791,12 +1855,30 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
       >
         <div className="grid gap-2 sm:grid-cols-3">
           <div>
-            {fieldLabel(Layers, "Transparente")}
-            <Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapTransparenteRaw} onChange={(e) => props.onSetScrapTransparente(e.target.value)} placeholder="0" disabled={inputDisabled} />
+            {fieldLabel(mk("scrap-transparente"), Layers, "Transparente")}
+            <Input
+              id={mk("scrap-transparente")}
+              name="impScrapTransparenteKg"
+              className="ot-input-unified h-9"
+              inputMode="decimal"
+              value={props.scrapTransparenteRaw}
+              onChange={(e) => props.onSetScrapTransparente(e.target.value)}
+              placeholder="0"
+              disabled={inputDisabled}
+            />
           </div>
           <div className="space-y-2">
-            {fieldLabel(Printer, "Impreso")}
-            <Input className="ot-input-unified h-9" inputMode="decimal" value={props.scrapImpresoRaw} onChange={(e) => props.onSetScrapImpreso(e.target.value)} placeholder="0" disabled={inputDisabled} />
+            {fieldLabel(mk("scrap-impreso"), Printer, "Impreso")}
+            <Input
+              id={mk("scrap-impreso")}
+              name="impScrapImpresoKg"
+              className="ot-input-unified h-9"
+              inputMode="decimal"
+              value={props.scrapImpresoRaw}
+              onChange={(e) => props.onSetScrapImpreso(e.target.value)}
+              placeholder="0"
+              disabled={inputDisabled}
+            />
               <div className="space-y-1">
               <p className="inline-flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
                 <Warehouse className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
@@ -1923,11 +2005,13 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
           </DialogHeader>
           <div className="grid gap-3">
             <div className="space-y-1">
-              <Label>Motivo</Label>
+              <Label htmlFor={mk("pause-motivo")}>Motivo</Label>
               <Popover open={pauseParadaComboOpen} onOpenChange={setPauseParadaComboOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     type="button"
+                    id={mk("pause-motivo")}
+                    name="impPauseMotivo"
                     variant="outline"
                     role="combobox"
                     aria-expanded={pauseParadaComboOpen}
@@ -1995,8 +2079,10 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
               </Popover>
             </div>
             <div className="space-y-1">
-              <Label>Observación (opcional)</Label>
+              <Label htmlFor={mk("pause-obs")}>Observación (opcional)</Label>
               <Input
+                id={mk("pause-obs")}
+                name="impPauseObs"
                 value={props.pauseObs}
                 onChange={(e) => props.setPauseObs(e.target.value)}
                 placeholder="Detalle breve (opcional)"
@@ -2025,60 +2111,134 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Fecha bobina</Label>
+              <Label htmlFor={mk("label-fecha")}>Fecha bobina</Label>
               <Input
+                id={mk("label-fecha")}
+                name="impLabelFecha"
                 value={props.labelEditorDraft.fecha}
                 onChange={(e) => props.onLabelDraftChange("fecha", e.target.value)}
                 placeholder="dd/mm/aaaa"
               />
             </div>
             <div className="space-y-2">
-              <Label>Hora</Label>
-              <Input value={props.labelEditorDraft.hora} onChange={(e) => props.onLabelDraftChange("hora", e.target.value)} placeholder="--:--" />
+              <Label htmlFor={mk("label-hora")}>Hora</Label>
+              <Input
+                id={mk("label-hora")}
+                name="impLabelHora"
+                value={props.labelEditorDraft.hora}
+                onChange={(e) => props.onLabelDraftChange("hora", e.target.value)}
+                placeholder="--:--"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Referencia Bobina</Label>
-              <Input value={props.labelEditorDraft.referencia} onChange={(e) => props.onLabelDraftChange("referencia", e.target.value)} placeholder="Ref. o lote" />
+              <Label htmlFor={mk("label-referencia")}>Referencia Bobina</Label>
+              <Input
+                id={mk("label-referencia")}
+                name="impLabelReferencia"
+                value={props.labelEditorDraft.referencia}
+                onChange={(e) => props.onLabelDraftChange("referencia", e.target.value)}
+                placeholder="Ref. o lote"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Pedido / Lote</Label>
-              <Input value={props.labelEditorDraft.pedido_lote} onChange={(e) => props.onLabelDraftChange("pedido_lote", e.target.value)} placeholder="N° pedido o lote" />
+              <Label htmlFor={mk("label-pedido-lote")}>Pedido / Lote</Label>
+              <Input
+                id={mk("label-pedido-lote")}
+                name="impLabelPedidoLote"
+                value={props.labelEditorDraft.pedido_lote}
+                onChange={(e) => props.onLabelDraftChange("pedido_lote", e.target.value)}
+                placeholder="N° pedido o lote"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Proveedor</Label>
-              <Input value={props.labelEditorDraft.proveedor} onChange={(e) => props.onLabelDraftChange("proveedor", e.target.value)} placeholder="Nombre proveedor" />
+              <Label htmlFor={mk("label-proveedor")}>Proveedor</Label>
+              <Input
+                id={mk("label-proveedor")}
+                name="impLabelProveedor"
+                value={props.labelEditorDraft.proveedor}
+                onChange={(e) => props.onLabelDraftChange("proveedor", e.target.value)}
+                placeholder="Nombre proveedor"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Operador</Label>
-              <Input value={props.labelEditorDraft.operador} onChange={(e) => props.onLabelDraftChange("operador", e.target.value)} placeholder="Nombre operador" />
+              <Label htmlFor={mk("label-operador")}>Operador</Label>
+              <Input
+                id={mk("label-operador")}
+                name="impLabelOperador"
+                value={props.labelEditorDraft.operador}
+                onChange={(e) => props.onLabelDraftChange("operador", e.target.value)}
+                placeholder="Nombre operador"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Peso (Kg)</Label>
-              <Input value={props.labelEditorDraft.peso} onChange={(e) => props.onLabelDraftChange("peso", e.target.value)} placeholder="Ej: 120" />
+              <Label htmlFor={mk("label-peso")}>Peso (Kg)</Label>
+              <Input
+                id={mk("label-peso")}
+                name="impLabelPeso"
+                value={props.labelEditorDraft.peso}
+                onChange={(e) => props.onLabelDraftChange("peso", e.target.value)}
+                placeholder="Ej: 120"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Metraje</Label>
-              <Input value={props.labelEditorDraft.metraje} onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)} placeholder="Metros" />
+              <Label htmlFor={mk("label-metraje")}>Metraje</Label>
+              <Input
+                id={mk("label-metraje")}
+                name="impLabelMetraje"
+                value={props.labelEditorDraft.metraje}
+                onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)}
+                placeholder="Metros"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Medida / Ancho (mm)</Label>
-              <Input value={props.labelEditorDraft.medida_ancho} onChange={(e) => props.onLabelDraftChange("medida_ancho", e.target.value)} placeholder="Ej: 610" />
+              <Label htmlFor={mk("label-medida-ancho")}>Medida / Ancho (mm)</Label>
+              <Input
+                id={mk("label-medida-ancho")}
+                name="impLabelMedidaAncho"
+                value={props.labelEditorDraft.medida_ancho}
+                onChange={(e) => props.onLabelDraftChange("medida_ancho", e.target.value)}
+                placeholder="Ej: 610"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Máquina origen</Label>
-              <Input value={props.labelEditorDraft.maquina_origen} onChange={(e) => props.onLabelDraftChange("maquina_origen", e.target.value)} placeholder="Máquina" />
+              <Label htmlFor={mk("label-maquina-origen")}>Máquina origen</Label>
+              <Input
+                id={mk("label-maquina-origen")}
+                name="impLabelMaquinaOrigen"
+                value={props.labelEditorDraft.maquina_origen}
+                onChange={(e) => props.onLabelDraftChange("maquina_origen", e.target.value)}
+                placeholder="Máquina"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Tratamiento interno</Label>
-              <Input value={props.labelEditorDraft.tratamiento_interno} onChange={(e) => props.onLabelDraftChange("tratamiento_interno", e.target.value)} placeholder="Dinas" />
+              <Label htmlFor={mk("label-trat-int")}>Tratamiento interno</Label>
+              <Input
+                id={mk("label-trat-int")}
+                name="impLabelTratamientoInterno"
+                value={props.labelEditorDraft.tratamiento_interno}
+                onChange={(e) => props.onLabelDraftChange("tratamiento_interno", e.target.value)}
+                placeholder="Dinas"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Tratamiento externo</Label>
-              <Input value={props.labelEditorDraft.tratamiento_externo} onChange={(e) => props.onLabelDraftChange("tratamiento_externo", e.target.value)} placeholder="Dinas" />
+              <Label htmlFor={mk("label-trat-ext")}>Tratamiento externo</Label>
+              <Input
+                id={mk("label-trat-ext")}
+                name="impLabelTratamientoExterno"
+                value={props.labelEditorDraft.tratamiento_externo}
+                onChange={(e) => props.onLabelDraftChange("tratamiento_externo", e.target.value)}
+                placeholder="Dinas"
+              />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>Lote</Label>
-              <Input value={props.labelEditorDraft.lote} onChange={(e) => props.onLabelDraftChange("lote", e.target.value)} placeholder="Lote" />
+              <Label htmlFor={mk("label-lote")}>Lote</Label>
+              <Input
+                id={mk("label-lote")}
+                name="impLabelLote"
+                value={props.labelEditorDraft.lote}
+                onChange={(e) => props.onLabelDraftChange("lote", e.target.value)}
+                placeholder="Lote"
+              />
             </div>
           </div>
 

@@ -7,6 +7,7 @@ import {
   Layers2,
   Package,
   PackageOpen,
+  Puzzle,
   Scissors,
   ScrollText,
   Shield,
@@ -87,6 +88,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     icon: Factory,
     items: [
       { title: "Programación", url: "programacion", icon: ClipboardList },
+      { title: "Montaje", url: "montaje", icon: Puzzle },
       { title: "Impresión", url: "impresion", icon: Factory },
       { title: "Laminación", url: "laminacion", icon: Layers2 },
       { title: "Corte", url: "corte", icon: Scissors },

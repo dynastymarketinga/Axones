@@ -27,6 +27,7 @@ import {
   PauseCircle,
   PlayCircle,
   Printer,
+  Puzzle,
   Rows3,
   Scissors,
   Search,
@@ -119,12 +120,13 @@ import {
   type PrintingTurnoEntry,
 } from "@/pages/axones/printing-turnos"
 
-export type AreaKey = "printing" | "laminacion" | "corte" | "tintas"
+export type AreaKey = "printing" | "montaje" | "laminacion" | "corte" | "tintas"
 
 const SEARCH_DEBOUNCE_MS = 320
 
 const TAB_BY_AREA: Record<AreaKey, string> = {
   printing: "printing",
+  montaje: "montaje",
   laminacion: "laminacion",
   corte: "corte",
   tintas: "printing",
@@ -132,6 +134,7 @@ const TAB_BY_AREA: Record<AreaKey, string> = {
 
 const AREA_ICON: Record<AreaKey, LucideIcon> = {
   printing: Printer,
+  montaje: Puzzle,
   laminacion: Layers2,
   corte: Scissors,
   tintas: Droplets,
@@ -153,6 +156,7 @@ function printingWorkflowPillGlyph(wf: PrintingBandejaWorkflow) {
 
 function areaTitle(area: AreaKey): string {
   if (area === "printing") return "Área: Impresión"
+  if (area === "montaje") return "Área: Montaje"
   if (area === "laminacion") return "Área: Laminación"
   if (area === "corte") return "Área: Corte"
   return "Área: Tintas"
@@ -424,6 +428,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   const miAreaApi = useMemo((): MiAreaApi => {
     if (area === "printing") return "impresion"
+    if (area === "montaje") return "montaje"
     if (area === "laminacion") return "laminacion"
     if (area === "corte") return "corte"
     return "tintas"
@@ -698,6 +703,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   }
   const areaStageForProgress: Record<AreaKey, string> = {
     printing: "impresion",
+    montaje: "montaje",
     laminacion: "laminacion",
     corte: "corte",
     tintas: "impresion",
@@ -732,12 +738,16 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     if (area === "laminacion") {
       return `/ordenes-trabajo/${woId}/produccion?tab=laminacion`
     }
+    if (area === "montaje") {
+      return `/ordenes-trabajo/${woId}/produccion?tab=montaje`
+    }
     const tab = TAB_BY_AREA[area]
     return `/ordenes-trabajo/${woId}?tab=${encodeURIComponent(tab)}`
   }
 
   const nextStageByArea: Record<AreaKey, string | null> = {
     printing: null,
+    montaje: "impresion",
     laminacion: "corte",
     // En Corte no exponemos botón "Pasar a Completada" desde la bandeja del área.
     // El cierre/completado se maneja por despacho/nota de entrega u otro flujo.
@@ -747,6 +757,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   const stageByArea: Record<AreaKey, string> = {
     printing: "impresion",
+    montaje: "montaje",
     laminacion: "laminacion",
     corte: "corte",
     tintas: "impresion",
@@ -764,6 +775,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     if (bs !== here) return false
 
     if (area === "printing") return isBoss || role === "printing" || role === "impresion"
+    if (area === "montaje") return isBoss || role === "montaje"
     if (area === "laminacion") return isBoss || role === "laminacion"
     if (area === "corte") return isBoss || role === "corte"
     return false

@@ -29,15 +29,23 @@ export default function WorkOrderDetailPage() {
   const canUsePrintingOps = isBoss || role === "impresion" || role === "printing"
   const canUseLaminacionOps = isBoss || role === "laminacion"
   const canUseTintasOps = isBoss || role === "tintas"
+  const canUseMontajeOps = isBoss || role === "montaje" || role === "planificador" || role === "supervisor"
   const isPrintingOperator = role === "impresion" || role === "printing"
-  const otBackPath = isPrintingOperator ? "/impresion" : "/ordenes-trabajo"
+  const isMontajeOperator = role === "montaje"
+  const headerBackPath = isPrintingOperator ? "/impresion" : isMontajeOperator ? "/montaje" : "/ordenes-trabajo"
   const [searchParams] = useSearchParams()
   const tabParam = (searchParams.get("tab") ?? "").toLowerCase().trim()
   const initialTab = (() => {
     if (tabParam === "printing" && canUsePrintingOps) return "printing"
     if (tabParam === "laminacion" && canUseLaminacionOps) return "laminacion"
     if (tabParam === "tintas" && canUseTintasOps) return "tintas"
-    if (tabParam === "montaje" || tabParam === "corte") return tabParam
+    if (tabParam === "montaje" && canUseMontajeOps) return "montaje"
+    if (tabParam === "corte") return "corte"
+    if (canUsePrintingOps) return "printing"
+    if (canUseMontajeOps) return "montaje"
+    if (canUseLaminacionOps) return "laminacion"
+    if (canUseTintasOps) return "tintas"
+    if (role === "corte") return "corte"
     return "montaje"
   })()
   const [loading, setLoading] = useState(true)
@@ -66,7 +74,7 @@ export default function WorkOrderDetailPage() {
     return (
       <div className="p-6">
         <p className="text-destructive">ID de orden inválido.</p>
-        <Link to={otBackPath} className="text-primary underline">
+        <Link to="/ordenes-trabajo" className="text-primary underline">
           Volver al listado
         </Link>
       </div>
@@ -85,11 +93,11 @@ export default function WorkOrderDetailPage() {
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-4">
         <Link
-          to={otBackPath}
-          className="text-muted-foreground inline-flex items-center gap-1.5 text-sm transition-colors hover:text-foreground"
+          to={headerBackPath}
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm shadow-sm transition-colors hover:border-primary/25 hover:bg-muted/70"
         >
           <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-          {isPrintingOperator ? "Área Impresión" : "Órdenes de trabajo"}
+          {isPrintingOperator ? "Área Impresión" : isMontajeOperator ? "Área Montaje" : "Órdenes de trabajo"}
         </Link>
       </div>
 
@@ -139,7 +147,7 @@ export default function WorkOrderDetailPage() {
             <Tabs defaultValue={initialTab} className="w-full">
               {initialTab !== "laminacion" && initialTab !== "corte" ? (
                 <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1">
-                  <TabsTrigger value="montaje">Montaje</TabsTrigger>
+                  {canUseMontajeOps ? <TabsTrigger value="montaje">Montaje</TabsTrigger> : null}
                   {canUsePrintingOps ? (
                     <TabsTrigger value="printing">Impresión</TabsTrigger>
                   ) : null}
@@ -151,12 +159,14 @@ export default function WorkOrderDetailPage() {
                 </TabsList>
               ) : null}
               <TabsContent value="montaje" className="mt-4">
-                <ProductionAreaPanel
-                  workOrderId={id}
-                  title="Montaje"
-                  areaPath="montaje"
-                  usageMode="montaje"
-                />
+                {canUseMontajeOps ? (
+                  <ProductionAreaPanel
+                    workOrderId={id}
+                    title="Montaje"
+                    areaPath="montaje"
+                    usageMode="montaje"
+                  />
+                ) : null}
               </TabsContent>
               {canUsePrintingOps ? (
                 <TabsContent value="printing" className="mt-4">

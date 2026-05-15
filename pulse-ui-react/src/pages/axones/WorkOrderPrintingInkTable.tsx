@@ -1,5 +1,5 @@
 import { Gauge, Loader2, MessageSquare, Palette as LucidePaletteField, Timer } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -43,6 +43,7 @@ type InkRowProps = {
   tintaColorPickerRow: number | null
   setTintaColorPickerRow: (v: number | null) => void
   onSetField: (key: string, value: unknown) => void
+  tintaFieldId: (n: number, suffix: string) => string
 }
 
 /** Celda color + catálogo (compartida entre tabla y vista móvil). */
@@ -55,13 +56,17 @@ function InkColorField({
   tintaColorPickerRow,
   setTintaColorPickerRow,
   onSetField,
+  tintaFieldId,
 }: InkRowProps) {
   const kColor = `tintaColor${n}`
+  const colorInputId = tintaFieldId(n, "color")
   return (
     <>
       <div className="flex min-w-0 max-w-full gap-1 no-print">
         <OtPlanillaInputIcon icon={LucidePaletteField} compact className="min-w-0 flex-1">
           <Input
+            id={colorInputId}
+            name={kColor}
             data-field={kColor}
             data-skip-blur="1"
             className="h-8 min-w-0 w-full flex-1 text-xs"
@@ -92,6 +97,7 @@ function InkColorField({
             <PopoverTrigger asChild>
               <Button
                 type="button"
+                id={tintaFieldId(n, "color-catalog")}
                 variant="outline"
                 size="icon"
                 className="h-8 w-8 shrink-0"
@@ -155,7 +161,7 @@ function InkColorField({
 }
 
 function InkTintaStackCard(p: InkRowProps) {
-  const { n, form, readOnly, onSetField } = p
+  const { n, form, readOnly, onSetField, tintaFieldId } = p
   return (
     <div className="rounded-lg border border-border/70 bg-background/90 p-3 shadow-sm">
       <div className="mb-2 text-[10px] font-black uppercase tracking-wide text-muted-foreground">
@@ -163,14 +169,26 @@ function InkTintaStackCard(p: InkRowProps) {
       </div>
       <div className="space-y-3">
         <div>
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Color</div>
+          <label
+            htmlFor={tintaFieldId(n, "color")}
+            className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
+          >
+            Color
+          </label>
           <InkColorField {...p} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Anilox</div>
+            <label
+              htmlFor={tintaFieldId(n, "anilox")}
+              className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
+            >
+              Anilox
+            </label>
             <OtPlanillaInputIcon icon={Gauge} compact>
               <input
+                id={tintaFieldId(n, "anilox")}
+                name={`tintaAnilox${n}`}
                 className="ot-input-unified h-8 w-full text-sm"
                 value={readString(form[`tintaAnilox${n}`])}
                 readOnly={readOnly}
@@ -181,11 +199,16 @@ function InkTintaStackCard(p: InkRowProps) {
             </OtPlanillaInputIcon>
           </div>
           <div>
-            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            <label
+              htmlFor={tintaFieldId(n, "visc")}
+              className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
+            >
               Visc (seg)
-            </div>
+            </label>
             <OtPlanillaInputIcon icon={Timer} compact>
               <input
+                id={tintaFieldId(n, "visc")}
+                name={`tintaVisc${n}`}
                 className="ot-input-unified h-8 w-full text-sm"
                 value={readString(form[`tintaVisc${n}`])}
                 readOnly={readOnly}
@@ -199,11 +222,16 @@ function InkTintaStackCard(p: InkRowProps) {
           </div>
         </div>
         <div>
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          <label
+            htmlFor={tintaFieldId(n, "obs")}
+            className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
+          >
             Observaciones
-          </div>
+          </label>
           <OtPlanillaInputIcon icon={MessageSquare} compact>
             <input
+              id={tintaFieldId(n, "obs")}
+              name={`tintaObs${n}`}
               className="ot-input-unified h-8 w-full text-sm"
               value={readString(form[`tintaObs${n}`])}
               readOnly={readOnly}
@@ -226,8 +254,11 @@ export default function WorkOrderPrintingInkTable({
   onSetField = () => {},
 }: Props) {
   const [tintaColorPickerRow, setTintaColorPickerRow] = useState<number | null>(null)
+  const tintaIdBase = useId().replace(/:/g, "")
+  const tintaStackFieldId = (n: number, suffix: string) => `${tintaIdBase}-stack-${n}-${suffix}`
+  const tintaTableFieldId = (n: number, suffix: string) => `${tintaIdBase}-table-${n}-${suffix}`
 
-  const rowPropsBase = {
+  const rowStackProps = {
     form,
     readOnly,
     tintaMateriales,
@@ -235,6 +266,18 @@ export default function WorkOrderPrintingInkTable({
     tintaColorPickerRow,
     setTintaColorPickerRow,
     onSetField,
+    tintaFieldId: tintaStackFieldId,
+  }
+
+  const rowTableProps = {
+    form,
+    readOnly,
+    tintaMateriales,
+    tintaMaterialesLoading,
+    tintaColorPickerRow,
+    setTintaColorPickerRow,
+    onSetField,
+    tintaFieldId: tintaTableFieldId,
   }
 
   return (
@@ -265,7 +308,7 @@ export default function WorkOrderPrintingInkTable({
         <div className="no-print space-y-2 md:hidden">
           {Array.from({ length: 8 }).map((_, idx) => {
             const n = idx + 1
-            return <InkTintaStackCard key={n} n={n} {...rowPropsBase} />
+            return <InkTintaStackCard key={n} n={n} {...rowStackProps} />
           })}
         </div>
 
@@ -287,11 +330,13 @@ export default function WorkOrderPrintingInkTable({
                   <tr key={n}>
                     <td>{n}</td>
                     <td className="min-w-[11rem] align-top">
-                      <InkColorField n={n} {...rowPropsBase} />
+                      <InkColorField n={n} {...rowTableProps} />
                     </td>
                     <td>
                       <OtPlanillaInputIcon icon={Gauge} compact>
                         <input
+                          id={tintaTableFieldId(n, "anilox")}
+                          name={`tintaAnilox${n}`}
                           className="ot-input-unified h-8 text-sm"
                           value={readString(form[`tintaAnilox${n}`])}
                           readOnly={readOnly}
@@ -304,6 +349,8 @@ export default function WorkOrderPrintingInkTable({
                     <td>
                       <OtPlanillaInputIcon icon={Timer} compact>
                         <input
+                          id={tintaTableFieldId(n, "visc")}
+                          name={`tintaVisc${n}`}
                           className="ot-input-unified h-8 text-sm"
                           value={readString(form[`tintaVisc${n}`])}
                           readOnly={readOnly}
@@ -318,6 +365,8 @@ export default function WorkOrderPrintingInkTable({
                     <td>
                       <OtPlanillaInputIcon icon={MessageSquare} compact>
                         <input
+                          id={tintaTableFieldId(n, "obs")}
+                          name={`tintaObs${n}`}
                           className="ot-input-unified h-8 text-sm"
                           value={readString(form[`tintaObs${n}`])}
                           readOnly={readOnly}

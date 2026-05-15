@@ -25,7 +25,7 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
             'form' => ['required', 'array'],
             'priority' => ['sometimes', 'nullable', 'string', Rule::in(WorkOrderPriority::values())],
             'assigned_areas' => ['sometimes', 'array', 'max:10'],
-            'assigned_areas.*' => ['string', Rule::in(['impresion', 'laminacion', 'corte', 'tintas'])],
+            'assigned_areas.*' => ['string', Rule::in(['montaje', 'impresion', 'laminacion', 'corte', 'tintas'])],
             'assignment_reason' => ['nullable', 'string', 'max:500'],
         ];
     }

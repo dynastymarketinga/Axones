@@ -514,7 +514,7 @@ function toTitleArea(area: string): string {
   return area || "desconocida"
 }
 
-const PROGRAMACION_AREAS = ["impresion", "laminacion", "corte", "tintas"] as const
+const PROGRAMACION_AREAS = ["montaje", "impresion", "laminacion", "corte", "tintas"] as const
 type ProgramacionAreaId = (typeof PROGRAMACION_AREAS)[number]
 
 function readProgramacionAreas(form: Record<string, unknown>): string[] {
@@ -530,6 +530,7 @@ function AreasMultiCheckbox({
   value: string[]
 }) {
   const labels: Record<ProgramacionAreaId, string> = {
+    montaje: "Montaje",
     impresion: "Impresión",
     laminacion: "Laminación",
     corte: "Corte",
@@ -1363,6 +1364,9 @@ export default function WorkOrderPlanillaPage() {
     if (isFullAccess) return
     if (role === "impresion" || role === "printing") {
       nav(`/ordenes-trabajo/${id}/produccion?tab=printing`, { replace: true })
+    }
+    if (role === "montaje") {
+      nav(`/ordenes-trabajo/${id}/produccion?tab=montaje`, { replace: true })
     }
   }, [id, isDraftRoute, isFullAccess, nav, role])
 

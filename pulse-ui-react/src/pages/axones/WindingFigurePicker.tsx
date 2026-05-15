@@ -18,6 +18,8 @@ type WindingFigurePickerProps = {
   invalid?: boolean
   helpText?: string
   disabled?: boolean
+  /** id del input numérico (asociar `<label htmlFor>` visible fuera del componente). */
+  figureInputId?: string
 }
 
 /**
@@ -30,6 +32,7 @@ export function WindingFigurePicker({
   invalid = false,
   helpText = "3",
   disabled = false,
+  figureInputId,
 }: WindingFigurePickerProps) {
   const v = (value || "").trim()
   return (
@@ -62,6 +65,7 @@ export function WindingFigurePicker({
         className="ot-input-icon-wrap--winding h-9 min-h-9 w-[4.25rem] shrink-0 self-stretch sm:w-[4.5rem]"
       >
         <Input
+          id={figureInputId}
           className="ax-winding-figure-input h-9 min-h-9 w-full min-w-0 px-2 py-0 text-sm"
           value={v}
           inputMode="numeric"
@@ -69,7 +73,7 @@ export function WindingFigurePicker({
           disabled={disabled}
           onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 1))}
           placeholder={helpText}
-          aria-label="Figura de embobinado (1-8)"
+          aria-label={figureInputId ? undefined : "Figura de embobinado (1-8)"}
           aria-invalid={invalid ? true : undefined}
         />
       </OtPlanillaInputIcon>

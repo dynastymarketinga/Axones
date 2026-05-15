@@ -183,18 +183,19 @@ class ClientOrderWorkOrderLinkTest extends TestCase
         ], $h)->assertCreated();
         $woId = (int) $woResp->json('id');
 
-        $this->assertDatabaseCount('area_requests', 4);
+        $this->assertDatabaseCount('area_requests', 5);
+        $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'montaje']);
         $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'impresion']);
         $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'laminacion']);
         $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'corte']);
         $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'tintas']);
-        $this->assertDatabaseCount('operational_alerts', 4);
+        $this->assertDatabaseCount('operational_alerts', 5);
         $this->assertSame(
-            4,
+            5,
             OperationalAlert::query()->where('work_order_id', $woId)->where('alert_type', 'work_order_created')->count()
         );
         $this->assertSame(
-            4,
+            5,
             AreaRequest::query()->where('work_order_id', $woId)->count()
         );
     }

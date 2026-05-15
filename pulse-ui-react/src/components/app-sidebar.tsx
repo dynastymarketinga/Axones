@@ -19,7 +19,7 @@ import { useAreaRequestCounts } from "@/hooks/useAreaRequestCounts"
 import { AXONES_MENU_TREE, getAccountLeaves } from "@/lib/axones-menu"
 import { filterAxonesMenuTree } from "@/lib/axones-roles"
 
-const AREA_COUNT_AREAS = ["impresion", "laminacion", "corte", "tintas"] as const
+const AREA_COUNT_AREAS = ["impresion", "laminacion", "corte", "tintas", "montaje"] as const
 
 const data = {
   user: {
@@ -58,6 +58,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       laminacion: counts.laminacion ?? 0,
       corte: counts.corte ?? 0,
       tintas: counts.tintas ?? 0,
+      montaje: counts.montaje ?? 0,
     }
 
     const add = (nodes: any[]): any[] =>

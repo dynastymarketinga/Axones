@@ -73,6 +73,7 @@ import MaterialRequestNewPage from "@/pages/axones/MaterialRequestNewPage"
 import DeliveryNoteCreatePage from "@/pages/axones/DeliveryNoteCreatePage"
 import AxonesChatPage from "@/pages/axones/AxonesChatPage"
 import AreaPrintingPage from "@/pages/axones/AreaPrintingPage"
+import AreaMontajePage from "@/pages/axones/AreaMontajePage"
 import AreaLaminacionPage from "@/pages/axones/AreaLaminacionPage"
 import AreaCortePage from "@/pages/axones/AreaCortePage"
 import AreaTintasPage from "@/pages/axones/AreaTintasPage"
@@ -229,6 +230,7 @@ export const router = createBrowserRouter(
           element: guardAxonesRoute({ routeKey: "solicitudes-material", element: <MaterialRequestDetailPage /> }),
         },
         { path: "programacion", element: guardAxonesRoute({ routeKey: "programacion", element: <ProgramacionBoardPage /> }) },
+        { path: "montaje", element: guardAxonesRoute({ routeKey: "montaje", element: <AreaMontajePage /> }) },
         { path: "impresion", element: guardAxonesRoute({ routeKey: "impresion", element: <AreaPrintingPage /> }) },
         { path: "laminacion", element: guardAxonesRoute({ routeKey: "laminacion", element: <AreaLaminacionPage /> }) },
         { path: "corte", element: guardAxonesRoute({ routeKey: "corte", element: <AreaCortePage /> }) },

@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -86,6 +87,8 @@ function sustratoFieldValue(r: SustratoRow): string {
 
 export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<string, unknown> }) {
   const sustratosImp = getSustratosImp(form)
+  const baseId = useId().replace(/:/g, "")
+  const sid = (suffix: string) => `${baseId}-${suffix}`
 
   return (
     <div className="ax-ot">
@@ -99,9 +102,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
       <div className="section-body">
         <div className="ot-grid ot-cols-3">
           <div className="ot-field">
-            <label className="ot-label required">Piñon (dientes)</label>
+            <label htmlFor={sid("pinon")} className="ot-label required">
+              Piñon (dientes)
+            </label>
             <OtPlanillaInputIcon icon={Cog}>
               <input
+                id={sid("pinon")}
+                name="pinonImp"
                 data-field="pinonImp"
                 className="ot-input"
                 readOnly
@@ -115,9 +122,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
             </OtPlanillaInputIcon>
           </div>
           <div className="ot-field">
-            <label className="ot-label required">Linea de corte</label>
+            <label htmlFor={sid("linea-corte")} className="ot-label required">
+              Linea de corte
+            </label>
             <Button
               type="button"
+              id={sid("linea-corte")}
+              name="lineaCorte"
               variant="outline"
               disabled
               data-field="lineaCorte"
@@ -140,7 +151,9 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
           </div>
           <div className="ot-field sm:col-span-2 lg:col-span-1" data-field="figEmbImpDisplay">
             <div className="flex flex-wrap items-center gap-2">
-              <label className="ot-label required">Figura emb. (1-8)</label>
+              <label htmlFor={sid("fig-emb")} className="ot-label required">
+                Figura emb. (1-8)
+              </label>
               <Badge
                 variant="outline"
                 className="text-[10px] font-normal"
@@ -150,6 +163,7 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
               </Badge>
             </div>
             <WindingFigurePicker
+              figureInputId={sid("fig-emb")}
               value={readString(form.figEmbImpDisplay)}
               onChange={() => {}}
               disabled
@@ -176,10 +190,12 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
             {sustratosImp.map((r, idx) => (
               <div key={idx} className="ot-grid ot-cols-2-asym">
                 <div className="ot-field">
-                  <label className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                  <label htmlFor={sid(`sustrato-mat-${idx}`)} className="ot-label required">{`Sustrato ${idx + 1}`}</label>
                   <div className="flex min-w-0 gap-1 no-print">
                     <OtPlanillaInputIcon icon={Warehouse} className="min-w-0 flex-1">
                       <Input
+                        id={sid(`sustrato-mat-${idx}`)}
+                        name={`sustratoVirgenImp${idx + 1}`}
                         data-field="sustratosImp"
                         className="ot-input-unified h-9 min-w-0 text-sm"
                         readOnly
@@ -212,9 +228,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
                   </div>
                 </div>
                 <div className="ot-field">
-                  <label className="ot-label required">Kg a utilizar</label>
+                  <label htmlFor={sid(`sustrato-kg-${idx}`)} className="ot-label required">
+                    Kg a utilizar
+                  </label>
                   <OtPlanillaInputIcon icon={Weight}>
                     <input
+                      id={sid(`sustrato-kg-${idx}`)}
+                      name={`kgUtilizarImp${idx + 1}`}
                       data-field="sustratosImp"
                       type="number"
                       inputMode="decimal"
@@ -249,9 +269,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
 
         <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
           <div className="ot-field">
-            <label className="ot-label required">Kg ingresado</label>
+            <label htmlFor={sid("kg-ingresado")} className="ot-label required">
+              Kg ingresado
+            </label>
             <OtPlanillaInputIcon icon={ArrowDownToLine}>
               <input
+                id={sid("kg-ingresado")}
+                name="kgIngresadoImp"
                 data-field="kgIngresadoImp"
                 type="number"
                 inputMode="decimal"
@@ -267,9 +291,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
             </OtPlanillaInputIcon>
           </div>
           <div className="ot-field">
-            <label className="ot-label required">Kg salida</label>
+            <label htmlFor={sid("kg-salida")} className="ot-label required">
+              Kg salida
+            </label>
             <OtPlanillaInputIcon icon={ArrowUpFromLine}>
               <input
+                id={sid("kg-salida")}
+                name="kgSalidaImp"
                 data-field="kgSalidaImp"
                 type="number"
                 inputMode="decimal"
@@ -285,9 +313,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
             </OtPlanillaInputIcon>
           </div>
           <div className="ot-field">
-            <label className="ot-label required">Merma</label>
+            <label htmlFor={sid("merma-imp")} className="ot-label required">
+              Merma
+            </label>
             <OtPlanillaInputIcon icon={TrendingDown}>
               <input
+                id={sid("merma-imp")}
+                name="mermaImp"
                 data-field="mermaImp"
                 type="number"
                 inputMode="decimal"
@@ -303,9 +335,13 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
             </OtPlanillaInputIcon>
           </div>
           <div className="ot-field">
-            <label className="ot-label required">Metros</label>
+            <label htmlFor={sid("metros-imp")} className="ot-label required">
+              Metros
+            </label>
             <OtPlanillaInputIcon icon={Ruler}>
               <input
+                id={sid("metros-imp")}
+                name="metrosImp"
                 data-field="metrosImp"
                 type="number"
                 inputMode="decimal"

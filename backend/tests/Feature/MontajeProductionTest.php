@@ -20,7 +20,7 @@ class MontajeProductionTest extends TestCase
 
     public function test_montaje_segment_with_machine_code_and_material_usage(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'montaje']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-MZ-1',
             'status' => WorkOrderStatus::Open->value,

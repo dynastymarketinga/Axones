@@ -16,8 +16,7 @@ class EnsureAreaRole
         'laminacion' => ['laminacion', 'planificador', 'supervisor'],
         'corte' => ['corte', 'planificador', 'supervisor'],
         'tintas' => ['tintas', 'planificador', 'supervisor'],
-        // Montaje queda reservado a perfiles de planificación/jefatura por ahora.
-        'montaje' => [],
+        'montaje' => ['montaje', 'planificador', 'supervisor'],
         /** @deprecated Usar planilla_read / planilla_write; se mantiene por compatibilidad. */
         'planilla' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad', 'planificador', 'supervisor'],
         /** Lectura de planilla técnica + resumen producción (incluye operadores de impresión). */

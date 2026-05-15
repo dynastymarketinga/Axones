@@ -107,6 +107,15 @@ const CORTE_URLS = new Set([
   "solicitudes-material",
 ])
 
+const MONTAJE_URLS = new Set([
+  "programacion",
+  "montaje",
+  "ordenes-trabajo",
+  "ordenes-trabajo-produccion",
+  "solicitudes-area",
+  "solicitudes-material",
+])
+
 const TINTAS_URLS = new Set([
   "tintas",
 ])
@@ -165,6 +174,9 @@ export function isAxonesUrlAllowed(
   }
   if (r === "corte") {
     return CORTE_URLS.has(url)
+  }
+  if (r === "montaje") {
+    return MONTAJE_URLS.has(url)
   }
   if (r === "tintas") {
     return TINTAS_URLS.has(url)

@@ -564,7 +564,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
 
         $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
 
-        $this->assertSame(4, OperationalAlert::query()
+        $this->assertSame(5, OperationalAlert::query()
             ->where('work_order_id', $wo->id)
             ->where('alert_type', 'work_order_saved_broadcast')
             ->count());
@@ -593,6 +593,71 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $r = $this->getJson('/api/work-orders?mi_area=tintas&per_page=20', $h)->assertOk();
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertContains($wo->id, $ids);
+    }
+
+    public function test_work_orders_mi_area_montaje_filters_by_pending_area_request(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-MIAREA-MONT',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Montaje->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => 'Test montaje',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=montaje&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertContains($wo->id, $ids);
+    }
+
+    public function test_mi_area_montaje_area_process_tag_in_progress_filters_at_montaje_stage(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($user);
+
+        $woBefore = WorkOrder::query()->create([
+            'code' => 'OT-MONT-IP-BEFORE',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Pendiente->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => 'M',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woBefore->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $woAt = WorkOrder::query()->create([
+            'code' => 'OT-MONT-IP-AT',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Montaje->value,
+            'created_by' => $user->id,
+        ]);
+        AreaRequest::query()->create([
+            'area' => 'montaje',
+            'title' => 'M',
+            'body' => 'b',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $woAt->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $r = $this->getJson('/api/work-orders?mi_area=montaje&area_process_tag=in_progress&per_page=20', $h)->assertOk();
+        $ids = collect($r->json('data'))->pluck('id')->all();
+        $this->assertNotContains($woBefore->id, $ids);
+        $this->assertContains($woAt->id, $ids);
     }
 
     public function test_mi_area_area_process_tag_not_started_filters_before_target_stage(): void

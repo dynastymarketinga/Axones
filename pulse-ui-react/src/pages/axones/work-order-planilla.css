@@ -898,6 +898,11 @@
   }
 }
 
+/* Mitad de fila (dos columnas): mantener 2×2 aunque el bloque lleve --4 */
+.ax-mes .mes-stat-grid--4.is-compact-tiles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .ax-mes .mes-stat-tile {
   border: 1px solid var(--ax-mes-border);
   border-radius: 8px;

@@ -13,7 +13,7 @@ use App\Models\WorkOrder;
 class ProductionNotificationService
 {
     /** Áreas que reciben despacho simultáneo de OT (sin secuencia obligatoria). */
-    public const PRODUCTIVE_AREAS = ['impresion', 'laminacion', 'corte', 'tintas'];
+    public const PRODUCTIVE_AREAS = ['montaje', 'impresion', 'laminacion', 'corte', 'tintas'];
 
     /**
      * Al crear una OT, la distribuye de inmediato a las áreas productivas para visibilidad por rol.

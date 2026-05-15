@@ -2,7 +2,7 @@ import { apiFetch } from "@/lib/api"
 import type { LaravelPaginated, WorkOrderListRow } from "@/types/api"
 
 /** Áreas de bandeja alineadas con `mi_area` del API de work-orders. */
-export type MiAreaApi = "impresion" | "laminacion" | "corte" | "tintas"
+export type MiAreaApi = "impresion" | "laminacion" | "corte" | "tintas" | "montaje"
 
 /** Máximo de IDs de OT recordados como “vistas” en En curso (localStorage). */
 export const ACTIVAS_SEEN_MAX_IDS = 2000

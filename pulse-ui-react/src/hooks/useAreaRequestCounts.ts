@@ -14,7 +14,7 @@ export function useAreaRequestCounts(options?: {
   areas?: string[]
 }) {
   const status = (options?.status ?? "pending").trim() || "pending"
-  const areas = options?.areas ?? ["almacen", "impresion", "laminacion", "corte", "tintas"]
+  const areas = options?.areas ?? ["almacen", "impresion", "laminacion", "corte", "tintas", "montaje"]
   const areasKey = React.useMemo(
     () => areas.map((a) => a.trim()).filter(Boolean).sort().join(","),
     // eslint-disable-next-line react-hooks/exhaustive-deps

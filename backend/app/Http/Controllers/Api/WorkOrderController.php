@@ -82,6 +82,7 @@ class WorkOrderController extends Controller
     private function targetBoardStageForMiArea(string $miArea): string
     {
         return match ($miArea) {
+            'montaje' => WorkOrderBoardStage::Montaje->value,
             'laminacion' => WorkOrderBoardStage::Laminacion->value,
             'corte' => WorkOrderBoardStage::Corte->value,
             'impresion', 'tintas' => WorkOrderBoardStage::Impresion->value,
@@ -126,7 +127,7 @@ class WorkOrderController extends Controller
             $query->where('priority', $priority);
         }
 
-        $allowedAreaKeys = ['impresion', 'laminacion', 'corte', 'tintas'];
+        $allowedAreaKeys = ['impresion', 'laminacion', 'corte', 'tintas', 'montaje'];
         $miArea = strtolower(trim((string) $request->query('mi_area', '')));
         $historialArea = strtolower(trim((string) $request->query('historial_area', '')));
         $targetAreaForPayload = null;

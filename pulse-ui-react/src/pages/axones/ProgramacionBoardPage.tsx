@@ -65,13 +65,16 @@ const STAGE_OPTIONS: { value: string; label: string }[] = [
 function allowedStagesForRole(roleNorm: string): string[] | null {
   if (!roleNorm || roleNorm === "general") return null
   if (roleNorm === "printing" || roleNorm === "impresion") {
-    return ["nueva", "pendiente", "impresion"]
+    return ["nueva", "pendiente", "montaje", "impresion"]
   }
   if (roleNorm === "laminacion") {
     return ["nueva", "pendiente", "laminacion"]
   }
   if (roleNorm === "corte") {
     return ["nueva", "pendiente", "corte"]
+  }
+  if (roleNorm === "montaje") {
+    return ["nueva", "pendiente", "montaje"]
   }
   return null
 }

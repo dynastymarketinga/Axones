@@ -1,6 +1,6 @@
 "use client"
 
-import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
 import { useNavigate } from "react-router-dom"
@@ -352,6 +352,7 @@ export default function WorkOrderPrintingControlPanel({
   canFinalizeOrder?: boolean
 }) {
   const _navigate = useNavigate()
+  const impObsTextareaId = useId().replace(/:/g, "")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
@@ -1808,6 +1809,9 @@ export default function WorkOrderPrintingControlPanel({
             }
           >
             <Textarea
+              id={impObsTextareaId}
+              name="impObservaciones"
+              aria-label="Observaciones del turno"
               value={readString(form.impObservaciones)}
               onChange={(e) => {
                 if (!hasActiveTurno || controlReadOnly) return

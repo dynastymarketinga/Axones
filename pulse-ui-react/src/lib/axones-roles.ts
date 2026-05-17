@@ -36,7 +36,6 @@ const INVENTORY_CHIEF_URLS = new Set([
   "bobinas/registrar-rechazada",
   "devoluciones",
   "despacho-corte",
-  "prefill-nota-entrega",
   "nota-entrega-nueva",
   "notas-entrega",
   "solicitudes-material",
@@ -59,7 +58,6 @@ const INVENTORY_URLS = new Set([
   "bobinas/registrar-rechazada",
   "devoluciones",
   "despacho-corte",
-  "prefill-nota-entrega",
   "nota-entrega-nueva",
   "notas-entrega",
   "solicitudes-material",
@@ -125,7 +123,6 @@ const ADMIN_URLS = new Set([
   "despacho-corte",
   "notas-entrega",
   "nota-entrega-nueva",
-  "prefill-nota-entrega",
 ])
 
 const SOLICITANTE_URLS = new Set([

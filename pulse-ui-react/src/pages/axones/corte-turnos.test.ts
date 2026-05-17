@@ -2,18 +2,23 @@ import { describe, expect, it } from "vitest"
 
 import {
   COR_ACTUAL_KEY,
+  bootstrapCorteFormState,
   createNewCorteTurno,
   corteTurnoToMirror,
+  getCorPaletas,
   isCorPaletaCerrada,
   legacyActiveTurnoFromForm,
   materializeOpenCorteTurnoActual,
+  pickAuthoritativeCorPaletas,
   pauseCorteProductionTimerOnForm,
+  shouldPreferTopCorPaletas,
   resolveCorteDisplayTimer,
   startCorteProductionTimerOnForm,
   syncCorteEntradaFields,
   syncCorteFormMetrics,
   sumEntradaKgFromForm,
   sumSalidaKgFromClosedPaletas,
+  sumSalidaKgFromPaletas,
   sanitizeCorPaletasForPersistence,
 } from "./corte-turnos"
 import type { CorPaleta } from "./corte-turnos"
@@ -245,6 +250,19 @@ describe("corte paletas cerradas / despacho", () => {
     expect(isCorPaletaCerrada({ ...base, status: "cerrada_opcional" })).toBe(true)
   })
 
+  it("shouldPreferTopCorPaletas prioriza cor_paletas cerrada aunque el turno tenga los mismos kg abiertos", () => {
+    const rollos = (kg: string) => [kg, ...Array(47).fill("")]
+    const top: CorPaleta[] = [
+      { id: "p-01", label: "Paleta #01", rollosKg: rollos("132"), status: "cerrada" },
+    ]
+    const nested: CorPaleta[] = [
+      { id: "p-01", label: "Paleta #01", rollosKg: rollos("132"), status: "en_progreso" },
+    ]
+    expect(shouldPreferTopCorPaletas(top, nested)).toBe(true)
+    const picked = pickAuthoritativeCorPaletas(top, nested)
+    expect(picked[0]?.status).toBe("cerrada")
+  })
+
   it("sumSalidaKgFromClosedPaletas solo suma paletas cerradas", () => {
     const paletas: CorPaleta[] = [
       { id: "p-01", label: "P1", rollosKg: rollos("10"), status: "cerrada" },
@@ -252,5 +270,39 @@ describe("corte paletas cerradas / despacho", () => {
       { id: "p-03", label: "P3", rollosKg: rollos("7.5"), status: "cerrada" },
     ]
     expect(sumSalidaKgFromClosedPaletas(paletas)).toBe(17.5)
+  })
+
+  it("bootstrapCorteFormState prefiere cor_paletas con kg si el turno tiene paletas vacías", () => {
+    const rollosWithKg = ["15", ...Array(47).fill("")]
+    const turno = createNewCorteTurno({
+      turno: "nocturno",
+      grupo: "B",
+      operador: "Test",
+      ayudante: "",
+      supervisor: "",
+    })
+    turno.paletas = [
+      {
+        id: "p-01",
+        label: "Paleta #01",
+        rollosKg: Array.from({ length: 48 }, () => ""),
+        status: "en_progreso",
+      },
+    ]
+    const merged = {
+      cor_paletas: [
+        {
+          id: "p-01",
+          label: "Paleta #01",
+          rollosKg: rollosWithKg,
+          status: "en_progreso",
+        },
+      ],
+      [COR_ACTUAL_KEY]: turno,
+    }
+    const boot = bootstrapCorteFormState(merged)
+    expect(sumSalidaKgFromPaletas(getCorPaletas(boot))).toBe(15)
+    const actual = boot[COR_ACTUAL_KEY] as { paletas: CorPaleta[] }
+    expect(sumSalidaKgFromPaletas(actual.paletas)).toBe(15)
   })
 })

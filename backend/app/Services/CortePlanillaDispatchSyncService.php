@@ -109,6 +109,16 @@ class CortePlanillaDispatchSyncService
             if ($paletaId === '' || isset($closedPaletaIds[$paletaId])) {
                 continue;
             }
+            // Formulario desactualizado (p. ej. turno con en_progreso pero ya hay fila definitiva).
+            if (CorteBobinaUsage::query()
+                ->where('work_order_id', $workOrder->getKey())
+                ->where('notes', self::paletaNotes($paletaId))
+                ->where('quantity_finished_kg', '>', 0)
+                ->exists()) {
+                $this->deleteUsageIfUnallocated($workOrder, self::paletaProvisionalNotes($paletaId));
+
+                continue;
+            }
             $finishedKg = number_format(CortePlanillaSalida::sumPaletaKg($paleta), 3, '.', '');
             $notes = self::paletaProvisionalNotes($paletaId);
             $activeProvisionalNotes[] = $notes;

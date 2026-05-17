@@ -105,15 +105,7 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     icon: BadgeCheck,
     items: [{ title: "Certificados", url: "calidad", icon: BadgeCheck }],
   },
-  {
-    title: "Despacho",
-    url: "#",
-    icon: Truck,
-    items: [
-      { title: "Despacho a registrar", url: "notas-entrega", icon: ClipboardList },
-      { title: "Producto terminado", url: "despacho-corte", icon: Truck },
-    ],
-  },
+  { title: "Despacho", url: "despacho-corte", icon: Truck },
   {
     title: "Reportes",
     url: "#",

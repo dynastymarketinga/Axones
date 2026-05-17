@@ -41,7 +41,6 @@ import WorkOrderPrintingDesperdicioPreviewPage from "@/pages/axones/WorkOrderPri
 import CorteDispatchPage from "@/pages/axones/CorteDispatchPage"
 import DeliveryNotesPage from "@/pages/axones/DeliveryNotesPage"
 import DeliveryNotePreviewPage from "@/pages/axones/DeliveryNotePreviewPage"
-import PrefillNotaEntregaPage from "@/pages/axones/PrefillNotaEntregaPage"
 import AreaRequestsPage from "@/pages/axones/AreaRequestsPage"
 import AreaRequestMaterialInsumosPage from "@/pages/axones/AreaRequestMaterialInsumosPage"
 import GateMovementsPage from "@/pages/axones/GateMovementsPage"
@@ -268,7 +267,6 @@ export const router = createBrowserRouter(
             element: <WorkOrderDetailPage />,
           }),
         },
-        { path: "prefill-nota-entrega", element: guardAxonesRoute({ routeKey: "prefill-nota-entrega", element: <PrefillNotaEntregaPage /> }) },
         { path: "nota-entrega-nueva", element: guardAxonesRoute({ routeKey: "nota-entrega-nueva", element: <DeliveryNoteCreatePage /> }) },
         { path: "despacho-corte", element: guardAxonesRoute({ routeKey: "despacho-corte", element: <CorteDispatchPage /> }) },
         { path: "notas-entrega", element: guardAxonesRoute({ routeKey: "notas-entrega", element: <DeliveryNotesPage /> }) },

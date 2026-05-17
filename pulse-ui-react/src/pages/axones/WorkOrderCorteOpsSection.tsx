@@ -81,6 +81,10 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  corteOperabilityFromForm,
+  explainCannotAddPaleta,
+} from "@/lib/corte-paleta-flow"
 import { cn } from "@/lib/utils"
 
 import {
@@ -375,8 +379,10 @@ export default function WorkOrderCorteOpsSection({
   const ultimoTurnoLabel = hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel
   const kgDespachoAcum = useMemo(() => sumSalidaKgFromClosedPaletas(corPaletas), [corPaletas])
   const kgProvisionalDespacho = useMemo(() => sumSalidaKgFromOpenPaletas(corPaletas), [corPaletas])
+  const corteOp = useMemo(() => corteOperabilityFromForm(form), [form])
   const inputDisabled = opsReadOnly || !hasActiveTurno
   const paletaInputsDisabled = (p: CorPaleta) => inputDisabled || isCorPaletaCerrada(p)
+  const canAddPaletaNow = corteOp.canAddPaleta && !opsReadOnly
 
   const draftOperadorName = draftPeople.find((p) => p.role === "operador")?.name.trim() ?? ""
   const draftOperadorMissing = draftPeople.every((p) => p.role !== "operador")
@@ -495,7 +501,14 @@ export default function WorkOrderCorteOpsSection({
   }
 
   function addPaleta() {
-    if (inputDisabled) return
+    if (opsReadOnly) {
+      toast.error("El área de corte está en solo lectura.")
+      return
+    }
+    if (!corteOp.canAddPaleta) {
+      toast.error(explainCannotAddPaleta(corteOp))
+      return
+    }
     const nextIndex = corPaletas.length + 1
     writePaletas([
       ...corPaletas,
@@ -555,7 +568,11 @@ export default function WorkOrderCorteOpsSection({
         toast.success(`${target.label} cerrada. Saldo visible en Despacho · producto terminado.`)
         return
       }
-      const ok = await onRequestSave(toSave, { suppressSuccessToast: true })
+      const ok = await onRequestSave(toSave, {
+        suppressSuccessToast: true,
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+      })
       if (ok) {
         toast.success(
           `${target.label} cerrada (${kg.toFixed(2)} kg). Consulte Despacho · producto terminado; si no aparece, revise el aviso al guardar.`,
@@ -1382,7 +1399,13 @@ export default function WorkOrderCorteOpsSection({
         subtle
         bodyClassName="mes-section__body--flush"
         headerRight={
-          <Button type="button" size="sm" className="h-8" onClick={addPaleta}>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            disabled={!canAddPaletaNow}
+            onClick={addPaleta}
+          >
             <PlusCircle className="mr-1 h-4 w-4" />
             Agregar paleta
           </Button>
@@ -1393,6 +1416,17 @@ export default function WorkOrderCorteOpsSection({
           terminar el lote: los kg pasan a Despacho · producto terminado sin finalizar el área. Requiere turno abierto y
           cronómetro iniciado (play).
         </p>
+        {entradaBobinasTotal > 0 && salidaTotalKg <= 0 ? (
+          <div
+            className="mb-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-950 dark:text-amber-100"
+            role="status"
+          >
+            <span className="font-semibold">Ingreso registrado ({entradaBobinasTotal.toFixed(2)} Kg)</span> no genera
+            saldo en Despacho. Escriba kg en los rollos de esta sección, pulse{" "}
+            <span className="font-semibold">Guardar</span> y, para la nota de entrega,{" "}
+            <span className="font-semibold">Cerrar paleta</span>.
+          </div>
+        ) : null}
         <div className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
           {salidaPaletas.map((paleta, paletaIdx) => {
             const meta = corPaletas[paletaIdx]
@@ -1415,7 +1449,10 @@ export default function WorkOrderCorteOpsSection({
                   <Badge variant="outline">{`${salidaPaletasRollos[paletaIdx]}/${COR_ROLLOS_PER_PALETA}`}</Badge>
                   {corPaletas[paletaIdx] && !isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
                     <CerrarPaletaButton
-                      disabled={!canOperateProduction}
+                      disabled={
+                        !canOperateProduction ||
+                        sumKgFromPaleta(corPaletas[paletaIdx]!) <= 0
+                      }
                       onClick={() => cerrarPaleta(paletaIdx)}
                     />
                   ) : null}

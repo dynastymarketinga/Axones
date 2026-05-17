@@ -30,11 +30,11 @@ type CorteControlPatchResponse = {
   dispatch_sync?: CorteDispatchSyncStatus
 }
 
-/**
- * Guardar / cerrar paleta no finaliza corEstadoArea; avisa si el sync a despacho falló.
- */
-function warnCorteDispatchSync(dispatchSync?: CorteDispatchSyncStatus): void {
-  if (!dispatchSync) return
+/** Mensaje persistente si el último guardado no sincronizó todo a Despacho. */
+export function corteDispatchSyncIssueMessage(
+  dispatchSync?: CorteDispatchSyncStatus,
+): string | null {
+  if (!dispatchSync) return null
   const {
     material_resolved,
     closed_paletas_with_kg,
@@ -46,24 +46,35 @@ function warnCorteDispatchSync(dispatchSync?: CorteDispatchSyncStatus): void {
   const needsMaterial =
     (closed_paletas_with_kg > 0 || provisional_paletas_with_kg > 0) && !material_resolved
   if (needsMaterial) {
-    toast.error(
-      "No se sincronizó a Despacho: la OT no tiene material asociado (líneas, pedido o producto). Asigne material en la OT o registre pesos y guarde de nuevo.",
-    )
-    return
+    return "No se sincronizó a Despacho: la OT no tiene material asociado (líneas, pedido o producto). Asigne material en la OT o registre pesos y guarde de nuevo."
   }
   if (closed_paletas_with_kg > usages_synced) {
-    toast.warning(
-      "Algunas paletas cerradas no se reflejaron en Despacho. Verifique material en la OT y guarde de nuevo.",
-    )
-    return
+    return "Algunas paletas cerradas no se reflejaron en Despacho. Verifique material en la OT y guarde de nuevo."
   }
   if (provisional_paletas_with_kg > provisional_synced) {
-    toast.warning(
-      "Algunas paletas en progreso no se reflejaron como saldo provisional en Despacho. Guarde de nuevo.",
-    )
+    return "Algunas paletas en progreso no se reflejaron como saldo provisional en Despacho. Guarde de nuevo."
+  }
+  return null
+}
+
+/**
+ * Guardar / cerrar paleta no finaliza corEstadoArea; avisa si el sync a despacho falló.
+ */
+function warnCorteDispatchSync(dispatchSync?: CorteDispatchSyncStatus): void {
+  if (!dispatchSync) return
+  const issue = corteDispatchSyncIssueMessage(dispatchSync)
+  if (issue) {
+    const needsMaterial =
+      (dispatchSync.closed_paletas_with_kg > 0 ||
+        (dispatchSync.provisional_paletas_with_kg ?? 0) > 0) &&
+      !dispatchSync.material_resolved
+    if (needsMaterial) toast.error(issue)
+    else toast.warning(issue)
     return
   }
-  if (provisional_paletas_with_kg > 0 && provisional_synced >= provisional_paletas_with_kg) {
+  const provisional = dispatchSync.provisional_paletas_with_kg ?? 0
+  const provisionalSynced = dispatchSync.provisional_synced ?? 0
+  if (provisional > 0 && provisionalSynced >= provisional) {
     toast.message("Saldo provisional visible en Despacho · producto terminado.")
   }
 }
@@ -99,6 +110,7 @@ import {
   getCorPaletas,
   sanitizeCorEntradaBobinasKg,
   sanitizeCorPaletasForPersistence,
+  shouldPreferTopCorPaletas,
   sumEntradaKgFromForm,
   sumSalidaKgFromPaletas,
   sumSalidaKgFromForm,
@@ -165,6 +177,7 @@ export default function WorkOrderCorteControlPanel({
   const [pauseMotivoModalOpen, setPauseMotivoModalOpen] = useState(false)
   const [pauseReason, setPauseReason] = useState("")
   const [pauseObs, setPauseObs] = useState("")
+  const [dispatchSyncAlert, setDispatchSyncAlert] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -175,6 +188,7 @@ export default function WorkOrderCorteControlPanel({
       setPrefill(basePrefill)
       const mergedForm = mergePrefill(basePrefill, payload.form)
       setForm(bootstrapCorteFormState(mergedForm))
+      setDispatchSyncAlert(null)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar la OT para corte.")
@@ -270,10 +284,11 @@ export default function WorkOrderCorteControlPanel({
           return false
         }
         const topPaletas = getCorPaletas(src)
-        const topKg = sumSalidaKgFromPaletas(topPaletas)
-        const nestedKg = sumSalidaKgFromPaletas(actualP.paletas)
-        if (topKg > nestedKg + 0.001 || (topKg > 0 && nestedKg <= 0)) {
-          actualP = { ...actualP, paletas: topPaletas }
+        if (shouldPreferTopCorPaletas(topPaletas, actualP.paletas)) {
+          actualP = {
+            ...actualP,
+            paletas: sanitizeCorPaletasForPersistence(topPaletas),
+          }
         }
         const entradaKg = sanitizeCorEntradaBobinasKg(
           src.corEntradaBobinasKg ?? actualP.entradaBobinasKg,
@@ -345,6 +360,7 @@ export default function WorkOrderCorteControlPanel({
           },
         )
         warnCorteDispatchSync(res.dispatch_sync)
+        setDispatchSyncAlert(corteDispatchSyncIssueMessage(res.dispatch_sync))
         setForm((prev) => bootstrapCorteFormState({ ...prev, ...normalizedForm }))
         if (!options?.suppressSuccessToast) {
           toast.success(options?.successMessage ?? "Control de corte guardado.")
@@ -810,6 +826,15 @@ export default function WorkOrderCorteControlPanel({
       {areaFinalizada ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
           Área de corte finalizada en el sistema. Los datos quedan en solo lectura salvo jefatura.
+        </p>
+      ) : null}
+
+      {dispatchSyncAlert ? (
+        <p
+          className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {dispatchSyncAlert}
         </p>
       ) : null}
 

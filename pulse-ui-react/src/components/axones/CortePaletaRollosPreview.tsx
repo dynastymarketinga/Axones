@@ -1,3 +1,6 @@
+"use client"
+
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { COR_ROLLOS_PER_PALETA } from "@/pages/axones/corte-turnos"
@@ -6,6 +9,8 @@ type Props = {
   rollosKg?: string[] | null
   /** Vista compacta para fila expandida en Despacho */
   compact?: boolean
+  /** Inputs de solo lectura (como en Corte / nota de entrega). */
+  useInputs?: boolean
   className?: string
 }
 
@@ -23,7 +28,12 @@ function readDisplayKg(v: unknown): string {
 }
 
 /** Grilla de rollos de paleta (solo lectura), alineada con la UI de Corte. */
-export function CortePaletaRollosPreview({ rollosKg, compact = false, className }: Props) {
+export function CortePaletaRollosPreview({
+  rollosKg,
+  compact = false,
+  useInputs = false,
+  className,
+}: Props) {
   const slots = Array.from({ length: COR_ROLLOS_PER_PALETA }, (_, i) =>
     readDisplayKg(rollosKg?.[i]),
   )
@@ -41,20 +51,35 @@ export function CortePaletaRollosPreview({ rollosKg, compact = false, className 
       {slots.map((valor, rolloIdx) => (
         <div key={`rollo-preview-${rolloIdx}`} className="space-y-1">
           <Label className="ot-label text-[10px]">{rolloIdx + 1}</Label>
-          <div
-            className={cn(
-              "ot-input-unified flex h-7 items-center justify-center px-2 text-xs tabular-nums",
-              compact && "h-6 text-[10px]",
-              readDisplayKg(valor) !== "0"
-                ? "bg-muted/50 font-medium text-foreground"
-                : "text-muted-foreground",
-            )}
-            aria-readonly
-          >
-            {valor}
-          </div>
+          {useInputs ? (
+            <Input
+              className={cn(
+                "ot-input-unified h-7 px-2 text-xs tabular-nums",
+                compact && "h-6 text-[10px]",
+              )}
+              inputMode="decimal"
+              readOnly
+              disabled
+              placeholder="0"
+              value={valor === "0" || valor === "" ? "" : valor}
+            />
+          ) : (
+            <div
+              className={cn(
+                "ot-input-unified flex h-7 items-center justify-center px-2 text-xs tabular-nums",
+                compact && "h-6 text-[10px]",
+                readDisplayKg(valor) !== "0"
+                  ? "bg-muted/50 font-medium text-foreground"
+                  : "text-muted-foreground",
+              )}
+              aria-readonly
+            >
+              {valor === "0" ? "" : valor}
+            </div>
+          )}
         </div>
       ))}
     </div>
   )
 }
+

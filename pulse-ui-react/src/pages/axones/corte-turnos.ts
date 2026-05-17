@@ -654,6 +654,39 @@ function reconcileCorteTurnoFromMirror(
   return next
 }
 
+/**
+ * Si cor_paletas tiene paletas cerradas y el turno activo aún las marca abiertas (mismos kg),
+ * se prefiere el nivel superior para no revertir el cierre al guardar o al recargar.
+ */
+export function shouldPreferTopCorPaletas(
+  topPaletas: CorPaleta[],
+  nestedPaletas: CorPaleta[],
+): boolean {
+  const topClosed = topPaletas.some(isCorPaletaCerrada)
+  const nestedClosed = nestedPaletas.some(isCorPaletaCerrada)
+  if (topClosed && !nestedClosed) return true
+  if (!topClosed && nestedClosed) return false
+
+  const topKg = sumSalidaKgFromPaletas(topPaletas)
+  const nestedKg = sumSalidaKgFromPaletas(nestedPaletas)
+  if (topKg > nestedKg + 0.001 || (topKg > 0 && nestedKg <= 0)) return true
+  if (topClosed) return true
+
+  return false
+}
+
+/**
+ * Elige cor_paletas vs paletas del turno activo (misma regla que persistCorteForm al guardar).
+ */
+export function pickAuthoritativeCorPaletas(
+  topPaletas: CorPaleta[],
+  nestedPaletas: CorPaleta[],
+): CorPaleta[] {
+  return sanitizeCorPaletasForPersistence(
+    shouldPreferTopCorPaletas(topPaletas, nestedPaletas) ? topPaletas : nestedPaletas,
+  )
+}
+
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   let actual =
     parseCorteTurnoActual(mergedForm[COR_ACTUAL_KEY], mergedForm) ??
@@ -666,6 +699,9 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
     if (flatLive && nestedPending) {
       actual = { ...actual, timer: flatTimer }
     }
+    const topPaletas = getCorPaletas(mergedForm)
+    const paletas = pickAuthoritativeCorPaletas(topPaletas, actual.paletas)
+    actual = { ...actual, paletas }
   }
   const turnos = parseCorteTurnos(mergedForm[COR_TURNOS_KEY], mergedForm)
   const estado = readCorteEstadoArea(mergedForm[COR_ESTADO_KEY])
@@ -679,10 +715,14 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
   }
 
   if (actual) {
+    const paletas = sanitizeCorPaletasForPersistence(actual.paletas)
+    actual = { ...actual, paletas }
     next = {
       ...next,
       ...corteTurnoToMirror(actual),
-      cor_paletas: sanitizeCorPaletasForPersistence(actual.paletas),
+      cor_paletas: paletas,
+      corSalidaPaletasKg: paletas.map((p) => p.rollosKg),
+      [COR_ACTUAL_KEY]: actual,
     }
   } else if (estado === "finalizada") {
     next = {

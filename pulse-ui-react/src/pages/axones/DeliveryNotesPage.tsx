@@ -3,26 +3,42 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
+import {
+  Barcode,
+  CalendarDays,
+  CircleDot,
+  ClipboardList,
+  Eye,
+  Hash,
+  ListOrdered,
+  Settings2,
+  Users,
+} from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
-import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  CatalogTableHead,
+  CatalogTableHeadRight,
+} from "@/components/axones/CatalogTableHead"
+import { LoadingTableRow } from "@/components/axones/LoadingStates"
+import {
+  catalogActionButtonClass,
+  catalogPaginationOutlineButtonClass,
+  catalogTableBodyCellClass,
+  catalogTableBodyRowClass,
+  catalogTableHeaderRowClass,
+} from "@/components/axones/catalog-list-classes"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 
 type NoteRow = {
   id: number
@@ -33,6 +49,62 @@ type NoteRow = {
   work_order_id: number | null
   work_order?: { code: string; client?: { name: string } }
 }
+
+type StatusFilter = "all" | "draft" | "dispatched" | "cancelled"
+
+const STATUS_TAB_DEFS: Array<{
+  filter: StatusFilter
+  label: string
+  icon: typeof ListOrdered
+  active: string
+  inactive: string
+  iconActive: string
+  iconIdle: string
+}> = [
+  {
+    filter: "all",
+    label: "Todas",
+    icon: ListOrdered,
+    active: "border-primary bg-primary text-primary-foreground shadow-sm",
+    inactive:
+      "border-primary/25 bg-background text-foreground hover:bg-primary/8 dark:hover:bg-primary/12",
+    iconActive: "text-primary-foreground",
+    iconIdle: "text-primary",
+  },
+  {
+    filter: "draft",
+    label: "Borrador",
+    icon: ClipboardList,
+    active: "border-sky-500/50 bg-sky-500/15 text-sky-950 shadow-sm dark:text-sky-100",
+    inactive:
+      "border-sky-500/25 bg-background text-foreground hover:bg-sky-500/10 dark:hover:bg-sky-500/15",
+    iconActive: "text-sky-700 dark:text-sky-200",
+    iconIdle: "text-sky-600 dark:text-sky-400",
+  },
+  {
+    filter: "dispatched",
+    label: "Despachada",
+    icon: CircleDot,
+    active: "border-emerald-500/50 bg-emerald-500/15 text-emerald-950 shadow-sm dark:text-emerald-100",
+    inactive:
+      "border-emerald-500/25 bg-background text-foreground hover:bg-emerald-500/10 dark:hover:bg-emerald-500/15",
+    iconActive: "text-emerald-700 dark:text-emerald-200",
+    iconIdle: "text-emerald-600 dark:text-emerald-400",
+  },
+  {
+    filter: "cancelled",
+    label: "Cancelada",
+    icon: CircleDot,
+    active: "border-rose-500/50 bg-rose-500/15 text-rose-950 shadow-sm dark:text-rose-100",
+    inactive:
+      "border-rose-500/25 bg-background text-foreground hover:bg-rose-500/10 dark:hover:bg-rose-500/15",
+    iconActive: "text-rose-700 dark:text-rose-200",
+    iconIdle: "text-rose-600 dark:text-rose-400",
+  },
+]
+
+const TAB_BTN_CLASS =
+  "inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 function deliveryNoteStatusLabel(status: string): string {
   switch (status) {
@@ -48,7 +120,7 @@ function deliveryNoteStatusLabel(status: string): string {
 }
 
 export default function DeliveryNotesPage() {
-  const [status, setStatus] = useState<string>("all")
+  const [status, setStatus] = useState<StatusFilter>("all")
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<NoteRow> | null>(null)
@@ -78,88 +150,105 @@ export default function DeliveryNotesPage() {
   }, [load])
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Notas de entrega
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Listado de notas emitidas y su estado.
-        </p>
+    <CatalogPageShell
+      title="Notas de entrega"
+      subtitle="Listado de notas emitidas y su estado. El listado se actualiza al cambiar de pestaña."
+      icon={ClipboardList}
+    >
+      <div
+        role="tablist"
+        aria-label="Filtro por estado"
+        className="flex flex-wrap items-center gap-2"
+      >
+        {STATUS_TAB_DEFS.map(({ filter: f, label, icon: Icon, active, inactive, iconActive, iconIdle }) => {
+          const isActive = status === f
+          return (
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={cn(TAB_BTN_CLASS, isActive ? active : inactive)}
+              onClick={() => {
+                setStatus(f)
+                setPage(1)
+              }}
+            >
+              <Icon
+                className={cn("h-4 w-4 shrink-0", isActive ? iconActive : iconIdle)}
+                aria-hidden
+              />
+              {label}
+            </button>
+          )
+        })}
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="grid w-44 gap-2">
-          <Label>Estado</Label>
-          <Select
-            value={status}
-            onValueChange={(v) => {
-              setStatus(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="draft">Borrador</SelectItem>
-              <SelectItem value="dispatched">Despachada</SelectItem>
-              <SelectItem value="cancelled">Cancelada</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button type="button" variant="secondary" onClick={() => void load()}>
-          Actualizar
-        </Button>
-      </div>
+      <p className="text-muted-foreground text-xs">
+        Use Acciones para abrir la vista previa de cada nota emitida.
+      </p>
 
-      <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
+      <div className="w-full min-w-0 overflow-x-auto rounded-2xl border bg-card shadow-sm">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>Código</TableHead>
-              <TableHead>Nº sec.</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead>Fecha doc.</TableHead>
-              <TableHead>OT</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
+            <TableRow className={catalogTableHeaderRowClass}>
+              <CatalogTableHead icon={Hash}>ID</CatalogTableHead>
+              <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
+              <CatalogTableHead icon={ListOrdered}>Nº sec.</CatalogTableHead>
+              <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
+              <CatalogTableHead icon={CalendarDays}>Fecha doc.</CatalogTableHead>
+              <CatalogTableHead icon={Barcode}>OT</CatalogTableHead>
+              <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
+              <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground">
-                  Cargando…
-                </TableCell>
-              </TableRow>
+              <LoadingTableRow colSpan={8} />
             ) : !rows?.data.length ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground">
-                  Sin notas.
+              <TableRow className={catalogTableBodyRowClass}>
+                <TableCell
+                  colSpan={8}
+                  className={cn("text-muted-foreground", catalogTableBodyCellClass)}
+                >
+                  Sin notas para este filtro.
                 </TableCell>
               </TableRow>
             ) : (
               rows.data.map((n) => (
-                <TableRow key={n.id}>
-                  <TableCell>{n.id}</TableCell>
-                  <TableCell className="font-mono text-sm">
+                <TableRow key={n.id} className={catalogTableBodyRowClass}>
+                  <TableCell className={catalogTableBodyCellClass}>{n.id}</TableCell>
+                  <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
                     {n.code ?? "—"}
                   </TableCell>
-                  <TableCell>{n.sequential_number ?? "—"}</TableCell>
-                  <TableCell>{deliveryNoteStatusLabel(n.status)}</TableCell>
-                  <TableCell>
+                  <TableCell className={catalogTableBodyCellClass}>
+                    {n.sequential_number ?? "—"}
+                  </TableCell>
+                  <TableCell className={catalogTableBodyCellClass}>
+                    {deliveryNoteStatusLabel(n.status)}
+                  </TableCell>
+                  <TableCell className={catalogTableBodyCellClass}>
                     {n.document_date ? String(n.document_date).slice(0, 10) : "—"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={catalogTableBodyCellClass}>
                     {n.work_order?.code ?? n.work_order_id ?? "—"}
                   </TableCell>
-                  <TableCell>{n.work_order?.client?.name ?? "—"}</TableCell>
-                  <TableCell className="text-right">
-                    <Button type="button" variant="outline" size="sm" asChild>
-                      <Link to={`/notas-entrega/${n.id}/vista-previa`}>Vista previa</Link>
+                  <TableCell className={catalogTableBodyCellClass}>
+                    {n.work_order?.client?.name ?? "—"}
+                  </TableCell>
+                  <TableCell className={cn("text-right", catalogTableBodyCellClass)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className={catalogActionButtonClass}
+                      asChild
+                      title="Vista previa"
+                    >
+                      <Link to={`/notas-entrega/${n.id}/vista-previa`}>
+                        <Eye className="h-4 w-4" aria-hidden />
+                        <span className="sr-only">Vista previa</span>
+                      </Link>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -170,22 +259,26 @@ export default function DeliveryNotesPage() {
       </div>
 
       {rows && rows.last_page > 1 ? (
-        <div className="flex items-center justify-between text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
           <span className="text-muted-foreground">
-            Página {rows.current_page} de {rows.last_page} · {rows.total}
+            Página {rows.current_page} de {rows.last_page} · {rows.total} nota(s)
           </span>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Button
-              variant="outline"
+              type="button"
               size="sm"
+              variant="outline"
+              className={catalogPaginationOutlineButtonClass}
               disabled={rows.current_page <= 1 || loading}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               Anterior
             </Button>
             <Button
-              variant="outline"
+              type="button"
               size="sm"
+              variant="outline"
+              className={catalogPaginationOutlineButtonClass}
               disabled={rows.current_page >= rows.last_page || loading}
               onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
             >
@@ -194,6 +287,6 @@ export default function DeliveryNotesPage() {
           </div>
         </div>
       ) : null}
-    </div>
+    </CatalogPageShell>
   )
 }

@@ -7,6 +7,7 @@ use App\Models\CorteBobinaUsage;
 use App\Models\DeliveryNoteLine;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderTechnicalDocument;
+use App\Services\CortePlanillaDispatchSyncService;
 use App\Support\CortePlanillaSalida;
 use Illuminate\Validation\ValidationException;
 
@@ -159,62 +160,52 @@ class CorteDispatchService
 
         $usages = $q->limit(500)->get();
 
-        // Agrupar por OT: una sola fila por OT con saldo acumulado.
-        $byWo = [];
+        $out = [];
         foreach ($usages as $usage) {
+            $wo = $usage->workOrder;
             $woId = (int) $usage->work_order_id;
             if ($woId <= 0) {
                 continue;
             }
-            if (! isset($byWo[$woId])) {
-                $wo = $usage->workOrder;
-                $byWo[$woId] = [
-                    'corte_bobina_usage_id' => (int) $usage->getKey(),
-                    'work_order_id' => $woId,
-                    'work_order_code' => $wo?->code,
-                    'client_id' => $wo?->client_id,
-                    'client_name' => $wo?->client?->name,
-                    'product_id' => $wo?->product_id,
-                    'product_name' => $wo?->product?->name,
-                    'product_cpe' => $wo?->product?->cpe,
-                    'material_id' => $usage->material_id,
-                    'material_sku' => $usage->material?->sku,
-                    'quantity_finished_kg' => '0.000',
-                    'quantity_dispatched_kg' => '0.000',
-                    'quantity_remaining_kg' => '0.000',
-                    // ya no hay granularidad por paleta/bobina en despacho por OT
-                    'bobina_id' => null,
-                    'bobina_code' => null,
-                    'pallet_code' => null,
-                    'bobbin_count' => null,
-                ];
-            }
-
-            // Mantener un id representativo (el más reciente) para crear líneas de nota.
-            if ((int) $usage->getKey() > (int) $byWo[$woId]['corte_bobina_usage_id']) {
-                $byWo[$woId]['corte_bobina_usage_id'] = (int) $usage->getKey();
-            }
-
-            $byWo[$woId]['quantity_finished_kg'] = bcadd(
-                (string) $byWo[$woId]['quantity_finished_kg'],
-                number_format((float) $usage->quantity_finished_kg, 3, '.', ''),
-                3,
-            );
-        }
-
-        $this->mergeFormOnlyRowsIntoByWo($byWo, $workOrderId, $productId, $clientId);
-
-        $out = [];
-        foreach ($byWo as $woId => $row) {
-            $allocated = $this->quantityAllocatedToWorkOrder((int) $woId);
-            $remaining = bcsub((string) $row['quantity_finished_kg'], $allocated, 3);
+            $finished = number_format((float) $usage->quantity_finished_kg, 3, '.', '');
+            $allocated = $this->quantityAllocatedToCorteUsage((int) $usage->getKey());
+            $remaining = $this->quantityRemainingForCorteUsage($usage);
             if (bccomp($remaining, '0', 3) <= 0) {
                 continue;
             }
-            $row['quantity_dispatched_kg'] = $allocated;
-            $row['quantity_remaining_kg'] = $remaining;
-            $out[] = $row;
+
+            $paletaMeta = $this->paletaMetaFromUsageNotes((string) ($usage->notes ?? ''));
+
+            $isProvisional = CortePlanillaDispatchSyncService::isProvisionalNotes((string) ($usage->notes ?? ''));
+
+            $out[] = [
+                'corte_bobina_usage_id' => (int) $usage->getKey(),
+                'work_order_id' => $woId,
+                'work_order_code' => $wo?->code,
+                'client_id' => $wo?->client_id,
+                'client_name' => $wo?->client?->name,
+                'product_id' => $wo?->product_id,
+                'product_name' => $wo?->product?->name,
+                'product_cpe' => $wo?->product?->cpe,
+                'material_id' => $usage->material_id,
+                'material_sku' => $usage->material?->sku,
+                'quantity_finished_kg' => $finished,
+                'quantity_dispatched_kg' => $allocated,
+                'quantity_remaining_kg' => $remaining,
+                'bobina_id' => $usage->bobina_id,
+                'bobina_code' => $usage->bobina?->code,
+                'pallet_code' => $paletaMeta['pallet_code'],
+                'pallet_label' => $paletaMeta['pallet_label'],
+                'paleta_id' => $paletaMeta['paleta_id'],
+                'rollos_kg' => $paletaMeta['rollos_kg'],
+                'rollos_count' => $paletaMeta['rollos_count'],
+                'bobbin_count' => $paletaMeta['rollos_count'],
+                'is_provisional' => $isProvisional,
+            ];
         }
+
+        $this->mergeFormOnlyPaletaRows($out, $workOrderId, $productId, $clientId);
+        $this->enrichPaletaRowsFromTechnicalDocuments($out);
 
         usort($out, fn ($a, $b) => ((int) ($b['corte_bobina_usage_id'] ?? 0)) <=> ((int) ($a['corte_bobina_usage_id'] ?? 0)));
 
@@ -334,16 +325,24 @@ class CorteDispatchService
     }
 
     /**
-     * OT con kg en planilla pero sin fila de uso (p. ej. sin material en líneas): aún listar saldo desde form.
+     * Paletas cerradas en planilla sin fila de uso aún (p. ej. sin material en líneas OT).
      *
-     * @param  array<int, array<string, mixed>>  $byWo
+     * @param  list<array<string, mixed>>  $out
      */
-    private function mergeFormOnlyRowsIntoByWo(
-        array &$byWo,
+    private function mergeFormOnlyPaletaRows(
+        array &$out,
         ?int $workOrderId,
         ?int $productId,
         ?int $clientId,
     ): void {
+        $existingUsageIds = [];
+        foreach ($out as $row) {
+            $id = (int) ($row['corte_bobina_usage_id'] ?? 0);
+            if ($id > 0) {
+                $existingUsageIds[$id] = true;
+            }
+        }
+
         $q = WorkOrderTechnicalDocument::query()->with([
             'workOrder:id,code,client_id,product_id',
             'workOrder.client:id,name',
@@ -362,51 +361,168 @@ class CorteDispatchService
 
         foreach ($q->get() as $doc) {
             $form = is_array($doc->form) ? $doc->form : [];
-            if (! $this->formHasDispatchableCorte($form)) {
-                continue;
-            }
-
             $wo = $doc->workOrder;
             if ($wo === null) {
                 continue;
             }
 
-            $woId = (int) $wo->getKey();
-            $formFinished = CortePlanillaSalida::finishedKgFromForm($form);
+            foreach ([
+                ['paletas' => CortePlanillaSalida::closedPaletasFromForm($form), 'provisional' => false],
+                ['paletas' => CortePlanillaSalida::openPaletasWithKgFromForm($form), 'provisional' => true],
+            ] as $batch) {
+                foreach ($batch['paletas'] as $paleta) {
+                    if (! is_array($paleta)) {
+                        continue;
+                    }
+                    $paletaId = trim((string) ($paleta['id'] ?? ''));
+                    if ($paletaId === '') {
+                        continue;
+                    }
+                    $finished = number_format(CortePlanillaSalida::sumPaletaKg($paleta), 3, '.', '');
+                    if (bccomp($finished, '0', 3) <= 0) {
+                        continue;
+                    }
 
-            if (isset($byWo[$woId])) {
-                if (bccomp((string) $byWo[$woId]['quantity_finished_kg'], $formFinished, 3) < 0) {
-                    $byWo[$woId]['quantity_finished_kg'] = $formFinished;
+                    $notes = $batch['provisional']
+                        ? CortePlanillaDispatchSyncService::paletaProvisionalNotes($paletaId)
+                        : CortePlanillaDispatchSyncService::paletaNotes($paletaId);
+                    $usageId = (int) (CorteBobinaUsage::query()
+                        ->where('work_order_id', $wo->getKey())
+                        ->where('notes', $notes)
+                        ->value('id') ?? 0);
+
+                    if ($usageId > 0 && isset($existingUsageIds[$usageId])) {
+                        continue;
+                    }
+
+                    $label = trim((string) ($paleta['label'] ?? ''));
+                    if ($label === '') {
+                        $label = $paletaId;
+                    }
+                    $rollos = is_array($paleta['rollosKg'] ?? null) ? $paleta['rollosKg'] : [];
+                    $rollosCount = 0;
+                    foreach ($rollos as $kg) {
+                        if ((float) str_replace(',', '.', (string) $kg) > 0) {
+                            $rollosCount++;
+                        }
+                    }
+
+                    $out[] = [
+                        'corte_bobina_usage_id' => $usageId > 0 ? $usageId : null,
+                        'work_order_id' => (int) $wo->getKey(),
+                        'work_order_code' => $wo->code,
+                        'client_id' => $wo->client_id,
+                        'client_name' => $wo->client?->name,
+                        'product_id' => $wo->product_id,
+                        'product_name' => $wo->product?->name,
+                        'product_cpe' => $wo->product?->cpe,
+                        'material_id' => null,
+                        'material_sku' => null,
+                        'quantity_finished_kg' => $finished,
+                        'quantity_dispatched_kg' => '0.000',
+                        'quantity_remaining_kg' => $finished,
+                        'bobina_id' => null,
+                        'bobina_code' => null,
+                        'pallet_code' => $label,
+                        'pallet_label' => $label,
+                        'paleta_id' => $paletaId,
+                        'rollos_kg' => array_values(array_map('strval', $rollos)),
+                        'rollos_count' => $rollosCount,
+                        'bobbin_count' => $rollosCount,
+                        'is_provisional' => $batch['provisional'],
+                    ];
                 }
+            }
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function enrichPaletaRowsFromTechnicalDocuments(array &$rows): void
+    {
+        $woIds = [];
+        foreach ($rows as $row) {
+            $woId = (int) ($row['work_order_id'] ?? 0);
+            if ($woId > 0) {
+                $woIds[$woId] = true;
+            }
+        }
+        if ($woIds === []) {
+            return;
+        }
+
+        $docs = WorkOrderTechnicalDocument::query()
+            ->whereIn('work_order_id', array_keys($woIds))
+            ->get(['work_order_id', 'form']);
+
+        $paletasByWo = [];
+        foreach ($docs as $doc) {
+            $form = is_array($doc->form) ? $doc->form : [];
+            $woId = (int) $doc->work_order_id;
+            $paletasByWo[$woId] = [];
+            foreach (CortePlanillaSalida::paletasArrayFromForm($form) as $paleta) {
+                if (! is_array($paleta)) {
+                    continue;
+                }
+                $id = trim((string) ($paleta['id'] ?? ''));
+                if ($id !== '') {
+                    $paletasByWo[$woId][$id] = $paleta;
+                }
+            }
+        }
+
+        foreach ($rows as $idx => $row) {
+            $woId = (int) ($row['work_order_id'] ?? 0);
+            $paletaId = (string) ($row['paleta_id'] ?? '');
+            if ($woId <= 0 || $paletaId === '') {
                 continue;
             }
+            $paleta = $paletasByWo[$woId][$paletaId] ?? null;
+            if (! is_array($paleta)) {
+                continue;
+            }
+            $label = trim((string) ($paleta['label'] ?? ''));
+            if ($label !== '') {
+                $rows[$idx]['pallet_label'] = $label;
+                $rows[$idx]['pallet_code'] = $label;
+            }
+            $rollos = is_array($paleta['rollosKg'] ?? null) ? $paleta['rollosKg'] : [];
+            $rollosCount = 0;
+            foreach ($rollos as $kg) {
+                if ((float) str_replace(',', '.', (string) $kg) > 0) {
+                    $rollosCount++;
+                }
+            }
+            $rows[$idx]['rollos_kg'] = array_values(array_map('strval', $rollos));
+            $rows[$idx]['rollos_count'] = $rollosCount;
+            $rows[$idx]['bobbin_count'] = $rollosCount;
+        }
+    }
 
-            $usageId = (int) (CorteBobinaUsage::query()
-                ->where('work_order_id', $woId)
-                ->where('quantity_finished_kg', '>', 0)
-                ->orderByDesc('id')
-                ->value('id') ?? 0);
-
-            $byWo[$woId] = [
-                'corte_bobina_usage_id' => $usageId > 0 ? $usageId : null,
-                'work_order_id' => $woId,
-                'work_order_code' => $wo->code,
-                'client_id' => $wo->client_id,
-                'client_name' => $wo->client?->name,
-                'product_id' => $wo->product_id,
-                'product_name' => $wo->product?->name,
-                'product_cpe' => $wo->product?->cpe,
-                'material_id' => null,
-                'material_sku' => null,
-                'quantity_finished_kg' => $formFinished,
-                'quantity_dispatched_kg' => '0.000',
-                'quantity_remaining_kg' => '0.000',
-                'bobina_id' => null,
-                'bobina_code' => null,
+    /**
+     * @return array{paleta_id: string|null, pallet_label: string|null, pallet_code: string|null, rollos_kg: list<string>, rollos_count: int}
+     */
+    private function paletaMetaFromUsageNotes(string $notes): array
+    {
+        $paletaId = CortePlanillaDispatchSyncService::paletaIdFromNotes($notes);
+        if ($paletaId === null) {
+            return [
+                'paleta_id' => null,
+                'pallet_label' => null,
                 'pallet_code' => null,
-                'bobbin_count' => null,
+                'rollos_kg' => [],
+                'rollos_count' => 0,
             ];
         }
+
+        return [
+            'paleta_id' => $paletaId,
+            'pallet_label' => $paletaId,
+            'pallet_code' => $paletaId,
+            'rollos_kg' => [],
+            'rollos_count' => 0,
+        ];
     }
 
     /**
@@ -414,10 +530,18 @@ class CorteDispatchService
      */
     private function formHasDispatchableCorte(array $form): bool
     {
-        if (CortePlanillaSalida::sumSalidaKgFromPaletasInForm($form) > 0) {
-            return true;
+        foreach (CortePlanillaSalida::closedPaletasFromForm($form) as $paleta) {
+            if (is_array($paleta) && CortePlanillaSalida::sumPaletaKg($paleta) > 0) {
+                return true;
+            }
         }
 
-        return bccomp(CortePlanillaSalida::finishedKgFromForm($form), '0', 3) > 0;
+        foreach (CortePlanillaSalida::openPaletasWithKgFromForm($form) as $paleta) {
+            if (is_array($paleta) && CortePlanillaSalida::sumPaletaKg($paleta) > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

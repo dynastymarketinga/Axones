@@ -21,13 +21,22 @@ import {
   ListOrdered,
   Package,
   Scale,
+  Scissors,
   Settings2,
   UserCircle,
   Users,
 } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { MES_CONTROL_SAVED_EVENTS } from "@/lib/area-mes-band-helpers"
 import { groupWorkOrdersForHub, latestRowInGroup, sumPedidoKgDisplay } from "@/lib/axones-work-order-grouping"
+import {
+  classifyWorkOrderHubRow,
+  hubBucketEtapaHint,
+  hubBucketMatchesFilter,
+  type HubSupervisorBucket,
+  type HubSupervisorFilter,
+} from "@/lib/work-order-hub-supervisor"
 import { CLIENT_ORDER_MODULE_LIST_FOCUS } from "@/pages/axones/client-order-i18n"
 import type {
   ClientOrderDetailRecord,
@@ -152,12 +161,7 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-type SupervisorFilter =
-  | "all"
-  | "created"
-  | "scheduling"
-  | "in_progress"
-  | "completed"
+type SupervisorFilter = HubSupervisorFilter
 
 function statusLabel(value: string | null | undefined): string {
   const statuses: Record<string, string> = {
@@ -184,24 +188,13 @@ function boardStageLabel(value: string | null | undefined): string {
   return stages[key] ?? (value?.trim() || "—")
 }
 
-function supervisorBucket(row: WorkOrderListRow): Exclude<SupervisorFilter, "all"> {
-  const stage = (row.board_stage ?? "").toLowerCase().trim()
-  const status = (row.status ?? "").toLowerCase().trim()
-  if (status === "completed" || stage === "completada") return "completed"
-  if (stage === "nueva") return "created"
-  if (stage === "pendiente") return "scheduling"
-  return "in_progress"
-}
-
 function canPreviewPlanillaReport(row: WorkOrderListRow): boolean {
   const s = (row.status ?? "").toLowerCase().trim()
   return s !== "completed" && s !== "cancelled"
 }
 
-type SupervisorBucket = Exclude<SupervisorFilter, "all">
-
 const SUPERVISOR_BUCKET_STYLES: Record<
-  SupervisorBucket,
+  HubSupervisorBucket,
   {
     tabActive: string
     tabInactive: string
@@ -214,7 +207,7 @@ const SUPERVISOR_BUCKET_STYLES: Record<
     BadgeIcon: LucideIcon
   }
 > = {
-  created: {
+  registered: {
     tabActive:
       "border-2 border-sky-600/50 bg-sky-500/12 text-foreground shadow-sm",
     tabInactive:
@@ -227,20 +220,6 @@ const SUPERVISOR_BUCKET_STYLES: Record<
       "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-sky-950 dark:text-sky-100 border-sky-500/30 bg-sky-500/10",
     badgeLabel: "Registrada",
     BadgeIcon: FilePenLine,
-  },
-  scheduling: {
-    tabActive:
-      "border-2 border-violet-600/45 bg-violet-500/12 text-foreground shadow-sm",
-    tabInactive:
-      "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-violet-500/38",
-    iconClass: "text-violet-700 dark:text-violet-300",
-    iconClassActive: "text-violet-800 dark:text-violet-200",
-    rowBorder: "border-l-violet-600/60",
-    rowBg: "bg-violet-500/[0.055]",
-    badgeClass:
-      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-violet-950 dark:text-violet-100 border-violet-500/28 bg-violet-500/10",
-    badgeLabel: "Programación",
-    BadgeIcon: CalendarDays,
   },
   in_progress: {
     tabActive:
@@ -256,7 +235,21 @@ const SUPERVISOR_BUCKET_STYLES: Record<
     badgeLabel: "En curso",
     BadgeIcon: Factory,
   },
-  completed: {
+  closed: {
+    tabActive:
+      "border-2 border-teal-600/45 bg-teal-500/12 text-foreground shadow-sm",
+    tabInactive:
+      "border border-border/80 bg-background text-muted-foreground border-l-[3px] border-l-teal-500/38",
+    iconClass: "text-teal-700 dark:text-teal-300",
+    iconClassActive: "text-teal-800 dark:text-teal-200",
+    rowBorder: "border-l-teal-600/58",
+    rowBg: "bg-teal-500/[0.055]",
+    badgeClass:
+      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-teal-950 dark:text-teal-100 border-teal-500/28 bg-teal-500/10",
+    badgeLabel: "Cerrada",
+    BadgeIcon: Scissors,
+  },
+  closed_complete: {
     tabActive:
       "border-2 border-emerald-600/45 bg-emerald-500/12 text-foreground shadow-sm",
     tabInactive:
@@ -267,8 +260,20 @@ const SUPERVISOR_BUCKET_STYLES: Record<
     rowBg: "bg-emerald-500/[0.055]",
     badgeClass:
       "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-emerald-950 dark:text-emerald-100 border-emerald-500/28 bg-emerald-500/10",
-    badgeLabel: "Cerrada",
+    badgeLabel: "Cerrada completada",
     BadgeIcon: CheckCircle2,
+  },
+  cancelled: {
+    tabActive: "",
+    tabInactive: "",
+    iconClass: "text-muted-foreground",
+    iconClassActive: "text-muted-foreground",
+    rowBorder: "border-l-muted-foreground/45",
+    rowBg: "bg-muted/30",
+    badgeClass:
+      "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground",
+    badgeLabel: "Cancelada",
+    BadgeIcon: Ban,
   },
 }
 
@@ -287,35 +292,22 @@ const SUPERVISOR_TAB_DEFS: Array<{
   Icon: LucideIcon
 }> = [
   { filter: "all", label: "Todas", Icon: Layers },
-  { filter: "created", label: "Registradas", Icon: FilePenLine },
-  { filter: "scheduling", label: "Programación", Icon: CalendarDays },
+  { filter: "registered", label: "Registradas", Icon: FilePenLine },
   { filter: "in_progress", label: "En curso", Icon: Factory },
-  { filter: "completed", label: "Cerradas", Icon: CheckCircle2 },
+  { filter: "closed", label: "Cerrada", Icon: Scissors },
+  { filter: "closed_complete", label: "Cerrada completada", Icon: CheckCircle2 },
 ]
 
 const SUPERVISOR_TAB_BTN_CLASS =
   "inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
-function workOrderRowAccent(row: WorkOrderListRow): {
+function workOrderRowAccent(row: WorkOrderListRow, nowMs: number): {
   rowClass: string
   badgeClass: string
   badgeLabel: string
   BadgeIcon: LucideIcon
 } {
-  const bucket = supervisorBucket(row)
-  const st = (row.status ?? "").toLowerCase().trim()
-  if (st === "cancelled" && bucket === "in_progress") {
-    return {
-      rowClass: cn(
-        "border-l-4 border-l-muted-foreground/45",
-        "bg-muted/30",
-      ),
-      badgeClass:
-        "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight border-muted-foreground/35 bg-muted/70 text-muted-foreground",
-      badgeLabel: "Cancelada",
-      BadgeIcon: Ban,
-    }
-  }
+  const bucket = classifyWorkOrderHubRow(row, nowMs)
   const s = SUPERVISOR_BUCKET_STYLES[bucket]
   return {
     rowClass: cn("border-l-4", s.rowBorder, s.rowBg),
@@ -325,8 +317,21 @@ function workOrderRowAccent(row: WorkOrderListRow): {
   }
 }
 
+function formatEtapaCell(row: WorkOrderListRow, nowMs: number): ReactNode {
+  const hint = hubBucketEtapaHint(classifyWorkOrderHubRow(row, nowMs))
+  const base = boardStageLabel(row.board_stage)
+  if (!hint) return base
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span>{base}</span>
+      <span className="text-muted-foreground text-xs">{hint}</span>
+    </div>
+  )
+}
+
 type HubWorkOrderTableRowProps = {
   row: WorkOrderListRow
+  mesNow: number
   numCell: ReactNode
   accent: {
     rowClass: string
@@ -341,6 +346,7 @@ type HubWorkOrderTableRowProps = {
 
 function HubWorkOrderTableRow({
   row: o,
+  mesNow,
   numCell,
   accent,
   nested,
@@ -374,7 +380,9 @@ function HubWorkOrderTableRow({
       <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.client?.name ?? "—"}</TableCell>
       <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.product?.name ?? "—"}</TableCell>
       <TableCell className={cn(catalogTableBodyCellClass)}>{formMachine(o)}</TableCell>
-      <TableCell className={cn(catalogTableBodyCellClass)}>{boardStageLabel(o.board_stage)}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass)}>
+        {formatEtapaCell(o, mesNow)}
+      </TableCell>
       <TableCell className={cn(catalogTableBodyCellClass)}>{statusLabel(o.status)}</TableCell>
       <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.creator?.name ?? "—"}</TableCell>
       <TableCell className={cn(catalogTableBodyCellClass)}>{formPedidoKg(o)}</TableCell>
@@ -469,6 +477,7 @@ export default function WorkOrdersHubPage() {
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
   const [supervisorFilter, setSupervisorFilter] = useState<SupervisorFilter>("all")
+  const [mesNow, setMesNow] = useState(() => Date.now())
 
   const [coLoading, setCoLoading] = useState(false)
   const [clientOrders, setClientOrders] = useState<ClientOrderRow[]>([])
@@ -541,6 +550,7 @@ export default function WorkOrdersHubPage() {
           page,
           per_page: 20,
           q: qApi || undefined,
+          include_area_summaries: "tintas",
         },
       })
       setRows(data)
@@ -573,30 +583,48 @@ export default function WorkOrdersHubPage() {
     void loadList()
   }, [loadList])
 
+  useEffect(() => {
+    const tick = window.setInterval(() => setMesNow(Date.now()), 5000)
+    const onMesSaved = () => setMesNow(Date.now())
+    for (const ev of Object.values(MES_CONTROL_SAVED_EVENTS)) {
+      window.addEventListener(ev, onMesSaved)
+    }
+    return () => {
+      window.clearInterval(tick)
+      for (const ev of Object.values(MES_CONTROL_SAVED_EVENTS)) {
+        window.removeEventListener(ev, onMesSaved)
+      }
+    }
+  }, [])
+
   const showInitialSkeleton = loading && rows === null
 
   const visibleRows = useMemo(() => {
     const all = rows?.data ?? []
     if (supervisorFilter === "all") return all
-    return all.filter((r) => supervisorBucket(r) === supervisorFilter)
-  }, [rows?.data, supervisorFilter])
+    return all.filter((r) =>
+      hubBucketMatchesFilter(classifyWorkOrderHubRow(r, mesNow), supervisorFilter),
+    )
+  }, [rows?.data, supervisorFilter, mesNow])
 
   const groupedVisible = useMemo(() => groupWorkOrdersForHub(visibleRows), [visibleRows])
 
   const supervisorCounts = useMemo(() => {
     const all = rows?.data ?? []
-    const created = all.filter((r) => supervisorBucket(r) === "created").length
-    const scheduling = all.filter((r) => supervisorBucket(r) === "scheduling").length
-    const inProgress = all.filter((r) => supervisorBucket(r) === "in_progress").length
-    const completed = all.filter((r) => supervisorBucket(r) === "completed").length
+    const countFor = (filter: HubSupervisorFilter) => {
+      if (filter === "all") return all.length
+      return all.filter((r) =>
+        hubBucketMatchesFilter(classifyWorkOrderHubRow(r, mesNow), filter),
+      ).length
+    }
     return {
       all: all.length,
-      created,
-      scheduling,
-      in_progress: inProgress,
-      completed,
+      registered: countFor("registered"),
+      in_progress: countFor("in_progress"),
+      closed: countFor("closed"),
+      closed_complete: countFor("closed_complete"),
     }
-  }, [rows?.data])
+  }, [rows?.data, mesNow])
 
   function clientOrderLabel(c: ClientOrderRow): string {
     const parts = [c.code, c.client?.name, c.first_line_with_product?.product?.name]
@@ -790,7 +818,7 @@ export default function WorkOrdersHubPage() {
                 const count =
                   f === "all"
                     ? supervisorCounts.all
-                    : supervisorCounts[f]
+                    : supervisorCounts[f as Exclude<HubSupervisorFilter, "all">]
                 if (f === "all") {
                   return (
                     <button
@@ -815,7 +843,7 @@ export default function WorkOrdersHubPage() {
                     </button>
                   )
                 }
-                const st = SUPERVISOR_BUCKET_STYLES[f]
+                const st = SUPERVISOR_BUCKET_STYLES[f as HubSupervisorBucket]
                 return (
                   <button
                     key={f}
@@ -916,7 +944,7 @@ export default function WorkOrdersHubPage() {
 
                       if (g.rows.length === 1) {
                         const o = g.rows[0]!
-                        const accent = workOrderRowAccent(o)
+                        const accent = workOrderRowAccent(o, mesNow)
                         const idxOnPage = rows?.data?.findIndex((r) => r.id === o.id) ?? -1
                         const n =
                           idxOnPage >= 0 ? rowPageBase + idxOnPage + 1 : rowPageBase + minIdx + 1
@@ -924,6 +952,7 @@ export default function WorkOrdersHubPage() {
                           <HubWorkOrderTableRow
                             key={o.id}
                             row={o}
+                            mesNow={mesNow}
                             accent={accent}
                             canDeactivate={canDeactivate}
                             onDeactivateClick={(row) => {
@@ -938,7 +967,7 @@ export default function WorkOrdersHubPage() {
                       }
 
                       const latest = latestRowInGroup(g.rows)
-                      const accentHeader = workOrderRowAccent(latest)
+                      const accentHeader = workOrderRowAccent(latest, mesNow)
                       const open = expandedGroups[g.key] ?? false
                       const ocCode = latest.client_order?.code ?? "—"
                       const out: ReactElement[] = []
@@ -1030,11 +1059,12 @@ export default function WorkOrdersHubPage() {
 
                       if (open) {
                         g.rows.forEach((o, j) => {
-                          const accent = workOrderRowAccent(o)
+                          const accent = workOrderRowAccent(o, mesNow)
                           out.push(
                             <HubWorkOrderTableRow
                               key={o.id}
                               row={o}
+                              mesNow={mesNow}
                               nested
                               accent={accent}
                               canDeactivate={canDeactivate}

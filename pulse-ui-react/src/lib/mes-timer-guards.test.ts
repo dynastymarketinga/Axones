@@ -70,4 +70,19 @@ describe("canSaveProductionAreaForm", () => {
       ),
     ).toBe(true)
   })
+
+  it("corte: legacy flat operador counts as open shift", () => {
+    const corteConfig = MES_PRODUCTION_SAVE_CONFIG.corte
+    expect(
+      canSaveProductionAreaForm(
+        {
+          corOperador: "Ana",
+          corTurno: "diurno",
+          corGrupo: "A",
+          corTimerState: "running",
+        },
+        corteConfig,
+      ),
+    ).toBe(true)
+  })
 })

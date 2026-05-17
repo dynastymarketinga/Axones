@@ -21,7 +21,7 @@ class MesProductionSaveGuard
         'corte' => [
             'prefix' => 'cor',
             'actual_key' => 'corTurnoActual',
-            'legacy_turno_keys' => ['cor_turno_actual'],
+            'legacy_turno_keys' => ['cor_turno_actual', 'corOperador', 'corTurno', 'corGrupo'],
         ],
     ];
 
@@ -63,6 +63,9 @@ class MesProductionSaveGuard
         foreach ($legacyTurnoKeys as $key) {
             $v = $form[$key] ?? null;
             if (is_string($v) && trim($v) !== '') {
+                return true;
+            }
+            if (is_array($v) && $v !== []) {
                 return true;
             }
         }

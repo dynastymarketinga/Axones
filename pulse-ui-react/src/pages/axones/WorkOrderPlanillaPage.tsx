@@ -77,6 +77,7 @@ import { syncMontajeAutoFields, withMontajeAutoFields } from "@/lib/montaje-plan
 import { sumSalidaKgFromForm } from "@/pages/axones/corte-turnos"
 import {
   canSaveProductionAreaForm,
+  hasActiveProductionTurno,
   MES_PRODUCTION_SAVE_CONFIG,
   MES_SAVE_BLOCKED_MESSAGE,
 } from "@/lib/mes-timer-guards"
@@ -1118,6 +1119,11 @@ export default function WorkOrderPlanillaPage() {
     () => canSaveProductionAreaForm(form, MES_PRODUCTION_SAVE_CONFIG.corte),
     [form],
   )
+  const canPersistCorteShiftOpen = useMemo(
+    () => hasActiveProductionTurno(form, MES_PRODUCTION_SAVE_CONFIG.corte),
+    [form],
+  )
+  const canSaveCorteForm = canSaveCorteProduction || canPersistCorteShiftOpen
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [blurFieldMessages, setBlurFieldMessages] = useState<Record<string, string>>({})
   const fieldErrorsClearTimerRef = useRef<number | null>(null)
@@ -1703,7 +1709,7 @@ export default function WorkOrderPlanillaPage() {
       return
     }
     if (saving) return
-    if (activeScope === "corte" && !canSaveCorteProduction) {
+    if (activeScope === "corte" && !canSaveCorteForm) {
       toast.error(MES_SAVE_BLOCKED_MESSAGE)
       return
     }
@@ -4534,8 +4540,9 @@ export default function WorkOrderPlanillaPage() {
                 form={form}
                 setForm={setForm}
                 pedidoTotalKg={Number(readNumberString(form.pedidoKg) || readNumberString(prefill.pedidoKg) || "0")}
+                canOperateProduction={canSaveCorteProduction}
               />
-              {!canSaveCorteProduction ? (
+              {!canSaveCorteForm ? (
                 <p className="max-w-md text-center text-xs text-muted-foreground">
                   {MES_SAVE_BLOCKED_MESSAGE}
                 </p>
@@ -4544,7 +4551,7 @@ export default function WorkOrderPlanillaPage() {
                 <Button
                   type="button"
                   onClick={() => setPendingHeaderAction("save")}
-                  disabled={saving || loading || !canSaveCorteProduction}
+                  disabled={saving || loading || !canSaveCorteForm}
                 >
                   {saving ? "Guardando…" : "Guardar orden"}
                 </Button>

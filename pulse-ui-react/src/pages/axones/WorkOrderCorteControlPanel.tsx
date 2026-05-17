@@ -17,6 +17,56 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { apiFetch, ApiError } from "@/lib/api"
+
+type CorteDispatchSyncStatus = {
+  material_resolved: boolean
+  closed_paletas_with_kg: number
+  usages_synced: number
+  provisional_paletas_with_kg?: number
+  provisional_synced?: number
+}
+
+type CorteControlPatchResponse = {
+  dispatch_sync?: CorteDispatchSyncStatus
+}
+
+/**
+ * Guardar / cerrar paleta no finaliza corEstadoArea; avisa si el sync a despacho falló.
+ */
+function warnCorteDispatchSync(dispatchSync?: CorteDispatchSyncStatus): void {
+  if (!dispatchSync) return
+  const {
+    material_resolved,
+    closed_paletas_with_kg,
+    usages_synced,
+    provisional_paletas_with_kg = 0,
+    provisional_synced = 0,
+  } = dispatchSync
+
+  const needsMaterial =
+    (closed_paletas_with_kg > 0 || provisional_paletas_with_kg > 0) && !material_resolved
+  if (needsMaterial) {
+    toast.error(
+      "No se sincronizó a Despacho: la OT no tiene material asociado (líneas, pedido o producto). Asigne material en la OT o registre pesos y guarde de nuevo.",
+    )
+    return
+  }
+  if (closed_paletas_with_kg > usages_synced) {
+    toast.warning(
+      "Algunas paletas cerradas no se reflejaron en Despacho. Verifique material en la OT y guarde de nuevo.",
+    )
+    return
+  }
+  if (provisional_paletas_with_kg > provisional_synced) {
+    toast.warning(
+      "Algunas paletas en progreso no se reflejaron como saldo provisional en Despacho. Guarde de nuevo.",
+    )
+    return
+  }
+  if (provisional_paletas_with_kg > 0 && provisional_synced >= provisional_paletas_with_kg) {
+    toast.message("Saldo provisional visible en Despacho · producto terminado.")
+  }
+}
 import { getStoredUser } from "@/lib/auth-storage"
 import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
 import { filterCorteControlForm } from "@/lib/corte-control-keys"
@@ -31,21 +81,32 @@ import {
 import {
   bootstrapCorteFormState,
   clearCorteMirrorKeys,
+  corteTurnoToMirror,
   COR_ACTUAL_KEY,
   COR_ESTADO_KEY,
   COR_TURNOS_KEY,
   corteAggregatedTimerMirrorFromTurnos,
   finalizeTurnTimerNow,
+  materializeOpenCorteTurnoActual,
   parseCorteTurnoActual,
   parseCorteTurnos,
   readCorteEstadoArea,
+  resolveCorteDisplayTimer,
   snapshotCorteTurnMetrics,
   accumulateCorteFromJson,
+  pauseCorteProductionTimerOnForm,
+  startCorteProductionTimerOnForm,
+  getCorPaletas,
+  sanitizeCorEntradaBobinasKg,
+  sanitizeCorPaletasForPersistence,
   sumEntradaKgFromForm,
+  sumSalidaKgFromPaletas,
   sumSalidaKgFromForm,
+  syncCorteFormMetrics,
   syncCorteSalidaFields,
   type CorteTurnoEntry,
 } from "./corte-turnos"
+import { stringsFromActivePersonnel, type DraftPerson } from "./WorkOrderMontajeOpsSection"
 import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import "./work-order-planilla.css"
@@ -55,15 +116,6 @@ type OrdenTrabajoPayload = {
   code: string
   prefill: Record<string, unknown>
   form: Record<string, unknown> | null
-}
-
-const LOCAL_CORTE_DRAFT_PREFIX = "axones.corte.control.draft."
-
-type LocalCorteDraft = {
-  work_order_id: number
-  saved_at_ms: number
-  active_turno: unknown
-  mirror: Record<string, unknown>
 }
 
 function readString(v: unknown): string {
@@ -110,6 +162,9 @@ export default function WorkOrderCorteControlPanel({
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
   const [finalizeAreaConfirmOpen, setFinalizeAreaConfirmOpen] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [pauseMotivoModalOpen, setPauseMotivoModalOpen] = useState(false)
+  const [pauseReason, setPauseReason] = useState("")
+  const [pauseObs, setPauseObs] = useState("")
 
   const load = useCallback(async () => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -119,45 +174,7 @@ export default function WorkOrderCorteControlPanel({
       const basePrefill = payload.prefill ?? {}
       setPrefill(basePrefill)
       const mergedForm = mergePrefill(basePrefill, payload.form)
-      const boot = bootstrapCorteFormState(mergedForm)
-      if (readCorteEstadoArea(boot[COR_ESTADO_KEY]) === "finalizada") {
-        setForm(boot)
-        return
-      }
-
-      try {
-        const raw = localStorage.getItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
-        if (raw) {
-          const draft = JSON.parse(raw) as Partial<LocalCorteDraft>
-          const serverLastResume = readNumber(boot.corTimerLastResumeAtMs)
-          const serverPauseAt = readNumber(boot.corTimerPauseAtMs)
-          const serverTimerAny = Math.max(serverLastResume, serverPauseAt)
-
-          const draftMirror =
-            draft.mirror && typeof draft.mirror === "object"
-              ? (draft.mirror as Record<string, unknown>)
-              : null
-          const draftLastResume = readNumber(draftMirror?.corTimerLastResumeAtMs)
-          const draftPauseAt = readNumber(draftMirror?.corTimerPauseAtMs)
-          const draftTimerAny = Math.max(draftLastResume, draftPauseAt)
-
-          if (draftTimerAny > serverTimerAny && draft.active_turno) {
-            setForm(
-              bootstrapCorteFormState({
-                ...boot,
-                [COR_ACTUAL_KEY]: draft.active_turno,
-                ...(draftMirror ?? {}),
-              }),
-            )
-          } else {
-            setForm(boot)
-          }
-        } else {
-          setForm(boot)
-        }
-      } catch {
-        setForm(boot)
-      }
+      setForm(bootstrapCorteFormState(mergedForm))
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar la OT para corte.")
@@ -176,8 +193,9 @@ export default function WorkOrderCorteControlPanel({
   const areaEstado = readCorteEstadoArea(form[COR_ESTADO_KEY])
   const areaFinalizada = areaEstado === "finalizada"
   const controlReadOnly = areaFinalizada && !canFinalizeOrder
-  const activeTurno = useMemo(() => parseCorteTurnoActual(form[COR_ACTUAL_KEY], form), [form])
-  const timerState = readString(form.corTimerState) || "pending"
+  const activeTurno = useMemo(() => materializeOpenCorteTurnoActual(form), [form])
+  const activeTimer = useMemo(() => resolveCorteDisplayTimer(activeTurno, form), [activeTurno, form])
+  const timerState = activeTimer.state || "pending"
   const timerRunning = timerState === "running"
   const timerPaused = timerState === "paused"
   const hasActiveTurno = activeTurno !== null
@@ -188,8 +206,25 @@ export default function WorkOrderCorteControlPanel({
   )
 
   const canSaveProduction = useMemo(() => {
+    if (controlReadOnly) return false
     return canSaveProductionAreaForm(form, MES_PRODUCTION_SAVE_CONFIG.corte)
-  }, [form])
+  }, [controlReadOnly, form])
+
+  const canPersistShiftOpen = useMemo(() => {
+    if (controlReadOnly) return false
+    return hasActiveTurno
+  }, [controlReadOnly, hasActiveTurno])
+
+  const canClickGuardar = canSaveProduction || canPersistShiftOpen || areaFinalizada
+
+  const guardarHint = useMemo(() => {
+    if (controlReadOnly) return ""
+    if (canSaveProduction || areaFinalizada) return ""
+    if (canPersistShiftOpen) {
+      return "Turno abierto: puede guardar turno y personal. Para cerrar paletas y avisar a otras áreas, inicie el cronómetro (play)."
+    }
+    return MES_SAVE_BLOCKED_MESSAGE
+  }, [areaFinalizada, canPersistShiftOpen, canSaveProduction, controlReadOnly])
 
   const persistCorteForm = useCallback(
     async (
@@ -199,6 +234,8 @@ export default function WorkOrderCorteControlPanel({
         notifyProductionSave?: boolean
         successMessage?: string
         suppressSuccessToast?: boolean
+        /** Envía corTurnoActual: null al cerrar turno (no omitir la clave). */
+        clearTurnoActual?: boolean
       },
     ): Promise<boolean> => {
       const src = withCorteAutoFields(srcBase ?? form)
@@ -226,26 +263,55 @@ export default function WorkOrderCorteControlPanel({
         return false
       }
 
-      const act = parseCorteTurnoActual(src[COR_ACTUAL_KEY], src)
-      if (act) {
-        if (!act.operador.trim() || !act.turno || !act.grupo) {
+      let actualP = materializeOpenCorteTurnoActual(src)
+      if (actualP) {
+        if (!actualP.operador.trim() || !actualP.turno || !actualP.grupo) {
           toast.error("Corte: complete turno, grupo y operador antes de guardar.")
           return false
         }
+        const topPaletas = getCorPaletas(src)
+        const topKg = sumSalidaKgFromPaletas(topPaletas)
+        const nestedKg = sumSalidaKgFromPaletas(actualP.paletas)
+        if (topKg > nestedKg + 0.001 || (topKg > 0 && nestedKg <= 0)) {
+          actualP = { ...actualP, paletas: topPaletas }
+        }
+        const entradaKg = sanitizeCorEntradaBobinasKg(
+          src.corEntradaBobinasKg ?? actualP.entradaBobinasKg,
+        )
+        actualP = {
+          ...actualP,
+          paletas: sanitizeCorPaletasForPersistence(topPaletas),
+          entradaBobinasKg: entradaKg,
+          kgIngresados: sumEntradaKgFromForm({ ...src, corEntradaBobinasKg: entradaKg }).toFixed(2),
+        }
       }
 
+      const paletasForSave = sanitizeCorPaletasForPersistence(getCorPaletas(src))
+      const entradaForSave = sanitizeCorEntradaBobinasKg(src.corEntradaBobinasKg)
+      const salidaFields = syncCorteSalidaFields({
+        ...src,
+        cor_paletas: paletasForSave,
+        corEntradaBobinasKg: entradaForSave,
+      })
+
       const closedP = parseCorteTurnos(src[COR_TURNOS_KEY], src)
-      const actualP = parseCorteTurnoActual(src[COR_ACTUAL_KEY], src)
-      const salidaActual = sumSalidaKgFromForm(src)
+      const salidaActual = sumSalidaKgFromForm({ ...src, ...salidaFields })
       const accFromJson = accumulateCorteFromJson(closedP, actualP, salidaActual)
+      const mirror = actualP ? corteTurnoToMirror(actualP) : {}
 
       const normalizedForm: Record<string, unknown> = {
         ...src,
+        ...mirror,
+        ...salidaFields,
+        cor_paletas: paletasForSave,
+        corSalidaPaletasKg: paletasForSave.map((p) => p.rollosKg),
+        corEntradaBobinasKg: entradaForSave,
         [COR_TURNOS_KEY]: closedP,
-        [COR_ACTUAL_KEY]: actualP,
         [COR_ESTADO_KEY]: readCorteEstadoArea(src[COR_ESTADO_KEY]),
-        kgIngresadosCorte: normalizeNumericString(src.kgIngresadosCorte),
-        kgSalidaCorte: normalizeNumericString(src.kgSalidaCorte),
+        kgIngresadosCorte: normalizeNumericString(
+          actualP?.kgIngresados ?? src.kgIngresadosCorte,
+        ),
+        kgSalidaCorte: normalizeNumericString(salidaFields.kgSalidaCorte),
         kgMermaCorte: normalizeNumericString(src.kgMermaCorte),
         metrajeCorte: normalizeNumericString(src.metrajeCorte),
         corScrapRefileKg: normalizeNumericString(src.corScrapRefileKg),
@@ -257,29 +323,42 @@ export default function WorkOrderCorteControlPanel({
         corAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
       }
 
+      if (actualP !== null) {
+        normalizedForm[COR_ACTUAL_KEY] = actualP
+      } else if (options?.clearTurnoActual) {
+        normalizedForm[COR_ACTUAL_KEY] = null
+      }
+
       const corteOnlyForm = filterCorteControlForm(normalizedForm)
 
       setSaving(true)
       try {
-        await apiFetch(`work-orders/${workOrderId}/orden-trabajo/corte-control`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            form: corteOnlyForm,
-            origin_area: "corte",
-            notify_on_production_save: notifyProductionSave && timerEverStarted,
-          }),
-        })
+        const res = await apiFetch<CorteControlPatchResponse>(
+          `work-orders/${workOrderId}/orden-trabajo/corte-control`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              form: corteOnlyForm,
+              origin_area: "corte",
+              notify_on_production_save: notifyProductionSave && timerEverStarted,
+            }),
+          },
+        )
+        warnCorteDispatchSync(res.dispatch_sync)
+        setForm((prev) => bootstrapCorteFormState({ ...prev, ...normalizedForm }))
         if (!options?.suppressSuccessToast) {
           toast.success(options?.successMessage ?? "Control de corte guardado.")
+          const entradaKg = sumEntradaKgFromForm(normalizedForm)
+          if (entradaKg > 0 && salidaActual <= 0) {
+            toast.message(
+              "El ingreso de bobinas no genera saldo en Despacho. Registre kg en los rollos de «Bobinas de salida por paleta», pulse Guardar y, para la nota de entrega, Cerrar paleta.",
+              { duration: 9000 },
+            )
+          }
         }
         window.dispatchEvent(
           new CustomEvent(CORTE_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
-        try {
-          localStorage.removeItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
-        } catch {
-          // no-op
-        }
         return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
@@ -293,8 +372,48 @@ export default function WorkOrderCorteControlPanel({
   )
 
   const persistCorteFormCb = useCallback(
-    (srcBase?: Record<string, unknown>) => {
-      void persistCorteForm(srcBase)
+    (
+      srcBase?: Record<string, unknown>,
+      saveOptions?: Parameters<typeof persistCorteForm>[1],
+    ) => persistCorteForm(srcBase, saveOptions),
+    [persistCorteForm],
+  )
+
+  const patchActiveTurn = useCallback((updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
+    setForm((prev) => {
+      const cur = materializeOpenCorteTurnoActual(prev)
+      if (!cur) return prev
+      const nextTurn = updater(cur)
+      return {
+        ...prev,
+        [COR_ACTUAL_KEY]: nextTurn,
+        ...corteTurnoToMirror(nextTurn),
+        ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
+      }
+    })
+  }, [])
+
+  const patchActiveTurnAndPersist = useCallback(
+    (updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
+      setForm((prev) => {
+        const cur = materializeOpenCorteTurnoActual(prev)
+        if (!cur) return prev
+        const nextTurn = updater(cur)
+        const nextForm: Record<string, unknown> = {
+          ...prev,
+          [COR_ACTUAL_KEY]: nextTurn,
+          ...corteTurnoToMirror(nextTurn),
+          ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
+        }
+        queueMicrotask(() => {
+          void persistCorteForm(nextForm, {
+            skipProductionSaveGuard: true,
+            notifyProductionSave: false,
+            suppressSuccessToast: true,
+          })
+        })
+        return nextForm
+      })
     },
     [persistCorteForm],
   )
@@ -382,11 +501,6 @@ export default function WorkOrderCorteControlPanel({
       ...clearCorteMirrorKeys(),
       ...corteAggregatedTimerMirrorFromTurnos(turnos),
     }
-    try {
-      localStorage.removeItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
-    } catch {
-      // no-op
-    }
     setForm(bootstrapCorteFormState(nextForm))
     const ok = await persistCorteForm(nextForm, {
       skipProductionSaveGuard: true,
@@ -413,51 +527,130 @@ export default function WorkOrderCorteControlPanel({
       [COR_ESTADO_KEY]: "abierta",
       ...clearCorteMirrorKeys(),
     }
-    try {
-      localStorage.removeItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`)
-    } catch {
-      // no-op
-    }
     setForm(bootstrapCorteFormState(cleared))
-    toast.success("Corte reiniciado localmente. Guardando en el servidor…")
+    toast.success("Corte reiniciado. Guardando en el servidor…")
     await persistCorteForm(cleared, { skipProductionSaveGuard: true, notifyProductionSave: false })
   }
 
-  useEffect(() => {
-    if (!Number.isFinite(workOrderId) || workOrderId < 1) return
-    if (!hasActiveTurno) return
-    if (!(timerRunning || timerPaused)) return
-    try {
-      const cur = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
-      if (!cur) return
-      const draft: LocalCorteDraft = {
-        work_order_id: workOrderId,
-        saved_at_ms: Date.now(),
-        active_turno: cur,
-        mirror: {
-          corTimerState: form.corTimerState,
-          corTimerStartedAtMs: form.corTimerStartedAtMs,
-          corTimerLastResumeAtMs: form.corTimerLastResumeAtMs,
-          corTimerPauseAtMs: form.corTimerPauseAtMs,
-          corTimerEffectiveAccSec: form.corTimerEffectiveAccSec,
-          corTimerDeadAccSec: form.corTimerDeadAccSec,
-          corTimerPauses: form.corTimerPauses,
+  const startProductionTimer = useCallback(() => {
+    if (controlReadOnly || !hasActiveTurno) return
+    setForm((prev) => {
+      const next = startCorteProductionTimerOnForm(prev)
+      if (!next) return prev
+      queueMicrotask(() => {
+        void persistCorteForm(next, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          successMessage: "Cronómetro iniciado y guardado en el sistema.",
+        })
+      })
+      return next
+    })
+  }, [controlReadOnly, hasActiveTurno, persistCorteForm])
+
+  function executePauseProductionTimer() {
+    if (controlReadOnly) return
+    if (!timerRunning) {
+      toast.message("El cronómetro no está en marcha.")
+      return
+    }
+    setForm((prev) => {
+      const next = pauseCorteProductionTimerOnForm(prev)
+      if (!next) {
+        toast.error("No se pudo pausar el cronómetro. Guarde el turno e intente de nuevo.")
+        return prev
+      }
+      queueMicrotask(() => {
+        void persistCorteForm(next, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        })
+      })
+      return next
+    })
+    setPauseMotivoModalOpen(true)
+  }
+
+  function confirmPauseAndResume() {
+    const reason = pauseReason.trim()
+    if (!reason) {
+      toast.error("Seleccione el motivo de parada.")
+      return
+    }
+    const obs = pauseObs.trim()
+    setForm((prev) => {
+      const cur = materializeOpenCorteTurnoActual(prev)
+      if (!cur || cur.timer.state !== "paused") return prev
+      const now = Date.now()
+      const pauseStart = cur.timer.pauseAtMs
+      const pauseDurationSec = pauseStart > 0 ? (now - pauseStart) / 1000 : 0
+      const nextTurn: CorteTurnoEntry = {
+        ...cur,
+        timer: {
+          ...cur.timer,
+          state: "paused",
+          deadAccSec: cur.timer.deadAccSec + pauseDurationSec,
+          pauseAtMs: now,
+          lastResumeAtMs: 0,
+          pauses: [
+            ...cur.timer.pauses,
+            {
+              at: new Date(now).toISOString(),
+              reason,
+              obs,
+              duration_sec: pauseDurationSec,
+            },
+          ],
         },
       }
-      localStorage.setItem(`${LOCAL_CORTE_DRAFT_PREFIX}${workOrderId}`, JSON.stringify(draft))
-    } catch {
-      // no-op
-    }
-  }, [form, hasActiveTurno, timerPaused, timerRunning, workOrderId])
+      const nextForm: Record<string, unknown> = {
+        ...prev,
+        [COR_ACTUAL_KEY]: nextTurn,
+        ...corteTurnoToMirror(nextTurn),
+      }
+      queueMicrotask(() => {
+        void persistCorteForm(nextForm, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        })
+      })
+      return nextForm
+    })
+    setPauseReason("")
+    setPauseObs("")
+    setPauseMotivoModalOpen(false)
+    toast.message("Parada registrada. Use play para reanudar el tiempo efectivo.")
+  }
 
   useEffect(() => {
     if (!timerRunning) return
     const id = window.setInterval(() => {
       if (saving) return
-      persistCorteFormCb(form)
+      persistCorteFormCb(form, {
+        skipProductionSaveGuard: !canSaveProduction && canPersistShiftOpen,
+        notifyProductionSave: canSaveProduction && timerEverStarted,
+        suppressSuccessToast: true,
+      })
     }, 60000)
     return () => window.clearInterval(id)
-  }, [timerRunning, saving, persistCorteFormCb, form])
+  }, [
+    timerRunning,
+    saving,
+    persistCorteFormCb,
+    form,
+    canSaveProduction,
+    canPersistShiftOpen,
+    timerEverStarted,
+  ])
+
+  const saveCorteForm = useCallback(() => {
+    void persistCorteForm(undefined, {
+      skipProductionSaveGuard: !canSaveProduction && canPersistShiftOpen,
+      notifyProductionSave: canSaveProduction && timerEverStarted,
+    })
+  }, [canPersistShiftOpen, canSaveProduction, persistCorteForm, timerEverStarted])
 
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de corte…</p>
 
@@ -478,8 +671,9 @@ export default function WorkOrderCorteControlPanel({
           <Button
             type="button"
             size="sm"
-            onClick={() => void persistCorteForm()}
-            disabled={saving || controlReadOnly || (!areaFinalizada && !canSaveProduction)}
+            onClick={saveCorteForm}
+            disabled={saving || controlReadOnly || (!areaFinalizada && !canClickGuardar)}
+            title={guardarHint || undefined}
           >
             <Save className="mr-1.5 h-4 w-4" />
             {saving ? "Guardando…" : "Guardar"}
@@ -624,17 +818,41 @@ export default function WorkOrderCorteControlPanel({
         setForm={setForm}
         pedidoTotalKg={pedidoTotalKg}
         readOnly={controlReadOnly}
+        readOnlyOps={controlReadOnly}
+        canOperateProduction={canSaveProduction}
+        corTurno={readString(form.corTurno)}
+        corGrupo={readString(form.corGrupo)}
+        corOperador={readString(form.corOperador)}
+        corAyudante={readString(form.corAyudante)}
+        corSupervisor={readString(form.corSupervisor)}
+        onSetTurno={(v) => patchActiveTurnAndPersist((t) => ({ ...t, turno: v }))}
+        onSetGrupo={(v) => patchActiveTurnAndPersist((t) => ({ ...t, grupo: v }))}
+        onActivePersonnelApply={(people: DraftPerson[]) => {
+          const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
+          patchActiveTurnAndPersist((t) => ({ ...t, operador, ayudante, supervisor }))
+        }}
+        patchActiveTurn={patchActiveTurn}
         onRequestSave={persistCorteFormCb}
         onApplyCerrarTurno={applyCerrarTurno}
         onRequestCerrarTurno={() => setCloseTurnConfirmOpen(true)}
+        startProductionTimer={startProductionTimer}
+        pauseProductionTimer={executePauseProductionTimer}
+        confirmPauseAndResume={confirmPauseAndResume}
+        pauseReason={pauseReason}
+        pauseObs={pauseObs}
+        setPauseReason={setPauseReason}
+        setPauseObs={setPauseObs}
+        pauseMotivoDialogOpen={pauseMotivoModalOpen}
+        onPauseMotivoDialogOpenChange={setPauseMotivoModalOpen}
       />
 
       <div className="no-print mb-12 flex flex-col items-center gap-2">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
             type="button"
-            onClick={() => void persistCorteForm()}
-            disabled={saving || controlReadOnly || (!areaFinalizada && !canSaveProduction)}
+            onClick={saveCorteForm}
+            disabled={saving || controlReadOnly || (!areaFinalizada && !canClickGuardar)}
+            title={guardarHint || undefined}
           >
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
@@ -735,8 +953,8 @@ export default function WorkOrderCorteControlPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Reiniciar corte (OT)</AlertDialogTitle>
             <AlertDialogDescription>
-              Esto borrará turnos, cronómetro, bobinas, paletas y métricas registradas en Corte para esta OT. También
-              limpia el respaldo local del navegador. ¿Desea continuar?
+              Esto borrará turnos, cronómetro, bobinas, paletas y métricas registradas en Corte para esta OT en el
+              servidor. ¿Desea continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

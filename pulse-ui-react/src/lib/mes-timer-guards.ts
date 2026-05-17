@@ -87,6 +87,14 @@ function hasActiveTurnoInForm(
   return legacyTurnoKeys.some((k) => readString(form[k]).trim() !== "")
 }
 
+/** Turno de planta abierto (sin exigir cronómetro iniciado). */
+export function hasActiveProductionTurno(
+  form: Record<string, unknown>,
+  config: MesProductionSaveAreaConfig,
+): boolean {
+  return hasActiveTurnoInForm(form, config.actualKey, config.legacyTurnoKeys)
+}
+
 /**
  * Whether a production-area form may be persisted via the main «Guardar» action.
  */
@@ -94,7 +102,7 @@ export function canSaveProductionAreaForm(
   form: Record<string, unknown>,
   config: MesProductionSaveAreaConfig,
 ): boolean {
-  if (!hasActiveTurnoInForm(form, config.actualKey, config.legacyTurnoKeys)) {
+  if (!hasActiveProductionTurno(form, config)) {
     return false
   }
   return hasProductionTimerStarted(mesTimerFieldsFromForm(form, config.prefix))
@@ -117,6 +125,6 @@ export const MES_PRODUCTION_SAVE_CONFIG = {
   corte: {
     prefix: "cor",
     actualKey: "corTurnoActual",
-    legacyTurnoKeys: ["cor_turno_actual"],
+    legacyTurnoKeys: ["cor_turno_actual", "corOperador", "corTurno", "corGrupo"],
   },
 } as const satisfies Record<string, MesProductionSaveAreaConfig>

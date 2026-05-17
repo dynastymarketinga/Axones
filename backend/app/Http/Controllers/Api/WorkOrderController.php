@@ -336,18 +336,28 @@ class WorkOrderController extends Controller
 
         $paginator = $query->paginate(min((int) $request->query('per_page', 20), 100));
 
+        $areasForTimeSummary = [];
         if ($targetAreaForPayload !== null && in_array($targetAreaForPayload, ['corte', 'tintas'], true)) {
-            $summaries = app(\App\Services\AreaBandejaTimeService::class)
-                ->summariesForWorkOrderIds(
-                    $paginator->getCollection()->pluck('id'),
-                    $targetAreaForPayload,
-                );
-            $paginator->getCollection()->transform(function ($workOrder) use ($summaries) {
-                $id = (int) $workOrder->getKey();
-                $workOrder->setAttribute('area_time_summary', $summaries[$id] ?? null);
+            $areasForTimeSummary[] = $targetAreaForPayload;
+        }
+        foreach ($this->parseIncludeAreaSummaries($request) as $area) {
+            if (! in_array($area, $areasForTimeSummary, true)) {
+                $areasForTimeSummary[] = $area;
+            }
+        }
 
-                return $workOrder;
-            });
+        if ($areasForTimeSummary !== []) {
+            $timeService = app(\App\Services\AreaBandejaTimeService::class);
+            $ids = $paginator->getCollection()->pluck('id');
+            foreach ($areasForTimeSummary as $summaryArea) {
+                $summaries = $timeService->summariesForWorkOrderIds($ids, $summaryArea);
+                $paginator->getCollection()->transform(function ($workOrder) use ($summaries) {
+                    $id = (int) $workOrder->getKey();
+                    $workOrder->setAttribute('area_time_summary', $summaries[$id] ?? null);
+
+                    return $workOrder;
+                });
+            }
         }
 
         return response()->json($paginator);
@@ -715,6 +725,27 @@ class WorkOrderController extends Controller
                 }
             }
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function parseIncludeAreaSummaries(Request $request): array
+    {
+        $raw = trim((string) $request->query('include_area_summaries', ''));
+        if ($raw === '') {
+            return [];
+        }
+        $allowed = ['corte', 'tintas'];
+        $out = [];
+        foreach (explode(',', $raw) as $part) {
+            $a = strtolower(trim($part));
+            if ($a !== '' && in_array($a, $allowed, true) && ! in_array($a, $out, true)) {
+                $out[] = $a;
+            }
+        }
+
+        return $out;
     }
 
     private function schedulingStatusForBoardStage(WorkOrderBoardStage $stage): string

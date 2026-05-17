@@ -10,7 +10,205 @@ final class CortePlanillaSalida
 {
     public const ROLLOS_PER_PALETA = 48;
 
+    public const ENTRADA_BOBINAS_SLOTS = 30;
+
     /**
+     * Normaliza celdas kg (null → '') en arrays del formulario de corte antes de persistir.
+     *
+     * @param  array<string, mixed>  $form
+     * @return array<string, mixed>
+     */
+    public static function sanitizePersistedFormArrays(array $form): array
+    {
+        if (isset($form['cor_paletas']) && is_array($form['cor_paletas'])) {
+            $form['cor_paletas'] = self::sanitizePaletasArray($form['cor_paletas']);
+        }
+
+        if (isset($form['corEntradaBobinasKg']) && is_array($form['corEntradaBobinasKg'])) {
+            $form['corEntradaBobinasKg'] = self::sanitizeKgStringArray(
+                $form['corEntradaBobinasKg'],
+                self::ENTRADA_BOBINAS_SLOTS,
+            );
+        }
+
+        $actual = $form['corTurnoActual'] ?? null;
+        if (is_array($actual)) {
+            if (isset($actual['paletas']) && is_array($actual['paletas'])) {
+                $actual['paletas'] = self::sanitizePaletasArray($actual['paletas']);
+            }
+            if (isset($actual['entradaBobinasKg']) && is_array($actual['entradaBobinasKg'])) {
+                $actual['entradaBobinasKg'] = self::sanitizeKgStringArray(
+                    $actual['entradaBobinasKg'],
+                    self::ENTRADA_BOBINAS_SLOTS,
+                );
+            }
+            $form['corTurnoActual'] = $actual;
+        }
+
+        return $form;
+    }
+
+    /**
+     * @param  list<mixed>  $raw
+     * @return list<string>
+     */
+    private static function sanitizeKgStringArray(array $raw, int $size): array
+    {
+        $out = [];
+        foreach (array_slice($raw, 0, $size) as $cell) {
+            $out[] = self::kgCellToString($cell);
+        }
+        while (count($out) < $size) {
+            $out[] = '';
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  list<mixed>  $raw
+     * @return list<array<string, mixed>>
+     */
+    private static function sanitizePaletasArray(array $raw): array
+    {
+        $out = [];
+        foreach ($raw as $paleta) {
+            if (! is_array($paleta)) {
+                continue;
+            }
+            $rollos = $paleta['rollosKg'] ?? null;
+            if (is_array($rollos)) {
+                $paleta['rollosKg'] = self::sanitizeKgStringArray($rollos, self::ROLLOS_PER_PALETA);
+            }
+            $out[] = $paleta;
+        }
+
+        return $out;
+    }
+
+    private static function kgCellToString(mixed $cell): string
+    {
+        if ($cell === null) {
+            return '';
+        }
+        if (is_int($cell) || is_float($cell)) {
+            return is_finite((float) $cell) ? (string) $cell : '';
+        }
+        if (! is_string($cell)) {
+            return '';
+        }
+
+        return $cell;
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     */
+    public static function isPaletaCerradaStatus(mixed $status): bool
+    {
+        $s = strtolower(trim((string) $status));
+
+        return $s === 'cerrada' || $s === 'cerrada_opcional';
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<array<string, mixed>>
+     */
+    public static function closedPaletasFromForm(array $form): array
+    {
+        $out = [];
+        foreach (self::paletasArrayFromForm($form) as $paleta) {
+            if (! is_array($paleta)) {
+                continue;
+            }
+            if (! self::isPaletaCerradaStatus($paleta['status'] ?? null)) {
+                continue;
+            }
+            $out[] = $paleta;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Paletas aún en progreso (no cerradas).
+     *
+     * @param  array<string, mixed>  $form
+     * @return list<array<string, mixed>>
+     */
+    public static function openPaletasFromForm(array $form): array
+    {
+        $out = [];
+        foreach (self::paletasArrayFromForm($form) as $paleta) {
+            if (! is_array($paleta)) {
+                continue;
+            }
+            if (self::isPaletaCerradaStatus($paleta['status'] ?? null)) {
+                continue;
+            }
+            $out[] = $paleta;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Paletas abiertas con al menos un rollo con peso (saldo provisional en despacho).
+     *
+     * @param  array<string, mixed>  $form
+     * @return list<array<string, mixed>>
+     */
+    public static function openPaletasWithKgFromForm(array $form): array
+    {
+        $out = [];
+        foreach (self::openPaletasFromForm($form) as $paleta) {
+            if (self::sumPaletaKg($paleta) > 0) {
+                $out[] = $paleta;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Kg despachables: solo paletas cerradas (acumulativo por cierre de paleta).
+     *
+     * @param  array<string, mixed>  $form
+     */
+    public static function dispatchableFinishedKgFromForm(array $form): string
+    {
+        $sum = 0.0;
+        foreach (self::closedPaletasFromForm($form) as $paleta) {
+            $sum += self::sumPaletaKg($paleta);
+        }
+        if ($sum > 0) {
+            return number_format($sum, 3, '.', '');
+        }
+
+        return '0.000';
+    }
+
+    /**
+     * @param  array<string, mixed>  $paleta
+     */
+    public static function sumPaletaKg(array $paleta): float
+    {
+        $rollos = $paleta['rollosKg'] ?? null;
+        if (! is_array($rollos)) {
+            return 0.0;
+        }
+        $sum = 0.0;
+        foreach ($rollos as $kg) {
+            $sum += self::readNumber($kg);
+        }
+
+        return $sum;
+    }
+
+    /**
+     * Kg salida en planilla (todas las paletas, abiertas + cerradas) para producción.
+     *
      * @param  array<string, mixed>  $form
      */
     public static function finishedKgFromForm(array $form): string
@@ -96,6 +294,24 @@ final class CortePlanillaSalida
         return number_format($n, 3, '.', '');
     }
 
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<mixed>
+     */
+    public static function paletasArrayFromForm(array $form): array
+    {
+        $raw = $form['cor_paletas'] ?? null;
+        if (is_array($raw) && $raw !== []) {
+            return $raw;
+        }
+        $turno = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
+        if (is_array($turno) && is_array($turno['paletas'] ?? null)) {
+            return $turno['paletas'];
+        }
+
+        return [];
+    }
+
     private static function sumPaletasArray(mixed $raw): float
     {
         if (! is_array($raw)) {
@@ -107,13 +323,7 @@ final class CortePlanillaSalida
             if (! is_array($paleta)) {
                 continue;
             }
-            $rollos = $paleta['rollosKg'] ?? null;
-            if (! is_array($rollos)) {
-                continue;
-            }
-            foreach ($rollos as $kg) {
-                $sum += self::readNumber($kg);
-            }
+            $sum += self::sumPaletaKg($paleta);
         }
 
         return $sum;

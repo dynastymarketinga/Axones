@@ -30,11 +30,14 @@ export type CorteTurnTimer = {
   pauses: CortePauseEntry[]
 }
 
+export type CorPaletaStatus = "en_progreso" | "cerrada" | "cerrada_opcional"
+
 export type CorPaleta = {
   id: string
   label: string
   rollosKg: string[]
-  status?: "en_progreso" | "cerrada_opcional"
+  status?: CorPaletaStatus
+  closed_at?: string
 }
 
 export type CorteTurnMetrics = {
@@ -96,10 +99,29 @@ function readObject(v: unknown): Record<string, unknown> {
 function ensureStringArray(raw: unknown, size: number): string[] {
   const out: string[] = []
   if (Array.isArray(raw)) {
-    for (const v of raw.slice(0, size)) out.push(readString(v))
+    for (const v of raw.slice(0, size)) out.push(sanitizeKgCell(v))
   }
   while (out.length < size) out.push("")
   return out
+}
+
+/** Evita que null/undefined en JSON del servidor rompan inputs o se re-guarden como null. */
+export function sanitizeKgCell(v: unknown): string {
+  if (v === null || v === undefined) return ""
+  if (typeof v === "number" && Number.isFinite(v)) return String(v)
+  if (typeof v === "string") return v
+  return ""
+}
+
+export function sanitizeCorEntradaBobinasKg(raw: unknown): string[] {
+  return ensureStringArray(raw, COR_ENTRADA_SLOTS)
+}
+
+export function sanitizeCorPaletasForPersistence(paletas: CorPaleta[]): CorPaleta[] {
+  return paletas.map((p) => ({
+    ...p,
+    rollosKg: ensureStringArray(p.rollosKg, COR_ROLLOS_PER_PALETA),
+  }))
 }
 
 export function emptyPaletaRollos(): string[] {
@@ -130,7 +152,8 @@ export function getCorPaletas(form: Record<string, unknown>): CorPaleta[] {
         id,
         label,
         rollosKg: ensureStringArray(o.rollosKg, COR_ROLLOS_PER_PALETA),
-        status: (readString(o.status) as CorPaleta["status"]) || "en_progreso",
+        status: (readString(o.status) as CorPaletaStatus) || "en_progreso",
+        closed_at: readString(o.closed_at) || undefined,
       })
     }
   }
@@ -160,10 +183,33 @@ export function getCorPaletas(form: Record<string, unknown>): CorPaleta[] {
   return merged
 }
 
+export function isCorPaletaCerrada(p: CorPaleta): boolean {
+  const s = readString(p.status).toLowerCase()
+  return s === "cerrada" || s === "cerrada_opcional"
+}
+
 export function sumSalidaKgFromPaletas(paletas: CorPaleta[]): number {
   return paletas
     .flatMap((p) => p.rollosKg)
     .reduce((acc, v) => acc + readNumber(v), 0)
+}
+
+export function sumSalidaKgFromClosedPaletas(paletas: CorPaleta[]): number {
+  return paletas.filter(isCorPaletaCerrada).reduce((acc, p) => acc + sumSalidaKgFromPaletas([p]), 0)
+}
+
+export function sumSalidaKgFromOpenPaletas(paletas: CorPaleta[]): number {
+  return paletas
+    .filter((p) => !isCorPaletaCerrada(p))
+    .reduce((acc, p) => acc + sumSalidaKgFromPaletas([p]), 0)
+}
+
+export function sumKgFromPaleta(p: CorPaleta): number {
+  return sumSalidaKgFromPaletas([p])
+}
+
+export function countRollosWithKg(p: CorPaleta): number {
+  return p.rollosKg.filter((v) => readNumber(v) > 0).length
 }
 
 export function sumSalidaKgFromForm(form: Record<string, unknown>): number {
@@ -278,8 +324,9 @@ export function normalizeCorteTurno(raw: unknown, formFallback?: Record<string, 
   const id = readString(o.id)
   if (!id) return null
 
-  const turnoRaw = readString(o.turno).toLowerCase()
-  const grupoRaw = readString(o.grupo).toUpperCase()
+  const fb = formFallback ?? {}
+  const turnoRaw = readString(o.turno || fb.corTurno).toLowerCase()
+  const grupoRaw = readString(o.grupo || fb.corGrupo).toUpperCase()
   const turno: CorteTurnoEntry["turno"] =
     turnoRaw === "diurno" || turnoRaw === "nocturno" ? (turnoRaw as "diurno" | "nocturno") : ""
   const grupo: CorteTurnoEntry["grupo"] =
@@ -293,7 +340,6 @@ export function normalizeCorteTurno(raw: unknown, formFallback?: Record<string, 
     if (cid > 0) closedBy = { id: cid, name: readString(c.name) || "—" }
   }
 
-  const fb = formFallback ?? {}
   const paletas = parsePaletas(o.paletas)
   const entradaBobinasKg = Array.isArray(o.entradaBobinasKg)
     ? ensureStringArray(o.entradaBobinasKg, COR_ENTRADA_SLOTS)
@@ -355,6 +401,111 @@ export function parseCorteTurnoActual(
   const t = normalizeCorteTurno(raw, formFallback)
   if (!t || t.closed_at) return null
   return t
+}
+
+/** Turno abierto: anidado, legacy plano o objeto crudo sin cerrar. */
+export function materializeOpenCorteTurnoActual(
+  form: Record<string, unknown>,
+): CorteTurnoEntry | null {
+  const parsed = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
+  if (parsed) return parsed
+  const legacy = legacyActiveTurnoFromForm(form)
+  if (legacy) return legacy
+  const raw = form[COR_ACTUAL_KEY]
+  if (raw && typeof raw === "object") {
+    const t = normalizeCorteTurno(raw, form)
+    if (t && !t.closed_at) return t
+  }
+  return null
+}
+
+/** Cronómetro visible: reconcilia espejo plano (corTimer*) y timer en corTurnoActual. */
+export function resolveCorteDisplayTimer(
+  activeTurno: CorteTurnoEntry | null,
+  form: Record<string, unknown>,
+): CorteTurnTimer {
+  const flat = timerFromLegacyFlatForm(form)
+  if (!activeTurno) return flat
+
+  const nested = activeTurno.timer ?? emptyCorteTurnTimer()
+  if (nested.state === flat.state) return nested
+
+  if (nested.state === "paused" || flat.state === "paused") {
+    return nested.state === "paused" ? nested : flat
+  }
+
+  if (flat.state !== "pending" && flat.state !== nested.state) return flat
+
+  const flatLive = flat.state === "running"
+  const nestedStale =
+    nested.state === "pending" || (nested.state === "stopped" && flatLive)
+  if (flatLive && nestedStale) return flat
+
+  return nested
+}
+
+/** Inicia o reanuda el cronómetro de producción en el formulario de corte. */
+export function startCorteProductionTimerOnForm(
+  prev: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const cur = materializeOpenCorteTurnoActual(prev)
+  if (!cur) return null
+  const display = resolveCorteDisplayTimer(cur, prev)
+  const now = Date.now()
+  const nextTimer: CorteTurnTimer =
+    display.state === "paused"
+      ? {
+          ...display,
+          state: "running",
+          lastResumeAtMs: now,
+          pauseAtMs: 0,
+        }
+      : {
+          ...display,
+          state: "running",
+          startedAtMs: display.startedAtMs || now,
+          lastResumeAtMs: now,
+          pauseAtMs: 0,
+        }
+  const nextTurn: CorteTurnoEntry = { ...cur, timer: nextTimer }
+  const mirror = corteTurnoToMirror(nextTurn)
+  const metrics = syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas })
+  return {
+    ...prev,
+    ...metrics,
+    [COR_ACTUAL_KEY]: nextTurn,
+    ...mirror,
+  }
+}
+
+/** Pausa el cronómetro (detiene tiempo efectivo, inicia tiempo muerto). */
+export function pauseCorteProductionTimerOnForm(
+  prev: Record<string, unknown>,
+  nowMs: number = Date.now(),
+): Record<string, unknown> | null {
+  const cur = materializeOpenCorteTurnoActual(prev)
+  const display = resolveCorteDisplayTimer(cur, prev)
+  if (!cur || display.state !== "running") return null
+  const last = display.lastResumeAtMs
+  const nextTimer: CorteTurnTimer = {
+    ...display,
+    state: "paused",
+    startedAtMs: display.startedAtMs,
+    lastResumeAtMs: 0,
+    pauseAtMs: nowMs,
+    effectiveAccSec: display.effectiveAccSec + (last > 0 ? (nowMs - last) / 1000 : 0),
+    deadAccSec: display.deadAccSec,
+    pauses: [...display.pauses],
+  }
+  const nextTurn: CorteTurnoEntry = { ...cur, timer: nextTimer }
+  const mirror = corteTurnoToMirror(nextTurn)
+  const metrics = syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas })
+  return {
+    ...prev,
+    ...metrics,
+    [COR_ACTUAL_KEY]: nextTurn,
+    ...mirror,
+  }
 }
 
 /** Turno abierto heredado de claves planas + cor_turno_actual mínimo. */
@@ -431,11 +582,16 @@ export function clearCorteMirrorKeys(): Record<string, unknown> {
 }
 
 export function syncCorteSalidaFields(form: Record<string, unknown>): Record<string, unknown> {
+  const paletas = getCorPaletas(form)
   const salida = sumSalidaKgFromForm(form)
+  const despachoAcum = sumSalidaKgFromClosedPaletas(paletas)
+  const provisionalAcum = sumSalidaKgFromOpenPaletas(paletas)
   const salidaStr = salida.toFixed(2)
   return {
     kgSalidaCorte: salidaStr,
     corAcumuladoProducidoKg: salida,
+    corKgDespachoAcum: despachoAcum.toFixed(2),
+    corKgProvisionalDespachoAcum: provisionalAcum.toFixed(2),
   }
 }
 
@@ -474,10 +630,43 @@ export function corteAggregatedTimerMirrorFromTurnos(turnos: CorteTurnoEntry[]):
   })
 }
 
+function reconcileCorteTurnoFromMirror(
+  turno: CorteTurnoEntry,
+  form: Record<string, unknown>,
+): CorteTurnoEntry {
+  const mirrorTurno = readString(form.corTurno).toLowerCase()
+  const mirrorGrupo = readString(form.corGrupo).toUpperCase()
+  let next = turno
+  if (mirrorTurno === "diurno" || mirrorTurno === "nocturno") {
+    next = { ...next, turno: mirrorTurno }
+  }
+  if (mirrorGrupo === "A" || mirrorGrupo === "B" || mirrorGrupo === "C") {
+    next = { ...next, grupo: mirrorGrupo }
+  }
+  if (!turno.operador.trim() && readString(form.corOperador).trim()) {
+    next = {
+      ...next,
+      operador: readString(form.corOperador),
+      ayudante: readString(form.corAyudante),
+      supervisor: readString(form.corSupervisor),
+    }
+  }
+  return next
+}
+
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   let actual =
     parseCorteTurnoActual(mergedForm[COR_ACTUAL_KEY], mergedForm) ??
     legacyActiveTurnoFromForm(mergedForm)
+  if (actual) {
+    actual = reconcileCorteTurnoFromMirror(actual, mergedForm)
+    const flatTimer = timerFromLegacyFlatForm(mergedForm)
+    const flatLive = flatTimer.state === "running" || flatTimer.state === "paused"
+    const nestedPending = actual.timer.state === "pending"
+    if (flatLive && nestedPending) {
+      actual = { ...actual, timer: flatTimer }
+    }
+  }
   const turnos = parseCorteTurnos(mergedForm[COR_TURNOS_KEY], mergedForm)
   const estado = readCorteEstadoArea(mergedForm[COR_ESTADO_KEY])
 
@@ -490,7 +679,11 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
   }
 
   if (actual) {
-    next = { ...next, ...corteTurnoToMirror(actual) }
+    next = {
+      ...next,
+      ...corteTurnoToMirror(actual),
+      cor_paletas: sanitizeCorPaletasForPersistence(actual.paletas),
+    }
   } else if (estado === "finalizada") {
     next = {
       ...next,
@@ -498,8 +691,13 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
       ...corteAggregatedTimerMirrorFromTurnos(turnos),
       [COR_ACTUAL_KEY]: null,
     }
-  } else if (!readString(mergedForm.corTurno) && !readString(mergedForm.corOperador)) {
-    next = { ...next, ...clearCorteMirrorKeys(), [COR_ACTUAL_KEY]: null }
+  } else if (
+    mergedForm[COR_ACTUAL_KEY] === null ||
+    mergedForm[COR_ACTUAL_KEY] === undefined
+  ) {
+    if (!readString(mergedForm.corTurno) && !readString(mergedForm.corOperador)) {
+      next = { ...next, ...clearCorteMirrorKeys(), [COR_ACTUAL_KEY]: null }
+    }
   }
 
   return next

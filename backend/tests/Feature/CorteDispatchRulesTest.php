@@ -242,6 +242,14 @@ class CorteDispatchRulesTest extends TestCase
                 'kgSalidaCorte' => '600.10',
                 'kgMermaCorte' => '10.00',
                 'metrajeCorte' => '1000',
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-plan',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => array_merge(['600.100'], array_fill(0, 47, '0')),
+                    ],
+                ],
             ],
         ];
 
@@ -332,6 +340,8 @@ class CorteDispatchRulesTest extends TestCase
                 'cor_paletas' => [
                     [
                         'id' => 'p-01',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
                         'rollosKg' => ['10.500', '20.000'],
                     ],
                 ],
@@ -351,7 +361,7 @@ class CorteDispatchRulesTest extends TestCase
         $this->assertDatabaseHas('corte_bobina_usages', [
             'work_order_id' => $wo->id,
             'quantity_finished_kg' => '30.500',
-            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-01'),
         ]);
     }
 
@@ -398,6 +408,8 @@ class CorteDispatchRulesTest extends TestCase
                 'cor_paletas' => [
                     [
                         'id' => 'p-01',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
                         'rollosKg' => ['15.250'],
                     ],
                 ],
@@ -412,7 +424,368 @@ class CorteDispatchRulesTest extends TestCase
         $this->assertDatabaseHas('corte_bobina_usages', [
             'work_order_id' => $wo->id,
             'quantity_finished_kg' => '15.250',
-            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-01'),
+        ]);
+    }
+
+    public function test_open_paleta_kg_appears_as_provisional_until_closed(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-OPEN-'.$uniq,
+            'rif' => 'J-OPEN'.$uniq,
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-OPEN',
+            'cpe' => 'CPE-OPEN',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-OPEN-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-OPEN-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-01',
+                        'label' => 'Paleta #01',
+                        'status' => 'en_progreso',
+                        'rollosKg' => ['25.000'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $rows = $this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows');
+        $openMatch = collect($rows)->firstWhere('work_order_id', $wo->id);
+        $this->assertNotNull($openMatch);
+        $this->assertTrue($openMatch['is_provisional']);
+        $this->assertEquals('25.000', $openMatch['quantity_remaining_kg']);
+
+        $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $wo->id)->first();
+        $form = is_array($doc->form) ? $doc->form : [];
+        $form['cor_paletas'][0]['status'] = 'cerrada';
+        $doc->update(['form' => $form]);
+
+        $rows2 = $this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows');
+        $match = collect($rows2)->firstWhere('work_order_id', $wo->id);
+        $this->assertNotNull($match);
+        $this->assertFalse($match['is_provisional']);
+        $this->assertEquals('25.000', $match['quantity_remaining_kg']);
+    }
+
+    public function test_patch_corte_control_with_two_closed_paletas_creates_two_dispatch_rows(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-2PAL-'.$uniq,
+            'rif' => 'J-2P'.$uniq,
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-2PAL',
+            'cpe' => 'CPE-2PAL',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-2PAL-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-2PAL-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        $rollosA = array_merge(['10.500'], array_fill(0, 47, '0'));
+        $rollosB = array_merge(['20.250'], array_fill(0, 47, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-01',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollosA,
+                    ],
+                    [
+                        'id' => 'p-02',
+                        'label' => 'Paleta #02',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollosB,
+                    ],
+                ],
+            ],
+        ], $h)
+            ->assertOk()
+            ->assertJsonPath('dispatch_sync.material_resolved', true)
+            ->assertJsonPath('dispatch_sync.closed_paletas_with_kg', 2)
+            ->assertJsonPath('dispatch_sync.usages_synced', 2);
+
+        $rows = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->where('work_order_id', $wo->id)
+            ->values();
+
+        $this->assertCount(2, $rows);
+        $this->assertNotNull($rows->firstWhere('paleta_id', 'p-01'));
+        $this->assertNotNull($rows->firstWhere('paleta_id', 'p-02'));
+        $this->assertNotNull($rows->firstWhere('corte_bobina_usage_id'));
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-01'),
+            'quantity_finished_kg' => '10.500',
+        ]);
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-02'),
+            'quantity_finished_kg' => '20.250',
+        ]);
+    }
+
+    /**
+     * @return array{user: User, h: array<string, string>, wo: WorkOrder}
+     */
+    private function createCorteWoWithMaterialLine(): array
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-PROV-'.$uniq,
+            'rif' => 'J-P'.$uniq,
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-PROV',
+            'cpe' => 'CPE-PROV',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PROV-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $mat = Material::query()->create([
+            'sku' => 'M-PROV-'.uniqid(),
+            'name' => 'Mat',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        WorkOrderLine::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+            'quantity' => 1,
+        ]);
+
+        return ['user' => $user, 'h' => $h, 'wo' => $wo];
+    }
+
+    public function test_open_paleta_with_kg_syncs_provisional_dispatch_row(): void
+    {
+        ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();
+        $rollos = array_merge(['15.500'], array_fill(0, 47, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-open',
+                        'label' => 'Paleta #01',
+                        'status' => 'en_progreso',
+                        'rollosKg' => $rollos,
+                    ],
+                ],
+            ],
+        ], $h)
+            ->assertOk()
+            ->assertJsonPath('dispatch_sync.provisional_paletas_with_kg', 1)
+            ->assertJsonPath('dispatch_sync.provisional_synced', 1);
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaProvisionalNotes('p-open'),
+            'quantity_finished_kg' => '15.500',
+        ]);
+
+        $rows = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->where('work_order_id', $wo->id);
+        $this->assertCount(1, $rows);
+        $row = $rows->first();
+        $this->assertTrue($row['is_provisional']);
+        $this->assertEquals('15.500', $row['quantity_remaining_kg']);
+    }
+
+    public function test_closing_paleta_promotes_provisional_to_definitive_usage(): void
+    {
+        ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();
+        $rollos = array_merge(['8.250'], array_fill(0, 47, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-close',
+                        'label' => 'Paleta #01',
+                        'status' => 'en_progreso',
+                        'rollosKg' => $rollos,
+                    ],
+                ],
+            ],
+        ], $h)->assertOk();
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-close',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollos,
+                    ],
+                ],
+            ],
+        ], $h)
+            ->assertOk()
+            ->assertJsonPath('dispatch_sync.closed_paletas_with_kg', 1)
+            ->assertJsonPath('dispatch_sync.usages_synced', 1);
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-close'),
+            'quantity_finished_kg' => '8.250',
+        ]);
+        $this->assertDatabaseMissing('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaProvisionalNotes('p-close'),
+        ]);
+
+        $rows = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->where('work_order_id', $wo->id);
+        $this->assertCount(1, $rows);
+        $this->assertFalse($rows->first()['is_provisional']);
+    }
+
+    public function test_closed_paleta_without_work_order_line_syncs_via_product_material(): void
+    {
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $uniq = (string) random_int(100000, 999999);
+        $client = Client::query()->create([
+            'name' => 'C-NOMAT-'.$uniq,
+            'rif' => 'J-N'.$uniq,
+        ]);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P-NOMAT',
+            'cpe' => 'CPE-NOMAT',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-NOMAT-'.uniqid(),
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $rollos = array_merge(['12.000'], array_fill(0, 47, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-nomat',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollos,
+                    ],
+                ],
+            ],
+        ], $h)
+            ->assertOk()
+            ->assertJsonPath('dispatch_sync.material_resolved', true)
+            ->assertJsonPath('dispatch_sync.closed_paletas_with_kg', 1)
+            ->assertJsonPath('dispatch_sync.usages_synced', 1);
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-nomat'),
+            'quantity_finished_kg' => '12.000',
+        ]);
+        $this->assertDatabaseHas('work_order_lines', [
+            'work_order_id' => $wo->id,
+        ]);
+        $this->assertDatabaseHas('materials', [
+            'sku' => 'PT-CPE-NOMAT',
+        ]);
+    }
+
+    public function test_closed_paleta_without_product_does_not_sync_dispatch(): void
+    {
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-NOPROD-'.uniqid(),
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+        $rollos = array_merge(['5.000'], array_fill(0, 47, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [
+                    [
+                        'id' => 'p-noprod',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollos,
+                    ],
+                ],
+            ],
+        ], $h)
+            ->assertOk()
+            ->assertJsonPath('dispatch_sync.material_resolved', false)
+            ->assertJsonPath('dispatch_sync.closed_paletas_with_kg', 1)
+            ->assertJsonPath('dispatch_sync.usages_synced', 0);
+
+        $this->assertDatabaseMissing('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-noprod'),
         ]);
     }
 }

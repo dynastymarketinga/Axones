@@ -10,6 +10,7 @@ use App\Models\WorkOrder;
 use App\Models\WorkOrderTechnicalDocument;
 use App\Http\Requests\MergeCorteOrdenTrabajoRequest;
 use App\Support\BossAccess;
+use App\Support\CortePlanillaSalida;
 use App\Support\MontajePlanillaMetrics;
 use Illuminate\Validation\ValidationException;
 
@@ -242,10 +243,21 @@ class WorkOrderOrdenTrabajoService
 
         foreach ($incoming as $key => $value) {
             $k = (string) $key;
-            if (MergeCorteOrdenTrabajoRequest::isCorteControlKey($k)) {
-                $existing[$k] = $value;
+            if (! MergeCorteOrdenTrabajoRequest::isCorteControlKey($k)) {
+                continue;
             }
+            if ($k === 'corTurnoActual' && $value === null) {
+                $prev = $existing['corTurnoActual'] ?? null;
+                $closingTurno = is_array($incoming['cor_turnos'] ?? null)
+                    && count($incoming['cor_turnos']) > count($existing['cor_turnos'] ?? []);
+                if (is_array($prev) && empty($prev['closed_at']) && ! $closingTurno) {
+                    continue;
+                }
+            }
+            $existing[$k] = $value;
         }
+
+        $existing = CortePlanillaSalida::sanitizePersistedFormArrays($existing);
 
         $doc = WorkOrderTechnicalDocument::query()->updateOrCreate(
             ['work_order_id' => $workOrder->getKey()],

@@ -107,4 +107,23 @@ class WorkOrderSchedulingTest extends TestCase
         ])->assertOk();
         $this->assertCount(1, $byClient->json('data'));
     }
+
+    public function test_index_include_area_summaries_tintas(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $created = $this->postJson('/api/work-orders', [], ['Authorization' => 'Bearer '.$token])->assertCreated();
+        $id = (int) $created->json('id');
+
+        $list = $this->getJson('/api/work-orders?include_area_summaries=tintas', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+
+        $row = collect($list->json('data'))->firstWhere('id', $id);
+        $this->assertNotNull($row);
+        $this->assertArrayHasKey('area_time_summary', $row);
+        $this->assertIsArray($row['area_time_summary']);
+        $this->assertEquals(0, $row['area_time_summary']['effective_seconds']);
+    }
 }

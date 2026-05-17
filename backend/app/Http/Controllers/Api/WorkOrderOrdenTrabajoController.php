@@ -9,6 +9,7 @@ use App\Http\Requests\MergePrintingOrdenTrabajoRequest;
 use App\Http\Requests\UpdateWorkOrderOrdenTrabajoRequest;
 use App\Models\WorkOrder;
 use App\Enums\WorkOrderPriority;
+use App\Services\CortePlanillaDispatchSyncService;
 use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderOrdenTrabajoService;
 use App\Support\MesProductionSaveGuard;
@@ -19,6 +20,7 @@ class WorkOrderOrdenTrabajoController extends Controller
     public function __construct(
         private readonly WorkOrderOrdenTrabajoService $ordenTrabajo,
         private readonly ProductionNotificationService $productionNotifications,
+        private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
     ) {}
 
     /**
@@ -214,6 +216,8 @@ class WorkOrderOrdenTrabajoController extends Controller
         }
 
         $doc = $this->ordenTrabajo->mergeCorteKeysIntoForm($work_order, $form, $request->user());
+        $mergedForm = is_array($doc->form) ? $doc->form : [];
+        $dispatchSync = $this->cortePlanillaDispatchSync->dispatchSyncStatus($work_order->fresh(), $mergedForm);
 
         $productionSummary = null;
         if ($notifyOnProductionSave && $originArea !== '') {
@@ -227,6 +231,7 @@ class WorkOrderOrdenTrabajoController extends Controller
         return response()->json([
             'work_order_id' => $work_order->getKey(),
             'updated_at' => $doc->updated_at,
+            'dispatch_sync' => $dispatchSync,
             'notification_summary' => [
                 'broadcast' => null,
                 'production' => $productionSummary,

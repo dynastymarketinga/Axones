@@ -2,7 +2,9 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   BarChart3,
+  Check,
   ChevronDown,
+  ChevronsUpDown,
   CirclePause,
   CirclePlay,
   ClipboardList,
@@ -19,6 +21,7 @@ import {
   Percent,
   PieChart,
   PlusCircle,
+  PackageCheck,
   Recycle,
   Ruler,
   Scissors,
@@ -49,6 +52,23 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -72,20 +92,29 @@ import {
   accumulateCorteFromJson,
   clearCorteMirrorKeys,
   corteTurnoToMirror,
+  materializeOpenCorteTurnoActual,
+  resolveCorteDisplayTimer,
   createNewCorteTurno,
   emptyPaletaRollos,
   finalizeTurnTimerNow,
   formatTimerHms,
+  countRollosWithKg,
   getCorPaletas,
+  isCorPaletaCerrada,
+  newCorteTurnoId,
   parseCorteTurnoActual,
   parseCorteTurnos,
   snapshotCorteTurnMetrics,
+  pauseCorteProductionTimerOnForm,
+  startCorteProductionTimerOnForm,
+  sumKgFromPaleta,
+  sumSalidaKgFromClosedPaletas,
   sumSalidaKgFromClosedTurno,
   sumSalidaKgFromForm,
+  sumSalidaKgFromOpenPaletas,
   syncCorteFormMetrics,
   syncCorteSalidaFields,
   sumEntradaKgFromForm,
-  timerFromLegacyFlatForm,
   type CorPaleta,
   type CortePauseEntry,
   type CorteTurnoEntry,
@@ -122,20 +151,103 @@ function getNumericSeries(form: Record<string, unknown>, key: string, size: numb
   return out
 }
 
+function coerceTurnoUi(v: string): "diurno" | "nocturno" | "" {
+  const t = v.toLowerCase()
+  return t === "diurno" || t === "nocturno" ? t : ""
+}
+
+function coerceGrupoUi(v: string): "A" | "B" | "C" | "" {
+  const g = v.toUpperCase()
+  return g === "A" || g === "B" || g === "C" ? g : ""
+}
+
 type Props = {
   form: Record<string, unknown>
   setForm: React.Dispatch<React.SetStateAction<Record<string, unknown>>>
   pedidoTotalKg: number
   readOnly?: boolean
-  /** Tras cerrar turno u otras acciones críticas, persistir en servidor. */
-  onRequestSave?: (srcBase?: Record<string, unknown>) => void
+  /** Solo lectura operativa (área finalizada sin jefatura). Paridad impresión. */
+  readOnlyOps?: boolean
+  /** Tras cerrar paleta u otras acciones críticas, persistir en servidor. */
+  onRequestSave?: (
+    srcBase?: Record<string, unknown>,
+    options?: {
+      suppressSuccessToast?: boolean
+      skipProductionSaveGuard?: boolean
+      notifyProductionSave?: boolean
+      clearTurnoActual?: boolean
+    },
+  ) => void | Promise<boolean>
   /** Cierre de turno con persistencia (panel padre). */
   onApplyCerrarTurno?: (cur: CorteTurnoEntry) => void | Promise<void>
   /** Abre confirmación de cierre en el panel padre. */
   onRequestCerrarTurno?: () => void
+  /** Turno abierto y cronómetro iniciado al menos una vez (operación en planta activa). */
+  canOperateProduction?: boolean
+  /** Espejo planilla (paridad impresión: impTurno / impGrupo). */
+  corTurno?: string
+  corGrupo?: string
+  corOperador?: string
+  corAyudante?: string
+  corSupervisor?: string
+  onSetTurno?: (v: "diurno" | "nocturno") => void
+  onSetGrupo?: (v: "A" | "B" | "C") => void
+  onActivePersonnelApply?: (people: DraftPerson[]) => void
+  /** Actualiza corTurnoActual + espejo (desde panel padre). */
+  patchActiveTurn?: (updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => void
+  /** Inicia/reanuda cronómetro (panel padre persiste en servidor). */
+  startProductionTimer?: () => void
+  /** Pausa cronómetro (panel padre persiste en servidor). */
+  pauseProductionTimer?: () => void
+  confirmPauseAndResume?: () => void
+  pauseReason?: string
+  pauseObs?: string
+  setPauseReason?: (v: string) => void
+  setPauseObs?: (v: string) => void
+  pauseMotivoDialogOpen?: boolean
+  onPauseMotivoDialogOpenChange?: (open: boolean) => void
 }
 
 const MIN_PALETAS = 1
+const CERRAR_PALETA_OPERATE_TOOLTIP =
+  "Inicie turno de planta y pulse play en el cronómetro antes de cerrar la paleta"
+
+function CerrarPaletaButton({
+  disabled,
+  onClick,
+  className,
+  variant = "outline",
+}: {
+  disabled: boolean
+  onClick: () => void
+  className?: string
+  variant?: "outline" | "ghost"
+}) {
+  const btn = (
+    <Button
+      type="button"
+      variant={variant}
+      size="sm"
+      className={cn(variant === "outline" ? "h-7 gap-1 px-2 text-xs" : "h-7 text-xs", className)}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {variant === "outline" ? <PackageCheck className="h-3.5 w-3.5" /> : null}
+      Cerrar paleta
+    </Button>
+  )
+  if (!disabled) return btn
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">{btn}</span>
+        </TooltipTrigger>
+        <TooltipContent side="top">{CERRAR_PALETA_OPERATE_TOOLTIP}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 function roleLabelEs(role: DraftPersonRole): string {
   if (role === "operador") return "Operador"
@@ -154,14 +266,45 @@ export default function WorkOrderCorteOpsSection({
   setForm,
   pedidoTotalKg,
   readOnly = false,
+  readOnlyOps,
   onRequestSave,
   onApplyCerrarTurno,
   onRequestCerrarTurno,
+  canOperateProduction = false,
+  corTurno: corTurnoProp = "",
+  corGrupo: corGrupoProp = "",
+  corOperador: corOperadorProp = "",
+  corAyudante: corAyudanteProp = "",
+  corSupervisor: corSupervisorProp = "",
+  onSetTurno: onSetTurnoProp,
+  onSetGrupo: onSetGrupoProp,
+  onActivePersonnelApply: onActivePersonnelApplyProp,
+  patchActiveTurn: patchActiveTurnProp,
+  startProductionTimer: startProductionTimerProp,
+  pauseProductionTimer: pauseProductionTimerProp,
+  confirmPauseAndResume: confirmPauseAndResumeProp,
+  pauseReason: pauseReasonProp = "",
+  pauseObs: pauseObsProp = "",
+  setPauseReason: setPauseReasonProp,
+  setPauseObs: setPauseObsProp,
+  pauseMotivoDialogOpen: pauseMotivoDialogOpenProp,
+  onPauseMotivoDialogOpenChange: onPauseMotivoDialogOpenChangeProp,
 }: Props) {
-  const mk = useId().replace(/:/g, "")
+  const opsReadOnly = readOnlyOps ?? readOnly
+  const formFieldId = useId().replace(/:/g, "")
+  const mk = (suffix: string) => `${formFieldId}-${suffix}`
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const [pauseReason, setPauseReason] = useState("")
-  const [pauseObs, setPauseObs] = useState("")
+  const [pauseReasonLocal, setPauseReasonLocal] = useState("")
+  const [pauseObsLocal, setPauseObsLocal] = useState("")
+  const [pauseMotivoDialogOpenLocal, setPauseMotivoDialogOpenLocal] = useState(false)
+  const pauseReason = pauseReasonProp || pauseReasonLocal
+  const setPauseReason = setPauseReasonProp ?? setPauseReasonLocal
+  const pauseObs = pauseObsProp || pauseObsLocal
+  const setPauseObs = setPauseObsProp ?? setPauseObsLocal
+  const pauseMotivoDialogOpen = pauseMotivoDialogOpenProp ?? pauseMotivoDialogOpenLocal
+  const setPauseMotivoDialogOpen =
+    onPauseMotivoDialogOpenChangeProp ?? setPauseMotivoDialogOpenLocal
+  const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
   const [draftTurno, setDraftTurno] = useState<"diurno" | "nocturno">("diurno")
   const [draftGrupo, setDraftGrupo] = useState<"A" | "B" | "C">("A")
   const [draftPeople, setDraftPeople] = useState<DraftPerson[]>([])
@@ -171,8 +314,16 @@ export default function WorkOrderCorteOpsSection({
   })
 
   const closedTurnos = useMemo(() => parseCorteTurnos(form[COR_TURNOS_KEY], form), [form])
-  const activeTurno = useMemo(() => parseCorteTurnoActual(form[COR_ACTUAL_KEY], form), [form])
+  const activeTurno = useMemo(() => materializeOpenCorteTurnoActual(form), [form])
   const hasActiveTurno = activeTurno !== null
+  const turnoUi =
+    coerceTurnoUi(activeTurno?.turno ?? "") ||
+    coerceTurnoUi(readString(form.corTurno)) ||
+    coerceTurnoUi(corTurnoProp)
+  const grupoUi =
+    coerceGrupoUi(activeTurno?.grupo ?? "") ||
+    coerceGrupoUi(readString(form.corGrupo)) ||
+    coerceGrupoUi(corGrupoProp)
   const showPersonalTurnoSetup = !hasActiveTurno
 
   const entradaBobinas = useMemo(() => getNumericSeries(form, "corEntradaBobinasKg", COR_ENTRADA_SLOTS), [form])
@@ -222,7 +373,10 @@ export default function WorkOrderCorteOpsSection({
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
   const turnosRegistrados = jsonAccum.turnosRegistrados
   const ultimoTurnoLabel = hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel
-  const inputDisabled = !hasActiveTurno
+  const kgDespachoAcum = useMemo(() => sumSalidaKgFromClosedPaletas(corPaletas), [corPaletas])
+  const kgProvisionalDespacho = useMemo(() => sumSalidaKgFromOpenPaletas(corPaletas), [corPaletas])
+  const inputDisabled = opsReadOnly || !hasActiveTurno
+  const paletaInputsDisabled = (p: CorPaleta) => inputDisabled || isCorPaletaCerrada(p)
 
   const draftOperadorName = draftPeople.find((p) => p.role === "operador")?.name.trim() ?? ""
   const draftOperadorMissing = draftPeople.every((p) => p.role !== "operador")
@@ -237,14 +391,15 @@ export default function WorkOrderCorteOpsSection({
     setForm((prev) => ({ ...prev, ...syncCorteFormMetrics(prev) }))
   }, [salidaTotalKg, entradaBobinasTotal, form.kgSalidaCorte, form.corAcumuladoProducidoKg, form.kgIngresadosCorte, setForm])
 
-  const timerState = readString(form.corTimerState) || "pending"
+  const activeTimer = resolveCorteDisplayTimer(activeTurno, form)
+  const timerState = activeTimer.state || "pending"
   const timerRunning = timerState === "running"
   const timerPaused = timerState === "paused"
   const timerStopped = timerState === "stopped" || timerState === "completed"
-  const effectiveAcc = readNumber(form.corTimerEffectiveAccSec)
-  const deadAcc = readNumber(form.corTimerDeadAccSec)
-  const lastResumeAt = readNumber(form.corTimerLastResumeAtMs)
-  const pauseAt = readNumber(form.corTimerPauseAtMs)
+  const effectiveAcc = activeTimer.effectiveAccSec
+  const deadAcc = activeTimer.deadAccSec
+  const lastResumeAt = activeTimer.lastResumeAtMs
+  const pauseAt = activeTimer.pauseAtMs
   const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
   const deadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
   const totalSec = effectiveSec + deadSec
@@ -253,7 +408,8 @@ export default function WorkOrderCorteOpsSection({
   const refilPct = kgIngresados > 0 ? ((scrapTotal / kgIngresados) * 100).toFixed(2) : "0.00"
 
   const pauseEntries = useMemo<CortePauseEntry[]>(() => {
-    const raw = form.corTimerPauses
+    const raw =
+      activeTimer.pauses.length > 0 ? activeTimer.pauses : form.corTimerPauses
     if (!Array.isArray(raw)) return []
     return raw
       .map((x) => x as Partial<CortePauseEntry>)
@@ -264,7 +420,7 @@ export default function WorkOrderCorteOpsSection({
         duration_sec: readNumber(x.duration_sec),
       }))
       .filter((x) => x.reason)
-  }, [form.corTimerPauses])
+  }, [activeTimer.pauses, form.corTimerPauses])
 
   useEffect(() => {
     if (!timerRunning && !timerPaused) return
@@ -275,17 +431,17 @@ export default function WorkOrderCorteOpsSection({
   }, [timerPaused, timerRunning])
 
   function setKey(key: string, value: unknown) {
-    if (readOnly) return
+    if (opsReadOnly) return
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   function setNumericSeries(key: string, values: string[]) {
-    if (readOnly) return
+    if (opsReadOnly) return
     setForm((prev) => ({ ...prev, [key]: values }))
   }
 
   function writeEntradaBobinasKg(next: string[]) {
-    if (readOnly) return
+    if (opsReadOnly) return
     setForm((prev) => {
       const base = { ...prev, corEntradaBobinasKg: next }
       const synced = syncCorteFormMetrics(base)
@@ -309,10 +465,9 @@ export default function WorkOrderCorteOpsSection({
     })
   }
 
-  const patchActiveTurn = useCallback((updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
-    if (readOnly) return
+  const patchActiveTurnLocal = useCallback((updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
     setForm((prev) => {
-      const cur = parseCorteTurnoActual(prev[COR_ACTUAL_KEY], prev)
+      const cur = materializeOpenCorteTurnoActual(prev)
       if (!cur) return prev
       const nextTurn = updater(cur)
       return {
@@ -322,10 +477,11 @@ export default function WorkOrderCorteOpsSection({
         ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
       }
     })
-  }, [readOnly, setForm])
+  }, [setForm])
+  const patchActiveTurn = patchActiveTurnProp ?? patchActiveTurnLocal
 
   function writePaletas(nextPaletas: CorPaleta[]) {
-    if (readOnly) return
+    if (opsReadOnly) return
     setForm((prev) => {
       const patch = {
         cor_paletas: nextPaletas,
@@ -352,9 +508,73 @@ export default function WorkOrderCorteOpsSection({
     ])
   }
 
+  function cerrarPaleta(index: number) {
+    if (opsReadOnly) return
+    if (!canOperateProduction) {
+      toast.error("Abra turno de planta e inicie el cronómetro (play) antes de cerrar una paleta.")
+      return
+    }
+    const target = corPaletas[index]
+    if (!target || isCorPaletaCerrada(target)) return
+    const kg = sumKgFromPaleta(target)
+    if (kg <= 0) {
+      toast.error("Registre al menos un rollo con peso antes de cerrar la paleta.")
+      return
+    }
+    const ok = window.confirm(
+      `¿Cerrar ${target.label}? Los ${kg.toFixed(2)} Kg pasarán a Despacho · producto terminado. Podrá seguir en otra paleta sin finalizar el área.`,
+    )
+    if (!ok) return
+
+    const closed: CorPaleta = {
+      ...target,
+      status: "cerrada",
+      closed_at: new Date().toISOString(),
+    }
+    let next = corPaletas.map((p, i) => (i === index ? closed : p))
+    if (!next.some((p) => !isCorPaletaCerrada(p))) {
+      const n = next.length + 1
+      next = [
+        ...next,
+        {
+          id: newCorteTurnoId(),
+          label: `Paleta #${String(n).padStart(2, "0")}`,
+          rollosKg: emptyPaletaRollos(),
+          status: "en_progreso" as const,
+        },
+      ]
+    }
+    const patch = {
+      cor_paletas: next,
+      corSalidaPaletasKg: next.map((p) => p.rollosKg),
+    }
+    const toSave = syncCorteFormMetrics({ ...form, ...patch })
+    writePaletas(next)
+    void (async () => {
+      if (!onRequestSave) {
+        toast.success(`${target.label} cerrada. Saldo visible en Despacho · producto terminado.`)
+        return
+      }
+      const ok = await onRequestSave(toSave, { suppressSuccessToast: true })
+      if (ok) {
+        toast.success(
+          `${target.label} cerrada (${kg.toFixed(2)} kg). Consulte Despacho · producto terminado; si no aparece, revise el aviso al guardar.`,
+        )
+      } else {
+        toast.error(
+          `${target.label} quedó cerrada en pantalla pero no se guardó en el servidor. Pulse Guardar de nuevo.`,
+        )
+      }
+    })()
+  }
+
   function removePaleta(index: number) {
     if (inputDisabled) return
     const target = corPaletas[index]
+    if (target && isCorPaletaCerrada(target)) {
+      toast.error("No se puede eliminar una paleta ya cerrada (está en despacho).")
+      return
+    }
     const hasAnyKg = (target?.rollosKg ?? []).some((v) => readNumber(v) > 0)
     if (hasAnyKg) {
       const ok = window.confirm(
@@ -398,7 +618,7 @@ export default function WorkOrderCorteOpsSection({
   }
 
   function onIniciarTurno() {
-    if (readOnly) return
+    if (opsReadOnly) return
     if (hasActiveTurno) return
     if (draftOperadorMissing) {
       toast.error("Guarde al menos un operador antes de iniciar el turno.")
@@ -412,16 +632,26 @@ export default function WorkOrderCorteOpsSection({
       ayudante,
       supervisor,
     })
-    setForm((prev) => ({
-      ...prev,
-      [COR_ACTUAL_KEY]: t,
-      ...corteTurnoToMirror(t),
-      [COR_TURNOS_KEY]: parseCorteTurnos(prev[COR_TURNOS_KEY], prev),
-    }))
+    setForm((prev) => {
+      const nextForm: Record<string, unknown> = {
+        ...prev,
+        [COR_ACTUAL_KEY]: t,
+        ...corteTurnoToMirror(t),
+        [COR_TURNOS_KEY]: parseCorteTurnos(prev[COR_TURNOS_KEY], prev),
+      }
+      queueMicrotask(() => {
+        void onRequestSave?.(nextForm, {
+          suppressSuccessToast: true,
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+        })
+      })
+      return nextForm
+    })
     setDraftPeople([])
     setDraftStaging({ name: "", role: "operador" })
     toast.success(
-      "Turno de planta abierto. Use el cronómetro (play) para registrar tiempos. La salida (Kg) se calcula desde los rollos.",
+      "Turno de planta abierto y guardado. Use el cronómetro (play) para registrar tiempos.",
     )
   }
 
@@ -456,15 +686,17 @@ export default function WorkOrderCorteOpsSection({
         ...clearCorteMirrorKeys(),
         ...syncCorteSalidaFields({ ...prev, cor_paletas: clearCorteMirrorKeys().cor_paletas }),
       }
-      queueMicrotask(() => onRequestSave?.(next))
+      queueMicrotask(() =>
+        onRequestSave?.(next, { clearTurnoActual: true, suppressSuccessToast: true }),
+      )
       return next
     })
     toast.success("Turno cerrado. Puede iniciar otro turno cuando corresponda.")
   }
 
   function cerrarTurnoActual() {
-    if (readOnly) return
-    const cur = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
+    if (opsReadOnly) return
+    const cur = activeTurno
     if (!cur) return
     if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
       toast.error("Complete turno, grupo y operador.")
@@ -481,54 +713,53 @@ export default function WorkOrderCorteOpsSection({
     applyCerrarTurno(cur)
   }
 
-  function onSetTurno(v: "diurno" | "nocturno") {
-    patchActiveTurn((t) => ({ ...t, turno: v }))
-  }
+  const onSetTurno =
+    onSetTurnoProp ??
+    ((v: "diurno" | "nocturno") => {
+      patchActiveTurn((t) => ({ ...t, turno: v }))
+    })
 
-  function onSetGrupo(v: "A" | "B" | "C") {
-    patchActiveTurn((t) => ({ ...t, grupo: v }))
-  }
+  const onSetGrupo =
+    onSetGrupoProp ??
+    ((v: "A" | "B" | "C") => {
+      patchActiveTurn((t) => ({ ...t, grupo: v }))
+    })
 
-  function onActivePersonnelApply(people: DraftPerson[]) {
-    const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
-    patchActiveTurn((t) => ({ ...t, operador, ayudante, supervisor }))
-  }
+  const onActivePersonnelApply =
+    onActivePersonnelApplyProp ??
+    ((people: DraftPerson[]) => {
+      const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
+      patchActiveTurn((t) => ({ ...t, operador, ayudante, supervisor }))
+    })
 
   const [activeStageName, setActiveStageName] = useState("")
   const [activeStageRole, setActiveStageRole] = useState<DraftPersonRole>("operador")
   const activeSaved = useMemo(
     () =>
       activePersonnelFromStrings(
-        readString(form.corOperador),
-        readString(form.corAyudante),
-        readString(form.corSupervisor),
+        corOperadorProp || readString(form.corOperador),
+        corAyudanteProp || readString(form.corAyudante),
+        corSupervisorProp || readString(form.corSupervisor),
       ),
-    [form.corOperador, form.corAyudante, form.corSupervisor],
+    [corOperadorProp, corAyudanteProp, corSupervisorProp, form.corOperador, form.corAyudante, form.corSupervisor],
   )
 
   const guardarPersonaTurnoActivo = useCallback(() => {
-    const trimmed = activeStageName.trim()
-    if (!trimmed) {
-      toast.error("Indique el nombre de la persona.")
+    const name = activeStageName.trim()
+    if (!name) {
+      toast.error("Escriba el nombre antes de guardar.")
       return
     }
-    const next = [...activeSaved]
-    if (activeStageRole === "operador") {
-      const idx = next.findIndex((p) => p.role === "operador")
-      if (idx >= 0) next[idx] = { ...next[idx], name: trimmed }
-      else next.push({ id: "slot-operador", role: "operador", name: trimmed })
-    } else if (activeStageRole === "supervisor") {
-      if (next.some((p) => p.role === "supervisor" && p.name !== trimmed)) {
-        toast.warning("Solo puede haber un supervisor en el turno.")
-        return
-      }
-      const idx = next.findIndex((p) => p.role === "supervisor")
-      if (idx >= 0) next[idx] = { ...next[idx], name: trimmed }
-      else next.push({ id: "slot-supervisor", role: "supervisor", name: trimmed })
-    } else {
-      next.push({ id: `slot-ayudante-${Date.now()}`, role: "ayudante", name: trimmed })
+    if (activeStageRole === "supervisor" && activeSaved.some((p) => p.role === "supervisor")) {
+      toast.warning("Solo puede haber un Supervisor en el turno.")
+      return
     }
-    onActivePersonnelApply(next)
+    if (activeStageRole === "operador" && activeSaved.some((p) => p.role === "operador")) {
+      toast.warning("Solo puede haber un Operador principal en el turno.")
+      return
+    }
+    const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    onActivePersonnelApply([...activeSaved, { id, role: activeStageRole, name }])
     setActiveStageName("")
     setActiveStageRole("operador")
   }, [activeSaved, activeStageName, activeStageRole, onActivePersonnelApply])
@@ -542,69 +773,86 @@ export default function WorkOrderCorteOpsSection({
     )
   }
 
-  function startProductionTimer() {
-    if (readOnly) return
+  function startProductionTimerLocal() {
+    if (opsReadOnly) return
     if (!hasActiveTurno) {
       toast.error("Primero inicie un turno de planta.")
       return
     }
-    const now = Date.now()
-    patchActiveTurn((t) => ({
-      ...t,
-      timer: {
-        ...t.timer,
-        state: "running",
-        startedAtMs: t.timer.startedAtMs || now,
-        lastResumeAtMs: now,
-        pauseAtMs: 0,
-      },
-    }))
-    setForm((prev) => ({
-      ...prev,
-      corTimerState: "running",
-      corTimerStartedAtMs: readNumber(prev.corTimerStartedAtMs) || now,
-      corTimerLastResumeAtMs: now,
-      corTimerPauseAtMs: 0,
-    }))
+    setForm((prev) => startCorteProductionTimerOnForm(prev) ?? prev)
   }
 
-  function pauseProductionTimer() {
-    if (!timerRunning) return
-    const now = Date.now()
-    setForm((prev) => ({
-      ...prev,
-      corTimerState: "paused",
-      corTimerEffectiveAccSec:
-        readNumber(prev.corTimerEffectiveAccSec) +
-        (readNumber(prev.corTimerLastResumeAtMs) > 0 ? (now - readNumber(prev.corTimerLastResumeAtMs)) / 1000 : 0),
-      corTimerPauseAtMs: now,
-      corTimerLastResumeAtMs: 0,
-      corUltimoTurnoLabel: "En pausa",
-    }))
-  }
+  const startProductionTimer = startProductionTimerProp ?? startProductionTimerLocal
 
-  function confirmPauseAndResume() {
-    if (!timerPaused || !pauseReason) return
+  function pauseProductionTimerLocal() {
+    if (opsReadOnly) return
+    if (!timerRunning) {
+      toast.message("El cronómetro no está en marcha.")
+      return
+    }
     const now = Date.now()
-    const pauseDurationSec = pauseAt > 0 ? (now - pauseAt) / 1000 : 0
     setForm((prev) => {
-      const rows = Array.isArray(prev.corTimerPauses) ? (prev.corTimerPauses as CortePauseEntry[]) : []
-      return {
-        ...prev,
-        corTimerState: "running",
-        corTimerDeadAccSec: readNumber(prev.corTimerDeadAccSec) + pauseDurationSec,
-        corTimerPauseAtMs: 0,
-        corTimerLastResumeAtMs: now,
-        corTimerPauses: [
-          ...rows,
-          { at: new Date(now).toISOString(), reason: pauseReason, obs: pauseObs.trim(), duration_sec: pauseDurationSec },
-        ],
-        corUltimoTurnoLabel: "Turno en ejecución",
+      const next = pauseCorteProductionTimerOnForm(prev, now)
+      if (!next) {
+        toast.error("No se pudo pausar el cronómetro. Guarde el turno e intente de nuevo.")
+        return prev
       }
+      queueMicrotask(() => onRequestSave?.(next, { suppressSuccessToast: true }))
+      return next
+    })
+    setPauseMotivoDialogOpen(true)
+  }
+
+  const pauseProductionTimer = pauseProductionTimerProp ?? pauseProductionTimerLocal
+
+  function confirmPauseAndResumeLocal() {
+    const reason = pauseReason.trim()
+    if (!reason) {
+      toast.error("Seleccione el motivo de parada.")
+      return
+    }
+    const now = Date.now()
+    setForm((prev) => {
+      const cur = materializeOpenCorteTurnoActual(prev)
+      if (!cur || cur.timer.state !== "paused") return prev
+      const pauseStart = cur.timer.pauseAtMs
+      const pauseDurationSec = pauseStart > 0 ? (now - pauseStart) / 1000 : 0
+      const nextTurn: CorteTurnoEntry = {
+        ...cur,
+        timer: {
+          ...cur.timer,
+          state: "paused",
+          deadAccSec: cur.timer.deadAccSec + pauseDurationSec,
+          pauseAtMs: now,
+          lastResumeAtMs: 0,
+          pauses: [
+            ...cur.timer.pauses,
+            {
+              at: new Date(now).toISOString(),
+              reason,
+              obs: pauseObs.trim(),
+              duration_sec: pauseDurationSec,
+            },
+          ],
+        },
+      }
+      const nextForm = {
+        ...prev,
+        [COR_ACTUAL_KEY]: nextTurn,
+        ...corteTurnoToMirror(nextTurn),
+      }
+      queueMicrotask(() => onRequestSave?.(nextForm, { suppressSuccessToast: true }))
+      return nextForm
     })
     setPauseReason("")
     setPauseObs("")
+    setPauseMotivoDialogOpen(false)
+    toast.message("Parada registrada. Use play para reanudar el tiempo efectivo.")
   }
+
+  const confirmPauseAndResume = confirmPauseAndResumeProp ?? confirmPauseAndResumeLocal
+
+  const pauseParadaComboLabel = pauseReason.trim() || "Seleccione motivo…"
 
   const doneAcumulado = pedidoTotalKg > 0.01 && faltanteKg <= 0.01
   const doneInfoTurno =
@@ -662,6 +910,18 @@ export default function WorkOrderCorteOpsSection({
               Último turno: <strong>{ultimoTurnoLabel}</strong>
             </span>
           </div>
+          <div className="mes-footer-bar__item flex items-start gap-2">
+            <PackageCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+            <span>
+              Kg despacho (cerradas): <strong>{kgDespachoAcum.toFixed(2)} Kg</strong>
+            </span>
+          </div>
+          <div className="mes-footer-bar__item flex items-start gap-2">
+            <Package className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+            <span>
+              Kg despacho (provisional): <strong>{kgProvisionalDespacho.toFixed(2)} Kg</strong>
+            </span>
+          </div>
         </div>
       </MesSectionShell>
   )
@@ -697,15 +957,33 @@ export default function WorkOrderCorteOpsSection({
                 </div>
                 <div className="mt-4 space-y-2 border-t pt-4">
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <Input className="h-9" value={draftStaging.name} onChange={(e) => setDraftStaging((s) => ({ ...s, name: e.target.value }))} placeholder="Nombre" />
-                    <Select value={draftStaging.role} onValueChange={(v) => setDraftStaging((s) => ({ ...s, role: v as DraftPersonRole }))}>
-                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="operador">Operador</SelectItem>
-                        <SelectItem value="ayudante">Ayudante</SelectItem>
-                        <SelectItem value="supervisor">Supervisor</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-1">
+                      {fieldLabel(mk("draft-person-name"), UserRound, "Nombre")}
+                      <Input
+                        id={mk("draft-person-name")}
+                        name="corDraftPersonName"
+                        className="h-9"
+                        value={draftStaging.name}
+                        onChange={(e) => setDraftStaging((s) => ({ ...s, name: e.target.value }))}
+                        placeholder="Nombre"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      {fieldLabel(mk("draft-person-role"), IdCard, "Rol")}
+                      <Select
+                        value={draftStaging.role}
+                        onValueChange={(v) => setDraftStaging((s) => ({ ...s, role: v as DraftPersonRole }))}
+                      >
+                        <SelectTrigger id={mk("draft-person-role")} className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="operador">Operador</SelectItem>
+                          <SelectItem value="ayudante">Ayudante</SelectItem>
+                          <SelectItem value="supervisor">Supervisor</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <Button type="button" variant="secondary" size="sm" onClick={() => onDraftPersonGuardar(draftStaging.name, draftStaging.role)}><UserPlus className="mr-1 h-4 w-4" />Guardar persona</Button>
                   {draftPeople.map((p) => (
@@ -714,7 +992,7 @@ export default function WorkOrderCorteOpsSection({
                       <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDraftPeople((prev) => prev.filter((x) => x.id !== p.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   ))}
-                  <Button type="button" className="w-full" onClick={onIniciarTurno} disabled={readOnly || draftOperadorMissing}><CirclePlay className="mr-2 h-4 w-4" />Iniciar turno</Button>
+                  <Button type="button" className="w-full" onClick={onIniciarTurno} disabled={opsReadOnly || draftOperadorMissing}><CirclePlay className="mr-2 h-4 w-4" />Iniciar turno</Button>
                 </div>
               </div>
             </MesSectionShell>
@@ -742,18 +1020,176 @@ export default function WorkOrderCorteOpsSection({
       ) : null}
 
       {hasActiveTurno ? (
-        <MesSectionShell title={mesSectionTitle(ClipboardList, "Información del turno")} headerRight={<MesSectionHeaderExtras isDone={doneInfoTurno} />}>
-          <p className="text-muted-foreground mb-3 text-xs">Personal y turno del registro en curso. Cierre la sesión con <strong>Cerrar turno</strong> en el cronómetro.</p>
+        <MesSectionShell
+          title={mesSectionTitle(ClipboardList, "Información del turno")}
+          headerRight={<MesSectionHeaderExtras isDone={doneInfoTurno} />}
+        >
+          <p className="text-muted-foreground mb-3 border-b border-border/50 pb-3 text-xs leading-snug">
+            Turno de planta (calendario y cuadrilla) y personal del registro actual. El cronómetro está en la sección
+            siguiente. Para cerrar la sesión use{" "}
+            <span className="font-semibold text-foreground">Cerrar turno</span> en el cronómetro.
+          </p>
           <div className="grid gap-2 md:grid-cols-2">
-            <ToggleGroup type="single" variant="outline" className="mes-toggle-row mes-toggle-turno w-full" value={readString(form.corTurno)} onValueChange={(v) => v && onSetTurno(v as "diurno" | "nocturno")}>
-              <ToggleGroupItem value="diurno" className="flex-1 gap-2"><Sun className="h-4 w-4" />Diurno</ToggleGroupItem>
-              <ToggleGroupItem value="nocturno" className="flex-1 gap-2"><Moon className="h-4 w-4" />Nocturno</ToggleGroupItem>
-            </ToggleGroup>
-            <ToggleGroup type="single" variant="outline" className="mes-toggle-row mes-toggle-grupo w-full" value={readString(form.corGrupo)} onValueChange={(v) => v && onSetGrupo(v as "A" | "B" | "C")}>
-              {(["A", "B", "C"] as const).map((g) => <ToggleGroupItem key={g} value={g} className="flex-1">{g}</ToggleGroupItem>)}
-            </ToggleGroup>
+            <div className="space-y-1">
+              {fieldLegend(Clock, "Turno")}
+              <div className="mes-toggle-row mes-toggle-turno">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  className="w-full"
+                  value={turnoUi || undefined}
+                  onValueChange={(v) => {
+                    if (!v) return
+                    onSetTurno(v as "diurno" | "nocturno")
+                  }}
+                  disabled={opsReadOnly}
+                >
+                  <ToggleGroupItem value="diurno" className="flex-1 gap-2">
+                    <Sun className="h-4 w-4 shrink-0" aria-hidden />
+                    Diurno
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
+                    <Moon className="h-4 w-4 shrink-0" aria-hidden />
+                    Nocturno
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+              <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
+            </div>
+            <div className="space-y-1">
+              {fieldLegend(Users, "Grupo")}
+              <div className="mes-toggle-row mes-toggle-grupo">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  className="w-full"
+                  value={grupoUi || undefined}
+                  onValueChange={(v) => {
+                    if (!v) return
+                    onSetGrupo(v as "A" | "B" | "C")
+                  }}
+                  disabled={opsReadOnly}
+                >
+                  {(["A", "B", "C"] as const).map((g) => (
+                    <ToggleGroupItem
+                      key={g}
+                      value={g}
+                      className={cn(
+                        "flex-1 gap-1",
+                        g === "A" && "mes-grupo-a",
+                        g === "B" && "mes-grupo-b",
+                        g === "C" && "mes-grupo-c",
+                      )}
+                    >
+                      <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                      {g}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+              <p className="mes-field-hint">Cuadrilla o equipo asignado (rotación A / B / C).</p>
+            </div>
+            <div className="md:col-span-2 mt-1 rounded-lg border bg-background/60 p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Personal del turno
+              </div>
+              <div className="space-y-3 rounded-md border bg-background p-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
+                  <div className="min-w-0 space-y-1">
+                    {fieldLabel(
+                      mk("active-person-name"),
+                      UserRound,
+                      <>
+                        Nombre
+                        {activeStageRole === "operador" ? (
+                          <span className="text-muted-foreground"> (operador)</span>
+                        ) : null}
+                      </>,
+                    )}
+                    <Input
+                      id={mk("active-person-name")}
+                      name="corActivePersonName"
+                      className="ot-input-unified h-9 w-full min-w-0"
+                      value={activeStageName}
+                      onChange={(e) => setActiveStageName(e.target.value)}
+                      placeholder="Nombre"
+                      disabled={opsReadOnly}
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    {fieldLabel(mk("active-person-role"), IdCard, "Rol")}
+                    <Select
+                      value={activeStageRole}
+                      onValueChange={(v) => setActiveStageRole(v as DraftPersonRole)}
+                      disabled={opsReadOnly}
+                    >
+                      <SelectTrigger id={mk("active-person-role")} className="h-9 w-full min-w-0">
+                        <SelectValue placeholder="Seleccione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="operador">Operador</SelectItem>
+                        <SelectItem value="ayudante">Ayudante</SelectItem>
+                        <SelectItem value="supervisor">Supervisor</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-9 w-full gap-1.5 sm:w-auto"
+                  onClick={guardarPersonaTurnoActivo}
+                  disabled={opsReadOnly}
+                >
+                  <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
+                  Guardar persona
+                </Button>
+              </div>
+              <Collapsible defaultOpen className="mt-3 rounded-md border border-dashed bg-muted/20">
+                <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/40">
+                  <span className="inline-flex items-center gap-2">
+                    <History className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+                    Personal en este turno ({activeSaved.length})
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  {activeSaved.length === 0 ? (
+                    <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
+                      Nadie registrado aún. Guarde operador, ayudantes o supervisor con el botón de arriba.
+                    </div>
+                  ) : (
+                    <ul className="space-y-1 border-t px-3 py-2">
+                      {activeSaved.map((p) => (
+                        <li
+                          key={p.id}
+                          className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs"
+                        >
+                          <span>
+                            <span className="font-medium text-foreground">{p.name}</span>
+                            <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={() => onActivePersonnelApply(activeSaved.filter((x) => x.id !== p.id))}
+                            disabled={opsReadOnly}
+                            title="Quitar de la lista"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
           </div>
         </MesSectionShell>
+
       ) : null}
 
       <MesSectionShell
@@ -775,11 +1211,20 @@ export default function WorkOrderCorteOpsSection({
           </div>
         }
       >
-        <div className="mb-3 rounded-md border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs leading-snug text-foreground">
-          <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
-          <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto).{" "}
-          <span className="font-semibold">Fin turno</span> cierra el registro sin finalizar la orden.
-        </div>
+        {hasActiveTurno ? (
+          <div className="mb-3 rounded-md border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs leading-snug text-foreground">
+            <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
+            <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
+            <span className="font-semibold">no</span> cierra el turno de planta. Use{" "}
+            <span className="font-semibold">Cerrar turno</span> para terminar la sesión.
+          </div>
+        ) : (
+          <div className="mb-3 rounded-md border border-dashed border-slate-400 bg-white px-3 py-2 text-xs text-slate-600">
+            Primero abra un <span className="font-semibold text-foreground">turno de planta</span> con{" "}
+            <span className="font-semibold text-foreground">Iniciar turno</span> arriba. Después use play aquí para el
+            cronómetro.
+          </div>
+        )}
         <div className="mes-timer-grid">
           <MesTimerFace
             elapsedLabel={formatTimerHms(effectiveSec)}
@@ -802,7 +1247,7 @@ export default function WorkOrderCorteOpsSection({
                         className="mes-timer-fab-btn mes-btn-primary shrink-0"
                         aria-label="Iniciar cronómetro de producción"
                         onClick={startProductionTimer}
-                        disabled={readOnly || !hasActiveTurno || timerRunning}
+                        disabled={opsReadOnly || !hasActiveTurno || timerRunning}
                       >
                         <CirclePlay className="shrink-0" aria-hidden />
                       </Button>
@@ -811,6 +1256,10 @@ export default function WorkOrderCorteOpsSection({
                   </Tooltip>
                 </div>
                 <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label flex flex-col items-center gap-0 leading-tight">
+                    <span>Parada</span>
+                    <span className="text-[10px] font-normal text-muted-foreground">motivo</span>
+                  </span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -820,7 +1269,7 @@ export default function WorkOrderCorteOpsSection({
                         className="mes-timer-fab-btn mes-btn-secondary shrink-0"
                         aria-label="Pausar cronómetro y registrar motivo de parada"
                         onClick={pauseProductionTimer}
-                        disabled={readOnly || !hasActiveTurno || !timerRunning}
+                        disabled={opsReadOnly || !timerRunning}
                       >
                         <CirclePause className="shrink-0" aria-hidden />
                       </Button>
@@ -829,6 +1278,7 @@ export default function WorkOrderCorteOpsSection({
                   </Tooltip>
                 </div>
                 <div className="mes-timer-action-labeled">
+                  <span className="mes-timer-action-label">Cerrar turno</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -838,7 +1288,7 @@ export default function WorkOrderCorteOpsSection({
                         className="mes-timer-fab-btn mes-btn-danger-outline shrink-0"
                         aria-label="Fin turno"
                         onClick={cerrarTurnoActual}
-                        disabled={readOnly || !hasActiveTurno}
+                        disabled={opsReadOnly || !hasActiveTurno}
                       >
                         <LogOut className="shrink-0" aria-hidden />
                       </Button>
@@ -850,17 +1300,16 @@ export default function WorkOrderCorteOpsSection({
             </TooltipProvider>
           </div>
         </div>
-        {timerPaused ? (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
-            <p className="mb-2 text-xs font-medium text-amber-900">Registrar motivo de parada</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <select className="ot-select" value={pauseReason} onChange={(e) => setPauseReason(e.target.value)}>
-                <option value="">-- Seleccionar motivo --</option>
-                {COR_PAUSE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
-              </select>
-              <Input value={pauseObs} onChange={(e) => setPauseObs(e.target.value)} placeholder="Detalle breve (opcional)" className="ot-input-unified h-9" />
-            </div>
-            <div className="mt-2"><Button type="button" size="sm" onClick={confirmPauseAndResume}>Registrar y continuar</Button></div>
+        {timerPaused && !pauseMotivoDialogOpen ? (
+          <div className="mt-2 flex justify-center md:justify-end">
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto p-0 text-xs font-normal text-amber-800 underline-offset-4 hover:text-amber-950"
+              onClick={() => setPauseMotivoDialogOpen(true)}
+            >
+              Motivo de parada
+            </Button>
           </div>
         ) : null}
         {pauseEntries.length > 0 ? (
@@ -898,8 +1347,12 @@ export default function WorkOrderCorteOpsSection({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10">
           {entradaBobinas.map((val, idx) => (
             <div key={`ent-cor-${idx}`} className="space-y-1">
-              <Label className="ot-label">{idx + 1}</Label>
+              <Label htmlFor={mk(`entrada-bobina-${idx}`)} className="ot-label">
+                {idx + 1}
+              </Label>
               <Input
+                id={mk(`entrada-bobina-${idx}`)}
+                name={`corEntradaBobinaKg_${idx + 1}`}
                 className="ot-input-unified h-9"
                 inputMode="decimal"
                 value={val}
@@ -935,39 +1388,73 @@ export default function WorkOrderCorteOpsSection({
           </Button>
         }
       >
+        <p className="text-muted-foreground mb-2 text-xs leading-snug">
+          Registre peso en al menos un rollo de la paleta (con todo en 0 no hay saldo en Despacho). Cierre cada paleta al
+          terminar el lote: los kg pasan a Despacho · producto terminado sin finalizar el área. Requiere turno abierto y
+          cronómetro iniciado (play).
+        </p>
         <div className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
-          {salidaPaletas.map((paleta, paletaIdx) => (
-            <div key={`paleta-${paletaIdx}`} className="rounded-lg border bg-background">
+          {salidaPaletas.map((paleta, paletaIdx) => {
+            const meta = corPaletas[paletaIdx]
+            return (
+            <div
+              key={`paleta-${paletaIdx}`}
+              className={cn(
+                "rounded-lg border bg-background",
+                corPaletas[paletaIdx] &&
+                  isCorPaletaCerrada(corPaletas[paletaIdx]) &&
+                  "border-emerald-500/35 bg-emerald-500/[0.04]",
+              )}
+            >
               <div className="flex items-center justify-between border-b px-2 py-1.5">
                 <strong className="text-sm">{corPaletas[paletaIdx]?.label ?? `Paleta #${String(paletaIdx + 1).padStart(2, "0")}`}</strong>
-                <div className="inline-flex items-center gap-1">
+                <div className="inline-flex flex-wrap items-center justify-end gap-1">
+                  {corPaletas[paletaIdx] && isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
+                    <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-950">En despacho</Badge>
+                  ) : null}
                   <Badge variant="outline">{`${salidaPaletasRollos[paletaIdx]}/${COR_ROLLOS_PER_PALETA}`}</Badge>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => removePaleta(paletaIdx)}
-                    title="Eliminar paleta"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {corPaletas[paletaIdx] && !isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
+                    <CerrarPaletaButton
+                      disabled={!canOperateProduction}
+                      onClick={() => cerrarPaleta(paletaIdx)}
+                    />
+                  ) : null}
+                  {corPaletas[paletaIdx] && !isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => removePaleta(paletaIdx)}
+                      title="Eliminar paleta"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
               <div className="space-y-2 p-2">
                 <div className="grid grid-cols-2 gap-1">
                   <div>
-                    <Label className="ot-label">Rollos</Label>
+                    <Label htmlFor={mk(`paleta-${paletaIdx}-rollos-count`)} className="ot-label">
+                      Rollos
+                    </Label>
                     <Input
+                      id={mk(`paleta-${paletaIdx}-rollos-count`)}
+                      name={`corPaleta${paletaIdx + 1}RollosCount`}
                       className="ot-input-unified h-8"
                       value={String(salidaPaletasRollos[paletaIdx] ?? 0)}
                       readOnly
                     />
                   </div>
                   <div>
-                    <Label className="ot-label">Total Kg</Label>
+                    <Label htmlFor={mk(`paleta-${paletaIdx}-total-kg`)} className="ot-label">
+                      Total Kg
+                    </Label>
                     <Input
+                      id={mk(`paleta-${paletaIdx}-total-kg`)}
+                      name={`corPaleta${paletaIdx + 1}TotalKg`}
                       className="ot-input-unified h-8 font-semibold"
                       value={(salidaPaletasTotales[paletaIdx] ?? 0).toFixed(2)}
                       readOnly
@@ -982,11 +1469,19 @@ export default function WorkOrderCorteOpsSection({
                 >
                   {paleta.map((valor, rolloIdx) => (
                     <div key={`p-${paletaIdx}-r-${rolloIdx}`} className="space-y-1">
-                      <Label className="ot-label text-[10px]">{rolloIdx + 1}</Label>
+                      <Label
+                        htmlFor={mk(`paleta-${paletaIdx}-rollo-${rolloIdx}`)}
+                        className="ot-label text-[10px]"
+                      >
+                        {rolloIdx + 1}
+                      </Label>
                       <Input
+                        id={mk(`paleta-${paletaIdx}-rollo-${rolloIdx}`)}
+                        name={`corPaleta${paletaIdx + 1}RolloKg_${rolloIdx + 1}`}
                         className="ot-input-unified h-7 px-2 text-xs"
                         inputMode="decimal"
                         value={valor}
+                        disabled={meta ? paletaInputsDisabled(meta) : inputDisabled}
                         onChange={(e) => {
                           const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
                           if (!next[paletaIdx]) return
@@ -1000,7 +1495,8 @@ export default function WorkOrderCorteOpsSection({
                 </div>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </MesSectionShell>
 
@@ -1009,15 +1505,59 @@ export default function WorkOrderCorteOpsSection({
         subtle
         bodyClassName="mes-section__body--flush"
       >
+        <p className="text-muted-foreground mb-3 text-xs leading-snug">
+          <span className="font-medium text-foreground">Kg salida</span> incluye paletas abiertas y cerradas.
+          Solo las paletas <span className="font-medium text-foreground">cerradas</span> (botón Cerrar paleta) pasan a
+          Despacho · producto terminado.
+        </p>
         <div className="mes-stat-grid mes-stat-grid--4">
           <MesStatTile
             label="Kg ingresados"
             value={`${entradaBobinasTotal.toFixed(2)} Kg`}
             icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
           />
-          <MesStatTile label="Kg salida" value={`${salidaTotalKg.toFixed(2)} Kg`} icon={<ArrowUpFromLine className="h-3.5 w-3.5" />} />
-          <div className="mes-stat-tile"><span className="mes-stat-tile__label">Kg merma</span><Input className="ot-input-unified mt-1 h-8" inputMode="decimal" value={readString(form.kgMermaCorte)} onChange={(e) => setKey("kgMermaCorte", e.target.value)} placeholder="0" /></div>
-          <div className="mes-stat-tile"><span className="mes-stat-tile__label">Metraje</span><Input className="ot-input-unified mt-1 h-8" inputMode="decimal" value={readString(form.metrajeCorte)} onChange={(e) => setKey("metrajeCorte", e.target.value)} placeholder="0" /></div>
+          <MesStatTile
+            label="Kg salida (plantas)"
+            value={`${salidaTotalKg.toFixed(2)} Kg`}
+            icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Kg en despacho (cerradas)"
+            value={`${kgDespachoAcum.toFixed(2)} Kg`}
+            tone="positive"
+            icon={<PackageCheck className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Kg despacho (provisional)"
+            value={`${kgProvisionalDespacho.toFixed(2)} Kg`}
+            icon={<Package className="h-3.5 w-3.5" />}
+          />
+          <div className="mes-stat-tile"><Label htmlFor={mk("kg-merma-corte")} className="mes-stat-tile__label">
+              Kg merma
+            </Label>
+            <Input
+              id={mk("kg-merma-corte")}
+              name="kgMermaCorte"
+              className="ot-input-unified mt-1 h-8"
+              inputMode="decimal"
+              value={readString(form.kgMermaCorte)}
+              onChange={(e) => setKey("kgMermaCorte", e.target.value)}
+              placeholder="0"
+            /></div>
+          <div className="mes-stat-tile">
+            <Label htmlFor={mk("metraje-corte")} className="mes-stat-tile__label">
+              Metraje
+            </Label>
+            <Input
+              id={mk("metraje-corte")}
+              name="metrajeCorte"
+              className="ot-input-unified mt-1 h-8"
+              inputMode="decimal"
+              value={readString(form.metrajeCorte)}
+              onChange={(e) => setKey("metrajeCorte", e.target.value)}
+              placeholder="0"
+            />
+          </div>
         </div>
         <div className="mes-stat-grid mt-2 sm:grid-cols-3">
           <MesStatTile label="Merma %" value={`${mermaPct}%`} icon={<Percent className="h-3.5 w-3.5" />} />
@@ -1025,7 +1565,18 @@ export default function WorkOrderCorteOpsSection({
           <MesStatTile label="Metraje total" value={`${metraje.toFixed(2)} m`} icon={<Ruler className="h-3.5 w-3.5" />} />
         </div>
         <div className="mes-stat-grid mt-2 mes-stat-grid--4">
-          <MesStatTile label="Salida" value={`${salidaTotalKg.toFixed(2)} Kg`} icon={<ArrowUpFromLine className="h-3.5 w-3.5" />} />
+          <MesStatTile label="Salida total" value={`${salidaTotalKg.toFixed(2)} Kg`} icon={<ArrowUpFromLine className="h-3.5 w-3.5" />} />
+          <MesStatTile
+            label="Despacho (cerradas)"
+            value={`${kgDespachoAcum.toFixed(2)} Kg`}
+            tone="positive"
+            icon={<PackageCheck className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Despacho (provisional)"
+            value={`${kgProvisionalDespacho.toFixed(2)} Kg`}
+            icon={<Package className="h-3.5 w-3.5" />}
+          />
           <MesStatTile label="Merma" value={`${kgMerma.toFixed(2)} Kg`} icon={<Trash2 className="h-3.5 w-3.5" />} />
           <MesStatTile label="Paletas" value={salidaPaletas.length} />
           <MesStatTile label="Bobinas" value={bobinasSalidaCount} />
@@ -1034,13 +1585,16 @@ export default function WorkOrderCorteOpsSection({
 
       <MesSectionShell title={mesSectionTitle(Recycle, "Scrap / Refil")} subtle>
         <div className="mb-3 space-y-2 rounded border bg-background/80 p-2">
-          <Label className="text-muted-foreground text-xs font-medium">Sustrato del desperdicio (reporte)</Label>
+          <Label id={mk("cor-desperdicio-sustrato-label")} className="text-muted-foreground text-xs font-medium">
+            Sustrato del desperdicio (reporte)
+          </Label>
           <p className="text-muted-foreground text-[11px] leading-snug">
             Clasificación global de la OT en el reporte (mal corte y «auto» en refile/impreso). «Auto» usa la estructura
             del producto. Transparente aplica cuando el sustrato es film transparente / CPP.
           </p>
           <ToggleGroup
             type="single"
+            aria-labelledby={mk("cor-desperdicio-sustrato-label")}
             className="flex flex-wrap justify-start gap-1"
             value={
               (() => {
@@ -1069,10 +1623,13 @@ export default function WorkOrderCorteOpsSection({
         </div>
         <div className="mb-3 grid gap-3 sm:grid-cols-2">
           <div className="space-y-1 rounded border bg-background/80 p-2">
-            <Label className="text-muted-foreground text-xs font-medium">Destino refile (BOPP / PE)</Label>
+            <Label id={mk("cor-scrap-refile-destino-label")} className="text-muted-foreground text-xs font-medium">
+              Destino refile (BOPP / PE)
+            </Label>
             <p className="text-muted-foreground text-[11px] leading-snug">«Auto» hereda el sustrato global o la estructura.</p>
             <ToggleGroup
               type="single"
+              aria-labelledby={mk("cor-scrap-refile-destino-label")}
               className="flex flex-wrap justify-start gap-1"
               value={
                 (() => {
@@ -1097,10 +1654,13 @@ export default function WorkOrderCorteOpsSection({
             </ToggleGroup>
           </div>
           <div className="space-y-1 rounded border bg-background/80 p-2">
-            <Label className="text-muted-foreground text-xs font-medium">Destino impreso corte (BOPP / PE)</Label>
+            <Label id={mk("cor-scrap-impreso-destino-label")} className="text-muted-foreground text-xs font-medium">
+              Destino impreso corte (BOPP / PE)
+            </Label>
             <p className="text-muted-foreground text-[11px] leading-snug">«Auto» hereda el sustrato global o la estructura.</p>
             <ToggleGroup
               type="single"
+              aria-labelledby={mk("cor-scrap-impreso-destino-label")}
               className="flex flex-wrap justify-start gap-1"
               value={
                 (() => {
@@ -1127,8 +1687,12 @@ export default function WorkOrderCorteOpsSection({
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Refile (Kg)</span>
+            <Label htmlFor={mk("cor-scrap-refile-kg")} className="text-muted-foreground">
+              Refile (Kg)
+            </Label>
             <Input
+              id={mk("cor-scrap-refile-kg")}
+              name="corScrapRefileKg"
               className="ot-input-unified mt-1 h-8"
               inputMode="decimal"
               value={readString(form.corScrapRefileKg)}
@@ -1137,8 +1701,12 @@ export default function WorkOrderCorteOpsSection({
             />
           </div>
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Impreso (Kg)</span>
+            <Label htmlFor={mk("cor-scrap-impreso-kg")} className="text-muted-foreground">
+              Impreso (Kg)
+            </Label>
             <Input
+              id={mk("cor-scrap-impreso-kg")}
+              name="corScrapImpresoKg"
               className="ot-input-unified mt-1 h-8"
               inputMode="decimal"
               value={readString(form.corScrapImpresoKg)}
@@ -1147,8 +1715,12 @@ export default function WorkOrderCorteOpsSection({
             />
           </div>
           <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Mal corte (Kg)</span>
+            <Label htmlFor={mk("cor-scrap-mal-corte-kg")} className="text-muted-foreground">
+              Mal corte (Kg)
+            </Label>
             <Input
+              id={mk("cor-scrap-mal-corte-kg")}
+              name="corScrapMalCorteKg"
               className="ot-input-unified mt-1 h-8"
               inputMode="decimal"
               value={readString(form.corScrapMalCorteKg)}
@@ -1198,13 +1770,32 @@ export default function WorkOrderCorteOpsSection({
               </tr>
             </thead>
             <tbody>
-              {salidaPaletas.map((_, idx) => (
-                <tr key={`res-paleta-${idx}`} className="border-b">
-                  <td className="py-1.5 pl-2 pr-2">{`Paleta #${String(idx + 1).padStart(2, "0")}`}</td>
-                  <td className="py-1.5 pr-2 text-center">{salidaPaletasRollos[idx] ?? 0}</td>
-                  <td className="py-1.5 pr-2 text-center">{salidaPaletasRollos[idx] ?? 0}</td>
-                  <td className="py-1.5 pr-2 text-right">{(salidaPaletasTotales[idx] ?? 0).toFixed(2)}</td>
-                  <td className="py-1.5 text-center">—</td>
+              {corPaletas.map((p, idx) => (
+                <tr key={`res-paleta-${p.id ?? idx}`} className="border-b">
+                  <td className="py-1.5 pl-2 pr-2">{p.label ?? `Paleta #${String(idx + 1).padStart(2, "0")}`}</td>
+                  <td className="py-1.5 pr-2 text-center">—</td>
+                  <td className="py-1.5 pr-2 text-center">{countRollosWithKg(p)}</td>
+                  <td className="py-1.5 pr-2 text-right">{sumKgFromPaleta(p).toFixed(2)}</td>
+                  <td className="py-1.5 text-center">
+                    {isCorPaletaCerrada(p) ? (
+                      <Badge variant="outline" className="text-xs border-emerald-500/40 bg-emerald-500/10">
+                        En despacho
+                      </Badge>
+                    ) : sumKgFromPaleta(p) > 0 ? (
+                      <Badge
+                        variant="outline"
+                        className="text-xs border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                      >
+                        Provisional en despacho
+                      </Badge>
+                    ) : (
+                      <CerrarPaletaButton
+                        variant="ghost"
+                        disabled={!canOperateProduction || sumKgFromPaleta(p) <= 0}
+                        onClick={() => cerrarPaleta(idx)}
+                      />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1222,7 +1813,12 @@ export default function WorkOrderCorteOpsSection({
       </MesSectionShell>
 
       <MesSectionShell title={mesSectionTitle(NotebookPen, "Observaciones")} subtle>
+        <Label htmlFor={mk("cor-observaciones")} className="sr-only">
+          Observaciones
+        </Label>
         <Textarea
+          id={mk("cor-observaciones")}
+          name="corObservaciones"
           className="min-h-24"
           value={readString(form.corObservaciones)}
           onChange={(e) => setKey("corObservaciones", e.target.value)}
@@ -1231,6 +1827,103 @@ export default function WorkOrderCorteOpsSection({
       </MesSectionShell>
       </>
       ) : null}
+
+      <Dialog
+        open={pauseMotivoDialogOpen}
+        onOpenChange={(open) => {
+          setPauseMotivoDialogOpen(open)
+          if (!open) setPauseParadaComboOpen(false)
+        }}
+      >
+        <DialogContent className="max-w-md border-amber-300 bg-background shadow-xl">
+          <DialogHeader>
+            <DialogTitle>Registrar motivo de parada</DialogTitle>
+            <DialogDescription>
+              Indique el motivo de esta parada y guárdelo. El cronómetro{" "}
+              <span className="font-medium text-foreground">sigue en pausa</span> hasta que pulse play para reanudar el
+              tiempo efectivo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1">
+              <Label htmlFor={mk("pause-motivo")}>Motivo</Label>
+              <Popover open={pauseParadaComboOpen} onOpenChange={setPauseParadaComboOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    id={mk("pause-motivo")}
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={pauseParadaComboOpen}
+                    className="h-9 w-full justify-between gap-2 rounded-md border border-input bg-background px-3 font-normal shadow-sm"
+                  >
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-sm",
+                        !pauseReason.trim() && "text-muted-foreground",
+                      )}
+                    >
+                      {pauseParadaComboLabel}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="z-[100] w-[var(--radix-popover-trigger-width)] min-w-[16rem] p-0"
+                  align="start"
+                >
+                  <Command>
+                    <CommandInput placeholder="Buscar motivo…" className="h-9" />
+                    <CommandList className="max-h-60">
+                      <CommandEmpty>Sin coincidencias.</CommandEmpty>
+                      <CommandGroup>
+                        {COR_PAUSE_REASONS.map((reason) => (
+                          <CommandItem
+                            key={reason}
+                            value={reason}
+                            onSelect={() => {
+                              setPauseReason(reason)
+                              setPauseParadaComboOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4 shrink-0",
+                                reason === pauseReason ? "opacity-100" : "opacity-0",
+                              )}
+                              aria-hidden
+                            />
+                            {reason}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={mk("pause-obs")}>Observación (opcional)</Label>
+              <Input
+                id={mk("pause-obs")}
+                name="corPauseObs"
+                value={pauseObs}
+                onChange={(e) => setPauseObs(e.target.value)}
+                placeholder="Detalle breve (opcional)"
+                className="ot-input-unified h-9"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => setPauseMotivoDialogOpen(false)}>
+              Cerrar
+            </Button>
+            <Button type="button" onClick={confirmPauseAndResume}>
+              Registrar parada
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

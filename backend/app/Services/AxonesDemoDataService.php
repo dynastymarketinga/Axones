@@ -498,6 +498,8 @@ class AxonesDemoDataService
                 ]],
             );
 
+            // material_id en línea: necesario para que al cerrar paleta el sync cree corte_bobina_usages (Despacho).
+            // Flujo manual: /axones/ordenes-trabajo/{id}/produccion?tab=corte → turno + play → pesos → Cerrar paleta → /axones/despacho-corte
             WorkOrderLine::query()->create([
                 'work_order_id' => $wo->getKey(),
                 'material_id' => $matLine->getKey(),

@@ -13,6 +13,8 @@ use App\Models\MontajeMaterialUsage;
 use App\Models\PrintingBobinaUsage;
 use App\Models\Product;
 use App\Models\WorkOrder;
+use App\Support\ScrapSubstrateCatalog;
+use App\Support\ScrapSubstrateGroup;
 use Carbon\Carbon;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -1070,7 +1072,10 @@ class InventoryReportService
         string $layout = 'detail',
         ?int $workOrderId = null,
     ): array {
-        $substrateGroup = in_array($substrateGroup, ['all', 'bopp', 'politerlero', 'transparente'], true) ? $substrateGroup : 'all';
+        $substrateGroup = ScrapSubstrateCatalog::normalizeGroupId($substrateGroup);
+        $substrateGroup = in_array($substrateGroup, ScrapSubstrateCatalog::allowedCanonical(), true)
+            ? $substrateGroup
+            : 'all';
         $layout = in_array($layout, ['detail', 'by_work_order', 'by_area', 'history_kg'], true) ? $layout : 'detail';
 
         if ($layout === 'history_kg') {
@@ -1095,10 +1100,11 @@ class InventoryReportService
         foreach ($defs as $def) {
             $q = DB::table($def['table'].' as s')
                 ->join('work_orders as wo', 's.work_order_id', '=', 'wo.id')
+                ->leftJoin('work_order_technical_documents as td', 'wo.id', '=', 'td.work_order_id')
                 ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id')
                 ->leftJoin('products as p', 'wo.product_id', '=', 'p.id')
-                ->whereNotNull('s.scrap_percent')
-                ->whereBetween('wo.created_at', [$from, $to]);
+                ->whereNotNull('s.scrap_percent');
+            $this->applyScrapWorkOrderPeriodFilter($q, $from, $to);
             if ($workOrderId !== null) {
                 $q->where('wo.id', $workOrderId);
             }
@@ -1173,8 +1179,8 @@ class InventoryReportService
             ->leftJoin('work_order_printing_summaries as sp', 'wo.id', '=', 'sp.work_order_id')
             ->leftJoin('work_order_laminacion_summaries as sl', 'wo.id', '=', 'sl.work_order_id')
             ->leftJoin('work_order_corte_summaries as sc', 'wo.id', '=', 'sc.work_order_id')
-            ->leftJoin('work_order_montaje_summaries as sm', 'wo.id', '=', 'sm.work_order_id')
-            ->whereBetween('wo.created_at', [$from, $to]);
+            ->leftJoin('work_order_montaje_summaries as sm', 'wo.id', '=', 'sm.work_order_id');
+        $this->applyScrapWorkOrderPeriodFilter($q, $from, $to);
 
         if ($workOrderId !== null) {
             $q->where('wo.id', $workOrderId);
@@ -1280,15 +1286,15 @@ class InventoryReportService
                 $corR_out = $refileResolved === 'bopp' ? $corR : 0.0;
                 $corI_out = $corImpresoResolved === 'bopp' ? $corIkg : 0.0;
                 $corM_out = $globalSub === 'bopp' ? $corM : 0.0;
-            } elseif ($substrateGroup === 'politerlero') {
+            } elseif ($substrateGroup === ScrapSubstrateGroup::POLIETILENO) {
                 $impT_out = 0.0;
                 $impI_out = 0.0;
                 $lamT_out = 0.0;
                 $lamI_out = $lamI;
                 $lamL_out = $lamL;
-                $corR_out = $refileResolved === 'politerlero' ? $corR : 0.0;
-                $corI_out = $corImpresoResolved === 'politerlero' ? $corIkg : 0.0;
-                $corM_out = $globalSub === 'politerlero' ? $corM : 0.0;
+                $corR_out = ScrapSubstrateGroup::isPolietileno($refileResolved) ? $corR : 0.0;
+                $corI_out = ScrapSubstrateGroup::isPolietileno($corImpresoResolved) ? $corIkg : 0.0;
+                $corM_out = ScrapSubstrateGroup::isPolietileno($globalSub) ? $corM : 0.0;
             } else {
                 $impT_out = $impT;
                 $impI_out = $impI;
@@ -1333,7 +1339,7 @@ class InventoryReportService
      *
      * @param  array<string, mixed>|null  $form
      */
-    private function resolveImpScrapImpresoDestino(?array $form, ?string $productStructure): string
+    private function resolveImpScrapImpresoDestino(?array $form, ?string $productStructure): ?string
     {
         $raw = strtolower(trim((string) (($form ?? [])['impScrapImpresoDestino'] ?? '')));
         if ($raw === 'transparente') {
@@ -1342,8 +1348,26 @@ class InventoryReportService
         if ($raw === 'bopp') {
             return 'bopp';
         }
+        if (ScrapSubstrateGroup::isPolietileno($raw)) {
+            return ScrapSubstrateGroup::POLIETILENO;
+        }
 
-        return $this->productStructureMatchesScrapSubstrateGroup($productStructure, 'transparente') ? 'transparente' : 'bopp';
+        $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
+        if ($explicit === 'bopp' || $explicit === 'transparente' || ScrapSubstrateGroup::isPolietileno($explicit)) {
+            return $explicit;
+        }
+
+        if (ScrapSubstrateCatalog::structureInferenceIsAmbiguous($productStructure)) {
+            return null;
+        }
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
+            return 'transparente';
+        }
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'bopp')) {
+            return 'bopp';
+        }
+
+        return null;
     }
 
     /**
@@ -1356,7 +1380,7 @@ class InventoryReportService
             return true;
         }
 
-        $explicit = strtolower(trim((string) (($form ?? [])['corDesperdicioSustrato'] ?? '')));
+        $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null) ?? '';
 
         $resolvedImpDest = $this->resolveImpScrapImpresoDestino($form, $productStructure);
 
@@ -1364,7 +1388,7 @@ class InventoryReportService
             if ($explicit === 'transparente') {
                 return true;
             }
-            if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'transparente')) {
+            if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
                 return true;
             }
             if ($resolvedImpDest === 'transparente' && $parseKg($form, 'impScrapImpresoKg') > 0) {
@@ -1381,7 +1405,7 @@ class InventoryReportService
             if ($explicit === 'bopp') {
                 return true;
             }
-            if ($explicit === '' && $this->productStructureMatchesScrapSubstrateGroup($productStructure, 'bopp')) {
+            if ($explicit === '' && ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'bopp')) {
                 return true;
             }
             if ($resolvedImpDest === 'bopp' && $parseKg($form, 'impScrapImpresoKg') > 0) {
@@ -1400,20 +1424,20 @@ class InventoryReportService
             return false;
         }
 
-        if ($substrateGroup === 'politerlero') {
-            if ($explicit === 'politerlero') {
+        if ($substrateGroup === ScrapSubstrateGroup::POLIETILENO) {
+            if (ScrapSubstrateGroup::isPolietileno($explicit)) {
                 return true;
             }
-            if ($explicit === '' && $this->productStructureMatchesScrapSubstrateGroup($productStructure, 'politerlero')) {
+            if ($explicit === '' && ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, ScrapSubstrateGroup::POLIETILENO)) {
                 return true;
             }
-            if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino') === 'politerlero') {
+            if (ScrapSubstrateGroup::isPolietileno($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino'))) {
                 return true;
             }
-            if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapImpresoDestino') === 'politerlero') {
+            if (ScrapSubstrateGroup::isPolietileno($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapImpresoDestino'))) {
                 return true;
             }
-            if ($this->resolvedGlobalCorteSubstrate($form, $productStructure) === 'politerlero') {
+            if (ScrapSubstrateGroup::isPolietileno($this->resolvedGlobalCorteSubstrate($form, $productStructure))) {
                 return true;
             }
 
@@ -1430,21 +1454,24 @@ class InventoryReportService
      */
     private function resolvedCorteBucketDestino(?array $form, ?string $productStructure, string $bucketKey): ?string
     {
-        $raw = strtolower(trim((string) (($form ?? [])[$bucketKey] ?? '')));
-        if ($raw === 'bopp' || $raw === 'politerlero') {
+        $raw = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])[$bucketKey] ?? null);
+        if ($raw === 'bopp' || ScrapSubstrateGroup::isPolietileno($raw)) {
             return $raw;
         }
 
-        $explicit = strtolower(trim((string) (($form ?? [])['corDesperdicioSustrato'] ?? '')));
-        if ($explicit === 'bopp' || $explicit === 'politerlero') {
+        $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
+        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit)) {
             return $explicit;
         }
 
-        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'bopp')) {
+        if (ScrapSubstrateCatalog::structureInferenceIsAmbiguous($productStructure)) {
+            return null;
+        }
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'bopp')) {
             return 'bopp';
         }
-        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'politerlero')) {
-            return 'politerlero';
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, ScrapSubstrateGroup::POLIETILENO)) {
+            return ScrapSubstrateGroup::POLIETILENO;
         }
 
         return null;
@@ -1457,65 +1484,57 @@ class InventoryReportService
      */
     private function resolvedGlobalCorteSubstrate(?array $form, ?string $productStructure): ?string
     {
-        $explicit = strtolower(trim((string) (($form ?? [])['corDesperdicioSustrato'] ?? '')));
-        if ($explicit === 'bopp' || $explicit === 'politerlero' || $explicit === 'transparente') {
+        $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
+        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'transparente') {
             return $explicit;
         }
 
-        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'bopp')) {
+        if (ScrapSubstrateCatalog::structureInferenceIsAmbiguous($productStructure)) {
+            return null;
+        }
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'bopp')) {
             return 'bopp';
         }
-        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'politerlero')) {
-            return 'politerlero';
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, ScrapSubstrateGroup::POLIETILENO)) {
+            return ScrapSubstrateGroup::POLIETILENO;
         }
-        if ($this->productStructureMatchesScrapSubstrateGroup($productStructure, 'transparente')) {
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
             return 'transparente';
         }
 
         return null;
     }
 
-    private function productStructureMatchesScrapSubstrateGroup(?string $structure, string $substrateGroup): bool
-    {
-        $s = strtolower((string) ($structure ?? ''));
-        if ($substrateGroup === 'bopp') {
-            return str_contains($s, 'bopp');
-        }
-        if ($substrateGroup === 'politerlero') {
-            foreach (['politerlero', 'polietileno', 'politereño', 'pebd', 'ldpe', 'hdpe', 'lldpe', 'polyethylene'] as $pat) {
-                if (str_contains($s, $pat)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-        if ($substrateGroup === 'transparente') {
-            foreach (['transparente', 'cpp', 'cast pp', 'opp transparente'] as $pat) {
-                if (str_contains($s, $pat)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        return true;
-    }
-
     /**
      * @param  Builder  $query
      */
+    /**
+     * OT con actividad de desperdicio en el período: creación, fecha documento o planilla actualizada.
+     */
+    private function applyScrapWorkOrderPeriodFilter(Builder $query, Carbon $from, Carbon $to): void
+    {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+
+        $query->where(function (Builder $q) use ($from, $to, $fromDate, $toDate) {
+            $q->whereBetween('wo.created_at', [$from, $to])
+                ->orWhereBetween('wo.document_date', [$fromDate, $toDate])
+                ->orWhereBetween('td.updated_at', [$from, $to]);
+        });
+    }
+
     private function applyScrapSubstrateFilter($query, string $substrateGroup): void
     {
         $col = 'LOWER(COALESCE(p.structure, \'\'))';
-        if ($substrateGroup === 'bopp') {
-            $query->whereRaw("{$col} LIKE ?", ['%bopp%']);
-
-            return;
-        }
-        if ($substrateGroup === 'politerlero') {
-            $patterns = ['%politerlero%', '%polietileno%', '%politereño%', '%pebd%', '%ldpe%', '%hdpe%', '%lldpe%', '%polyethylene%'];
+        $id = ScrapSubstrateCatalog::normalizeGroupId($substrateGroup);
+        foreach (ScrapSubstrateCatalog::groups() as $group) {
+            if ($group['id'] !== $id) {
+                continue;
+            }
+            $patterns = array_map(fn (string $p): string => '%'.$p.'%', $group['structure_patterns']);
+            if ($patterns === []) {
+                return;
+            }
             $query->where(function ($q) use ($col, $patterns) {
                 foreach ($patterns as $pat) {
                     $q->orWhereRaw("{$col} LIKE ?", [$pat]);
@@ -1523,14 +1542,6 @@ class InventoryReportService
             });
 
             return;
-        }
-        if ($substrateGroup === 'transparente') {
-            $patterns = ['%transparente%', '%cpp%', '%cast pp%', '%opp transparente%'];
-            $query->where(function ($q) use ($col, $patterns) {
-                foreach ($patterns as $pat) {
-                    $q->orWhereRaw("{$col} LIKE ?", [$pat]);
-                }
-            });
         }
     }
 

@@ -6,7 +6,11 @@ import { toast } from "sonner"
 
 import { apiDownloadFile, apiFetch, ApiError } from "@/lib/api"
 import type { InventoryMovementRow, LaravelPaginated } from "@/types/api"
-import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
+import {
+  AXONES_INVENTORY_FILTER_INPUT_CLASS,
+  AxonesInventoryModuleNav,
+  AxonesTableCard,
+} from "@/components/axones/inventory-page-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -201,29 +205,33 @@ export default function InventoryMovementsPage() {
 
       <AxonesInventoryModuleNav active="movimientos-inventario" />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-        <div className="grid gap-2">
-          <Label>Desde</Label>
-          <Input
-            type="date"
-            value={from}
-            onChange={(ev) => {
-              setFrom(ev.target.value)
-              setPage(1)
-            }}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label>Hasta</Label>
-          <Input
-            type="date"
-            value={to}
-            onChange={(ev) => {
-              setTo(ev.target.value)
-              setPage(1)
-            }}
-          />
-        </div>
+      <AxonesTableCard>
+        <div className="border-b bg-muted/30 p-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid gap-2">
+              <Label>Desde</Label>
+              <Input
+                type="date"
+                value={from}
+                className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
+                onChange={(ev) => {
+                  setFrom(ev.target.value)
+                  setPage(1)
+                }}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Hasta</Label>
+              <Input
+                type="date"
+                value={to}
+                className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
+                onChange={(ev) => {
+                  setTo(ev.target.value)
+                  setPage(1)
+                }}
+              />
+            </div>
         <div className="grid gap-2">
           <Label>Tipo</Label>
           <Select
@@ -233,12 +241,12 @@ export default function InventoryMovementsPage() {
               setPage(1)
             }}
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {MOVEMENT_TYPES.map((t) => (
+                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {MOVEMENT_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>
                   {t}
                 </SelectItem>
@@ -255,12 +263,12 @@ export default function InventoryMovementsPage() {
               setPage(1)
             }}
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
-              {AREAS.map((a) => (
+                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {AREAS.map((a) => (
                 <SelectItem key={a} value={a}>
                   {a}
                 </SelectItem>
@@ -277,12 +285,12 @@ export default function InventoryMovementsPage() {
               setPage(1)
             }}
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {REFERENCE_TYPES.map((t) => (
+                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {REFERENCE_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>
                   {referenceTypeLabel[t] ?? t}
                 </SelectItem>
@@ -290,39 +298,41 @@ export default function InventoryMovementsPage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-end">
-          <Button type="button" onClick={() => void load()}>
-            Aplicar
+            <div className="grid gap-2">
+              <Label>Auditoría</Label>
+              <Select
+                value={invalidOnly}
+                onValueChange={(v) => {
+                  setInvalidOnly(v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="invalid">Solo inválidos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 border-b p-4">
+          <Button type="button" variant="outline" onClick={openPreview} disabled={loading}>
+            Vista previa
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void downloadMovementsPdf()}
+            disabled={loading || reportLoading}
+          >
+            {reportLoading ? "Generando PDF..." : "Generar PDF"}
           </Button>
         </div>
-        <div className="grid gap-2">
-          <Label>Auditoría</Label>
-          <Select
-            value={invalidOnly}
-            onValueChange={(v) => {
-              setInvalidOnly(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="invalid">Solo inválidos</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" onClick={openPreview} disabled={loading}>
-          Vista previa
-        </Button>
-        <Button type="button" variant="outline" onClick={() => void downloadMovementsPdf()} disabled={loading || reportLoading}>
-          {reportLoading ? "Generando PDF..." : "Generar PDF"}
-        </Button>
-      </div>
+      </AxonesTableCard>
 
       <Card>
         <CardHeader className="pb-2">

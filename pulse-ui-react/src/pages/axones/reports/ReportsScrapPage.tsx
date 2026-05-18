@@ -26,6 +26,8 @@ import {
   CatalogTableHead,
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
+import { ScrapClassificationHelp } from "@/components/axones/ScrapClassificationHelp"
+import { ScrapReportFilters } from "@/components/axones/ScrapReportFilters"
 import {
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
@@ -33,8 +35,6 @@ import {
 } from "@/components/axones/catalog-list-classes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Table,
   TableBody,
@@ -68,10 +68,19 @@ import {
   type ApiErrorBody,
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
-
+import {
+  buildHistoryKgTabQuery,
+  DEFAULT_SCRAP_SUBSTRATE_GROUPS,
+  fetchScrapSubstrateConfig,
+  type ScrapSubstrateGroupConfig,
+} from "@/lib/scrap-substrate-catalog"
 import { ReportPageShell, useReportRange } from "./report-shared"
+import { useReportEntityFilters } from "./use-report-entity-filters"
 
-type ScrapTab = "bopp" | "politerlero" | "transparente" | "por-ot" | "por-areas"
+const WORK_ORDER_CODE_DEBOUNCE_MS = 400
+
+type ScrapAggregateTab = "por-ot" | "por-areas"
+type ScrapTab = string
 
 type ScrapReportPayload = {
   rows: Record<string, unknown>[]
@@ -79,15 +88,22 @@ type ScrapReportPayload = {
   layout: string
 }
 
-const SCRAP_TAB_QUERY: Record<
-  ScrapTab,
+const SCRAP_AGGREGATE_TAB_QUERY: Record<
+  ScrapAggregateTab,
   { substrate_group: string; layout: string }
 > = {
-  bopp: { substrate_group: "bopp", layout: "history_kg" },
-  politerlero: { substrate_group: "politerlero", layout: "history_kg" },
-  transparente: { substrate_group: "transparente", layout: "history_kg" },
   "por-ot": { substrate_group: "all", layout: "by_work_order" },
   "por-areas": { substrate_group: "all", layout: "by_area" },
+}
+
+function buildScrapTabQuery(
+  groups: ScrapSubstrateGroupConfig[],
+): Record<string, { substrate_group: string; layout: string }> {
+  const q: Record<string, { substrate_group: string; layout: string }> = {}
+  for (const g of groups) {
+    q[g.id] = buildHistoryKgTabQuery(g.id)
+  }
+  return { ...q, ...SCRAP_AGGREGATE_TAB_QUERY }
 }
 
 const PIVOT_AREA_KEYS = ["printing", "corte", "laminacion", "montaje"] as const
@@ -154,9 +170,9 @@ const HISTORY_KG_SUM_KEYS = [
 
 type HistoryKgTotalsShape = Record<(typeof HISTORY_KG_SUM_KEYS)[number], number>
 
-/** En BOPP y polietileno el backend enmascara a cero el kg transparente en impresión y laminación. */
+/** El backend enmascara kg transparentes salvo en la pestaña Transparente. */
 function historyKgHideTransparentColumns(tab: ScrapTab): boolean {
-  return tab === "bopp" || tab === "politerlero"
+  return tab !== "transparente" && tab !== "por-ot" && tab !== "por-areas"
 }
 
 const HISTORY_KG_COL_COUNT_FULL = 18
@@ -204,43 +220,62 @@ function historyKgTotals(rows: Record<string, unknown>[]): HistoryKgTotalsShape 
 
 export default function ReportsScrapPage() {
   const { from, setFrom, to, setTo, loading, downloadCsv } = useReportRange()
-  const [clientId, setClientId] = useState("")
-  const [productId, setProductId] = useState("")
-  const [workOrderOt, setWorkOrderOt] = useState("")
+  const entity = useReportEntityFilters()
+  const [workOrderCode, setWorkOrderCode] = useState("")
+  const [workOrderCodeApplied, setWorkOrderCodeApplied] = useState("")
+  const [substrateGroups, setSubstrateGroups] = useState<ScrapSubstrateGroupConfig[]>(
+    DEFAULT_SCRAP_SUBSTRATE_GROUPS,
+  )
   const [activeTab, setActiveTab] = useState<ScrapTab>("bopp")
   const [listLoading, setListLoading] = useState(false)
   const [payload, setPayload] = useState<ScrapReportPayload | null>(null)
 
-  const clientIdQ = useMemo(() => {
-    const t = clientId.trim()
-    if (!t) return undefined
-    const n = Number(t)
-    return Number.isFinite(n) ? n : undefined
-  }, [clientId])
+  const scrapTabQuery = useMemo(
+    () => buildScrapTabQuery(substrateGroups),
+    [substrateGroups],
+  )
 
-  const productIdQ = useMemo(() => {
-    const t = productId.trim()
-    if (!t) return undefined
-    const n = Number(t)
-    return Number.isFinite(n) ? n : undefined
-  }, [productId])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const cfg = await fetchScrapSubstrateConfig()
+      if (!cancelled && cfg.groups.length > 0) {
+        setSubstrateGroups(cfg.groups)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const valid = [...substrateGroups.map((g) => g.id), "por-ot", "por-areas"]
+    if (!valid.includes(activeTab)) {
+      setActiveTab(substrateGroups[0]?.id ?? "por-ot")
+    }
+  }, [activeTab, substrateGroups])
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setWorkOrderCodeApplied(workOrderCode.trim())
+    }, WORK_ORDER_CODE_DEBOUNCE_MS)
+    return () => window.clearTimeout(id)
+  }, [workOrderCode])
 
   const workOrderOtQ = useMemo(() => {
-    const t = workOrderOt.trim()
-    if (!t) return {}
-    if (/^\d+$/.test(t)) return { work_order_id: Number(t) }
-    return { work_order_code: t }
-  }, [workOrderOt])
+    if (!workOrderCodeApplied) return {}
+    return { work_order_code: workOrderCodeApplied }
+  }, [workOrderCodeApplied])
 
   const baseQuery = useMemo(
     () => ({
       from,
       to,
-      client_id: clientIdQ,
-      product_id: productIdQ,
+      client_id: entity.clientIdQ,
+      product_id: entity.productIdQ,
       ...workOrderOtQ,
     }),
-    [from, to, clientIdQ, productIdQ, workOrderOtQ],
+    [from, to, entity.clientIdQ, entity.productIdQ, workOrderOtQ],
   )
 
   const previewAbortRef = useRef<AbortController | null>(null)
@@ -256,7 +291,7 @@ export default function ReportsScrapPage() {
     async (extra?: { focus_work_order_id?: number; focus_area?: string }) => {
       const q: Record<string, string | number | undefined> = {
         ...baseQuery,
-        ...SCRAP_TAB_QUERY[activeTab],
+        ...scrapTabQuery[activeTab],
       }
       if (extra?.focus_work_order_id != null) {
         q.focus_work_order_id = extra.focus_work_order_id
@@ -297,7 +332,7 @@ export default function ReportsScrapPage() {
         }
       }
     },
-    [activeTab, baseQuery],
+    [activeTab, baseQuery, scrapTabQuery],
   )
 
   const downloadFocusedPdf = useCallback(async () => {
@@ -315,7 +350,8 @@ export default function ReportsScrapPage() {
   }, [docQuery, from, to])
 
   const loadPreview = useCallback(async () => {
-    const q = SCRAP_TAB_QUERY[activeTab]
+    const q = scrapTabQuery[activeTab]
+    if (!q) return
     setListLoading(true)
     try {
       const data = await apiFetch<ScrapReportPayload>("reports/scrap-by-filters", {
@@ -329,7 +365,7 @@ export default function ReportsScrapPage() {
     } finally {
       setListLoading(false)
     }
-  }, [activeTab, baseQuery])
+  }, [activeTab, baseQuery, scrapTabQuery])
 
   useEffect(() => {
     void loadPreview()
@@ -634,7 +670,8 @@ export default function ReportsScrapPage() {
           ) : !rows.length ? (
             <TableRow>
               <TableCell colSpan={colCount} className="text-muted-foreground">
-                Sin órdenes en este intervalo de fechas, o ninguna coincide con el sustrato de esta pestaña.
+                No hay OT en este período, o ninguna está clasificada en esta pestaña. Revise fechas, planilla de
+                desperdicio y sustrato en Corte.
               </TableCell>
             </TableRow>
           ) : (
@@ -875,7 +912,7 @@ export default function ReportsScrapPage() {
   }
 
   function renderTableForPayload() {
-    const expected = SCRAP_TAB_QUERY[activeTab]
+    const expected = scrapTabQuery[activeTab]
     const stale =
       payload != null &&
       (payload.layout !== expected.layout ||
@@ -907,205 +944,100 @@ export default function ReportsScrapPage() {
   return (
     <ReportPageShell
       title="Desperdicio"
-      description="Filtre por fechas, orden de trabajo (ID o código) y, si lo necesita, cliente o producto. Exporte en PDF o descargue datos por tipo de sustrato (BOPP, polietileno, transparente) o por vistas agregadas."
-      rangeCardTitle="Período del reporte"
+      description="Historial de desperdicio en kilogramos por tipo de film (planilla de la OT) y vistas de merma por área. Use las pestañas BOPP, Polietileno y Transparente para separar materiales distintos."
       from={from}
       to={to}
       onFromChange={setFrom}
       onToChange={setTo}
+      showRange={false}
     >
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="grid gap-2">
-          <Label>Cliente (n.º interno, opcional)</Label>
-          <Input
-            inputMode="numeric"
-            value={clientId}
-            onChange={(ev) => setClientId(ev.target.value)}
-            placeholder="opcional"
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label>Producto (n.º interno, opcional)</Label>
-          <Input
-            inputMode="numeric"
-            value={productId}
-            onChange={(ev) => setProductId(ev.target.value)}
-            placeholder="opcional"
-          />
-        </div>
-        <div className="grid min-w-[12rem] gap-2">
-          <Label>Orden de trabajo (ID o código, opcional)</Label>
-          <Input
-            value={workOrderOt}
-            onChange={(ev) => setWorkOrderOt(ev.target.value)}
-            placeholder="ej. 42 o OT-001"
-          />
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={listLoading}
-          onClick={() => void loadPreview()}
-        >
-          Actualizar listado
-        </Button>
-      </div>
+      <ScrapReportFilters
+        from={from}
+        to={to}
+        onFromChange={setFrom}
+        onToChange={setTo}
+        clientFilter={entity.clientFilter}
+        onClientFilterChange={entity.setClientFilter}
+        productFilter={entity.productFilter}
+        onProductFilterChange={entity.setProductFilter}
+        workOrderCode={workOrderCode}
+        onWorkOrderCodeChange={setWorkOrderCode}
+        clients={entity.clients}
+        products={entity.products}
+        clientComboOpen={entity.clientComboOpen}
+        onClientComboOpenChange={entity.setClientComboOpen}
+        productComboOpen={entity.productComboOpen}
+        onProductComboOpenChange={entity.setProductComboOpen}
+        selectedClientLabel={entity.selectedClientLabel}
+        selectedProductLabel={entity.selectedProductLabel}
+        listLoading={listLoading}
+      />
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as ScrapTab)}
-        className="w-full"
-      >
+      <ScrapClassificationHelp groups={substrateGroups} />
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="flex h-auto min-h-9 w-full flex-wrap justify-start gap-1">
-          <TabsTrigger value="bopp">BOPP</TabsTrigger>
-          <TabsTrigger value="politerlero">Polietileno</TabsTrigger>
-          <TabsTrigger value="transparente">Transparente</TabsTrigger>
+          {substrateGroups.map((g) => (
+            <TabsTrigger key={g.id} value={g.id}>
+              {g.label}
+            </TabsTrigger>
+          ))}
           <TabsTrigger value="por-ot">Por órdenes de trabajo</TabsTrigger>
           <TabsTrigger value="por-areas">Por áreas</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="bopp" className="space-y-3">
-          <p className="text-muted-foreground text-sm">
-            Kilogramos por orden según la planilla técnica y porcentajes de desperdicio por área. Por defecto entran OT
-            con estructura BOPP; si en corte indicaron el sustrato del desperdicio, ese dato prevalece sobre la
-            estructura del producto. Aquí no se muestran las columnas de kilos transparentes en impresión ni en
-            laminación: véalas en la pestaña <strong>Transparente</strong>. Los valores salen solo de la planilla por
-            OT, no del inventario ni del detalle de bobinas.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="default"
-              disabled={loading}
-              onClick={() =>
-                void downloadCsv(
-                  "reports/scrap-by-filters",
-                  "desperdicio-historial-kg-bopp.csv",
-                  {
-                    ...baseQuery,
-                    substrate_group: "bopp",
-                    layout: "history_kg",
-                  },
-                )
-              }
-            >
-              Descargar historial kg — BOPP
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={loading}
-              onClick={() =>
-                void downloadCsv("reports/scrap-by-filters", "desperdicio-bopp.csv", {
-                  ...baseQuery,
-                  substrate_group: "bopp",
-                  layout: "detail",
-                })
-              }
-            >
-              % desperdicio por área
-            </Button>
-          </div>
-          {activeTab === "bopp" ? renderTableForPayload() : null}
-        </TabsContent>
-
-        <TabsContent value="politerlero" className="space-y-3">
-          <p className="text-muted-foreground text-sm">
-            Igual que BOPP: historial en kilogramos con filtro por polietileno (PE) según estructura del producto y
-            mezclas. Si en corte definieron el sustrato del desperdicio, ese valor sustituye a la estructura. No se
-            muestran aquí los kilos transparentes en impresión ni laminación; consulte la pestaña{" "}
-            <strong>Transparente</strong>.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="default"
-              disabled={loading}
-              onClick={() =>
-                void downloadCsv(
-                  "reports/scrap-by-filters",
-                  "desperdicio-historial-kg-polietileno.csv",
-                  {
-                    ...baseQuery,
-                    substrate_group: "politerlero",
-                    layout: "history_kg",
-                  },
-                )
-              }
-            >
-              Descargar historial kg — polietileno
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={loading}
-              onClick={() =>
-                void downloadCsv(
-                  "reports/scrap-by-filters",
-                  "desperdicio-polietileno.csv",
-                  {
-                    ...baseQuery,
-                    substrate_group: "politerlero",
-                    layout: "detail",
-                  },
-                )
-              }
-            >
-              % desperdicio por área
-            </Button>
-          </div>
-          {activeTab === "politerlero" ? renderTableForPayload() : null}
-        </TabsContent>
-
-        <TabsContent value="transparente" className="space-y-3">
-          <p className="text-muted-foreground text-sm">
-            Incluye desperdicio transparente en impresión y en laminación, y el impreso que en planilla se envió a
-            inventario transparente. Mal corte suma aquí cuando el sustrato global es transparente o corte lo marcó así.
-            Esta pestaña muestra las columnas de kilos transparentes en impresión y laminación tal como figuran en la
-            planilla técnica de cada OT.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="default"
-              disabled={loading}
-              onClick={() =>
-                void downloadCsv(
-                  "reports/scrap-by-filters",
-                  "desperdicio-historial-kg-transparente.csv",
-                  {
-                    ...baseQuery,
-                    substrate_group: "transparente",
-                    layout: "history_kg",
-                  },
-                )
-              }
-            >
-              Descargar historial kg — transparente
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={loading}
-              onClick={() =>
-                void downloadCsv("reports/scrap-by-filters", "desperdicio-transparente.csv", {
-                  ...baseQuery,
-                  substrate_group: "transparente",
-                  layout: "detail",
-                })
-              }
-            >
-              % desperdicio por área
-            </Button>
-          </div>
-          {activeTab === "transparente" ? renderTableForPayload() : null}
-        </TabsContent>
+        {substrateGroups.map((group) => {
+          const hideTransparent = group.id !== "transparente"
+          return (
+            <TabsContent key={group.id} value={group.id} className="space-y-3">
+              <p className="text-muted-foreground text-sm">
+                Desperdicio en kg de OTs clasificadas como <strong>{group.label}</strong>. Los datos salen de la planilla
+                técnica; cargue primero los kg en producción y, si hace falta, el sustrato en Corte.
+                {hideTransparent ? (
+                  <> Los kg de film transparente en impresión/laminación se ven en la pestaña Transparente.</>
+                ) : (
+                  <> Aquí se listan también los kg transparentes registrados en impresión y laminación.</>
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  disabled={loading}
+                  onClick={() =>
+                    void downloadCsv(
+                      "reports/scrap-by-filters",
+                      `desperdicio-historial-kg-${group.id}.csv`,
+                      { ...baseQuery, ...buildHistoryKgTabQuery(group.id) },
+                    )
+                  }
+                >
+                  Descargar historial kg — {group.label}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading}
+                  onClick={() =>
+                    void downloadCsv(`reports/scrap-by-filters`, `desperdicio-${group.id}.csv`, {
+                      ...baseQuery,
+                      substrate_group: group.id,
+                      layout: "detail",
+                    })
+                  }
+                >
+                  % desperdicio por área
+                </Button>
+              </div>
+              {activeTab === group.id ? renderTableForPayload() : null}
+            </TabsContent>
+          )
+        })}
 
         <TabsContent value="por-ot" className="space-y-3">
           <p className="text-muted-foreground text-sm">
-            Una fila por orden de trabajo con columnas de % desperdicio por área
-            (impresión, corte, laminación, montaje).
+            Rendimiento de merma por OT: % en Impresión, Corte, Laminación y Montaje. No separa BOPP, polietileno ni
+            transparente.
           </p>
           <Button
             type="button"
@@ -1126,8 +1058,8 @@ export default function ReportsScrapPage() {
 
         <TabsContent value="por-areas" className="space-y-3">
           <p className="text-muted-foreground text-sm">
-            Resumen por área: cantidad de registros y promedio / máximo / mínimo de
-            % desperdicio.
+            Vista agregada por área de planta (promedio, máximo y mínimo de % merma). Sirve para comparar procesos, no
+            para clasificar por tipo de film.
           </p>
           <Button
             type="button"

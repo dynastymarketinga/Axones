@@ -105,7 +105,7 @@ export default function InventoryReturnsPage() {
     <div className={AXONES_INVENTORY_PAGE_CLASS}>
       <AxonesPageHeader
         title="Devoluciones a inventario"
-        description="Pendiente hasta aceptar ingreso. Bobinas rechazadas: tras aceptar, use la acción en la fila."
+        description="Pendiente hasta aceptar ingreso."
       />
 
       {showInitialSkeleton ? (
@@ -279,16 +279,6 @@ export default function InventoryReturnsPage() {
                                     }}
                                   >
                                     Aceptar ingreso
-                                  </Button>
-                                ) : null}
-                                {r.destination_area === "bobinas_rechazadas" ? (
-                                  <Button type="button" size="sm" variant="outline" asChild>
-                                    <Link
-                                      to={`/bobinas/registrar-rechazada?devolucion_id=${r.id}`}
-                                      title="Registrar bobina única vinculada a esta devolución"
-                                    >
-                                      Bobina rechazada
-                                    </Link>
                                   </Button>
                                 ) : null}
                               </div>

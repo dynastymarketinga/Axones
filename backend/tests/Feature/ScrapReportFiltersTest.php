@@ -89,7 +89,7 @@ class ScrapReportFiltersTest extends TestCase
         $this->assertStringNotContainsString('OT-PE1', $bodyBopp);
 
         $csvPe = $this->withHeaders($h)->get('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
-            'substrate_group' => 'politerlero',
+            'substrate_group' => 'polietileno',
         ])));
         $csvPe->assertOk();
         $bodyPe = (string) $csvPe->getContent();
@@ -228,7 +228,7 @@ class ScrapReportFiltersTest extends TestCase
         ]);
         WorkOrderTechnicalDocument::query()->create([
             'work_order_id' => $woPe->id,
-            'form' => ['corDesperdicioSustrato' => 'politerlero'],
+            'form' => ['corDesperdicioSustrato' => 'polietileno'],
         ]);
 
         $q = [
@@ -245,7 +245,7 @@ class ScrapReportFiltersTest extends TestCase
         $this->assertSame('OT-EX-B', $bopp[0]['work_order_code']);
 
         $pe = $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
-            'substrate_group' => 'politerlero',
+            'substrate_group' => 'polietileno',
         ])), $h)->assertOk()->json('rows');
 
         $this->assertCount(1, $pe);
@@ -360,5 +360,122 @@ class ScrapReportFiltersTest extends TestCase
         $this->assertStringContainsString('application/pdf', (string) $pdf->headers->get('Content-Type'));
 
         Carbon::setTestNow();
+    }
+
+    public function test_scrap_report_includes_ot_when_planilla_updated_in_range_but_created_outside(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-05-15 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'C-Period', 'rif' => 'J-PER']);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P Period',
+            'cpe' => 'CPE-PER',
+            'structure' => 'BOPP 20',
+        ]);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-OLD-CREATED',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'created_at' => Carbon::parse('2025-01-10 08:00:00'),
+        ]);
+        WorkOrderPrintingSummary::query()->create([
+            'work_order_id' => $wo->id,
+            'scrap_percent' => 2.0,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => ['impScrapImpresoKg' => '12'],
+            'updated_at' => Carbon::parse('2026-05-10 14:00:00'),
+        ]);
+
+        $res = $this->getJson('/api/reports/scrap-by-filters?from=2026-05-01&to=2026-05-31&substrate_group=bopp&layout=detail', $h)
+            ->assertOk();
+
+        $codes = collect($res->json('rows'))->pluck('work_order_code')->all();
+        $this->assertContains('OT-OLD-CREATED', $codes);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_scrap_history_kg_mixed_structure_without_explicit_omitted_from_bopp_and_pe_tabs(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-02 10:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Amb', 'rif' => 'J-AMB']);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Mix',
+            'cpe' => 'CPE-AMB',
+            'structure' => 'BOPP 20 + PEBD',
+        ]);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-AMB-1',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => ['impScrapImpresoKg' => '5'],
+        ]);
+
+        $q = [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+            'layout' => 'history_kg',
+        ];
+
+        $bopp = $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'bopp',
+        ])), $h)->assertOk()->json('rows');
+        $pe = $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'polietileno',
+        ])), $h)->assertOk()->json('rows');
+
+        $boppCodes = collect($bopp)->pluck('work_order_code')->all();
+        $peCodes = collect($pe)->pluck('work_order_code')->all();
+        $this->assertNotContains('OT-AMB-1', $boppCodes);
+        $this->assertNotContains('OT-AMB-1', $peCodes);
+
+        WorkOrderTechnicalDocument::query()->where('work_order_id', $wo->id)->update([
+            'form' => ['corDesperdicioSustrato' => 'polietileno', 'impScrapImpresoKg' => '5'],
+        ]);
+
+        $peAfter = $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'polietileno',
+        ])), $h)->assertOk()->json('rows');
+        $this->assertContains('OT-AMB-1', collect($peAfter)->pluck('work_order_code')->all());
+
+        Carbon::setTestNow();
+    }
+
+    public function test_scrap_substrate_config_endpoint(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $res = $this->getJson('/api/reports/scrap-substrate-config', $h)->assertOk();
+        $groups = $res->json('groups');
+        $this->assertIsArray($groups);
+        $ids = collect($groups)->pluck('id')->all();
+        $this->assertContains('bopp', $ids);
+        $this->assertContains('polietileno', $ids);
+        $this->assertContains('transparente', $ids);
+    }
+
+    public function test_scrap_substrate_group_legacy_politerlero_alias_normalizes_to_polietileno(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $this->getJson('/api/reports/scrap-by-filters?from=2026-01-01&to=2026-12-31&substrate_group=politerlero', $h)
+            ->assertOk()
+            ->assertJsonPath('substrate_group', 'polietileno');
     }
 }

@@ -26,6 +26,7 @@
       $substrate = (string) ($report['substrate_group'] ?? 'all');
       $substrateLabel = match ($substrate) {
         'bopp' => 'BOPP',
+        'polietileno' => 'Polietileno (PE)',
         'politerlero' => 'Polietileno (PE)',
         'transparente' => 'Transparente',
         'all' => 'Todos los sustratos',

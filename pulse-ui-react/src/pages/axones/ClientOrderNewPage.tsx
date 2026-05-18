@@ -690,7 +690,7 @@ export default function ClientOrderNewPage() {
   return (
     <div className="space-y-4 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 max-w-3xl">
+        <div className="min-w-0 max-w-6xl">
           <h1 className="text-2xl font-semibold tracking-tight">{CLIENT_ORDER_MODULE_NEW_TITLE}</h1>
         </div>
         <Button type="button" variant="outline" size="icon" asChild>
@@ -703,11 +703,11 @@ export default function ClientOrderNewPage() {
       <form
         noValidate
         onSubmit={handleFormSubmit}
-        className="mx-auto max-w-3xl space-y-4 rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+        className="mx-auto w-full max-w-3xl space-y-4 rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm md:max-w-5xl xl:max-w-6xl"
       >
         <div className="space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="grid w-full flex-1 gap-1.5 min-w-0 sm:max-w-xl">
+            <div className="grid w-full min-w-0 flex-1 gap-1.5">
               <Label
                 htmlFor="co-cliente"
                 className="flex items-center gap-2 text-sm font-medium text-foreground"

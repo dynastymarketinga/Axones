@@ -31,4 +31,38 @@ return [
         'accept_roles' => env('AXONES_INVENTORY_RETURN_ACCEPT_ROLES'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Grupos de sustrato — reporte de desperdicio
+    |--------------------------------------------------------------------------
+    */
+    'scrap_substrate_groups' => [
+        [
+            'id' => 'bopp',
+            'label' => 'BOPP',
+            'structure_patterns' => ['bopp'],
+            'aliases' => [],
+        ],
+        [
+            'id' => 'polietileno',
+            'label' => 'Polietileno',
+            'structure_patterns' => [
+                'polietileno',
+                'politereño',
+                'pebd',
+                'ldpe',
+                'hdpe',
+                'lldpe',
+                'polyethylene',
+            ],
+            'aliases' => ['politerlero'],
+        ],
+        [
+            'id' => 'transparente',
+            'label' => 'Transparente',
+            'structure_patterns' => ['transparente', 'cpp', 'cast pp', 'opp transparente'],
+            'aliases' => [],
+        ],
+    ],
+
 ];

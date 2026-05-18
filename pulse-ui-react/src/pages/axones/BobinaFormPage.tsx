@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Barcode, Building2, Package2, Scale, Tags } from "lucide-react"
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { AXONES_INVENTORY_FILTER_INPUT_CLASS, AXONES_INVENTORY_PAGE_CLASS } from "@/components/axones/inventory-page-layout"
 import { PageLoadingBlock } from "@/components/axones/LoadingStates"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { ReasonModal } from "@/components/axones/ReasonModal"
 import {
@@ -57,15 +56,9 @@ type BobinaDetail = {
   material?: MaterialRow
 }
 
-type InventoryReturnPeek = {
-  id: number
-  destination_area: string
-}
-
 export default function BobinaFormPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchParams] = useSearchParams()
   const { bobinaId } = useParams<{ bobinaId: string }>()
   const isEdit = location.pathname.endsWith("/editar") && Boolean(bobinaId)
   const id = bobinaId ? Number(bobinaId) : NaN
@@ -80,7 +73,6 @@ export default function BobinaFormPage() {
   const [weightKg, setWeightKg] = useState("")
   const [status, setStatus] = useState("available")
   const [canEditStructural, setCanEditStructural] = useState(true)
-  const [devolucionBanner, setDevolucionBanner] = useState<string | null>(null)
   const [reasonModalOpen, setReasonModalOpen] = useState(false)
   const [pendingBody, setPendingBody] = useState<Record<string, unknown> | null>(null)
   const [changeReason, setChangeReason] = useState("")
@@ -145,45 +137,6 @@ export default function BobinaFormPage() {
     }
   }, [isEdit, validEdit, loadMaterials, loadBobina])
 
-  useEffect(() => {
-    if (isEdit) return
-    const raw = searchParams.get("devolucion_id")?.trim()
-    if (!raw) return
-
-    let cancelled = false
-    void (async () => {
-      const n = Number(raw)
-      if (!Number.isFinite(n) || n < 1) {
-        if (!cancelled) {
-          setDevolucionBanner(
-            "devolucion_id no válido. Bobinas rechazadas: use el enlace desde Devoluciones.",
-          )
-        }
-        return
-      }
-      try {
-        const d = await apiFetch<InventoryReturnPeek>(`inventory-returns/${n}`)
-        if (cancelled) return
-        if (d.destination_area === "bobinas_rechazadas") {
-          toast.info("Redirigiendo al registro de bobina rechazada.")
-          navigate(`/bobinas/registrar-rechazada?devolucion_id=${n}`, { replace: true })
-          return
-        }
-        setDevolucionBanner(
-          `La devolución #${n} no es a bobinas rechazadas. Esta pantalla no vincula devoluciones.`,
-        )
-      } catch {
-        if (!cancelled) {
-          setDevolucionBanner("No se encontró la devolución. Revise el id.")
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [isEdit, navigate, searchParams])
-
   async function onSubmit(ev: React.FormEvent) {
     ev.preventDefault()
     if (!materialId || !code.trim() || !weightKg.trim()) {
@@ -246,7 +199,7 @@ export default function BobinaFormPage() {
           <p className="text-muted-foreground text-sm">
             {isEdit
               ? "Si la bobina ya se usó o despachó, puede que solo pueda cambiar el estado."
-              : "Alta en material normal. Rechazadas con devolución: Inventario → Devoluciones → Registrar bobina rechazada."}
+              : "Alta de bobina en material normal."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -267,18 +220,6 @@ export default function BobinaFormPage() {
           onSubmit={(e) => void onSubmit(e)}
           className="mx-auto max-w-5xl space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
         >
-          {devolucionBanner ? (
-            <Alert variant="default" className="border-dashed">
-              <AlertTitle>Devolución</AlertTitle>
-              <AlertDescription className="space-y-2">
-                <p>{devolucionBanner}</p>
-                <Button variant="link" className="h-auto p-0" asChild>
-                  <Link to="/devoluciones">Ir a devoluciones</Link>
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
           <div className="rounded-xl border-l-4 border-l-emerald-500 bg-emerald-50/30 p-4">
             <h2 className="mb-4 text-center text-2xl font-extrabold tracking-wide text-emerald-900">
               BOBINAS
@@ -424,8 +365,7 @@ export default function BobinaFormPage() {
               consumida en producción.
             </li>
             <li>
-              <span className="text-foreground font-medium">Rechazada</span> — Material no conforme;
-              suele ir con una devolución aceptada y el registro de bobina rechazada.
+              <span className="text-foreground font-medium">Rechazada</span> — Material no conforme.
             </li>
           </ul>
         </DialogContent>

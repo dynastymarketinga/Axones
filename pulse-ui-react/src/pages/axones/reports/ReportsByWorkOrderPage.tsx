@@ -2,47 +2,54 @@
 
 import { useState } from "react"
 
+import { ReportFilterSection } from "@/components/axones/reports/ReportFilterSection"
+import { ReportFiltersPanel } from "@/components/axones/reports/ReportFiltersPanel"
+import { ReportWorkOrderPicker } from "@/components/axones/reports/ReportWorkOrderPicker"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+
 import { ReportPageShell, useReportRange } from "./report-shared"
 
 export default function ReportsByWorkOrderPage() {
-  const { from, setFrom, to, setTo, loading, downloadCsv } = useReportRange()
+  const { loading, downloadCsv } = useReportRange()
   const [woId, setWoId] = useState("")
 
   return (
     <ReportPageShell
       title="Reporte por orden de trabajo"
       description="Resumen de material, despachos y usos por bobina vinculados a una OT (movimiento de orden §9)."
-      from={from}
-      to={to}
-      onFromChange={setFrom}
-      onToChange={setTo}
       showRange={false}
     >
-      <div className="bg-card space-y-3 rounded-2xl border p-4 shadow-sm">
-        <p className="text-muted-foreground text-sm">
-          Indique el <strong>ID numérico</strong> de la orden de trabajo tal como aparece en el sistema (ej.{" "}
-          <span className="font-mono text-xs">42</span>). La descarga es un único archivo.
-        </p>
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="grid min-w-[12rem] gap-2">
-            <Label>Orden de trabajo (ID)</Label>
-            <Input
-              inputMode="numeric"
-              value={woId}
-              onChange={(ev) => setWoId(ev.target.value)}
-              placeholder="ej. 42"
-            />
-            <p className="text-muted-foreground text-[11px]">
-              Debe existir en la base de datos; si el ID no es válido, el servidor devolverá un error.
-            </p>
-          </div>
+      <ReportFiltersPanel
+        subtitle="Seleccione la orden por código; la descarga es un único archivo CSV"
+        activeFilterCount={woId.trim() ? 1 : 0}
+      >
+        <ReportFilterSection
+          title="Orden de trabajo"
+          accentClass="text-amber-800 dark:text-amber-200"
+          dotClass="bg-amber-500"
+          borderClass="border-amber-500/30 from-amber-500/[0.07]"
+        >
+          <ReportWorkOrderPicker
+            value={woId}
+            onValueChange={setWoId}
+            mode="search"
+            placeholder="Buscar por código OT…"
+            highlighted={!!woId.trim()}
+            className="max-w-xl"
+          />
+          <p className="text-muted-foreground mt-2 text-xs">
+            Debe existir en la base de datos. Si el código no es válido, el servidor devolverá un error.
+          </p>
+        </ReportFilterSection>
+
+        <ReportFilterSection
+          title="Descarga"
+          accentClass="text-emerald-800 dark:text-emerald-200"
+          dotClass="bg-emerald-500"
+          borderClass="border-emerald-500/30 from-emerald-500/[0.07]"
+        >
           <Button
             type="button"
-            variant="secondary"
-            size="sm"
             disabled={loading || !woId.trim()}
             onClick={() =>
               void downloadCsv(
@@ -54,8 +61,8 @@ export default function ReportsByWorkOrderPage() {
           >
             Resumen OT
           </Button>
-        </div>
-      </div>
+        </ReportFilterSection>
+      </ReportFiltersPanel>
     </ReportPageShell>
   )
 }

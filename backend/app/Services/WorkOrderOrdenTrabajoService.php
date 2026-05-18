@@ -18,6 +18,7 @@ class WorkOrderOrdenTrabajoService
 {
     public function __construct(
         private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
+        private readonly MesTimerSegmentSyncService $mesTimerSegmentSync,
     ) {}
 
     /**
@@ -123,6 +124,7 @@ class WorkOrderOrdenTrabajoService
         $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
         /** @var array<string, mixed> $existing */
         $existing = is_array($doc?->form) ? $doc->form : [];
+        $previousForm = $existing;
 
         $this->assertPrintingEstadoAreaAllowed($existing, $form, $user);
         $this->assertLaminacionEstadoAreaAllowed($existing, $form, $user);
@@ -134,6 +136,8 @@ class WorkOrderOrdenTrabajoService
             ['work_order_id' => $workOrder->getKey()],
             ['form' => $form],
         );
+
+        $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $form, $user);
 
         if ($this->shouldSyncCorteDispatch($form)) {
             $this->cortePlanillaDispatchSync->syncFromForm($workOrder->fresh(), $form);
@@ -180,6 +184,7 @@ class WorkOrderOrdenTrabajoService
         $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
         /** @var array<string, mixed> $existing */
         $existing = is_array($doc?->form) ? $doc->form : [];
+        $previousForm = $existing;
 
         $this->assertPrintingEstadoAreaAllowed($existing, $incoming, $user);
 
@@ -194,6 +199,7 @@ class WorkOrderOrdenTrabajoService
             ['work_order_id' => $workOrder->getKey()],
             ['form' => $existing],
         );
+        $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $existing, $user, ['printing']);
         $this->syncAreaRequestsAfterProductionFinalize($workOrder->fresh(), $existing);
 
         return $doc;
@@ -209,6 +215,7 @@ class WorkOrderOrdenTrabajoService
         $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
         /** @var array<string, mixed> $existing */
         $existing = is_array($doc?->form) ? $doc->form : [];
+        $previousForm = $existing;
 
         $this->assertLaminacionEstadoAreaAllowed($existing, $incoming, $user);
 
@@ -223,6 +230,7 @@ class WorkOrderOrdenTrabajoService
             ['work_order_id' => $workOrder->getKey()],
             ['form' => $existing],
         );
+        $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $existing, $user, ['laminacion']);
         $this->syncAreaRequestsAfterProductionFinalize($workOrder->fresh(), $existing);
 
         return $doc;
@@ -238,6 +246,7 @@ class WorkOrderOrdenTrabajoService
         $doc = WorkOrderTechnicalDocument::query()->where('work_order_id', $workOrder->getKey())->first();
         /** @var array<string, mixed> $existing */
         $existing = is_array($doc?->form) ? $doc->form : [];
+        $previousForm = $existing;
 
         $this->assertCorteEstadoAreaAllowed($existing, $incoming, $user);
 
@@ -264,6 +273,7 @@ class WorkOrderOrdenTrabajoService
             ['form' => $existing],
         );
 
+        $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $existing, $user, ['corte']);
         $this->syncAreaRequestsAfterProductionFinalize($workOrder->fresh(), $existing);
         $this->cortePlanillaDispatchSync->syncFromForm($workOrder->fresh(), $existing);
 

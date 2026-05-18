@@ -75,7 +75,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -779,25 +781,31 @@ export default function WorkOrdersHubPage() {
 
               <div className="grid min-w-0 gap-2 self-start">
                 <Label>Máquina</Label>
-                <select
-                  className={cn(
-                    "h-11 rounded-md border bg-background/95 px-3 text-sm",
-                    catalogSelectTriggerClass,
-                  )}
-                  value={maquina}
-                  onChange={(ev) => setMaquina(ev.target.value as MachineValue)}
+                <Select
+                  value={maquina || undefined}
+                  onValueChange={(v) =>
+                    setMaquina(v === "__clear__" ? "" : (v as MachineValue))
+                  }
                 >
-                  <option value="">Seleccionar…</option>
-                  {MACHINE_OPTIONS.map((g) => (
-                    <optgroup key={g.group} label={g.group}>
-                      {g.options.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+                  >
+                    <SelectValue placeholder="Seleccionar…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__clear__">Seleccionar…</SelectItem>
+                    {MACHINE_OPTIONS.map((g) => (
+                      <SelectGroup key={g.group}>
+                        <SelectLabel>{g.group}</SelectLabel>
+                        {g.options.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="md:col-span-3 flex justify-center">

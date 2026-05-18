@@ -189,6 +189,10 @@ function areaTitle(area: AreaKey): string {
   return "Área: Tintas"
 }
 
+function historialTabLabel(area: AreaKey): string {
+  return area === "montaje" ? "Finalizados" : "Historial"
+}
+
 function areaSubtitle(area: AreaKey): string {
   if (area === "printing") {
     return "Bandeja de OT activas. Las vistas filtran por temporizador de impresión. Historial: solicitudes del área ya cerradas."
@@ -198,6 +202,9 @@ function areaSubtitle(area: AreaKey): string {
   }
   if (area === "corte") {
     return "Bandeja de OT activas. Las vistas filtran por temporizador de corte. Historial: solicitudes del área ya cerradas."
+  }
+  if (area === "montaje") {
+    return "En curso: OT en cola o en producción en Montaje (montaje no finalizado). Finalizados: montaje cerrado en producción o solicitud al área ya cerrada. El badge naranja «Pendiente» es solo la solicitud administrativa."
   }
   if (areaHasMesTimerColumn(area)) {
     return `En curso: solicitudes pendientes y OT en cola o en ${areaTitle(area).replace("Área: ", "")}. El badge de color refleja producción (turno y cronómetro); «Pendiente» naranja es solo la solicitud al área. Historial: solicitudes cerradas.`
@@ -579,7 +586,13 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             per_page: 20,
             historial_area: miAreaApi,
             historial_exclude_pending: 1,
+            status: queryStatus,
+            priority: queryPriority,
             q: search || undefined,
+            created_from: createdFrom || undefined,
+            created_to: createdTo || undefined,
+            area_requested_from: areaRequestedFrom || undefined,
+            area_requested_to: areaRequestedTo || undefined,
           }
         } else {
           query = {
@@ -676,12 +689,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       return rows.data.filter(
         (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === mesActivasSubTab,
       )
-    }
-    if (area === "montaje") {
-      return rows.data.filter((o) => {
-        const mes = mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)
-        return mes?.workflow !== "finalizado"
-      })
     }
     return rows.data
   }, [rows, area, mesBandNowMs, mesActivasSubTab])
@@ -877,14 +884,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const filterHint = (
     <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs md:col-span-12 lg:col-span-12">
       <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-      <span>La búsqueda filtra por código de OT, referencia de pedido o nombre de cliente al escribir.</span>
-    </p>
-  )
-
-  const historialFilterHint = (
-    <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs md:col-span-12 lg:col-span-12">
-      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-      <span>Busque por cliente, producto, código de OT o referencia de pedido al escribir.</span>
+      <span>
+        La búsqueda filtra por código OT, referencia, cliente o producto al escribir.{" "}
+        <strong className="font-medium text-foreground/85">Estado OT</strong> es abierta / completada / cancelada de la
+        orden (no el badge naranja «Pendiente» de solicitud al área).
+      </span>
     </p>
   )
 
@@ -1005,9 +1009,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
           value={activeTab}
           onValueChange={(v) => {
             setActiveTab(v as AreaBandejaTab)
-            if (v === "historial") {
-              setStatus("all")
-            }
             setPage(1)
           }}
         >
@@ -1030,9 +1031,129 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
           </TabsTrigger>
           <TabsTrigger value="historial" className="inline-flex items-center gap-2">
             <History className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-            Historial
+            {historialTabLabel(area)}
           </TabsTrigger>
         </TabsList>
+
+        <div className={cn(catalogFilterPanelClass, "mt-4")}>
+          <CatalogFilterGrid>
+            <CatalogSearchField
+              id={`a-q-${area}`}
+              label="Ref. pedido cliente"
+              placeholder="Código OT, referencia, cliente…"
+              value={qInput}
+              onChange={(ev) => setQInput(ev.target.value)}
+              className="min-w-0 md:col-span-6 lg:col-span-6"
+            />
+            <CatalogLabeledField label="Prioridad" icon={ListFilter} className="md:col-span-3 lg:col-span-3">
+              <Select
+                value={priority}
+                onValueChange={(v) => {
+                  setPriority(v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="gap-2">
+                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Todas
+                  </SelectItem>
+                  <SelectItem value="normal" className="gap-2">
+                    <Minus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Normal
+                  </SelectItem>
+                  <SelectItem value="alta" className="gap-2">
+                    <ArrowUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Alta
+                  </SelectItem>
+                  <SelectItem value="urgente" className="gap-2">
+                    <Zap className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Urgente
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </CatalogLabeledField>
+            <CatalogLabeledField label="Estado OT" icon={SlidersHorizontal} className="md:col-span-3 lg:col-span-3">
+              <Select
+                value={status}
+                onValueChange={(v) => {
+                  setStatus(v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="gap-2">
+                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Todos
+                  </SelectItem>
+                  <SelectItem value="open" className="gap-2">
+                    <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Abierta
+                  </SelectItem>
+                  <SelectItem value="completed" className="gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Completada
+                  </SelectItem>
+                  <SelectItem value="cancelled" className="gap-2">
+                    <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    Cancelada
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </CatalogLabeledField>
+            <CatalogLabeledField label="Fecha OT (desde)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
+              <Input
+                type="date"
+                className={catalogFilterDateInputClass}
+                value={createdFrom}
+                onChange={(ev) => {
+                  setCreatedFrom(ev.target.value)
+                  setPage(1)
+                }}
+              />
+            </CatalogLabeledField>
+            <CatalogLabeledField label="Fecha OT (hasta)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
+              <Input
+                type="date"
+                className={catalogFilterDateInputClass}
+                value={createdTo}
+                onChange={(ev) => {
+                  setCreatedTo(ev.target.value)
+                  setPage(1)
+                }}
+              />
+            </CatalogLabeledField>
+            <CatalogLabeledField label="Solicitud área (desde)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
+              <Input
+                type="date"
+                className={catalogFilterDateInputClass}
+                value={areaRequestedFrom}
+                onChange={(ev) => {
+                  setAreaRequestedFrom(ev.target.value)
+                  setPage(1)
+                }}
+              />
+            </CatalogLabeledField>
+            <CatalogLabeledField label="Solicitud área (hasta)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
+              <Input
+                type="date"
+                className={catalogFilterDateInputClass}
+                value={areaRequestedTo}
+                onChange={(ev) => {
+                  setAreaRequestedTo(ev.target.value)
+                  setPage(1)
+                }}
+              />
+            </CatalogLabeledField>
+            {filterHint}
+          </CatalogFilterGrid>
+        </div>
 
         <TabsContent value="activas" className="mt-4 space-y-4">
           {areaUsesMesActivasSubTabs(area) ? (
@@ -1122,125 +1243,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               </Badge>
             )}
           </div>
-          <div className={catalogFilterPanelClass}>
-            <CatalogFilterGrid>
-            <CatalogSearchField
-              id={`a-q-act-${area}`}
-              label="Ref. pedido cliente"
-              placeholder="Código OT, referencia, cliente…"
-              value={qInput}
-              onChange={(ev) => setQInput(ev.target.value)}
-              className="min-w-0 md:col-span-6 lg:col-span-6"
-            />
-            <CatalogLabeledField label="Prioridad" icon={ListFilter} className="md:col-span-3 lg:col-span-3">
-              <Select
-                value={priority}
-                onValueChange={(v) => {
-                  setPriority(v)
-                  setPage(1)
-                }}
-              >
-                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="gap-2">
-                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Todas
-                  </SelectItem>
-                  <SelectItem value="normal" className="gap-2">
-                    <Minus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Normal
-                  </SelectItem>
-                  <SelectItem value="alta" className="gap-2">
-                    <ArrowUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Alta
-                  </SelectItem>
-                  <SelectItem value="urgente" className="gap-2">
-                    <Zap className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Urgente
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="md:col-span-3 lg:col-span-3">
-              <Select
-                value={status}
-                onValueChange={(v) => {
-                  setStatus(v)
-                  setPage(1)
-                }}
-              >
-                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="gap-2">
-                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Todos
-                  </SelectItem>
-                  <SelectItem value="open" className="gap-2">
-                    <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Abierta
-                  </SelectItem>
-                  <SelectItem value="completed" className="gap-2">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Completada
-                  </SelectItem>
-                  <SelectItem value="cancelled" className="gap-2">
-                    <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Cancelada
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (desde)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={createdFrom}
-                onChange={(ev) => {
-                  setCreatedFrom(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (hasta)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={createdTo}
-                onChange={(ev) => {
-                  setCreatedTo(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (desde)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={areaRequestedFrom}
-                onChange={(ev) => {
-                  setAreaRequestedFrom(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (hasta)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={areaRequestedTo}
-                onChange={(ev) => {
-                  setAreaRequestedTo(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            {filterHint}
-          </CatalogFilterGrid>
-          </div>
 
           <InsumosBandejaTableCard>
             <Table>
@@ -1298,10 +1300,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  (areaUsesMesActivasSubTabs(area) || area === "montaje"
-                    ? displayActivasRows
-                    : rows.data
-                  ).map((o, idx) => {
+                  (areaUsesMesActivasSubTabs(area) ? displayActivasRows : rows.data).map((o, idx) => {
                     const reqStatus = resolveAreaRequestStatusForTab(o, "activas") ?? "pending"
                     const mesBand = hasTimerColumn
                       ? mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)
@@ -1420,8 +1419,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             <p className="text-muted-foreground flex items-start gap-2 text-sm">
               <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
               <span>
-                Archivo de OT con solicitud cerrada al área o área MES finalizada. Misma etiqueta de producción que
-                en En curso (p. ej. Finalizado). Busque por cliente o producto.
+                {area === "montaje"
+                  ? "OT con montaje finalizado en producción o solicitud al área ya cerrada. Use los filtros de arriba y la pestaña En curso para lo activo."
+                  : "Archivo de OT con solicitud cerrada al área o área MES finalizada. Misma etiqueta de producción que en En curso (p. ej. Finalizado)."}
               </span>
             </p>
             <Badge
@@ -1431,20 +1431,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               <ListOrdered className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
               En listado: {rows?.total ?? 0}
             </Badge>
-          </div>
-
-          <div className={catalogFilterPanelClass}>
-            <CatalogFilterGrid>
-            <CatalogSearchField
-              id={`a-q2-${area}`}
-              label="Cliente, producto u OT"
-              placeholder="Cliente, producto, código OT o referencia…"
-              value={qInput}
-              onChange={(ev) => setQInput(ev.target.value)}
-              className="min-w-0 md:col-span-12 lg:col-span-12"
-            />
-            {historialFilterHint}
-          </CatalogFilterGrid>
           </div>
 
           <InsumosBandejaTableCard>

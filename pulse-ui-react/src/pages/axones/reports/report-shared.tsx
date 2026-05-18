@@ -72,13 +72,13 @@ export function useReportRange() {
 type ReportPageShellProps = {
   title: string
   description?: string
-  from: string
-  to: string
-  onFromChange: (v: string) => void
-  onToChange: (v: string) => void
+  from?: string
+  to?: string
+  onFromChange?: (v: string) => void
+  onToChange?: (v: string) => void
   /** Título de la tarjeta Desde/Hasta (por defecto: «Rango de fechas global»). */
   rangeCardTitle?: string
-  /** Si es false, no renderiza la tarjeta de Desde/Hasta (útil para reportes que no la usan). */
+  /** Si es false, no renderiza la tarjeta de Desde/Hasta (filtros de fecha van en el panel del reporte). */
   showRange?: boolean
   children: ReactNode
 }
@@ -106,7 +106,7 @@ export function ReportPageShell({
         ) : null}
       </div>
 
-      {showRange ? (
+      {showRange && from != null && to != null && onFromChange && onToChange ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{rangeCardTitle}</CardTitle>

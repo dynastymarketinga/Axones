@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Barcode,
   Layers,
@@ -22,10 +22,14 @@ import {
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
+import { ReportFilterSection } from "@/components/axones/reports/ReportFilterSection"
+import { ReportFiltersPanel } from "@/components/axones/reports/ReportFiltersPanel"
+import { ReportPeriodFields } from "@/components/axones/reports/ReportPeriodFields"
+import type { ReportWorkOrderOption } from "@/components/axones/reports/ReportWorkOrderPicker"
+import { ReportWorkOrderPicker } from "@/components/axones/reports/ReportWorkOrderPicker"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Table,
@@ -278,6 +282,18 @@ export default function ReportsTimesPage() {
   }
 
   const selectedId = woId.trim() === "" ? null : Number(woId.trim())
+
+  const woPickerOptions = useMemo<ReportWorkOrderOption[]>(
+    () =>
+      candidates.map((r) => ({
+        work_order_id: r.work_order_id,
+        work_order_code: r.work_order_code,
+        client_name: r.client_name,
+        product_name: r.product_name,
+      })),
+    [candidates],
+  )
+
   const kgHeadClass =
     "min-w-[4.25rem] text-right text-xs font-medium tabular-nums text-muted-foreground"
 
@@ -290,7 +306,76 @@ export default function ReportsTimesPage() {
         to={to}
         onFromChange={setFrom}
         onToChange={setTo}
+        showRange={false}
       >
+        <ReportFiltersPanel
+          subtitle="Período, orden de trabajo o agregado global"
+          loading={loadingCandidates || loadingPreview}
+          activeFilterCount={aggregateAll ? 1 : woId.trim() ? 1 : 0}
+        >
+          <ReportPeriodFields from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+
+          <ReportFilterSection
+            title="Orden de trabajo"
+            accentClass="text-amber-800 dark:text-amber-200"
+            dotClass="bg-amber-500"
+            borderClass="border-amber-500/30 from-amber-500/[0.07]"
+          >
+            <div className="mb-4 flex items-center space-x-2">
+              <Checkbox
+                id="aggregate-all"
+                checked={aggregateAll}
+                onCheckedChange={(v) => onAggregateChecked(v === true)}
+              />
+              <Label htmlFor="aggregate-all" className="cursor-pointer text-sm font-normal leading-none">
+                Agregado de todas las OT del rango
+              </Label>
+            </div>
+            <ReportWorkOrderPicker
+              value={woId}
+              onValueChange={(id) => {
+                setAggregateAll(false)
+                setWoId(id)
+              }}
+              options={woPickerOptions}
+              mode="static"
+              disabled={aggregateAll}
+              placeholder="Seleccione en la tabla o busque por código…"
+              highlighted={!aggregateAll && !!woId.trim()}
+              className="max-w-xl"
+            />
+            <p className="text-muted-foreground mt-2 text-xs">
+              Desactivado mientras el agregado global está activo. Pulse una fila de la tabla o elija aquí por código OT.
+            </p>
+          </ReportFilterSection>
+
+          <ReportFilterSection
+            title="Acciones"
+            accentClass="text-emerald-800 dark:text-emerald-200"
+            dotClass="bg-emerald-500"
+            borderClass="border-emerald-500/30 from-emerald-500/[0.07]"
+          >
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                disabled={loadingPreview}
+                onClick={() => void loadPreview({ silent: false })}
+              >
+                {loadingPreview ? "Generando…" : "Vista previa"}
+              </Button>
+              <Button type="button" variant="outline" disabled={loading} onClick={() => void downloadPdf()}>
+                Descargar PDF
+              </Button>
+              <Button type="button" variant="outline" disabled={loading} onClick={() => void downloadCsvFile()}>
+                Descargar datos del reporte
+              </Button>
+            </div>
+            <p className="text-muted-foreground mt-3 text-xs">
+              La vista previa se actualiza al cambiar fechas o selección. PDF y exportaciones usan los mismos filtros.
+            </p>
+          </ReportFilterSection>
+        </ReportFiltersPanel>
+
         <div className="space-y-4">
           <div className="bg-card flex flex-col gap-3 rounded-2xl border p-4 shadow-sm">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -438,59 +523,6 @@ export default function ReportsTimesPage() {
                   )}
                 </TableBody>
               </Table>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="aggregate-all"
-                  checked={aggregateAll}
-                  onCheckedChange={(v) => onAggregateChecked(v === true)}
-                />
-                <Label htmlFor="aggregate-all" className="cursor-pointer text-sm font-normal leading-none">
-                  Agregado de todas las OT del rango
-                </Label>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-end gap-4">
-              <div className="grid min-w-[200px] gap-2">
-                <Label>Orden de trabajo (ID)</Label>
-                <Input
-                  inputMode="numeric"
-                  value={woId}
-                  disabled={aggregateAll}
-                  onChange={(ev) => {
-                    setAggregateAll(false)
-                    setWoId(ev.target.value)
-                  }}
-                  placeholder="Seleccione en la tabla o escriba el ID"
-                />
-                <p className="text-muted-foreground text-[11px]">
-                  Desactivado mientras el agregado global está activo.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-end gap-2">
-                <Button
-                  type="button"
-                  disabled={loadingPreview}
-                  onClick={() => void loadPreview({ silent: false })}
-                >
-                  {loadingPreview ? "Generando…" : "Vista previa"}
-                </Button>
-                <Button type="button" variant="outline" disabled={loading} onClick={() => void downloadPdf()}>
-                  Descargar PDF
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={loading}
-                  onClick={() => void downloadCsvFile()}
-                >
-                  Descargar datos del reporte
-                </Button>
-              </div>
             </div>
           </div>
         </div>

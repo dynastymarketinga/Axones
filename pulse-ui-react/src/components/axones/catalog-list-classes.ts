@@ -15,6 +15,10 @@ export const catalogActionButtonClass =
 export const catalogFilterPanelClass =
   "rounded-xl border border-primary/20 bg-card/90 p-4 shadow-sm ring-1 ring-black/[0.04] dark:bg-card/70 dark:ring-white/[0.06]"
 
+/** Shell de filtros estandarizado en páginas de reportes (modelo Desperdicio). */
+export const reportFiltersPanelClass =
+  "overflow-hidden rounded-2xl border border-primary/25 shadow-md bg-gradient-to-br from-primary/[0.07] via-card to-card ring-1 ring-primary/10 dark:from-primary/[0.12] dark:via-card/95 dark:to-card/90"
+
 export const catalogSelectTriggerClass =
   "h-11 rounded-lg border border-primary/25 bg-background font-normal shadow-sm transition-[border-color,box-shadow] hover:border-primary/35 focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/20"
 

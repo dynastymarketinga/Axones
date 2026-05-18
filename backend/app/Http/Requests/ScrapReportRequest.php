@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\WorkOrder;
+use App\Support\ScrapSubstrateCatalog;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -26,7 +27,7 @@ class ScrapReportRequest extends FormRequest
             'product_id' => ['nullable', 'integer', 'exists:products,id'],
             'work_order_id' => ['nullable', 'integer', 'exists:work_orders,id'],
             'work_order_code' => ['nullable', 'string', 'max:120'],
-            'substrate_group' => ['sometimes', 'string', Rule::in(['all', 'bopp', 'politerlero', 'transparente'])],
+            'substrate_group' => ['sometimes', 'string', Rule::in(ScrapSubstrateCatalog::allowedInput())],
             'layout' => ['sometimes', 'string', Rule::in(['detail', 'by_work_order', 'by_area', 'history_kg'])],
             'format' => ['sometimes', 'string', Rule::in(['csv'])],
             'focus_work_order_id' => ['nullable', 'integer', 'exists:work_orders,id'],

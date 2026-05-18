@@ -6,7 +6,11 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
-import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
+import {
+  AXONES_INVENTORY_FILTER_INPUT_CLASS,
+  AxonesInventoryModuleNav,
+  AxonesTableCard,
+} from "@/components/axones/inventory-page-layout"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -24,7 +28,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-
 type BobinaRow = {
   id: number
   code?: string | null
@@ -107,65 +110,62 @@ export default function BobinasPage() {
           <Button type="button" variant="outline" size="sm" asChild>
             <Link to="/devoluciones">Devoluciones</Link>
           </Button>
-          <Button type="button" variant="secondary" size="sm" asChild>
-            <Link to="/bobinas/registrar-rechazada">Registrar bobina rechazada</Link>
-          </Button>
         </div>
       </div>
 
       <AxonesInventoryModuleNav active="bobinas" />
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="grid w-56 gap-2">
-          <Label>Material</Label>
-          <Select
-            value={materialId}
-            onValueChange={(v) => {
-              setMaterialId(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Todos los materiales" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los materiales</SelectItem>
-              {materials.map((m) => (
-                <SelectItem key={m.id} value={String(m.id)}>
-                  {m.sku} · {m.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <AxonesTableCard>
+        <div className="border-b bg-muted/30 p-4">
+          <div className="grid gap-4 sm:grid-cols-2 md:max-w-xl">
+            <div className="grid gap-2">
+              <Label>Material</Label>
+              <Select
+                value={materialId}
+                onValueChange={(v) => {
+                  setMaterialId(v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
+                  <SelectValue placeholder="Todos los materiales" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los materiales</SelectItem>
+                  {materials.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      {m.sku} · {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Estado</Label>
+              <Select
+                value={status}
+                onValueChange={(v) => {
+                  setStatus(v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="available">{bobinaStatusLabel("available")}</SelectItem>
+                  <SelectItem value="issued">{bobinaStatusLabel("issued")}</SelectItem>
+                  <SelectItem value="consumed">{bobinaStatusLabel("consumed")}</SelectItem>
+                  <SelectItem value="rejected">{bobinaStatusLabel("rejected")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
-        <div className="grid w-48 gap-2">
-          <Label>Estado</Label>
-          <Select
-            value={status}
-            onValueChange={(v) => {
-              setStatus(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="available">{bobinaStatusLabel("available")}</SelectItem>
-              <SelectItem value="issued">{bobinaStatusLabel("issued")}</SelectItem>
-              <SelectItem value="consumed">{bobinaStatusLabel("consumed")}</SelectItem>
-              <SelectItem value="rejected">{bobinaStatusLabel("rejected")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button type="button" variant="secondary" onClick={() => void load()}>
-          Actualizar
-        </Button>
-      </div>
 
-      <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
-        <Table>
+        <div className="overflow-x-auto">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>ID</TableHead>
@@ -223,8 +223,9 @@ export default function BobinasPage() {
               ))
             )}
           </TableBody>
-        </Table>
-      </div>
+          </Table>
+        </div>
+      </AxonesTableCard>
 
       {rows && rows.last_page > 1 ? (
         <div className="flex items-center justify-between text-sm">

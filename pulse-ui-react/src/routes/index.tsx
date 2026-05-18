@@ -29,7 +29,6 @@ import MiscellaneousReceiptsPage from "@/pages/axones/MiscellaneousReceiptsPage"
 import BobinasPage from "@/pages/axones/BobinasPage"
 import BobinaDetailPage from "@/pages/axones/BobinaDetailPage"
 import BobinaFormPage from "@/pages/axones/BobinaFormPage"
-import BobinaRejectedRegisterPage from "@/pages/axones/BobinaRejectedRegisterPage"
 import InventoryReturnsPage from "@/pages/axones/InventoryReturnsPage"
 import ProgramacionBoardPage from "@/pages/axones/ProgramacionBoardPage"
 import WorkOrdersHubPage from "@/pages/axones/WorkOrdersHubPage"
@@ -208,10 +207,6 @@ export const router = createBrowserRouter(
         },
         { path: "miscelaneos/nuevo", element: guardAxonesRoute({ routeKey: "miscelaneos/nuevo", element: <MiscellaneousReceiptNewPage /> }) },
         { path: "bobinas/nueva", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaFormPage /> }) },
-        {
-          path: "bobinas/registrar-rechazada",
-          element: guardAxonesRoute({ routeKey: "bobinas/registrar-rechazada", element: <BobinaRejectedRegisterPage /> }),
-        },
         { path: "bobinas/:bobinaId/editar", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaFormPage /> }) },
         { path: "bobinas/:bobinaId", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinaDetailPage /> }) },
         { path: "bobinas", element: guardAxonesRoute({ routeKey: "bobinas", element: <BobinasPage /> }) },

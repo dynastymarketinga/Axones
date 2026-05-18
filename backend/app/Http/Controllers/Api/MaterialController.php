@@ -67,15 +67,27 @@ class MaterialController extends Controller
 
         $productId = (int) ($validated['product_id'] ?? 0);
         if ($productId > 0) {
+            $inventoryArea = (string) ($validated['inventory_area'] ?? '');
             $inkIds = DB::table('product_ink_material')
                 ->where('product_id', $productId)
                 ->pluck('material_id');
-            $substrateIds = DB::table('material_product')
-                ->where('product_id', $productId)
-                ->pluck('material_id');
-            $ids = $inkIds->merge($substrateIds)->unique()->values();
+            if ($inventoryArea === 'tintas') {
+                $ids = $inkIds->unique()->values();
+            } else {
+                $substrateIds = DB::table('material_product')
+                    ->where('product_id', $productId)
+                    ->pluck('material_id');
+                $ids = $inkIds->merge($substrateIds)->unique()->values();
+            }
             if ($ids->isNotEmpty()) {
-                $query->whereIn('id', $ids->all());
+                $matchingIds = Material::query()
+                    ->when($inventoryArea !== '', fn ($q) => $q->where('inventory_area', $inventoryArea))
+                    ->whereIn('id', $ids->all())
+                    ->pluck('id');
+                if ($matchingIds->isNotEmpty()) {
+                    $query->whereIn('id', $matchingIds->all());
+                }
+                // Sin coincidencias en el área: no filtrar por producto (listar todo el inventario del área).
             }
         }
 

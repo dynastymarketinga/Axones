@@ -93,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/work-order-time-report', [ReportController::class, 'workOrderTimeReport']);
     Route::get('/reports/work-order-time-report/preview', [ReportController::class, 'workOrderTimeReportPreview']);
     Route::get('/reports/work-order-time-report.pdf', [ReportController::class, 'workOrderTimeReportPdf']);
+    Route::get('/reports/scrap-substrate-config', [ReportController::class, 'scrapSubstrateConfig']);
     Route::get('/reports/scrap-by-filters/preview', [ReportController::class, 'scrapByFiltersPreview']);
     Route::get('/reports/scrap-by-filters.pdf', [ReportController::class, 'scrapByFiltersPdf']);
     Route::get('/reports/scrap-by-filters', [ReportController::class, 'scrapByFilters']);

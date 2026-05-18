@@ -25,10 +25,7 @@ export function CatalogLabeledField({
     <div className={cn("grid gap-2.5", className)}>
       <Label
         htmlFor={htmlFor}
-        className={cn(
-          "text-sm font-medium leading-snug text-muted-foreground",
-          Icon && "inline-flex items-center gap-2.5",
-        )}
+        className="inline-flex min-h-8 items-center gap-2.5 text-sm font-medium leading-snug text-muted-foreground"
       >
         {Icon ? (
           <span

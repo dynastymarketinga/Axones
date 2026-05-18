@@ -11,6 +11,7 @@ use App\Http\Requests\ScrapReportRequest;
 use App\Http\Requests\WorkOrderTimeReportRequest;
 use App\Models\WorkOrder;
 use App\Services\InventoryReportService;
+use App\Support\ScrapSubstrateCatalog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -280,6 +281,20 @@ class ReportController extends Controller
     }
 
     /**
+     * Catálogo de grupos de sustrato para el reporte de desperdicio (pestañas BOPP / PE / etc.).
+     */
+    public function scrapSubstrateConfig(): JsonResponse
+    {
+        return response()->json([
+            'groups' => ScrapSubstrateCatalog::publicConfig(),
+            'rules' => [
+                'explicit_field' => 'corDesperdicioSustrato',
+                'ambiguous_structure_requires_explicit' => true,
+            ],
+        ]);
+    }
+
+    /**
      * Desperdicio (% scrap) por OT y área (filtro cliente/producto, sustrato y layout de exportación).
      */
     public function scrapByFilters(ScrapReportRequest $request): JsonResponse|Response
@@ -514,15 +529,15 @@ class ReportController extends Controller
         return match ($layout) {
             'by_area' => 'desperdicio-por-area',
             'by_work_order' => 'desperdicio-por-ot',
-            'history_kg' => match ($substrateGroup) {
+            'history_kg' => match (ScrapSubstrateCatalog::normalizeGroupId($substrateGroup)) {
                 'bopp' => 'desperdicio-historial-kg-bopp',
-                'politerlero' => 'desperdicio-historial-kg-polietileno',
+                'polietileno' => 'desperdicio-historial-kg-polietileno',
                 'transparente' => 'desperdicio-historial-kg-transparente',
                 default => 'desperdicio-historial-kg',
             },
-            default => match ($substrateGroup) {
+            default => match (ScrapSubstrateCatalog::normalizeGroupId($substrateGroup)) {
                 'bopp' => 'desperdicio-bopp',
-                'politerlero' => 'desperdicio-polietileno',
+                'polietileno' => 'desperdicio-polietileno',
                 'transparente' => 'desperdicio-transparente',
                 default => 'desperdicio-detalle',
             },

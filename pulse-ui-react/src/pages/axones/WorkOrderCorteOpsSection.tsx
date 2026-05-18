@@ -85,6 +85,7 @@ import {
   corteOperabilityFromForm,
   explainCannotAddPaleta,
 } from "@/lib/corte-paleta-flow"
+import { normalizeScrapSubstrate, SCRAP_POLIETILENO } from "@/lib/scrap-substrate"
 import { cn } from "@/lib/utils"
 
 import {
@@ -1635,8 +1636,8 @@ export default function WorkOrderCorteOpsSection({
             className="flex flex-wrap justify-start gap-1"
             value={
               (() => {
-                const s = readString(form.corDesperdicioSustrato).toLowerCase()
-                return s === "bopp" || s === "politerlero" || s === "transparente" ? s : "auto"
+                const s = normalizeScrapSubstrate(readString(form.corDesperdicioSustrato))
+                return s === "bopp" || s === SCRAP_POLIETILENO || s === "transparente" ? s : "auto"
               })()
             }
             onValueChange={(v) => {
@@ -1650,7 +1651,7 @@ export default function WorkOrderCorteOpsSection({
             <ToggleGroupItem value="bopp" className="text-xs">
               BOPP
             </ToggleGroupItem>
-            <ToggleGroupItem value="politerlero" className="text-xs">
+            <ToggleGroupItem value={SCRAP_POLIETILENO} className="text-xs">
               Polietileno
             </ToggleGroupItem>
             <ToggleGroupItem value="transparente" className="text-xs">
@@ -1670,8 +1671,8 @@ export default function WorkOrderCorteOpsSection({
               className="flex flex-wrap justify-start gap-1"
               value={
                 (() => {
-                  const s = readString(form.corScrapRefileDestino).toLowerCase()
-                  return s === "bopp" || s === "politerlero" ? s : "auto"
+                  const s = normalizeScrapSubstrate(readString(form.corScrapRefileDestino))
+                  return s === "bopp" || s === SCRAP_POLIETILENO ? s : "auto"
                 })()
               }
               onValueChange={(v) => {
@@ -1685,7 +1686,7 @@ export default function WorkOrderCorteOpsSection({
               <ToggleGroupItem value="bopp" className="text-xs">
                 BOPP
               </ToggleGroupItem>
-              <ToggleGroupItem value="politerlero" className="text-xs">
+              <ToggleGroupItem value={SCRAP_POLIETILENO} className="text-xs">
                 Polietileno
               </ToggleGroupItem>
             </ToggleGroup>
@@ -1701,8 +1702,8 @@ export default function WorkOrderCorteOpsSection({
               className="flex flex-wrap justify-start gap-1"
               value={
                 (() => {
-                  const s = readString(form.corScrapImpresoDestino).toLowerCase()
-                  return s === "bopp" || s === "politerlero" ? s : "auto"
+                  const s = normalizeScrapSubstrate(readString(form.corScrapImpresoDestino))
+                  return s === "bopp" || s === SCRAP_POLIETILENO ? s : "auto"
                 })()
               }
               onValueChange={(v) => {
@@ -1716,7 +1717,7 @@ export default function WorkOrderCorteOpsSection({
               <ToggleGroupItem value="bopp" className="text-xs">
                 BOPP
               </ToggleGroupItem>
-              <ToggleGroupItem value="politerlero" className="text-xs">
+              <ToggleGroupItem value={SCRAP_POLIETILENO} className="text-xs">
                 Polietileno
               </ToggleGroupItem>
             </ToggleGroup>

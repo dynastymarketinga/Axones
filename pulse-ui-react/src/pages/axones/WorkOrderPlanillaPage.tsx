@@ -74,6 +74,11 @@ import { apiFetch, ApiError } from "@/lib/api"
 import { latestRowInGroup } from "@/lib/axones-work-order-grouping"
 import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
 import { syncMontajeAutoFields, withMontajeAutoFields } from "@/lib/montaje-planilla-metrics"
+import {
+  countFilledTintaColorsInRange,
+  structureLayersToOtFormFields,
+  tipoImpresionFromProductPrintType,
+} from "@/lib/product-structure-layers"
 import { sumSalidaKgFromForm } from "@/pages/axones/corte-turnos"
 import {
   canSaveProductionAreaForm,
@@ -245,12 +250,14 @@ function trimBarcodeForPrefill(barcode: string | null | undefined): string | nul
 
 /** Alineado con `WorkOrderOrdenTrabajoService::buildPrefill()` (tipo de impresión según `print_type`). */
 function prefillFromProduct(p: ProductRecord): Record<string, unknown> {
+  const tipoEstructura = tipoImpresionFromProductPrintType(p.print_type)
   const out: Record<string, unknown> = {
     producto: p.name,
     cpe: p.cpe ?? null,
     mpps: p.mps ?? null,
     codigoBarra: trimBarcodeForPrefill(p.barcode),
     estructuraMaterial: p.structure ?? null,
+    ...structureLayersToOtFormFields(p.structure, tipoEstructura),
   }
   const raw = p.print_type
   if (raw == null) return out
@@ -1336,6 +1343,13 @@ export default function WorkOrderPlanillaPage() {
         const rawTipo = readString(merged.tipoImpresionEstructura) || readString(merged.tipoImpresion)
         if (rawTipo) merged.tipoImpresionEstructura = normalizeTipoImpresionEstructura(rawTipo)
       }
+      const tipoEstructuraDraft = normalizeTipoImpresion(
+        readString(merged.tipoImpresionEstructura) || readString(merged.tipoImpresion),
+      )
+      Object.assign(
+        merged,
+        structureLayersToOtFormFields(readString(product?.structure) || readString(p.estructuraMaterial), tipoEstructuraDraft),
+      )
 
       if (draftMaquinaQuery) {
         merged.maquina = draftMaquinaQuery
@@ -1509,8 +1523,13 @@ export default function WorkOrderPlanillaPage() {
         n.cpe = readString(p.cpe)
         n.mpps = readString(p.mps)
         n.codigoBarra = trimBarcodeForPrefill(p.barcode) ?? ""
-        const s = p.structure
-        if (typeof s === "string" && s !== "") n.estructuraCapa1 = s
+        const tipoEstructura =
+          delta.tipoImpresion === "Reverso"
+            ? "reverso"
+            : delta.tipoImpresion === "Superficie"
+              ? "superficie"
+              : normalizeTipoImpresion(readString(f.tipoImpresionEstructura))
+        Object.assign(n, structureLayersToOtFormFields(p.structure, tipoEstructura))
         if (delta.tipoImpresion === "Reverso") n.tipoImpresionEstructura = "reverso"
         else if (delta.tipoImpresion === "Superficie") n.tipoImpresionEstructura = "superficie"
         n.tipoImpresion = delta.tipoImpresion ?? f.tipoImpresion
@@ -1756,6 +1775,27 @@ export default function WorkOrderPlanillaPage() {
       addError("codigoBarra", "Cod. Barra es obligatorio.")
     }
 
+    if (canEditShared) {
+      if (tipoImpresion === "reverso") {
+        if (!readString(formToSave.estructuraCapa1Rev).trim()) {
+          addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
+        }
+        if (!readString(formToSave.estructuraCapa2Rev).trim()) {
+          addError("estructuraCapa2Rev", "Capa 2 es obligatoria (revise estructura del producto).")
+        }
+        if (!readString(formToSave.estructuraCapa3Rev).trim()) {
+          addError("estructuraCapa3Rev", "Capa 3 es obligatoria (revise estructura del producto).")
+        }
+      } else if (tipoImpresion === "superficie") {
+        const estructuraSuperficie =
+          readString(formToSave.estructuraCapa1).trim() ||
+          readString(prefill.estructuraMaterial).trim()
+        if (!estructuraSuperficie) {
+          addError("estructuraCapa1", "Estructura (1 capa) es obligatoria.")
+        }
+      }
+    }
+
     if (canEditShared && canViewMontaje) {
       if (!isMetricLike(readString(formToSave.frecuencia))) {
         addError("frecuencia", "Formato válido: 250, 250±2 o 250-252.")
@@ -1865,6 +1905,20 @@ export default function WorkOrderPlanillaPage() {
       for (const [key, label, value] of impRequiredDecimals) {
         const s = readNumberString(value).trim()
         if (!s) addError(key, `Impresión: ${label} es obligatorio.`)
+      }
+    }
+
+    if ((canViewImpresion || canViewTintas) && canEditShared) {
+      const numColoresRaw = readString(formToSave.numColores).trim()
+      const numColores = Number(numColoresRaw)
+      if (numColoresRaw && Number.isFinite(numColores) && numColores > 0) {
+        const filledInRange = countFilledTintaColorsInRange(formToSave, 1, Math.min(8, numColores))
+        if (filledInRange < numColores) {
+          addError(
+            "tintaColor1",
+            `Descripción de tintas: indique color en las posiciones 1 a ${numColores} (N° colores = ${numColores}).`,
+          )
+        }
       }
     }
 
@@ -2933,13 +2987,16 @@ export default function WorkOrderPlanillaPage() {
                           <label className="ot-label required">Estructura (1 capa)</label>
                           <OtPlanillaInputIcon icon={LucideLayers}>
                             <input
+                              data-field="estructuraCapa1"
                               className="ot-input"
                               value={readString(form.estructuraCapa1) || readString(prefill.estructuraMaterial)}
                               onChange={(ev) => setKey(setForm, "estructuraCapa1", ev.target.value)}
                               placeholder="BOPP transparente 40 µm"
                               disabled={!canEditShared}
+                              aria-invalid={otInvalid("estructuraCapa1")}
                             />
                           </OtPlanillaInputIcon>
+                          {renderError("estructuraCapa1")}
                         </div>
                       ) : null}
 
@@ -2950,37 +3007,46 @@ export default function WorkOrderPlanillaPage() {
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
+                                data-field="estructuraCapa1Rev"
                                 value={readString(form.estructuraCapa1Rev)}
                                 onChange={(ev) => setKey(setForm, "estructuraCapa1Rev", ev.target.value)}
                                 placeholder="BOPP transparente 40 µm"
                                 disabled={!canEditShared}
+                                aria-invalid={otInvalid("estructuraCapa1Rev")}
                               />
                             </OtPlanillaInputIcon>
-                          </div>
+                          
+                            {renderError("estructuraCapa1Rev")}</div>
                           <div className="ot-field ot-dpm-span-2">
                             <label className="ot-label required">Capa 2</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
+                                data-field="estructuraCapa2Rev"
                                 value={readString(form.estructuraCapa2Rev)}
                                 onChange={(ev) => setKey(setForm, "estructuraCapa2Rev", ev.target.value)}
                                 placeholder="CAST 20 µm"
                                 disabled={!canEditShared}
+                                aria-invalid={otInvalid("estructuraCapa2Rev")}
                               />
                             </OtPlanillaInputIcon>
-                          </div>
+                          
+                            {renderError("estructuraCapa2Rev")}</div>
                           <div className="ot-field ot-dpm-span-2">
                             <label className="ot-label required">Capa 3</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
+                                data-field="estructuraCapa3Rev"
                                 value={readString(form.estructuraCapa3Rev)}
                                 onChange={(ev) => setKey(setForm, "estructuraCapa3Rev", ev.target.value)}
                                 placeholder="PEBD coextrusión 55 µm"
                                 disabled={!canEditShared}
+                                aria-invalid={otInvalid("estructuraCapa3Rev")}
                               />
                             </OtPlanillaInputIcon>
-                          </div>
+                          
+                            {renderError("estructuraCapa3Rev")}</div>
                         </>
                       ) : null}
 
@@ -3634,12 +3700,17 @@ export default function WorkOrderPlanillaPage() {
                   ) : null}
 
                   {canViewTintas ? (
-                    <WorkOrderPrintingInkTable
-                      form={form}
-                      tintaMateriales={tintaMateriales}
-                      tintaMaterialesLoading={tintaMaterialesLoading}
-                      onSetField={(k, v) => setKey(setForm, k, v)}
-                    />
+                    <>
+                      <div data-field="tintaColor1" className="mb-1">
+                        {renderError("tintaColor1")}
+                      </div>
+                      <WorkOrderPrintingInkTable
+                        form={form}
+                        tintaMateriales={tintaMateriales}
+                        tintaMaterialesLoading={tintaMaterialesLoading}
+                        onSetField={(k, v) => setKey(setForm, k, v)}
+                      />
+                    </>
                   ) : null}
 
                 </div>

@@ -16,6 +16,9 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { ReportFilterSection } from "@/components/axones/reports/ReportFilterSection"
+import { ReportFiltersPanel } from "@/components/axones/reports/ReportFiltersPanel"
+import { ReportPeriodFields } from "@/components/axones/reports/ReportPeriodFields"
 import {
   CatalogTableHead,
   CatalogTableHeadRight,
@@ -316,7 +319,12 @@ export default function ReportsProductionPage() {
         to={to}
         onFromChange={setFrom}
         onToChange={setTo}
+        showRange={false}
       >
+        <ReportFiltersPanel subtitle="Período para tablas, vista previa y descargas">
+          <ReportPeriodFields from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        </ReportFiltersPanel>
+
         <div className="bg-card space-y-3 rounded-2xl border p-4 shadow-sm">
           <div className="space-y-1">
             <p className="text-sm font-medium">Órdenes de trabajo con tiempo registrado</p>
@@ -575,40 +583,51 @@ export default function ReportsProductionPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={loadingPreview} onClick={() => void loadPreview()}>
-            {loadingPreview ? "Generando…" : "Vista previa (PDF en pantalla)"}
-          </Button>
-          <Button variant="outline" disabled={loading} onClick={() => void downloadPdf()}>
-            Descargar PDF
-          </Button>
-          <Button
-            variant="outline"
-            disabled={loading}
-            onClick={() =>
-              void downloadCsv(
-                "reports/production-time-by-area",
-                "production-time-by-area.csv",
-                { from, to },
-              )
-            }
-          >
-            Tiempos por área
-          </Button>
-          <Button
-            variant="outline"
-            disabled={loading}
-            onClick={() =>
-              void downloadCsv(
-                "reports/tinta-consumption-by-client",
-                "tinta-consumption-by-client.csv",
-                { from, to },
-              )
-            }
-          >
-            Consumo tintas por cliente
-          </Button>
-        </div>
+        <ReportFilterSection
+          title="Acciones"
+          accentClass="text-emerald-800 dark:text-emerald-200"
+          dotClass="bg-emerald-500"
+          borderClass="border-emerald-500/30 from-emerald-500/[0.07]"
+        >
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={loadingPreview} onClick={() => void loadPreview()}>
+              {loadingPreview ? "Generando…" : "Vista previa (PDF en pantalla)"}
+            </Button>
+            <Button variant="outline" disabled={loading} onClick={() => void downloadPdf()}>
+              Descargar PDF
+            </Button>
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() =>
+                void downloadCsv(
+                  "reports/production-time-by-area",
+                  "production-time-by-area.csv",
+                  { from, to },
+                )
+              }
+            >
+              Tiempos por área
+            </Button>
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() =>
+                void downloadCsv(
+                  "reports/tinta-consumption-by-client",
+                  "tinta-consumption-by-client.csv",
+                  { from, to },
+                )
+              }
+            >
+              Consumo tintas por cliente
+            </Button>
+          </div>
+          <p className="text-muted-foreground mt-3 text-xs">
+            Pulse <strong>Vista previa</strong> para ver el PDF en pantalla. El rango de fechas es el del panel de
+            filtros.
+          </p>
+        </ReportFilterSection>
 
         {previewHtml ? (
           <div className="rounded-xl border bg-white p-2 shadow-sm">
@@ -618,12 +637,7 @@ export default function ReportsProductionPage() {
               className="h-[760px] w-full rounded-md border"
             />
           </div>
-        ) : (
-          <p className="text-muted-foreground text-xs">
-            Pulse <strong>Vista previa (PDF en pantalla)</strong> para ver el mismo contenido que el PDF sin descargarlo.
-            El rango de fechas es el de la tarjeta superior.
-          </p>
-        )}
+        ) : null}
       </ReportPageShell>
     </TooltipProvider>
   )

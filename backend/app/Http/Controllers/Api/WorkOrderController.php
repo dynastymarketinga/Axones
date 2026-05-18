@@ -169,7 +169,9 @@ class WorkOrderController extends Controller
                         });
                     }
                 });
-                if ($mesEstadoKeyActivas !== null) {
+                // Montaje: lo finalizado en producción va a Historial/Finalizados, no a En curso.
+                // Impresión/laminación: En curso incluye subpestaña «Finalizadas» (MES).
+                if ($mesEstadoKeyActivas !== null && $miArea !== 'montaje') {
                     $outer->orWhereHas('technicalDocument', function ($td) use ($mesEstadoKeyActivas) {
                         $td->where("form->{$mesEstadoKeyActivas}", 'finalizada');
                     });

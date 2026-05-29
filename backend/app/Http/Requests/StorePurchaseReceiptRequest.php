@@ -13,17 +13,26 @@ class StorePurchaseReceiptRequest extends FormRequest
         return true;
     }
 
+    protected function withoutPurchaseOrder(): bool
+    {
+        return $this->boolean('without_purchase_order');
+    }
+
     /**
      * @return array<string, mixed>
      */
     public function rules(): array
     {
+        $withPo = ! $this->withoutPurchaseOrder();
+
         return [
-            'purchase_order_id' => [
-                'required',
+            'purchase_order_id' => array_filter([
+                $withPo ? 'required' : 'nullable',
                 'integer',
-                Rule::exists('purchase_orders', 'id')->where(fn ($q) => $q->where('is_active', true)),
-            ],
+                $withPo
+                    ? Rule::exists('purchase_orders', 'id')->where(fn ($q) => $q->where('is_active', true))
+                    : 'prohibited',
+            ]),
             'supplier_id' => ['required', 'integer', 'exists:suppliers,id'],
             'without_purchase_order' => ['sometimes', 'boolean'],
             'exception_reason' => ['nullable', 'string'],
@@ -39,7 +48,11 @@ class StorePurchaseReceiptRequest extends FormRequest
             'lines.*.unit' => ['required', 'string', Rule::in(['kg', 'unidad', 'm', 'rollo', 'otros'])],
             'lines.*.micras' => ['nullable', 'numeric', 'min:0.001'],
             'lines.*.ancho_mm' => ['nullable', 'numeric', 'min:0.001'],
-            'lines.*.purchase_order_line_id' => ['required', 'integer', 'exists:purchase_order_lines,id'],
+            'lines.*.purchase_order_line_id' => array_filter([
+                $withPo ? 'required' : 'nullable',
+                'integer',
+                $withPo ? 'exists:purchase_order_lines,id' : 'prohibited',
+            ]),
             // Bobina única: si se indica bobina_count, se generan N bobinas y el ingreso se registra por bobina.
             'lines.*.bobina_count' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'lines.*.bobina_weight_kg' => ['nullable', 'numeric', 'min:0.001'],
@@ -49,10 +62,10 @@ class StorePurchaseReceiptRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            if ($this->boolean('without_purchase_order')) {
+            if ($this->withoutPurchaseOrder() && $this->filled('purchase_order_id')) {
                 $validator->errors()->add(
-                    'without_purchase_order',
-                    'Las recepciones deben estar ligadas a una orden de compra.'
+                    'purchase_order_id',
+                    'No indique orden de compra cuando la recepción es sin OC.'
                 );
             }
 

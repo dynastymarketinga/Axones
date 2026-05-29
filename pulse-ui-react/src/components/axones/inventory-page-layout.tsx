@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils"
 export type AxonesInventoryModuleNavKey =
   | "materiales"
   | "recepciones-oc"
-  | "bobinas"
   | "movimientos-inventario"
   | "devoluciones"
 
@@ -20,7 +19,6 @@ const INVENTORY_MODULE_NAV: {
 }[] = [
   { key: "materiales", title: "Materiales", routeKey: "materiales" },
   { key: "recepciones-oc", title: "Recepción", routeKey: "recepciones-oc" },
-  { key: "bobinas", title: "Bobinas", routeKey: "bobinas" },
   { key: "movimientos-inventario", title: "Movimientos", routeKey: "movimientos-inventario" },
   { key: "devoluciones", title: "Devoluciones", routeKey: "devoluciones" },
 ]

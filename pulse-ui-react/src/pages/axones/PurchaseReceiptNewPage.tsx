@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
-import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText, Scale } from "lucide-react"
+import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText, PackagePlus, Scale } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -171,7 +171,7 @@ function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
 }
 
 /** Mensaje concreto por fila; evita el toast genérico cuando el fallo es solo el SKU del catálogo. */
-function receiptLineValidationMessage(row: FreeLine): string | null {
+function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: boolean): string | null {
   const hasPol = row.purchase_order_line_id.trim().length > 0
   const hasType = row.item_type.trim().length > 0
   const materialId = Number(row.material_id)
@@ -179,14 +179,16 @@ function receiptLineValidationMessage(row: FreeLine): string | null {
   const requiresDimensions = !HIDE_DIMENSIONS_FOR_TYPES.has(row.item_type)
   const micras = Number(row.micras)
   const ancho = Number(row.ancho_mm)
-  if (!hasPol) {
+  if (requirePurchaseOrderLine && !hasPol) {
     return "Falta asociar la fila a una línea de la orden de compra (recargue la OC o agregue de nuevo el ítem)."
   }
   if (!hasType) {
     return "Seleccione el tipo de ítem (Sustrato, Tinta, etc.) en cada fila."
   }
   if (!Number.isFinite(materialId) || materialId <= 0) {
-    return "Debe abrir «Material» y elegir un SKU del catálogo. Lo que muestra la OC es solo referencia hasta que seleccione el material."
+    return requirePurchaseOrderLine
+      ? "Debe abrir «Material» y elegir un SKU del catálogo. Lo que muestra la OC es solo referencia hasta que seleccione el material."
+      : "Seleccione un material del catálogo en cada fila."
   }
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return "Indique cantidad recibida mayor que 0 (entrada física)."
@@ -219,10 +221,17 @@ function mapReceiptItemTypeToMaterialFormTab(
   return "sustratos"
 }
 
+function defaultReceiptItemType(raw: string): (typeof RECEIPT_ITEM_TYPES)[number] {
+  const t = raw.trim()
+  return RECEIPT_ITEM_TYPES.includes(t as (typeof RECEIPT_ITEM_TYPES)[number])
+    ? (t as (typeof RECEIPT_ITEM_TYPES)[number])
+    : "Sustrato"
+}
+
 function emptyLine(): FreeLine {
   return {
     purchase_order_line_id: "",
-    item_type: "",
+    item_type: "Sustrato",
     material_id: "",
     micras: "",
     ancho_mm: "",
@@ -628,33 +637,33 @@ export default function PurchaseReceiptNewPage() {
     navigate("/proveedores/form", { state: { from: "/recepciones-nueva" } })
   }
 
+  function goToCreateMaterialFromReceipt(preferredRowIndex?: number) {
+    const resolvedIdx =
+      preferredRowIndex != null && preferredRowIndex >= 0 && preferredRowIndex < freeLines.length
+        ? preferredRowIndex
+        : 0
+    const row = freeLines[resolvedIdx]
+    const itemType = defaultReceiptItemType(row?.item_type ?? "")
+    if (!row?.item_type?.trim()) {
+      updateFreeLine(resolvedIdx, { item_type: itemType })
+    }
+    goToMaterialMaster(resolvedIdx, itemType)
+  }
+
   function goToMaterialMaster(
     rowIndex: number,
     itemType: string,
     preset?: { sku?: string; name?: string },
   ) {
-    if (!itemType.trim()) {
-      toast.error("Seleccione primero el tipo de ítem en esta fila.")
-      return
-    }
-    const area = mapItemTypeToInventoryArea(itemType)
-    const requiresDimensions = area === "material"
+    const resolvedType = defaultReceiptItemType(itemType)
     const row = freeLines[rowIndex]
-    if (requiresDimensions) {
-      const rowMicras = row?.micras?.trim() ? Number(String(row.micras).replace(",", ".")) : NaN
-      const rowAncho = row?.ancho_mm?.trim() ? Number(String(row.ancho_mm).replace(",", ".")) : NaN
-      if (!Number.isFinite(rowMicras) || !Number.isFinite(rowAncho) || rowMicras <= 0 || rowAncho <= 0) {
-        toast.error("Para sustratos complete Micras y Ancho en la fila antes de crear el material.")
-        return
-      }
-    }
 
     if (!saveReceiptDraftToSession()) return
 
     const presetSku = preset?.sku?.trim() ?? ""
     const presetName = preset?.name?.trim() ?? ""
     const selected = materials.find((m) => String(m.id) === row?.material_id)
-    const suggestedName = (presetName || presetSku || selected?.name) ?? (itemType ? `${itemType} ` : "")
+    const suggestedName = (presetName || presetSku || selected?.name) ?? (resolvedType ? `${resolvedType} ` : "")
     const suggestedSku = (presetSku || selected?.sku || "").toUpperCase()
 
     const dateRaw = receivedAt.trim().slice(0, 10)
@@ -664,7 +673,7 @@ export default function PurchaseReceiptNewPage() {
       state: {
         from: buildReceiptReturnPath(),
         materialPrefillFromReceipt: {
-          tab: mapReceiptItemTypeToMaterialFormTab(itemType),
+          tab: mapReceiptItemTypeToMaterialFormTab(resolvedType),
           sku: suggestedSku,
           name: suggestedName,
           micras: row?.micras?.trim() ?? "",
@@ -718,6 +727,16 @@ export default function PurchaseReceiptNewPage() {
     })
   }
 
+  function clearPurchaseOrder() {
+    setPurchaseOrderId(null)
+    setPurchaseOrderDetail(null)
+    setPurchaseOrderError(false)
+    skipRemoteFreeLinesForPurchaseOrderRef.current = null
+    pendingRestoredFreeLinesRef.current = null
+    setFreeLines([emptyLine()])
+    setPoComboOpen(false)
+  }
+
   function materialsForItemType(itemType: string) {
     if (!itemType) return materials
     const area = mapItemTypeToInventoryArea(itemType)
@@ -750,13 +769,15 @@ export default function PurchaseReceiptNewPage() {
   async function submit(ev: React.FormEvent, skipDuplicateCheck = false) {
     ev.preventDefault()
 
+    const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
     const supplierOk = Number.isFinite(supplierId) && (supplierId ?? 0) > 0
     const invoiceOk = invoiceNumber.trim().length > 0
     const receivedAtOk = receivedAt.trim().length > 0
     const purchaseOrderOk =
-      Number.isFinite(purchaseOrderId) &&
-      (purchaseOrderId ?? 0) > 0 &&
-      Boolean(purchaseOrderDetail?.code)
+      !hasPurchaseOrder ||
+      (Number.isFinite(purchaseOrderId) &&
+        (purchaseOrderId ?? 0) > 0 &&
+        Boolean(purchaseOrderDetail?.code))
     setSupplierError(!supplierOk)
     setInvoiceNumberError(!invoiceOk)
     setReceivedAtError(!receivedAtOk)
@@ -777,13 +798,12 @@ export default function PurchaseReceiptNewPage() {
       toast.error("La fecha recibido es obligatoria.")
       return
     }
-    if (!purchaseOrderOk) {
+    if (hasPurchaseOrder && !purchaseOrderOk) {
       document.getElementById("purchase-order-field")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("Seleccione la orden de compra del proveedor.")
+      toast.error("No se pudo cargar la orden de compra seleccionada.")
       return
     }
     const poDetail = purchaseOrderDetail
-    if (!poDetail?.code) return
 
     const rowsWithContent = freeLines
       .map((row, index) => ({ row, index }))
@@ -804,7 +824,9 @@ export default function PurchaseReceiptNewPage() {
       return
     }
 
-    const firstInvalid = rowsWithContent.findIndex(({ row }) => receiptLineValidationMessage(row) !== null)
+    const firstInvalid = rowsWithContent.findIndex(
+      ({ row }) => receiptLineValidationMessage(row, hasPurchaseOrder) !== null,
+    )
 
     if (firstInvalid !== -1) {
       const invalidEntry = rowsWithContent[firstInvalid]
@@ -813,38 +835,59 @@ export default function PurchaseReceiptNewPage() {
       document
         .getElementById(`receipt-row-${invalidRowIndex}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" })
-      const msg = invalidEntry ? receiptLineValidationMessage(invalidEntry.row) : null
+      const msg = invalidEntry
+        ? receiptLineValidationMessage(invalidEntry.row, hasPurchaseOrder)
+        : null
       toast.error(
         msg ??
-          "Revise línea de OC, tipo, material del catálogo, cantidad y (en Sustrato) Micras y Ancho.",
+          (hasPurchaseOrder
+            ? "Revise línea de OC, tipo, material del catálogo, cantidad y (en Sustrato) Micras y Ancho."
+            : "Revise tipo, material del catálogo, cantidad y (en Sustrato) Micras y Ancho."),
       )
       return
     }
 
     setFirstInvalidRowIndex(null)
-    const lines = rowsWithContent
-      .map((row) => ({
-        purchase_order_line_id: Number(row.row.purchase_order_line_id),
-        material_id: Number(row.row.material_id),
-        quantity: Number(row.row.quantity),
-        item_type: mapUiItemTypeToApi(row.row.item_type),
-        unit: row.row.unit || "kg",
-        micras: row.row.micras.trim() ? Number(row.row.micras) : null,
-        ancho_mm: row.row.ancho_mm.trim() ? Number(row.row.ancho_mm) : null,
-      }))
+    const lines = rowsWithContent.map(({ row }) => {
+      const base = {
+        material_id: Number(row.material_id),
+        quantity: Number(row.quantity),
+        item_type: mapUiItemTypeToApi(row.item_type),
+        unit: row.unit || "kg",
+        micras: row.micras.trim() ? Number(row.micras) : null,
+        ancho_mm: row.ancho_mm.trim() ? Number(row.ancho_mm) : null,
+      }
+      if (hasPurchaseOrder) {
+        return {
+          ...base,
+          purchase_order_line_id: Number(row.purchase_order_line_id),
+        }
+      }
+      return base
+    })
 
-    const payload = {
-      purchase_order_id: purchaseOrderId,
-      without_purchase_order: false,
-      exception_reason: null,
-      supplier_id: supplierId,
-      supplier_name: selectedSupplier?.name?.trim() || null,
-      invoice_number: invoiceNumber.trim() || null,
-      purchase_order_reference: poDetail.code.trim(),
-      notes: notes.trim() || null,
-      received_at: receivedAt || null,
-      lines,
-    }
+    const payload: Record<string, unknown> = hasPurchaseOrder
+      ? {
+          purchase_order_id: purchaseOrderId,
+          without_purchase_order: false,
+          exception_reason: null,
+          supplier_id: supplierId,
+          supplier_name: selectedSupplier?.name?.trim() || null,
+          invoice_number: invoiceNumber.trim() || null,
+          purchase_order_reference: poDetail?.code?.trim() ?? null,
+          notes: notes.trim() || null,
+          received_at: receivedAt || null,
+          lines,
+        }
+      : {
+          without_purchase_order: true,
+          supplier_id: supplierId,
+          supplier_name: selectedSupplier?.name?.trim() || null,
+          invoice_number: invoiceNumber.trim() || null,
+          notes: notes.trim() || null,
+          received_at: receivedAt || null,
+          lines,
+        }
 
     if (!skipDuplicateCheck) {
       try {
@@ -852,7 +895,9 @@ export default function PurchaseReceiptNewPage() {
           query: {
             supplier_id: String(supplierId ?? ""),
             invoice_number: invoiceNumber.trim() || undefined,
-            purchase_order_reference: poDetail.code.trim() || undefined,
+            ...(hasPurchaseOrder && poDetail?.code
+              ? { purchase_order_reference: poDetail.code.trim() }
+              : {}),
           },
         })
         if (duplicateCheck.has_duplicates) {
@@ -870,6 +915,7 @@ export default function PurchaseReceiptNewPage() {
   }
 
   const reachedItemLimit = freeLines.length >= MAX_RECEIPT_LINES
+  const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
 
   const receiptAreaSummary = useMemo(() => {
     const areaSet = new Set<"material" | "tintas" | "quimicos" | "miscelaneos">()
@@ -905,8 +951,8 @@ export default function PurchaseReceiptNewPage() {
             Ingreso de material
           </h1>
           <p className="text-muted-foreground text-sm">
-            Punto de partida del stock: registre aquí las cantidades físicas que entran al inventario (con OC y
-            factura).
+            Punto de partida del stock: registre aquí las cantidades físicas que entran al inventario (con factura; la
+            orden de compra es opcional).
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -948,10 +994,11 @@ export default function PurchaseReceiptNewPage() {
           <Scale className="h-4 w-4 text-primary" aria-hidden />
           <AlertTitle className="text-foreground">Cantidades reales en inventario</AlertTitle>
           <AlertDescription>
-            Esta pantalla es el registro oficial de <strong>entrada física</strong> contra orden de compra: lo que
-            guarde aquí es lo que suma al stock del material (y queda trazado en movimientos de inventario). Use kg
-            reales en báscula o lo documentado en la factura de este despacho; el maestro de materiales no sustituye
-            esta recepción.
+            Esta pantalla es el registro oficial de <strong>entrada física</strong> al inventario: lo que guarde aquí es
+            lo que suma al stock del material (y queda trazado en movimientos de inventario). Use kg reales en báscula o
+            lo documentado en la factura de este despacho. Si vincula una orden de compra, el sistema cruza líneas y
+            respeta lo pendiente; sin OC registra la cantidad que indique. El maestro de materiales no sustituye esta
+            recepción.
           </AlertDescription>
         </Alert>
 
@@ -1090,7 +1137,7 @@ export default function PurchaseReceiptNewPage() {
             </div>
           </div>
           <div id="purchase-order-field" className="grid gap-2">
-            <Label>Orden de compra *</Label>
+            <Label>Orden de compra (opcional)</Label>
             <div className="flex items-center gap-2">
               <Popover open={poComboOpen} onOpenChange={setPoComboOpen}>
                 <PopoverTrigger asChild>
@@ -1126,7 +1173,7 @@ export default function PurchaseReceiptNewPage() {
                               ? `${purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code ?? "…"} · ${purchaseOrderStatusHint(
                                 purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
                               )}${poDetailLoading ? " (cargando…)" : ""}`
-                              : "Seleccione orden de compra…"}
+                              : "Entrada directa (sin OC)…"}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
@@ -1138,10 +1185,26 @@ export default function PurchaseReceiptNewPage() {
                     <CommandList className="max-h-60">
                       <CommandEmpty>
                         {supplierId && !poListLoading
-                          ? "No hay órdenes abiertas o parciales para este proveedor."
+                          ? "No hay órdenes abiertas o parciales. Use «Sin orden de compra» para entrada directa."
                           : "Seleccione un proveedor."}
                       </CommandEmpty>
                       <CommandGroup>
+                        {supplierId ? (
+                          <CommandItem
+                            value="sin orden de compra entrada directa"
+                            onSelect={() => clearPurchaseOrder()}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                !purchaseOrderId ? "opacity-100" : "opacity-0",
+                              )}
+                              aria-hidden
+                            />
+                            <span className="font-medium">Sin orden de compra</span>
+                            <span className="text-muted-foreground ml-2 text-xs">Entrada directa al inventario</span>
+                          </CommandItem>
+                        ) : null}
                         {purchaseOrderOptions.map((po) => (
                           <CommandItem
                             key={po.id}
@@ -1195,11 +1258,12 @@ export default function PurchaseReceiptNewPage() {
         </div>
 
         <p className="text-muted-foreground text-xs">
-          Cada ingreso va contra una orden de compra del mismo proveedor. En cada fila elija la línea de la OC. En{" "}
-          <strong>Cantidad recibida</strong> registre la cantidad física que entra al inventario en esta entrega (por
-          ejemplo los kg reales en báscula o lo que venga en la factura de ese despacho): puede ajustarla respecto al
-          valor sugerido por la OC, siempre sin superar lo pendiente de esa línea. Los estados Parcial y Completa de la
-          orden se calculan al guardar la recepción.
+          <strong>Sin orden de compra:</strong> elija tipo, material y la cantidad física que entra (kg en báscula o
+          factura); no hay tope de pedido.{" "}
+          <strong>Con orden de compra:</strong> en cada fila use la línea de la OC; en{" "}
+          <strong>Cantidad recibida</strong> registre lo recibido en este despacho (puede ser menor al sugerido, pero no
+          mayor que lo pendiente de esa línea). Los estados Parcial y Completa de la orden se calculan al guardar cuando
+          hay OC vinculada.
         </p>
 
         <div className="grid gap-2">
@@ -1218,7 +1282,18 @@ export default function PurchaseReceiptNewPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium">Items recibidos</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                title="Abre Nuevo material; se guarda el borrador de esta recepción para continuar al volver."
+                onClick={() => goToCreateMaterialFromReceipt()}
+              >
+                <PackagePlus className="h-4 w-4" aria-hidden />
+                Crear material
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -1236,7 +1311,9 @@ export default function PurchaseReceiptNewPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-14">N°</TableHead>
-                  <TableHead className="min-w-[200px]">Ítem solicitado (OC)</TableHead>
+                  {hasPurchaseOrder ? (
+                    <TableHead className="min-w-[200px]">Ítem solicitado (OC)</TableHead>
+                  ) : null}
                   <TableHead className="w-40">Tipo</TableHead>
                   <TableHead className="min-w-[200px]">Material *</TableHead>
                   <TableHead className="w-24">Micras</TableHead>
@@ -1257,28 +1334,30 @@ export default function PurchaseReceiptNewPage() {
                         {i + 1}
                       </div>
                     </TableCell>
-                    <TableCell className="align-top">
-                      {line.purchase_order_line_id ? (
-                        (() => {
-                          const pol = purchaseOrderDetail?.lines?.find(
-                            (ln) => String(ln.id) === String(line.purchase_order_line_id),
-                          )
-                          if (!pol) return null
-                          return (
-                            <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
-                              {formatPolLabel(pol)}
-                            </div>
-                          )
-                        })()
-                      ) : (
-                        <div
-                          className="flex h-9 min-w-0 max-w-full items-center truncate rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground"
-                          title="Seleccione OC arriba para cargar ítems…"
-                        >
-                          Seleccione OC arriba para cargar ítems…
-                        </div>
-                      )}
-                    </TableCell>
+                    {hasPurchaseOrder ? (
+                      <TableCell className="align-top">
+                        {line.purchase_order_line_id ? (
+                          (() => {
+                            const pol = purchaseOrderDetail?.lines?.find(
+                              (ln) => String(ln.id) === String(line.purchase_order_line_id),
+                            )
+                            if (!pol) return null
+                            return (
+                              <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                                {formatPolLabel(pol)}
+                              </div>
+                            )
+                          })()
+                        ) : (
+                          <div
+                            className="flex h-9 min-w-0 max-w-full items-center truncate rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground"
+                            title="Seleccione OC arriba para cargar ítems…"
+                          >
+                            Seleccione OC arriba para cargar ítems…
+                          </div>
+                        )}
+                      </TableCell>
+                    ) : null}
                     <TableCell className="align-top">
                       <Select
                         value={line.item_type}
@@ -1453,14 +1532,15 @@ export default function PurchaseReceiptNewPage() {
                       <div className="flex items-start justify-end gap-1.5">
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="secondary"
                           size="sm"
-                          className="h-8 px-2 text-xs"
+                          className="h-8 shrink-0 px-2 text-xs"
                           disabled={saving}
-                          title="Abre el formulario Nuevo material; se guarda el borrador de esta recepción."
-                          onClick={() => goToMaterialMaster(i, line.item_type)}
+                          title="Ir a Nuevo material (se guarda el borrador de esta recepción)."
+                          onClick={() => goToCreateMaterialFromReceipt(i)}
                         >
-                          + Nuevo material
+                          <PackagePlus className="mr-1 h-3.5 w-3.5" aria-hidden />
+                          Crear material
                         </Button>
                         <Button
                           type="button"
@@ -1547,13 +1627,16 @@ export default function PurchaseReceiptNewPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
-            <p><strong>Qué hace:</strong> suma existencias al inventario desde una recepción ligada a una orden de compra (proveedor, factura, fecha e ítems).</p>
+            <p><strong>Qué hace:</strong> suma existencias al inventario (proveedor, factura, fecha e ítems). La orden de compra es opcional.</p>
             <p>
-              <strong>Cantidad recibida:</strong> aquí va la entrada real (p. ej. los kg que pesó o que constan en la
-              factura de este despacho), no un dato “teórico” de la OC. Puede corregir el valor sugerido al cargar la
-              línea; el sistema no permite pasar lo pendiente de esa línea en la orden.
+              <strong>Sin OC:</strong> elija tipo, material del catálogo y la cantidad física que entra (kg reales).
+              No hay tope de pedido.
             </p>
-            <p><strong>Flujo por línea:</strong> elija la línea de la OC, tipo, material y cantidad; si no existe el material, use <strong>+ Nuevo material</strong> para abrir el formulario completo de maestro. Se guarda un borrador de esta recepción y al volver (con proveedor ya elegido) puede seguir y seleccionar el SKU nuevo en la lista.</p>
+            <p>
+              <strong>Con OC:</strong> elija la línea de la OC, tipo, material y cantidad. La cantidad no puede superar
+              lo pendiente de esa línea; al guardar se actualiza el avance de la orden.
+            </p>
+            <p><strong>Flujo por línea:</strong> si no existe el material, use <strong>+ Nuevo material</strong>. Se guarda un borrador y al volver puede seguir con el mismo proveedor.</p>
             <p><strong>Importante:</strong> el stock del material no se carga al crear el SKU; las cantidades reales entran solo por esta recepción (u otros flujos de inventario autorizados). Esta pantalla no reemplaza el maestro de productos.</p>
             <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo (maestro, stock en cero), 3) Ingreso de material cuando llegue físicamente.</p>
           </div>

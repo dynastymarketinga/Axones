@@ -530,6 +530,10 @@ export function hasLaminacionSavedData(form: Record<string, unknown> | null | un
     "lamTimerState",
     "lamEntradaVirgenRechazadasKg",
     "lamEntradaVirgenMaterialesBuenosKg",
+    "lamDevolucionBuenaKg",
+    "lamDevolucionRechazadaKg",
+    "lamChecklistEstado",
+    "lamChecklistObs",
   ]
 
   for (const key of singleKeys) {
@@ -547,6 +551,9 @@ export function hasLaminacionSavedData(form: Record<string, unknown> | null | un
 
   const hist = f[LAM_TURNOS_HISTORIAL_KEY]
   if (Array.isArray(hist) && hist.length > 0) return true
+
+  const chk = f.lamChecklistChecked
+  if (Array.isArray(chk) && chk.length > 0) return true
 
   if (parseLaminacionTurnos(f[LAM_TURNOS_KEY]).length > 0) return true
   if (parseLaminacionTurnoActual(f[LAM_ACTUAL_KEY]) !== null) return true
@@ -779,6 +786,99 @@ export function readLaminacionEstadoArea(raw: unknown): LaminacionEstadoArea {
   const s = readString(raw).toLowerCase().trim()
   if (s === "finalizada") return "finalizada"
   return "abierta"
+}
+
+function mergeKgSlotSeries(turnoSlots: string[], mirrorSlots: string[]): string[] {
+  return turnoSlots.map((v, i) => {
+    const best = Math.max(readLamNumber(v), readLamNumber(mirrorSlots[i]))
+    return best > 0.005 ? readNumberString(best) : ""
+  })
+}
+
+/** Alinea turno actual con el espejo plano lam* antes de cierre (evita kg perdidos). */
+export function syncLaminacionTurnoFromFormMirror(
+  form: Record<string, unknown>,
+  turno: LaminacionTurnoEntry,
+): LaminacionTurnoEntry {
+  const mirrorImpresa = getNumericSeries(form, "lamEntradaImpresaBobinasKg", LAM_BOBINAS_SLOTS)
+  const mirrorVirgen = getNumericSeries(form, "lamEntradaVirgenBobinasKg", LAM_BOBINAS_SLOTS)
+  const mirrorSalida = getNumericSeries(form, "lamSalidaBobinasKg", LAM_BOBINAS_SLOTS)
+  const mirrorImpresaMeta = getMetaSeries(form, "lamEntradaImpresaBobinasMeta", LAM_BOBINAS_SLOTS)
+  const mirrorVirgenMeta = getMetaSeries(form, "lamEntradaVirgenBobinasMeta", LAM_BOBINAS_SLOTS)
+  const mirrorSalidaMeta = getMetaSeries(form, "lamSalidaBobinasMeta", LAM_BOBINAS_SLOTS)
+  const scrapT =
+    readLamNumber(turno.scrapTransparenteKg) > 0
+      ? turno.scrapTransparenteKg
+      : readNumberString(form.lamScrapTransparenteKg)
+  const scrapI =
+    readLamNumber(turno.scrapImpresoKg) > 0 ? turno.scrapImpresoKg : readNumberString(form.lamScrapImpresoKg)
+  const scrapL =
+    readLamNumber(turno.scrapLaminadoKg) > 0 ? turno.scrapLaminadoKg : readNumberString(form.lamScrapLaminadoKg)
+
+  return {
+    ...turno,
+    entradaImpresaBobinasKg: mergeKgSlotSeries(turno.entradaImpresaBobinasKg, mirrorImpresa),
+    entradaVirgenBobinasKg: mergeKgSlotSeries(turno.entradaVirgenBobinasKg, mirrorVirgen),
+    salidaBobinasKg: mergeKgSlotSeries(turno.salidaBobinasKg, mirrorSalida),
+    entradaImpresaBobinasMeta: turno.entradaImpresaBobinasMeta.map((m, i) => {
+      const mirror = mirrorImpresaMeta[i] ?? emptyBobinaLabelMeta()
+      return readLamNumber(m.peso) > 0 || Object.values(m).some((v) => readString(v).trim() !== "")
+        ? m
+        : mirror
+    }),
+    entradaVirgenBobinasMeta: turno.entradaVirgenBobinasMeta.map((m, i) => {
+      const mirror = mirrorVirgenMeta[i] ?? emptyBobinaLabelMeta()
+      return readLamNumber(m.peso) > 0 || Object.values(m).some((v) => readString(v).trim() !== "")
+        ? m
+        : mirror
+    }),
+    salidaBobinasMeta: turno.salidaBobinasMeta.map((m, i) => {
+      const mirror = mirrorSalidaMeta[i] ?? emptyBobinaLabelMeta()
+      return readLamNumber(m.peso) > 0 || Object.values(m).some((v) => readString(v).trim() !== "")
+        ? m
+        : mirror
+    }),
+    metrajeProduccion:
+      readLamNumber(turno.metrajeProduccion) > 0
+        ? turno.metrajeProduccion
+        : readNumberString(form.lamMetrajeProduccion),
+    adhesivoEntradaKg:
+      readLamNumber(turno.adhesivoEntradaKg) > 0
+        ? turno.adhesivoEntradaKg
+        : readNumberString(form.lamAdhesivoEntradaKg),
+    adhesivoSobroKg:
+      readLamNumber(turno.adhesivoSobroKg) > 0
+        ? turno.adhesivoSobroKg
+        : readNumberString(form.lamAdhesivoSobroKg),
+    catalizadorEntradaKg:
+      readLamNumber(turno.catalizadorEntradaKg) > 0
+        ? turno.catalizadorEntradaKg
+        : readNumberString(form.lamCatalizadorEntradaKg),
+    catalizadorSobroKg:
+      readLamNumber(turno.catalizadorSobroKg) > 0
+        ? turno.catalizadorSobroKg
+        : readNumberString(form.lamCatalizadorSobroKg),
+    acetatoEntradaLt:
+      readLamNumber(turno.acetatoEntradaLt) > 0
+        ? turno.acetatoEntradaLt
+        : readNumberString(form.lamAcetatoEntradaLt),
+    acetatoSobroLt:
+      readLamNumber(turno.acetatoSobroLt) > 0 ? turno.acetatoSobroLt : readNumberString(form.lamAcetatoSobroLt),
+    entradaVirgenRechazadasKg:
+      readLamNumber(turno.entradaVirgenRechazadasKg) > 0
+        ? turno.entradaVirgenRechazadasKg
+        : readNumberString(form.lamEntradaVirgenRechazadasKg),
+    entradaVirgenMaterialesBuenosKg:
+      readLamNumber(turno.entradaVirgenMaterialesBuenosKg) > 0
+        ? turno.entradaVirgenMaterialesBuenosKg
+        : readNumberString(form.lamEntradaVirgenMaterialesBuenosKg),
+    scrapTransparenteKg: scrapT || "0",
+    scrapImpresoKg: scrapI || "0",
+    scrapLaminadoKg: scrapL || "0",
+    observaciones: readString(turno.observaciones).trim()
+      ? turno.observaciones
+      : readString(form.lamObservaciones),
+  }
 }
 
 export function laminacionTurnoToMirror(t: LaminacionTurnoEntry): Record<string, unknown> {

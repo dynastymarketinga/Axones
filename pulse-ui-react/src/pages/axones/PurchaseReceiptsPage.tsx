@@ -40,6 +40,7 @@ import {
 type ReceiptRow = {
   id: number
   purchase_order_id?: number | null
+  without_purchase_order?: boolean
   supplier_id?: number | null
   supplier_name?: string | null
   supplier?: {
@@ -454,7 +455,13 @@ export default function PurchaseReceiptsPage() {
                     {receiptMaterialNamesSummary(r)}
                   </TableCell>
                   <TableCell className="transition-colors group-hover:bg-muted/60">{r.invoice_number || "—"}</TableCell>
-                  <TableCell className="transition-colors group-hover:bg-muted/60">{r.purchase_order_reference || "—"}</TableCell>
+                  <TableCell className="transition-colors group-hover:bg-muted/60">
+                    {r.without_purchase_order ? (
+                      <span className="text-muted-foreground text-xs font-medium">Sin OC</span>
+                    ) : (
+                      r.purchase_order_reference || "—"
+                    )}
+                  </TableCell>
                   <TableCell className="transition-colors group-hover:bg-muted/60">
                     {r.received_at
                       ? String(r.received_at).slice(0, 19).replace("T", " ")

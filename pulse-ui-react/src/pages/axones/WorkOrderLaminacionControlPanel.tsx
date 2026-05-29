@@ -3,7 +3,7 @@
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
-import { Layers, Package } from "lucide-react"
+import { Layers, ListChecks, Package } from "lucide-react"
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
@@ -11,7 +11,11 @@ import { WindingFigurePicker } from "./WindingFigurePicker"
 import { MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import { LAMINACION_CONTROL_SAVED_EVENT } from "@/lib/laminacion-mes-band-status"
-import { cumulativeEffectiveSeconds, formatHmsFromSeconds } from "@/lib/mes-timer-band-shared"
+import {
+  cumulativeDeadSeconds,
+  cumulativeEffectiveSeconds,
+  formatHmsFromSeconds,
+} from "@/lib/mes-timer-band-shared"
 import {
   canSaveProductionAreaForm,
   hasProductionTimerStarted,
@@ -35,6 +39,10 @@ import WorkOrderLaminacionOpsSection, {
   stringsFromActivePersonnel,
 } from "./WorkOrderLaminacionOpsSection"
 import {
+  parseLamChecklistChecked,
+  type LamChecklistEstado,
+} from "./laminacion-checklist-config"
+import {
   LAM_ACTUAL_KEY,
   LAM_ESTADO_KEY,
   LAM_PAUSE_REASONS,
@@ -50,6 +58,7 @@ import {
   parseLaminacionTurnoActual,
   parseLaminacionTurnos,
   readLaminacionEstadoArea,
+  syncLaminacionTurnoFromFormMirror,
   sumSalidaKgTurno,
   sumScrapKgTurno,
   LAM_BOBINAS_SLOTS,
@@ -115,8 +124,6 @@ function normalizeNumericString(v: unknown): string {
   if (n === null) return ""
   return String(n)
 }
-
-const LOCAL_LAMINACION_DRAFT_PREFIX = "axones.laminacion.control.draft."
 
 /** Tonos visuales para confirmaciones del panel de laminación (alineados a cada acción). */
 type MesLaminacionConfirmTone =
@@ -219,50 +226,49 @@ function MesLaminacionConfirmDialog(props: MesLaminacionConfirmDialogProps) {
   )
 }
 
-const MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES = {
+const MES_LAMINACION_TOAST_SURFACE_STYLE = {
+  backgroundColor: "#ffffff",
+  opacity: 1,
+} as const
+
+const MES_LAMINACION_SUCCESS_TOAST_CLASSNAMES = {
   toast:
-    "border-violet-200/70 bg-gradient-to-b from-violet-50/50 to-background text-foreground shadow-lg dark:from-violet-950/25 dark:to-background",
-  title: "text-foreground text-sm font-medium",
-  success: "!bg-transparent !border-transparent",
-  description: "text-muted-foreground text-sm",
+    "!bg-white !opacity-100 shadow-lg border border-slate-200 !text-slate-900 [--normal-bg:#ffffff] [--success-bg:#ffffff] [&_[data-close-button]]:!bg-white [&_[data-close-button]]:!border-slate-300 [&_[data-close-button]]:!opacity-100 [&_[data-description]]:!text-slate-600",
+  title: "!text-slate-900 text-sm font-medium leading-snug",
+  success: "!bg-white !border-slate-200 !text-slate-900",
+  description: "!text-slate-600 text-sm leading-snug",
   icon: "text-violet-600",
+  closeButton: "!bg-white !border-slate-300 hover:!bg-slate-50",
 } as const
 
 function mesLaminacionToastSuccess(message: string) {
-  toast.success(message, {
+  toast(message, {
     richColors: false,
-    classNames: MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES,
+    classNames: MES_LAMINACION_SUCCESS_TOAST_CLASSNAMES,
+    style: MES_LAMINACION_TOAST_SURFACE_STYLE,
     icon: createElement(Sparkles, { className: "h-4 w-4 shrink-0 text-violet-600", "aria-hidden": true }),
   })
 }
 
 function mesLaminacionToastWarning(message: string) {
-  toast.warning(message, {
+  toast(message, {
     richColors: false,
     classNames: {
-      ...MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES,
-      warning: "!bg-transparent !border-transparent",
+      ...MES_LAMINACION_SUCCESS_TOAST_CLASSNAMES,
+      toast:
+        "!bg-white !opacity-100 shadow-lg border border-amber-200 !text-slate-900 [--normal-bg:#ffffff] [--warning-bg:#ffffff] [&_[data-close-button]]:!bg-white [&_[data-close-button]]:!border-amber-200 [&_[data-close-button]]:!opacity-100 [&_[data-description]]:!text-slate-600",
+      warning: "!bg-white !border-amber-200 !text-slate-900",
       icon: "text-amber-600",
     },
+    style: MES_LAMINACION_TOAST_SURFACE_STYLE,
     icon: createElement(AlertCircle, { className: "h-4 w-4 shrink-0 text-amber-600", "aria-hidden": true }),
   })
 }
 
-type LocalLaminacionDraft = {
-  work_order_id: number
-  saved_at_ms: number
-  // Guardamos lo mínimo para rehidratar el temporizador + turno actual.
-  active_turno: unknown
-  mirror: Record<string, unknown>
-}
-
-function clearLocalLaminacionDrafts(workOrderId: number) {
+/** Limpia borradores legacy del navegador (ya no se usan; el estado viene del servidor). */
+function purgeLegacyLaminacionBrowserDrafts(workOrderId: number) {
   try {
-    localStorage.removeItem(`${LOCAL_LAMINACION_DRAFT_PREFIX}${workOrderId}`)
-  } catch {
-    // ignore
-  }
-  try {
+    localStorage.removeItem(`axones.laminacion.control.draft.${workOrderId}`)
     localStorage.removeItem(`axones.laminacion.timer-preview.${workOrderId}`)
   } catch {
     // ignore
@@ -292,6 +298,7 @@ export default function WorkOrderLaminacionControlPanel({
   const [labelEditorIndex, setLabelEditorIndex] = useState(0)
   const [labelEditorDraft, setLabelEditorDraft] = useState<BobinaLabelMeta>(emptyBobinaLabelMeta())
   const [labelEditorError, setLabelEditorError] = useState("")
+  const [checklistOpen, setChecklistOpen] = useState(false)
 
   /** Borrador para iniciar turno (sin turno activo). */
   const [draftTurno, setDraftTurno] = useState<"diurno" | "nocturno">("diurno")
@@ -345,9 +352,9 @@ export default function WorkOrderLaminacionControlPanel({
       return
     }
     const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    setDraftPeople((p) => [...p, { id, role, name: trimmed }])
+    setDraftPeople((p) => [...p, { id, role, name: trimmed, grupo: draftGrupo, turno: draftTurno }])
     setDraftStaging((s) => ({ ...s, name: "" }))
-  }, [])
+  }, [draftGrupo, draftTurno])
 
   const removeDraftPerson = useCallback((id: string) => {
     setDraftPeople((prev) => prev.filter((p) => p.id !== id))
@@ -360,45 +367,9 @@ export default function WorkOrderLaminacionControlPanel({
       const payload = await apiFetch<OrdenTrabajoPayload>(`work-orders/${workOrderId}/orden-trabajo`)
       setPrefill(payload.prefill ?? {})
       const mergedForm = mergePrefill(payload.prefill ?? {}, payload.form)
+      purgeLegacyLaminacionBrowserDrafts(workOrderId)
       const boot = bootstrapLaminacionFormState(mergedForm)
-      if (readLaminacionEstadoArea(boot[LAM_ESTADO_KEY]) === "finalizada") {
-        setForm(boot)
-        return
-      }
-      // Rehidratar desde respaldo local si hay un temporizador más reciente.
-      try {
-        const raw = localStorage.getItem(`${LOCAL_LAMINACION_DRAFT_PREFIX}${workOrderId}`)
-        if (raw) {
-          const draft = JSON.parse(raw) as Partial<LocalLaminacionDraft>
-          const serverLastResume = readNumber(boot.lamTimerLastResumeAtMs)
-          const serverPauseAt = readNumber(boot.lamTimerPauseAtMs)
-          const serverTimerAny = Math.max(serverLastResume, serverPauseAt)
-
-          const draftMirror =
-            draft.mirror && typeof draft.mirror === "object"
-              ? (draft.mirror as Record<string, unknown>)
-              : null
-          const draftLastResume = readNumber(draftMirror?.lamTimerLastResumeAtMs)
-          const draftPauseAt = readNumber(draftMirror?.lamTimerPauseAtMs)
-          const draftTimerAny = Math.max(draftLastResume, draftPauseAt)
-
-          if (draftTimerAny > serverTimerAny && draft.active_turno) {
-            setForm(
-              bootstrapLaminacionFormState({
-                ...boot,
-                [LAM_ACTUAL_KEY]: draft.active_turno,
-                ...(draftMirror ?? {}),
-              }),
-            )
-          } else {
-            setForm(boot)
-          }
-        } else {
-          setForm(boot)
-        }
-      } catch {
-        setForm(boot)
-      }
+      setForm(boot)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar la OT para laminacion.")
@@ -412,6 +383,13 @@ export default function WorkOrderLaminacionControlPanel({
   useEffect(() => {
     void load()
   }, [load])
+
+  const formRef = useRef(form)
+  formRef.current = form
+
+  useEffect(() => {
+    purgeLegacyLaminacionBrowserDrafts(workOrderId)
+  }, [workOrderId])
 
   useEffect(() => {
     let cancelled = false
@@ -462,6 +440,16 @@ export default function WorkOrderLaminacionControlPanel({
   const scrapLaminado = readLamNumber(form.lamScrapLaminadoKg)
   const totalScrap = scrapTransparente + scrapImpreso + scrapLaminado
   const adhesivoConsumido = Math.max(0, readLamNumber(form.lamAdhesivoEntradaKg) - readLamNumber(form.lamAdhesivoSobroKg))
+  const catalizadorConsumido = Math.max(
+    0,
+    readLamNumber(form.lamCatalizadorEntradaKg) - readLamNumber(form.lamCatalizadorSobroKg),
+  )
+  const acetatoConsumido = Math.max(0, readLamNumber(form.lamAcetatoEntradaLt) - readLamNumber(form.lamAcetatoSobroLt))
+  const totalEntradaTurno = totalEntradaImpresa + totalEntradaVirgen + adhesivoConsumido
+  const checklistCheckedIds = useMemo(
+    () => parseLamChecklistChecked(form.lamChecklistChecked),
+    [form.lamChecklistChecked],
+  )
   const { mermaCalc, refilPct } = useMemo(
     () =>
       computeLamMermaRefil({
@@ -533,19 +521,23 @@ export default function WorkOrderLaminacionControlPanel({
   const timerState = readString(form.lamTimerState) || "pending"
   const timerRunning = timerState === "running"
   const timerPaused = timerState === "paused"
-  const effectiveAcc = readNumber(form.lamTimerEffectiveAccSec)
-  const deadAcc = readNumber(form.lamTimerDeadAccSec)
-  const lastResumeAt = readNumber(form.lamTimerLastResumeAtMs)
-  const pauseAt = readNumber(form.lamTimerPauseAtMs)
   const nowMs = Date.now() + timerTick * 0
-  const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
-  const deadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
-  const totalSec = effectiveSec + deadSec
   const otEffectiveAccSec = useMemo(
-    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, Date.now()),
+    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
   )
-  const kgHora = effectiveSec > 0 ? (totalSalidaTurno / (effectiveSec / 3600)).toFixed(2) : "0.00"
+  const otDeadAccSec = useMemo(
+    () => cumulativeDeadSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otTotalAccSec = otEffectiveAccSec + otDeadAccSec
+  const displayEffectiveSec = otEffectiveAccSec
+  const displayDeadSec = otDeadAccSec
+  const displayTotalSec = otTotalAccSec
+  const kgHora =
+    displayEffectiveSec > 0.01
+      ? (producidoAcumuladoKg / (displayEffectiveSec / 3600)).toFixed(2)
+      : "0.00"
   const pauseEntries = useMemo<LaminacionPauseEntry[]>(() => {
     const raw = form.lamTimerPauses
     if (!Array.isArray(raw)) return []
@@ -583,26 +575,6 @@ export default function WorkOrderLaminacionControlPanel({
     wasTimerPausedRef.current = timerPaused
   }, [timerPaused])
 
-  // Respaldo local del turno abierto (evita pérdida al navegar atrás/recargar antes del play).
-  useEffect(() => {
-    if (!Number.isFinite(workOrderId) || workOrderId < 1) return
-    if (!hasActiveTurno) return
-    try {
-      const cur = parseLaminacionTurnoActual(form[LAM_ACTUAL_KEY])
-      if (!cur) return
-      const mirror = laminacionTurnoToMirror(cur)
-      const draft: LocalLaminacionDraft = {
-        work_order_id: workOrderId,
-        saved_at_ms: Date.now(),
-        active_turno: cur,
-        mirror,
-      }
-      localStorage.setItem(`${LOCAL_LAMINACION_DRAFT_PREFIX}${workOrderId}`, JSON.stringify(draft))
-    } catch {
-      // no-op
-    }
-  }, [form, hasActiveTurno, workOrderId])
-
   const timerEverStarted = useMemo(
     () => hasProductionTimerStarted(mesTimerFieldsFromForm(form, "lam")),
     [form],
@@ -618,16 +590,27 @@ export default function WorkOrderLaminacionControlPanel({
     return hasActiveTurno
   }, [controlReadOnly, hasActiveTurno])
 
-  const canClickGuardar = canSaveProduction || canPersistShiftOpen
+  const canPersistEntreTurnos = useMemo(() => {
+    if (controlReadOnly || areaFinalizada) return false
+    if (hasActiveTurno) return false
+    return closedTurnos.length > 0
+  }, [areaFinalizada, closedTurnos.length, controlReadOnly, hasActiveTurno])
+
+  const canClickGuardar = canSaveProduction || canPersistShiftOpen || canPersistEntreTurnos
 
   const guardarHint = useMemo(() => {
     if (controlReadOnly) return ""
-    if (canSaveProduction) return ""
+    if (canSaveProduction) {
+      return "Guardar cierra este turno, lo deja en el historial arriba y reinicia las rejillas para abrir otro turno (Turno / Grupo / Personal)."
+    }
     if (canPersistShiftOpen) {
-      return "Turno abierto: puede guardar el registro. Para avisar a otras áreas, inicie el cronómetro (play) y vuelva a guardar."
+      return "Turno abierto: puede guardar cuadrilla sin producción. Para cerrar el turno con bobinas y tiempos, inicie el cronómetro (play) y pulse Guardar."
+    }
+    if (canPersistEntreTurnos) {
+      return "Entre turnos: puede guardar de nuevo el historial y los kg acumulados en el servidor (p. ej. si la bandeja no se actualizó)."
     }
     return MES_SAVE_BLOCKED_MESSAGE
-  }, [canPersistShiftOpen, canSaveProduction, controlReadOnly])
+  }, [canPersistEntreTurnos, canPersistShiftOpen, canSaveProduction, controlReadOnly])
 
   const canPreviewTimerReport = useMemo(() => {
     if (!hasActiveTurno) return false
@@ -694,9 +677,9 @@ export default function WorkOrderLaminacionControlPanel({
       },
       timer: {
         state: timerState,
-        total_hms: formatTimerHms(totalSec),
-        dead_hms: formatTimerHms(deadSec),
-        effective_hms: formatTimerHms(effectiveSec),
+        total_hms: formatTimerHms(displayTotalSec),
+        dead_hms: formatTimerHms(displayDeadSec),
+        effective_hms: formatTimerHms(displayEffectiveSec),
         kg_hora: kgHora,
       },
       pauses: pauseEntries.map((p) => ({
@@ -706,20 +689,21 @@ export default function WorkOrderLaminacionControlPanel({
         duration_hms: formatTimerHms(p.duration_sec),
       })),
     }
-    try {
-      localStorage.setItem(
-        `axones.laminacion.timer-preview.${workOrderId}`,
-        JSON.stringify(payload),
-      )
-    } catch {
-      toast.error("No se pudo guardar la vista previa en el navegador.")
+    const previewHash = (() => {
+      try {
+        const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+        return `#p=${encodeURIComponent(encoded)}`
+      } catch {
+        return ""
+      }
+    })()
+    if (!previewHash) {
+      toast.error("No se pudo preparar la vista previa.")
       return
     }
-    // Abrir dentro del sistema (SPA) bajo /axones (basename del router)
-    // usando una pestaña nueva para mantener la pantalla operativa abierta.
     const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
       String(workOrderId),
-    )}/laminacion/temporizador/vista-previa`
+    )}/laminacion/temporizador/vista-previa${previewHash}`
     window.open(url, "_blank", "noopener,noreferrer")
   }
 
@@ -836,9 +820,14 @@ export default function WorkOrderLaminacionControlPanel({
         mesLaminacionToastWarning(`Se detectaron ${outlierWarnings.length} valores atípicos. Se guardará de todas formas.`)
       }
 
-      const closedP = parseLaminacionTurnos(src[LAM_TURNOS_KEY])
-      const actualP = parseLaminacionTurnoActual(src[LAM_ACTUAL_KEY])
+      let closedP = parseLaminacionTurnos(src[LAM_TURNOS_KEY])
+      let actualP = parseLaminacionTurnoActual(src[LAM_ACTUAL_KEY])
+      if (actualP) {
+        actualP = syncLaminacionTurnoFromFormMirror(src, actualP)
+      }
       const accFromJson = accumulateLaminacionFromJson(closedP, actualP)
+      const closedTimerMirror =
+        actualP === null && closedP.length > 0 ? laminacionAggregatedTimerMirrorFromTurnos(closedP) : null
 
       const seriesBase = actualP
         ? {
@@ -864,10 +853,22 @@ export default function WorkOrderLaminacionControlPanel({
           [LAM_TURNOS_KEY]: closedP,
           [LAM_ACTUAL_KEY]: actualP,
           [LAM_ESTADO_KEY]: readLaminacionEstadoArea(src[LAM_ESTADO_KEY]),
-          lamTimerEffectiveAccSec: normalizeNumericString(src.lamTimerEffectiveAccSec),
-          lamTimerDeadAccSec: normalizeNumericString(src.lamTimerDeadAccSec),
+          lamTimerEffectiveAccSec: normalizeNumericString(
+            closedTimerMirror?.lamTimerEffectiveAccSec ?? src.lamTimerEffectiveAccSec,
+          ),
+          lamTimerDeadAccSec: normalizeNumericString(
+            closedTimerMirror?.lamTimerDeadAccSec ?? src.lamTimerDeadAccSec,
+          ),
+          lamTimerState: readString(closedTimerMirror?.lamTimerState ?? src.lamTimerState) || "pending",
+          lamTimerLastResumeAtMs: normalizeNumericString(
+            closedTimerMirror?.lamTimerLastResumeAtMs ?? src.lamTimerLastResumeAtMs,
+          ),
+          lamTimerPauseAtMs: normalizeNumericString(
+            closedTimerMirror?.lamTimerPauseAtMs ?? src.lamTimerPauseAtMs,
+          ),
           lamRegistrosTurnos: String(accFromJson.turnosRegistrados),
           lamAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
+          lamScrapAcumuladoKg: normalizeNumericString(accFromJson.scrapKg),
         },
         seriesBase,
       )
@@ -955,11 +956,18 @@ export default function WorkOrderLaminacionControlPanel({
     }
     patchActiveTurn(() => nextTurn)
     setStartTimerConfirmOpen(false)
-    void persistLaminacionForm({
-      ...form,
-      [LAM_ACTUAL_KEY]: nextTurn,
-      ...laminacionTurnoToMirror(nextTurn),
-    })
+    void persistLaminacionForm(
+      {
+        ...form,
+        [LAM_ACTUAL_KEY]: nextTurn,
+        ...laminacionTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        suppressSuccessToast: true,
+      },
+    )
   }
 
   function requestPauseProductionTimer() {
@@ -996,7 +1004,11 @@ export default function WorkOrderLaminacionControlPanel({
         ...laminacionTurnoToMirror(nextTurn),
       }
       queueMicrotask(() => {
-        void persistLaminacionForm(nextForm)
+        void persistLaminacionForm(nextForm, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        })
       })
       return nextForm
     })
@@ -1041,7 +1053,11 @@ export default function WorkOrderLaminacionControlPanel({
         ...laminacionTurnoToMirror(nextTurn),
       }
       queueMicrotask(() => {
-        void persistLaminacionForm(nextForm)
+        void persistLaminacionForm(nextForm, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        })
       })
       return nextForm
     })
@@ -1106,58 +1122,78 @@ export default function WorkOrderLaminacionControlPanel({
         successMessage:
           "Turno de planta abierto y guardado. Use play en «Cronómetro de producción» para iniciar tiempos.",
       })
-      await tryAdvanceBoardStageToLaminacion()
     })()
   }
 
-  async function tryAdvanceBoardStageToLaminacion() {
-    const stageOrder: Record<string, number> = {
-      nueva: 0,
-      pendiente: 1,
-      montaje: 2,
-      impresion: 3,
-      laminacion: 4,
-      corte: 5,
-      completada: 6,
-    }
-    try {
-      const wo = await apiFetch<{ board_stage?: string | null }>(`work-orders/${workOrderId}`)
-      const bs = (wo.board_stage ?? "nueva").toLowerCase()
-      if ((stageOrder[bs] ?? -1) >= stageOrder.laminacion) return
-      await apiFetch(`work-orders/${workOrderId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ board_stage: "laminacion" }),
-      })
-    } catch {
-      /* sin permiso o red */
-    }
-  }
-
-  async function applyCerrarTurno(cur: LaminacionTurnoEntry, finalizedTimer: LaminacionTurnTimer) {
+  async function applyCerrarTurno(
+    cur: LaminacionTurnoEntry,
+    finalizedTimer: LaminacionTurnTimer,
+    options?: { notifyProductionSave?: boolean; successMessage?: string },
+  ): Promise<boolean> {
+    const latestForm = formRef.current
+    const syncedCur = syncLaminacionTurnoFromFormMirror(latestForm, cur)
     const u = getStoredUser()
+    const closedAt = new Date().toISOString()
     const closed: LaminacionTurnoEntry = {
-      ...cur,
+      ...syncedCur,
       timer: finalizedTimer,
-      closed_at: new Date().toISOString(),
+      closed_at: closedAt,
       closed_by: u ? { id: u.id, name: u.name } : null,
     }
+    const turnos = [...parseLaminacionTurnos(latestForm[LAM_TURNOS_KEY]), closed]
+    const acc = accumulateLaminacionFromJson(turnos, null)
     const nextForm: Record<string, unknown> = {
-      ...form,
-      [LAM_TURNOS_KEY]: [...parseLaminacionTurnos(form[LAM_TURNOS_KEY]), closed],
+      ...latestForm,
+      [LAM_TURNOS_KEY]: turnos,
       [LAM_ACTUAL_KEY]: null,
       ...clearLaminacionMirrorKeys(),
-      ...laminacionAggregatedTimerMirrorFromTurnos([...parseLaminacionTurnos(form[LAM_TURNOS_KEY]), closed]),
+      ...laminacionAggregatedTimerMirrorFromTurnos(turnos),
+      lamAcumuladoProducidoKg: normalizeNumericString(acc.producidoKg),
+      lamRegistrosTurnos: String(acc.turnosRegistrados),
+      lamScrapAcumuladoKg: normalizeNumericString(acc.scrapKg),
     }
-    setForm(bootstrapLaminacionFormState(nextForm))
     const ok = await persistLaminacionForm(nextForm, {
       skipProductionSaveGuard: true,
-      notifyProductionSave: false,
+      notifyProductionSave: options?.notifyProductionSave === true,
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesLaminacionToastSuccess("Turno de planta cerrado y guardado.")
+      mesLaminacionToastSuccess(
+        options?.successMessage ??
+          "Turno guardado en el historial. Elija Turno, Grupo y Personal para iniciar el siguiente.",
+      )
+      await load()
+    } else {
+      toast.error("No se pudo guardar el cierre del turno en el servidor. Se restauraron los datos del servidor.")
       await load()
     }
+    return ok
+  }
+
+  async function cerrarTurnoYGuardarHistorial(options?: {
+    notifyProductionSave?: boolean
+  }): Promise<boolean> {
+    if (controlReadOnly) return false
+    const latestForm = formRef.current
+    const curRaw = parseLaminacionTurnoActual(latestForm[LAM_ACTUAL_KEY])
+    if (!curRaw) {
+      toast.error("No hay turno de planta abierto.")
+      return false
+    }
+    const cur = syncLaminacionTurnoFromFormMirror(latestForm, curRaw)
+    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
+      toast.error("Complete turno, grupo y operador antes de guardar.")
+      return false
+    }
+    const finalizedTimer = finalizeLaminacionTurnTimerNow(cur.timer)
+    if (finalizedTimer.effectiveAccSec < 0.01 && sumSalidaKgTurno(cur) < 0.005) {
+      pendingEmptyShiftCloseRef.current = { cur, finalizedTimer }
+      setEmptyShiftCloseDialogOpen(true)
+      return false
+    }
+    return applyCerrarTurno(cur, finalizedTimer, {
+      notifyProductionSave: options?.notifyProductionSave,
+    })
   }
 
   function confirmEmptyShiftClose() {
@@ -1165,24 +1201,11 @@ export default function WorkOrderLaminacionControlPanel({
     pendingEmptyShiftCloseRef.current = null
     setEmptyShiftCloseDialogOpen(false)
     if (!p) return
-    void applyCerrarTurno(p.cur, p.finalizedTimer)
+    void applyCerrarTurno(p.cur, p.finalizedTimer, { notifyProductionSave: true })
   }
 
   function cerrarTurnoActual() {
-    if (controlReadOnly) return
-    const cur = parseLaminacionTurnoActual(form[LAM_ACTUAL_KEY])
-    if (!cur) return
-    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
-      toast.error("Complete turno, grupo y operador.")
-      return
-    }
-    const finalizedTimer = finalizeLaminacionTurnTimerNow(cur.timer)
-    if (finalizedTimer.effectiveAccSec < 0.01 && sumSalidaKgTurno(cur) === 0) {
-      pendingEmptyShiftCloseRef.current = { cur, finalizedTimer }
-      setEmptyShiftCloseDialogOpen(true)
-      return
-    }
-    void applyCerrarTurno(cur, finalizedTimer)
+    void cerrarTurnoYGuardarHistorial({ notifyProductionSave: true })
   }
 
   async function finalizarAreaLaminacion() {
@@ -1203,6 +1226,7 @@ export default function WorkOrderLaminacionControlPanel({
       }
       turnos = [...turnos, closed]
     }
+    const acc = accumulateLaminacionFromJson(turnos, null)
     const nextForm: Record<string, unknown> = {
       ...prev,
       [LAM_TURNOS_KEY]: turnos,
@@ -1210,8 +1234,10 @@ export default function WorkOrderLaminacionControlPanel({
       [LAM_ESTADO_KEY]: "finalizada",
       ...clearLaminacionMirrorKeys(),
       ...laminacionAggregatedTimerMirrorFromTurnos(turnos),
+      lamAcumuladoProducidoKg: normalizeNumericString(acc.producidoKg),
+      lamRegistrosTurnos: String(acc.turnosRegistrados),
+      lamScrapAcumuladoKg: normalizeNumericString(acc.scrapKg),
     }
-    clearLocalLaminacionDrafts(workOrderId)
     setForm(bootstrapLaminacionFormState(nextForm))
     const ok = await persistLaminacionForm(nextForm, {
       skipProductionSaveGuard: true,
@@ -1219,6 +1245,7 @@ export default function WorkOrderLaminacionControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
+      purgeLegacyLaminacionBrowserDrafts(workOrderId)
       mesLaminacionToastSuccess(
         "Área de laminación finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
       )
@@ -1307,7 +1334,7 @@ export default function WorkOrderLaminacionControlPanel({
 
   async function guardar() {
     if (canSaveProduction) {
-      await persistLaminacionForm()
+      await cerrarTurnoYGuardarHistorial({ notifyProductionSave: true })
       return
     }
     if (canPersistShiftOpen) {
@@ -1316,6 +1343,14 @@ export default function WorkOrderLaminacionControlPanel({
         notifyProductionSave: false,
         successMessage:
           "Turno guardado. Inicie el cronómetro (play) para habilitar el guardado de producción con aviso a otras áreas.",
+      })
+      return
+    }
+    if (canPersistEntreTurnos) {
+      await persistLaminacionForm(undefined, {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage: "Producción acumulada sincronizada con el servidor.",
       })
       return
     }
@@ -1343,7 +1378,7 @@ export default function WorkOrderLaminacionControlPanel({
       if (k.startsWith("lamBlockDone.")) delete cleared[k]
     }
 
-    clearLocalLaminacionDrafts(workOrderId)
+    purgeLegacyLaminacionBrowserDrafts(workOrderId)
     setForm(bootstrapLaminacionFormState(cleared))
     mesLaminacionToastSuccess("Laminación reiniciado localmente. Guardando en el servidor…")
     await persistLaminacionForm(cleared, { skipProductionSaveGuard: true })
@@ -1537,25 +1572,32 @@ export default function WorkOrderLaminacionControlPanel({
         </div>
       </div>
 
+      <div className="no-print mb-2 flex flex-wrap items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="border-violet-300 text-violet-900 hover:bg-violet-50"
+          onClick={() => setChecklistOpen(true)}
+          disabled={controlReadOnly && areaFinalizada}
+        >
+          <ListChecks className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+          Chequeo laminación
+        </Button>
+      </div>
+
       <WorkOrderLaminacionOpsSection
         pedidoTotalKg={pedidoTotalKg}
         producidoAcumuladoKg={producidoAcumuladoKg}
         faltanteKg={faltanteKg}
         turnosRegistrados={turnosRegistrados}
         totalProduccionAcumulada={totalProduccionAcumulada}
-        totalEntradaImpresa={totalEntradaImpresa}
-        totalEntradaVirgen={totalEntradaVirgen}
-        totalSalida={totalSalida}
-        totalScrap={totalScrap}
-        mermaCalc={mermaCalc}
-        refilPct={refilPct}
-        totalSalidaTurnoKg={totalSalidaTurno}
         totalScrapAcumulada={totalScrapAcumulada}
         ultimoTurnoLabel={ultimoTurnoLabel}
         timerState={timerState}
-        totalSec={totalSec}
-        deadSec={deadSec}
-        effectiveSec={effectiveSec}
+        totalSec={displayTotalSec}
+        deadSec={displayDeadSec}
+        effectiveSec={displayEffectiveSec}
+        timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
         timerRunning={timerRunning}
         timerPaused={timerPaused}
@@ -1570,9 +1612,89 @@ export default function WorkOrderLaminacionControlPanel({
         lamOperador={readString(form.lamOperador)}
         lamAyudante={readString(form.lamAyudante)}
         lamSupervisor={readString(form.lamSupervisor)}
-        kgProduccionRaw={readNumberString(form.lamKgProduccion)}
-        mermaRaw={readNumberString(form.lamMermaKg)}
-        metrajeRaw={readNumberString(form.lamMetraje)}
+        metrajeRaw={readNumberString(form.lamMetrajeProduccion)}
+        entradaImpresaBobinas={entradaImpresaBobinas}
+        entradaImpresaMeta={entradaImpresaBobinasMeta}
+        entradaVirgenBobinas={entradaVirgenBobinas}
+        entradaVirgenMeta={entradaVirgenBobinasMeta}
+        salidaBobinas={salidaBobinas}
+        salidaMeta={salidaBobinasMeta}
+        totalEntradaImpresa={totalEntradaImpresa}
+        totalEntradaVirgen={totalEntradaVirgen}
+        totalSalida={totalSalida}
+        totalScrap={totalScrap}
+        totalEntradaTurno={totalEntradaTurno}
+        adhesivoEntradaRaw={readNumberString(form.lamAdhesivoEntradaKg)}
+        adhesivoSobroRaw={readNumberString(form.lamAdhesivoSobroKg)}
+        catalizadorEntradaRaw={readNumberString(form.lamCatalizadorEntradaKg)}
+        catalizadorSobroRaw={readNumberString(form.lamCatalizadorSobroKg)}
+        acetatoEntradaRaw={readNumberString(form.lamAcetatoEntradaLt)}
+        acetatoSobroRaw={readNumberString(form.lamAcetatoSobroLt)}
+        adhesivoConsumido={adhesivoConsumido}
+        catalizadorConsumido={catalizadorConsumido}
+        acetatoConsumido={acetatoConsumido}
+        virgenRechazadasRaw={readNumberString(form.lamEntradaVirgenRechazadasKg)}
+        virgenMaterialesBuenosRaw={readNumberString(form.lamEntradaVirgenMaterialesBuenosKg)}
+        devolucionBuenaRaw={readNumberString(form.lamDevolucionBuenaKg)}
+        devolucionRechazadaRaw={readNumberString(form.lamDevolucionRechazadaKg)}
+        checklistOpen={checklistOpen}
+        checklistCheckedIds={checklistCheckedIds}
+        checklistEstado={(readString(form.lamChecklistEstado) as LamChecklistEstado) || ""}
+        checklistObs={readString(form.lamChecklistObs)}
+        checklistElaborado={readString(form.lamChecklistElaborado)}
+        checklistRevisado={readString(form.lamChecklistRevisado)}
+        checklistAprobadoPor={readString(form.lamChecklistAprobadoPor)}
+        onChecklistOpenChange={setChecklistOpen}
+        onChecklistToggleItem={(id, checked) => {
+          setForm((prev) => {
+            const cur = parseLamChecklistChecked(prev.lamChecklistChecked)
+            const next = checked ? [...new Set([...cur, id])] : cur.filter((x) => x !== id)
+            return { ...prev, lamChecklistChecked: next }
+          })
+        }}
+        onChecklistEstado={(v) => setForm((prev) => ({ ...prev, lamChecklistEstado: v }))}
+        onChecklistObs={(v) => setForm((prev) => ({ ...prev, lamChecklistObs: v }))}
+        onChecklistElaborado={(v) => setForm((prev) => ({ ...prev, lamChecklistElaborado: v }))}
+        onChecklistRevisado={(v) => setForm((prev) => ({ ...prev, lamChecklistRevisado: v }))}
+        onChecklistAprobadoPor={(v) => setForm((prev) => ({ ...prev, lamChecklistAprobadoPor: v }))}
+        scrapTransparenteRaw={readNumberString(form.lamScrapTransparenteKg)}
+        scrapImpresoRaw={readNumberString(form.lamScrapImpresoKg)}
+        scrapLaminadoRaw={readNumberString(form.lamScrapLaminadoKg)}
+        mermaCalc={mermaCalc}
+        refilPct={refilPct}
+        onEntradaImpresaChange={(idx, v) => patchBobinaKg("entradaImpresaBobinasKg", idx, v)}
+        onEntradaVirgenChange={(idx, v) => patchBobinaKg("entradaVirgenBobinasKg", idx, v)}
+        onSalidaChange={(idx, v) => patchBobinaKg("salidaBobinasKg", idx, v)}
+        onOpenImpresaLabel={(idx) => openLabelEditor("impresa", idx)}
+        onOpenVirgenLabel={(idx) => openLabelEditor("virgen", idx)}
+        onOpenSalidaLabel={(idx) => openLabelEditor("salida", idx)}
+        onSetAdhesivoEntrada={(v) => patchActiveTurn((t) => ({ ...t, adhesivoEntradaKg: v }))}
+        onSetAdhesivoSobro={(v) => patchActiveTurn((t) => ({ ...t, adhesivoSobroKg: v }))}
+        onSetCatalizadorEntrada={(v) => patchActiveTurn((t) => ({ ...t, catalizadorEntradaKg: v }))}
+        onSetCatalizadorSobro={(v) => patchActiveTurn((t) => ({ ...t, catalizadorSobroKg: v }))}
+        onSetAcetatoEntrada={(v) => patchActiveTurn((t) => ({ ...t, acetatoEntradaLt: v }))}
+        onSetAcetatoSobro={(v) => patchActiveTurn((t) => ({ ...t, acetatoSobroLt: v }))}
+        onSetVirgenRechazadas={(v) => patchActiveTurn((t) => ({ ...t, entradaVirgenRechazadasKg: v }))}
+        onSetVirgenMaterialesBuenos={(v) =>
+          patchActiveTurn((t) => ({ ...t, entradaVirgenMaterialesBuenosKg: v }))
+        }
+        onSetDevolucionBuena={(v) => setForm((prev) => ({ ...prev, lamDevolucionBuenaKg: v }))}
+        onSetDevolucionRechazada={(v) => setForm((prev) => ({ ...prev, lamDevolucionRechazadaKg: v }))}
+        onSetScrapTransparente={(v) => patchActiveTurn((t) => ({ ...t, scrapTransparenteKg: v }))}
+        onSetScrapImpreso={(v) => patchActiveTurn((t) => ({ ...t, scrapImpresoKg: v }))}
+        onSetScrapLaminado={(v) => patchActiveTurn((t) => ({ ...t, scrapLaminadoKg: v }))}
+        labelEditorOpen={labelEditorOpen}
+        labelEditorMode={labelEditorMode}
+        labelEditorIndex={labelEditorIndex}
+        labelEditorDraft={labelEditorDraft}
+        labelEditorError={labelEditorError}
+        onLabelOpenChange={(open) => {
+          setLabelEditorOpen(open)
+          if (!open) setLabelEditorError("")
+        }}
+        onLabelDraftChange={updateLabelDraft}
+        onLabelClear={clearLabelEditor}
+        onLabelSave={saveLabelEditor}
         formatTimerHms={formatTimerHms}
         setPauseReason={setPauseReason}
         setPauseObs={setPauseObs}
@@ -1605,9 +1727,7 @@ export default function WorkOrderLaminacionControlPanel({
           const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
           patchActiveTurn((t) => ({ ...t, operador, ayudante, supervisor }))
         }}
-        onSetKgProduccion={(v) => patchActiveTurn((t) => ({ ...t, kgProduccion: v }))}
-        onSetMerma={(v) => patchActiveTurn((t) => ({ ...t, mermaKg: v }))}
-        onSetMetraje={(v) => patchActiveTurn((t) => ({ ...t, metrajeLaminacion: v }))}
+        onSetMetraje={(v) => patchActiveTurn((t) => ({ ...t, metrajeProduccion: v }))}
         canPreviewTimerReport={canPreviewTimerReport}
         onPreviewTimerReport={requestOpenTimerReportPreview}
         canResetAll={!saving && !controlReadOnly}
@@ -1674,29 +1794,6 @@ export default function WorkOrderLaminacionControlPanel({
             >
               <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
               Empezar de cero
-            </Button>
-          ) : null}
-          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-orange-300 text-orange-950 hover:bg-orange-50"
-              disabled={saving}
-              onClick={requestCerrarTurnoActual}
-            >
-              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Terminar turno de planta
-            </Button>
-          ) : null}
-          {canFinalizeOrder && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving}
-              onClick={requestFinalizarAreaLaminacion}
-            >
-              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Finalizar área de laminación
             </Button>
           ) : null}
         </div>

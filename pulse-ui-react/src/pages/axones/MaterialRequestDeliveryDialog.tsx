@@ -30,7 +30,61 @@ type LineRow = {
   description?: string | null
   quantity_requested: string
   quantity_dispatched: string
-  material?: { sku: string; name: string; unit: string; inventory_area?: string }
+  material?: {
+    sku: string
+    name: string
+    unit: string
+    inventory_area?: string
+    quantity_on_hand?: string
+  }
+}
+
+function lineRemaining(ln: LineRow): number {
+  const req = Number(ln.quantity_requested)
+  const dis = Number(ln.quantity_dispatched)
+  return Math.max(0, req - dis)
+}
+
+function stockOnHand(material: LineRow["material"]): number {
+  const n = Number(material?.quantity_on_hand ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Área material con bobinas registradas: se despacha por selección de bobina. */
+function usesBobinaPicker(ln: LineRow, bobinas: BobinaRow[]): boolean {
+  return ln.material?.inventory_area === "material" && bobinas.length > 0
+}
+
+function maxApprovableQty(ln: LineRow, bobinas: BobinaRow[]): number {
+  const rem = lineRemaining(ln)
+  if (rem <= 0) return 0
+  if (usesBobinaPicker(ln, bobinas)) return rem
+  const stock = stockOnHand(ln.material)
+  if (stock > 0) return Math.min(rem, stock)
+  return rem
+}
+
+function defaultApprovalQty(ln: LineRow, bobinas: BobinaRow[]): string {
+  const max = maxApprovableQty(ln, bobinas)
+  return max > 0 ? String(max) : ""
+}
+
+function validateApprovalQty(
+  ln: LineRow,
+  qn: number,
+  bobinas: BobinaRow[],
+): string | null {
+  const rem = lineRemaining(ln)
+  const unit = ln.material?.unit || "kg"
+  if (qn > rem + 0.0005) {
+    return `No puede aprobar más de lo pendiente (${rem.toFixed(3)} ${unit}).`
+  }
+  if (usesBobinaPicker(ln, bobinas)) return null
+  const stock = stockOnHand(ln.material)
+  if (ln.material_id != null && stock > 0 && qn > stock + 0.0005) {
+    return `Stock insuficiente: hay ${stock.toFixed(3)} ${unit} en inventario.`
+  }
+  return null
 }
 
 type Detail = {
@@ -89,14 +143,6 @@ export function MaterialRequestDeliveryDialog({
     try {
       const d = await apiFetch<Detail>(`material-requests/${requestId}`)
       setDetail(d)
-      const q: Record<string, string> = {}
-      for (const ln of d.lines ?? []) {
-        const req = Number(ln.quantity_requested)
-        const dis = Number(ln.quantity_dispatched)
-        const rem = Math.max(0, req - dis)
-        q[String(ln.id)] = rem > 0 ? String(rem) : ""
-      }
-      setQty(q)
 
       const lines = d.lines ?? []
       const wanted = lines.filter(
@@ -126,6 +172,13 @@ export function MaterialRequestDeliveryDialog({
       )
       setBobinasByLine(bobinasMap)
       setSelectedBobinaIds(selectedMap)
+
+      const q: Record<string, string> = {}
+      for (const ln of lines) {
+        const bobinas = bobinasMap[String(ln.id)] ?? []
+        q[String(ln.id)] = defaultApprovalQty(ln, bobinas)
+      }
+      setQty(q)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar la solicitud.")
@@ -143,22 +196,47 @@ export function MaterialRequestDeliveryDialog({
     void load()
   }, [open, requestId, load])
 
+  function pendingLinesNeedingInput(): LineRow[] {
+    if (!detail) return []
+    return detail.lines.filter((ln) => lineRemaining(ln) > 0.0005)
+  }
+
+  function lineHasNoFulfillmentSource(ln: LineRow): boolean {
+    const rem = lineRemaining(ln)
+    if (rem <= 0.0005) return false
+    const lineKey = String(ln.id)
+    const bobinas = bobinasByLine[lineKey] ?? []
+    if (usesBobinaPicker(ln, bobinas)) return false
+    return stockOnHand(ln.material) <= 0.0005
+  }
+
   async function dispatch() {
     if (!detail) return
+
+    const blocked = pendingLinesNeedingInput().filter(lineHasNoFulfillmentSource)
+    if (blocked.length) {
+      const names = blocked
+        .map((ln) => ln.material?.name ?? ln.description?.trim() ?? "línea sin catálogo")
+        .join(", ")
+      toast.error(
+        `Sin stock disponible para: ${names}. Registre entrada en Inventario (recepción o movimiento) antes de aprobar.`,
+      )
+      return
+    }
+
     const lines = detail.lines
       .map((ln) => {
         const lineKey = String(ln.id)
-        const isBobina = ln.material?.inventory_area === "material"
-        if (isBobina) {
+        const bobinas = bobinasByLine[lineKey] ?? []
+        if (usesBobinaPicker(ln, bobinas)) {
           const sel = selectedBobinaIds[lineKey] ?? {}
           const ids = Object.keys(sel)
             .filter((k) => sel[k])
             .map((k) => Number(k))
             .filter((n) => Number.isFinite(n) && n > 0)
           if (!ids.length) return null
-          const list = bobinasByLine[lineKey] ?? []
           const total = ids.reduce((acc, id) => {
-            const b = list.find((x) => x.id === id)
+            const b = bobinas.find((x) => x.id === id)
             const w = b?.weight_kg ? Number(b.weight_kg) : 0
             return acc + (Number.isFinite(w) ? w : 0)
           }, 0)
@@ -181,12 +259,33 @@ export function MaterialRequestDeliveryDialog({
     }>
 
     if (!lines.length) {
+      const pending = pendingLinesNeedingInput()
+      const needsBobinas = pending.some((ln) => {
+        const bobinas = bobinasByLine[String(ln.id)] ?? []
+        return usesBobinaPicker(ln, bobinas)
+      })
       toast.error(
-        variant === "approval"
-          ? "Indique cantidades o bobinas a aprobar."
-          : "Indique cantidades a despachar.",
+        needsBobinas
+          ? variant === "approval"
+            ? "Seleccione los rollos a aprobar."
+            : "Seleccione los rollos a despachar."
+          : variant === "approval"
+            ? "Indique la cantidad a aprobar en cada línea pendiente."
+            : "Indique la cantidad a despachar en cada línea pendiente.",
       )
       return
+    }
+
+    for (const entry of lines) {
+      if (entry.bobina_ids?.length) continue
+      const ln = detail.lines.find((l) => l.id === entry.material_request_line_id)
+      if (!ln) continue
+      const bobinas = bobinasByLine[String(ln.id)] ?? []
+      const err = validateApprovalQty(ln, entry.quantity, bobinas)
+      if (err) {
+        toast.error(err)
+        return
+      }
     }
 
     setDispatching(true)
@@ -216,6 +315,9 @@ export function MaterialRequestDeliveryDialog({
     detail.status !== "cancelled" &&
     detail.status !== "dispatched"
 
+  const hasBlockedLines =
+    detail != null && pendingLinesNeedingInput().some(lineHasNoFulfillmentSource)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
@@ -227,12 +329,13 @@ export function MaterialRequestDeliveryDialog({
           <DialogDescription>
             {variant === "approval" ? (
               <>
-                Se cargan existencias y bobinas disponibles. Seleccione cantidades o bobinas: al confirmar, el
-                sistema <strong>rebaja el inventario</strong> y registra el movimiento.
+                Se cargan existencias disponibles. Si hay rollos con código registrados, elija cuáles salen; si no,
+                indique la cantidad en kg según el stock mostrado. Al confirmar, el sistema{" "}
+                <strong>rebaja el inventario</strong> y registra el movimiento.
               </>
             ) : (
               <>
-                Seleccione cantidades o bobinas y confirme para registrar la salida de inventario.
+                Seleccione cantidades y confirme para registrar la salida de inventario.
                 La solicitud debe estar autorizada.
               </>
             )}
@@ -262,6 +365,13 @@ export function MaterialRequestDeliveryDialog({
               </p>
             ) : null}
 
+            {hasBlockedLines ? (
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                Una o más líneas no tienen stock en inventario. No puede aprobar la salida hasta registrar
+                entrada (p. ej. recepción de compra o movimiento de inventario).
+              </p>
+            ) : null}
+
             <div className="rounded-xl border bg-muted/30 p-3 text-sm">
               <div>
                 <span className="text-muted-foreground">Estado: </span>
@@ -288,12 +398,19 @@ export function MaterialRequestDeliveryDialog({
                 </TableHeader>
                 <TableBody>
                   {detail.lines.map((ln) => {
-                    const req = Number(ln.quantity_requested)
-                    const dis = Number(ln.quantity_dispatched)
-                    const rem = Math.max(0, req - dis)
-                    const isBobina = ln.material?.inventory_area === "material"
+                    const rem = lineRemaining(ln)
                     const lineKey = String(ln.id)
                     const bobinas = bobinasByLine[lineKey] ?? []
+                    const bobinaPicker = usesBobinaPicker(ln, bobinas)
+                    const stock = stockOnHand(ln.material)
+                    const maxQty = maxApprovableQty(ln, bobinas)
+                    const enteredQty = Number(qty[lineKey] ?? 0)
+                    const qtyOverPending = !bobinaPicker && enteredQty - rem > 0.0005
+                    const qtyOverStock =
+                      !bobinaPicker &&
+                      stock > 0 &&
+                      enteredQty > stock + 0.0005
+                    const noSource = lineHasNoFulfillmentSource(ln)
                     const sel = selectedBobinaIds[lineKey] ?? {}
                     const selectedIds = Object.keys(sel).filter((k) => sel[k])
                     const selectedKg = selectedIds.reduce((acc, idStr) => {
@@ -302,7 +419,7 @@ export function MaterialRequestDeliveryDialog({
                       const w = b?.weight_kg ? Number(b.weight_kg) : 0
                       return acc + (Number.isFinite(w) ? w : 0)
                     }, 0)
-                    const overSelected = isBobina && selectedKg - rem > 0.0005
+                    const overSelected = bobinaPicker && selectedKg - rem > 0.0005
                     return (
                       <TableRow key={ln.id}>
                         <TableCell>
@@ -324,13 +441,11 @@ export function MaterialRequestDeliveryDialog({
                         <TableCell>{ln.quantity_dispatched}</TableCell>
                         <TableCell>{rem.toFixed(3)}</TableCell>
                         <TableCell className="min-w-[280px]">
-                          {isBobina ? (
+                          {bobinaPicker ? (
                             <div className="space-y-2">
                               <div className="text-xs text-muted-foreground">
-                                Seleccione bobinas (sumatoria kg). Seleccionado:{" "}
-                                <span className="font-medium">
-                                  {selectedKg.toFixed(3)} kg
-                                </span>
+                                Seleccione rollos (sumatoria kg). Seleccionado:{" "}
+                                <span className="font-medium">{selectedKg.toFixed(3)} kg</span>
                               </div>
                               {overSelected ? (
                                 <div className="text-xs text-destructive">
@@ -338,60 +453,93 @@ export function MaterialRequestDeliveryDialog({
                                 </div>
                               ) : null}
                               <div className="max-h-40 overflow-auto rounded-md border p-2">
-                                {!bobinas.length ? (
-                                  <div className="text-xs text-muted-foreground">
-                                    Sin bobinas disponibles para este material.
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1">
-                                    {bobinas.map((b) => (
-                                      <label
-                                        key={b.id}
-                                        className="flex cursor-pointer items-center justify-between gap-2 text-xs"
-                                      >
-                                        <span className="font-mono">
-                                          #{b.id} {b.code ? `· ${b.code}` : ""}
-                                        </span>
-                                        <span className="text-muted-foreground">
-                                          {b.weight_kg ?? "—"} kg
-                                        </span>
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(sel[String(b.id)])}
-                                          disabled={
-                                            rem <= 0 ||
-                                            (!sel[String(b.id)] &&
-                                              selectedKg >= rem - 0.0005)
-                                          }
-                                          onChange={(ev) => {
-                                            const checked = ev.target.checked
-                                            setSelectedBobinaIds((prev) => ({
-                                              ...prev,
-                                              [lineKey]: {
-                                                ...(prev[lineKey] ?? {}),
-                                                [String(b.id)]: checked,
-                                              },
-                                            }))
-                                          }}
-                                        />
-                                      </label>
-                                    ))}
-                                  </div>
-                                )}
+                                <div className="space-y-1">
+                                  {bobinas.map((b) => (
+                                    <label
+                                      key={b.id}
+                                      className="flex cursor-pointer items-center justify-between gap-2 text-xs"
+                                    >
+                                      <span className="font-mono">
+                                        #{b.id} {b.code ? `· ${b.code}` : ""}
+                                      </span>
+                                      <span className="text-muted-foreground">
+                                        {b.weight_kg ?? "—"} kg
+                                      </span>
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(sel[String(b.id)])}
+                                        disabled={
+                                          rem <= 0 ||
+                                          (!sel[String(b.id)] && selectedKg >= rem - 0.0005)
+                                        }
+                                        onChange={(ev) => {
+                                          const checked = ev.target.checked
+                                          setSelectedBobinaIds((prev) => ({
+                                            ...prev,
+                                            [lineKey]: {
+                                              ...(prev[lineKey] ?? {}),
+                                              [String(b.id)]: checked,
+                                            },
+                                          }))
+                                        }}
+                                      />
+                                    </label>
+                                  ))}
+                                </div>
                               </div>
                             </div>
+                          ) : noSource ? (
+                            <div className="space-y-1 text-xs">
+                              <p className="font-medium text-destructive">
+                                Sin rollos ni stock disponible.
+                              </p>
+                              <p className="text-muted-foreground">
+                                Registre una entrada de inventario antes de aprobar esta línea.
+                              </p>
+                            </div>
                           ) : (
-                            <Input
-                              inputMode="decimal"
-                              value={qty[lineKey] ?? ""}
-                              onChange={(ev) =>
-                                setQty((prev) => ({
-                                  ...prev,
-                                  [lineKey]: ev.target.value,
-                                }))
-                              }
-                              disabled={rem <= 0}
-                            />
+                            <div className="space-y-1">
+                              {ln.material?.inventory_area === "material" ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Sin rollos con código registrados. Stock en sistema:{" "}
+                                  <span className="font-medium text-foreground">
+                                    {stock.toFixed(3)} {ln.material.unit || "kg"}
+                                  </span>
+                                  {rem > stock + 0.0005 && stock > 0 ? (
+                                    <span className="block text-amber-800 dark:text-amber-200">
+                                      Pendiente {rem.toFixed(3)} kg — puede aprobar hasta{" "}
+                                      {maxQty.toFixed(3)} kg ahora (parcial).
+                                    </span>
+                                  ) : null}
+                                </p>
+                              ) : null}
+                              {qtyOverPending ? (
+                                <p className="text-xs text-destructive">
+                                  Supera lo pendiente ({rem.toFixed(3)}).
+                                </p>
+                              ) : null}
+                              {qtyOverStock ? (
+                                <p className="text-xs text-destructive">
+                                  Supera el stock disponible ({stock.toFixed(3)}).
+                                </p>
+                              ) : null}
+                              <Input
+                                inputMode="decimal"
+                                placeholder={
+                                  rem > 0
+                                    ? `Máx. ${maxQty.toFixed(3)} ${ln.material?.unit || "kg"}`
+                                    : ""
+                                }
+                                value={qty[lineKey] ?? ""}
+                                onChange={(ev) =>
+                                  setQty((prev) => ({
+                                    ...prev,
+                                    [lineKey]: ev.target.value,
+                                  }))
+                                }
+                                disabled={rem <= 0}
+                              />
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>
@@ -410,7 +558,7 @@ export function MaterialRequestDeliveryDialog({
           <Button
             type="button"
             onClick={() => void dispatch()}
-            disabled={dispatching || !canDispatch || loading}
+            disabled={dispatching || !canDispatch || loading || hasBlockedLines}
           >
             {dispatching ? "Procesando…" : variant === "approval" ? "Aplicar aprobación" : "Despachar selección"}
           </Button>

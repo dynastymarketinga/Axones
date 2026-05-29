@@ -15,6 +15,10 @@ class ProductionNotificationService
     /** Áreas que reciben despacho simultáneo de OT (sin secuencia obligatoria). */
     public const PRODUCTIVE_AREAS = ['montaje', 'impresion', 'laminacion', 'corte', 'tintas'];
 
+    public function __construct(
+        private readonly AreaRequestService $areaRequests,
+    ) {}
+
     /**
      * Al crear una OT, la distribuye de inmediato a las áreas productivas para visibilidad por rol.
      */
@@ -47,6 +51,10 @@ class ProductionNotificationService
 
             $areaRequestStatus = 'existing';
             if (! $alreadyPending) {
+                $this->areaRequests->supersedePendingWorkOrderCoordination(
+                    (int) $workOrder->getKey(),
+                    $targetArea,
+                );
                 AreaRequest::query()->create([
                     'area' => $targetArea,
                     'title' => $title,
@@ -167,16 +175,11 @@ class ProductionNotificationService
             // Si NO existe ya una solicitud pendiente para este área y título, crea un nuevo registro AreaRequest como pendiente
             $areaRequestStatus = 'existing';
             if (! $alreadyPending) {
+                $this->areaRequests->supersedePendingWorkOrderCoordination(
+                    (int) $workOrder->getKey(),
+                    $targetArea,
+                );
                 AreaRequest::query()->create([
-                    // Este bloque crea un nuevo registro en la tabla AreaRequest
-                    // para solicitar la revisión de la orden de trabajo en un área específica ($targetArea).
-                    // Los campos principales son:
-                    // - area: el área de destino que debe revisar la solicitud (por ejemplo, corte, laminación, etc.)
-                    // - title: el título descriptivo con el formato "OT XXX — orden guardada"
-                    // - body: el cuerpo/mensaje indicando que se guardó la orden y que debe revisarse en el área correspondiente
-                    // - status: el estado de la solicitud, en este caso siempre "Pending" (pendiente)
-                    // - work_order_id: la referencia a la orden de trabajo que fue guardada
-                    // - requested_by: el usuario que realizó la acción (puede ser null si fue automático)
                     'area' => $targetArea,
                     'title' => $title,
                     'body' => $body,
@@ -264,6 +267,10 @@ class ProductionNotificationService
 
             $areaRequestStatus = 'existing';
             if (! $alreadyPending) {
+                $this->areaRequests->supersedePendingWorkOrderCoordination(
+                    (int) $workOrder->getKey(),
+                    $targetArea,
+                );
                 AreaRequest::query()->create([
                     'area' => $targetArea,
                     'title' => $title,
@@ -390,6 +397,10 @@ class ProductionNotificationService
 
             $areaRequestStatus = 'existing';
             if (! $alreadyPending) {
+                $this->areaRequests->supersedePendingWorkOrderCoordination(
+                    (int) $workOrder->getKey(),
+                    $targetArea,
+                );
                 AreaRequest::query()->create([
                     'area' => $targetArea,
                     'title' => $title,

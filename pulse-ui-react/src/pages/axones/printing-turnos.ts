@@ -83,15 +83,69 @@ export type PrintingTurnoEntry = {
   salidaBobinasKg: string[]
   salidaBobinasMeta: BobinaLabelMeta[]
   devolucionBuenaKg: string
+  /** @deprecated Legado (kg); usar devolucionRechazadaBobinas. */
   devolucionRechazadaKg: string
+  /** Cantidad de bobinas rechazadas devueltas en el turno. */
+  devolucionRechazadaBobinas: string
   /** id del motivo (PRINTING_REJECT_REASONS) o texto libre si aplica */
   devolucionRechazadaMotivo: string
   scrapTransparenteKg: string
   scrapImpresoKg: string
-  mermaKg: string
-  metrajeProduccion: string
   observaciones: string
   timer: PrintingTurnTimer
+  /** Resumen derivado al cerrar el turno (historial / bandeja). */
+  resumenCierre?: PrintingTurnoResumenCierre
+  /** Capturas guardadas con «Guardar» dentro del mismo turno (rejillas se limpian tras cada una). */
+  capturas?: PrintingCapturaProduccion[]
+}
+
+/** Snapshot de producción al pulsar Guardar (acumulativo dentro del turno). */
+export type PrintingCapturaProduccion = {
+  id: string
+  saved_at: string
+  entradaBobinasKg: string[]
+  entradaBobinasMeta: BobinaLabelMeta[]
+  salidaBobinasKg: string[]
+  salidaBobinasMeta: BobinaLabelMeta[]
+  devolucionBuenaKg: string
+  devolucionRechazadaKg: string
+  devolucionRechazadaBobinas: string
+  devolucionRechazadaMotivo: string
+  scrapTransparenteKg: string
+  scrapImpresoKg: string
+}
+
+/** N° bobinas rechazadas (lee campo nuevo o legado en kg). */
+export function countDevolucionRechazadaBobinas(
+  bobinasRaw: unknown,
+  legacyKgRaw?: unknown,
+): number {
+  const b = readNumber(bobinasRaw)
+  if (b > 0) return Math.floor(b)
+  const k = readNumber(legacyKgRaw)
+  if (k > 0) return Math.floor(k)
+  return 0
+}
+
+function readDevolucionRechazadaBobinasField(o: Record<string, unknown>): string {
+  const b =
+    readNumberString(o.devolucionRechazadaBobinas) || readNumberString(o.impDevolucionRechazadaBobinas)
+  if (readNumber(b) > 0) return b
+  const legacy = countDevolucionRechazadaBobinas(
+    "",
+    o.devolucionRechazadaKg ?? o.impDevolucionRechazadaKg,
+  )
+  return legacy > 0 ? String(legacy) : ""
+}
+
+/** Métricas de cierre para historial legible. */
+export type PrintingTurnoResumenCierre = {
+  numBobinasSalida: number
+  pesoSalidaKg: number
+  pesoEntradaKg: number
+  scrapKg: number
+  numParadas: number
+  metrajeTotalM: number
 }
 
 function readString(v: unknown): string {
@@ -203,11 +257,10 @@ export function createNewPrintingTurno(params: {
     salidaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
     devolucionBuenaKg: "",
     devolucionRechazadaKg: "",
+    devolucionRechazadaBobinas: "",
     devolucionRechazadaMotivo: "",
     scrapTransparenteKg: "0",
     scrapImpresoKg: "0",
-    mermaKg: "",
-    metrajeProduccion: "",
     observaciones: "",
     timer: emptyPrintingTurnTimer(),
   }
@@ -294,6 +347,37 @@ function getMetaSeriesForm(form: Record<string, unknown>, key: string, size: num
   return out
 }
 
+function normalizePrintingCaptura(raw: unknown): PrintingCapturaProduccion | null {
+  if (!raw || typeof raw !== "object") return null
+  const o = raw as Record<string, unknown>
+  const id = readString(o.id)
+  if (!id) return null
+  return {
+    id,
+    saved_at: readString(o.saved_at) || new Date().toISOString(),
+    entradaBobinasKg: padStringArray(o.entradaBobinasKg, IMP_BOBINAS_SLOTS),
+    entradaBobinasMeta: padMetaArray(o.entradaBobinasMeta, IMP_BOBINAS_SLOTS),
+    salidaBobinasKg: padStringArray(o.salidaBobinasKg, IMP_BOBINAS_SLOTS),
+    salidaBobinasMeta: padMetaArray(o.salidaBobinasMeta, IMP_BOBINAS_SLOTS),
+    devolucionBuenaKg: readNumberString(o.devolucionBuenaKg),
+    devolucionRechazadaKg: "",
+    devolucionRechazadaBobinas: readDevolucionRechazadaBobinasField(o),
+    devolucionRechazadaMotivo: readString(o.devolucionRechazadaMotivo),
+    scrapTransparenteKg: readNumberString(o.scrapTransparenteKg),
+    scrapImpresoKg: readNumberString(o.scrapImpresoKg),
+  }
+}
+
+function parsePrintingCapturas(raw: unknown): PrintingCapturaProduccion[] {
+  if (!Array.isArray(raw)) return []
+  const out: PrintingCapturaProduccion[] = []
+  for (const item of raw) {
+    const c = normalizePrintingCaptura(item)
+    if (c) out.push(c)
+  }
+  return out
+}
+
 export function parsePrintingTurnos(raw: unknown): PrintingTurnoEntry[] {
   if (!Array.isArray(raw)) return []
   const out: PrintingTurnoEntry[] = []
@@ -324,6 +408,20 @@ export function normalizePrintingTurno(raw: unknown): PrintingTurnoEntry | null 
     if (cid > 0) closedBy = { id: cid, name: readString(c.name) || "—" }
   }
 
+  let resumenCierre: PrintingTurnoResumenCierre | undefined
+  const rc = o.resumenCierre
+  if (rc && typeof rc === "object") {
+    const r = rc as Record<string, unknown>
+    resumenCierre = {
+      numBobinasSalida: readNumber(r.numBobinasSalida),
+      pesoSalidaKg: readNumber(r.pesoSalidaKg),
+      pesoEntradaKg: readNumber(r.pesoEntradaKg),
+      scrapKg: readNumber(r.scrapKg),
+      numParadas: readNumber(r.numParadas),
+      metrajeTotalM: readNumber(r.metrajeTotalM),
+    }
+  }
+
   return {
     id,
     started_at: readString(o.started_at) || new Date().toISOString(),
@@ -342,14 +440,15 @@ export function normalizePrintingTurno(raw: unknown): PrintingTurnoEntry | null 
     salidaBobinasKg: padStringArray(o.salidaBobinasKg, IMP_BOBINAS_SLOTS),
     salidaBobinasMeta: padMetaArray(o.salidaBobinasMeta, IMP_BOBINAS_SLOTS),
     devolucionBuenaKg: readNumberString(o.devolucionBuenaKg),
-    devolucionRechazadaKg: readNumberString(o.devolucionRechazadaKg),
+    devolucionRechazadaKg: "",
+    devolucionRechazadaBobinas: readDevolucionRechazadaBobinasField(o),
     devolucionRechazadaMotivo: readString(o.devolucionRechazadaMotivo),
     scrapTransparenteKg: readNumberString(o.scrapTransparenteKg),
     scrapImpresoKg: readNumberString(o.scrapImpresoKg),
-    mermaKg: readNumberString(o.mermaKg),
-    metrajeProduccion: readNumberString(o.metrajeProduccion),
     observaciones: readString(o.observaciones),
     timer: parseTimer(o.timer),
+    ...(resumenCierre ? { resumenCierre } : {}),
+    capturas: parsePrintingCapturas(o.capturas),
   }
 }
 
@@ -400,7 +499,12 @@ export function hasLegacyPrintingMirror(form: Record<string, unknown>): boolean 
   if (ent.some((x) => readNumber(x) > 0) || sal.some((x) => readNumber(x) > 0)) return true
 
   if (readNumber(form.impScrapTransparenteKg) > 0 || readNumber(form.impScrapImpresoKg) > 0) return true
-  if (readNumber(form.impDevolucionBuenaKg) > 0 || readNumber(form.impDevolucionRechazadaKg) > 0) return true
+  if (
+    readNumber(form.impDevolucionBuenaKg) > 0 ||
+    countDevolucionRechazadaBobinas(form.impDevolucionRechazadaBobinas, form.impDevolucionRechazadaKg) > 0
+  ) {
+    return true
+  }
 
   return false
 }
@@ -429,12 +533,11 @@ export function legacyClosedTurnoFromMirror(form: Record<string, unknown>): Prin
     salidaBobinasKg: getNumericSeriesForm(form, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS),
     salidaBobinasMeta: getMetaSeriesForm(form, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS),
     devolucionBuenaKg: readNumberString(form.impDevolucionBuenaKg),
-    devolucionRechazadaKg: readNumberString(form.impDevolucionRechazadaKg),
+    devolucionRechazadaKg: "",
+    devolucionRechazadaBobinas: readDevolucionRechazadaBobinasField(form),
     devolucionRechazadaMotivo: readString(form.impDevolucionRechazadaMotivo),
     scrapTransparenteKg: readNumberString(form.impScrapTransparenteKg),
     scrapImpresoKg: readNumberString(form.impScrapImpresoKg),
-    mermaKg: readNumberString(form.impMermaKg),
-    metrajeProduccion: readNumberString(form.impMetrajeProduccion),
     observaciones: readString(form.impObservaciones),
     timer,
   }
@@ -453,12 +556,11 @@ export function printingTurnoToMirror(t: PrintingTurnoEntry): Record<string, unk
     impSalidaBobinasKg: t.salidaBobinasKg,
     impSalidaBobinasMeta: t.salidaBobinasMeta,
     impDevolucionBuenaKg: t.devolucionBuenaKg,
-    impDevolucionRechazadaKg: t.devolucionRechazadaKg,
+    impDevolucionRechazadaKg: "",
+    impDevolucionRechazadaBobinas: t.devolucionRechazadaBobinas,
     impDevolucionRechazadaMotivo: t.devolucionRechazadaMotivo,
     impScrapTransparenteKg: t.scrapTransparenteKg,
     impScrapImpresoKg: t.scrapImpresoKg,
-    impMermaKg: t.mermaKg,
-    impMetrajeProduccion: t.metrajeProduccion,
     impObservaciones: t.observaciones,
     ...timerToLegacyFlat(t.timer),
   }
@@ -478,6 +580,7 @@ export function clearPrintingMirrorKeys(): Record<string, unknown> {
     impSalidaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
     impDevolucionBuenaKg: "",
     impDevolucionRechazadaKg: "",
+    impDevolucionRechazadaBobinas: "",
     impDevolucionRechazadaMotivo: "",
     /** Tras "Enviar a almacén" en devoluciones: heurística para badge pendiente */
     impDevolucionesAlmacenUltimoEnvioMs: 0,
@@ -485,8 +588,6 @@ export function clearPrintingMirrorKeys(): Record<string, unknown> {
     impDevolucionesAlmacenSnapRech: "",
     impScrapTransparenteKg: "0",
     impScrapImpresoKg: "0",
-    impMermaKg: "",
-    impMetrajeProduccion: "",
     impObservaciones: "",
     impAcumuladoProducidoKg: "",
     impRegistrosTurnos: "",
@@ -536,16 +637,247 @@ export function bootstrapPrintingFormState(mergedForm: Record<string, unknown>):
   return next
 }
 
+export function sumSalidaKgSlots(slots: string[]): number {
+  return slots.reduce((acc, v) => acc + readNumber(v), 0)
+}
+
+/** Kg de salida por casilla: rejilla operativa o peso en etiqueta si la casilla está vacía. */
+export function salidaKgFromSlotsAndMeta(slots: string[], metas: BobinaLabelMeta[]): number {
+  let sum = 0
+  for (let i = 0; i < slots.length; i++) {
+    const slotKg = readNumber(slots[i])
+    if (slotKg > 0.005) {
+      sum += slotKg
+      continue
+    }
+    sum += readNumber(metas[i]?.peso)
+  }
+  return sum
+}
+
+function mergeKgSlotSeries(turnoSlots: string[], mirrorSlots: string[]): string[] {
+  return turnoSlots.map((v, i) => {
+    const best = Math.max(readNumber(v), readNumber(mirrorSlots[i]))
+    return best > 0.005 ? readNumberString(best) : ""
+  })
+}
+
+/** Alinea turno actual con el espejo plano imp* antes de flush / cierre (evita kg perdidos). */
+export function syncPrintingTurnoFromFormMirror(
+  form: Record<string, unknown>,
+  turno: PrintingTurnoEntry,
+): PrintingTurnoEntry {
+  const mirrorEb = getNumericSeriesForm(form, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS)
+  const mirrorSb = getNumericSeriesForm(form, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS)
+  const mirrorEm = getMetaSeriesForm(form, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS)
+  const mirrorSm = getMetaSeriesForm(form, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS)
+  const devBuena =
+    readNumber(turno.devolucionBuenaKg) > 0
+      ? turno.devolucionBuenaKg
+      : readNumberString(form.impDevolucionBuenaKg)
+  const devRech =
+    countDevolucionRechazadaBobinas(turno.devolucionRechazadaBobinas, turno.devolucionRechazadaKg) > 0
+      ? turno.devolucionRechazadaBobinas
+      : readDevolucionRechazadaBobinasField(form)
+  const devMotivo =
+    readString(turno.devolucionRechazadaMotivo).trim() ||
+    readString(form.impDevolucionRechazadaMotivo).trim()
+  const scrapT =
+    readNumber(turno.scrapTransparenteKg) > 0
+      ? turno.scrapTransparenteKg
+      : readNumberString(form.impScrapTransparenteKg)
+  const scrapI =
+    readNumber(turno.scrapImpresoKg) > 0 ? turno.scrapImpresoKg : readNumberString(form.impScrapImpresoKg)
+
+  return {
+    ...turno,
+    entradaBobinasKg: mergeKgSlotSeries(turno.entradaBobinasKg, mirrorEb),
+    salidaBobinasKg: mergeKgSlotSeries(turno.salidaBobinasKg, mirrorSb),
+    entradaBobinasMeta: turno.entradaBobinasMeta.map((m, i) => {
+      const mirror = mirrorEm[i] ?? emptyBobinaLabelMeta()
+      return readNumber(m.peso) > 0 || Object.values(m).some((v) => readString(v).trim() !== "")
+        ? m
+        : mirror
+    }),
+    salidaBobinasMeta: turno.salidaBobinasMeta.map((m, i) => {
+      const mirror = mirrorSm[i] ?? emptyBobinaLabelMeta()
+      return readNumber(m.peso) > 0 || Object.values(m).some((v) => readString(v).trim() !== "")
+        ? m
+        : mirror
+    }),
+    devolucionBuenaKg: devBuena,
+    devolucionRechazadaBobinas: devRech,
+    devolucionRechazadaMotivo: devMotivo,
+    scrapTransparenteKg: scrapT || "0",
+    scrapImpresoKg: scrapI || "0",
+    observaciones: readString(turno.observaciones).trim()
+      ? turno.observaciones
+      : readString(form.impObservaciones),
+  }
+}
+
+export function sumEntradaKgSlots(slots: string[]): number {
+  return slots.reduce((acc, v) => acc + readNumber(v), 0)
+}
+
 export function sumSalidaKg(t: PrintingTurnoEntry): number {
-  return t.salidaBobinasKg.reduce((acc, v) => acc + readNumber(v), 0)
+  return sumSalidaKgSlots(t.salidaBobinasKg)
 }
 
 export function sumEntradaKg(t: PrintingTurnoEntry): number {
-  return t.entradaBobinasKg.reduce((acc, v) => acc + readNumber(v), 0)
+  return sumEntradaKgSlots(t.entradaBobinasKg)
 }
 
 export function sumScrapKg(t: PrintingTurnoEntry): number {
   return readNumber(t.scrapTransparenteKg) + readNumber(t.scrapImpresoKg)
+}
+
+export function sumScrapKgCaptura(c: PrintingCapturaProduccion): number {
+  return readNumber(c.scrapTransparenteKg) + readNumber(c.scrapImpresoKg)
+}
+
+/** Totales del turno: capturas guardadas + rejilla operativa actual. */
+export function turnoProduccionTotals(t: PrintingTurnoEntry): {
+  entradaKg: number
+  salidaKg: number
+  scrapKg: number
+} {
+  let entradaKg = 0
+  let salidaKg = 0
+  let scrapKg = 0
+  for (const c of t.capturas ?? []) {
+    entradaKg += sumEntradaKgSlots(c.entradaBobinasKg)
+    salidaKg += salidaKgFromSlotsAndMeta(c.salidaBobinasKg, c.salidaBobinasMeta)
+    scrapKg += sumScrapKgCaptura(c)
+  }
+  entradaKg += sumEntradaKg(t)
+  salidaKg += salidaKgFromSlotsAndMeta(t.salidaBobinasKg, t.salidaBobinasMeta)
+  scrapKg += sumScrapKg(t)
+  if (salidaKg < 0.005 && t.resumenCierre && readNumber(t.resumenCierre.pesoSalidaKg) > 0) {
+    salidaKg = readNumber(t.resumenCierre.pesoSalidaKg)
+  }
+  return { entradaKg, salidaKg, scrapKg }
+}
+
+export function printingTurnoHasOperativoData(t: PrintingTurnoEntry): boolean {
+  const tot = turnoProduccionTotals(t)
+  if (tot.entradaKg > 0.005 || tot.salidaKg > 0.005 || tot.scrapKg > 0.005) return true
+  if (
+    readNumber(t.devolucionBuenaKg) > 0 ||
+    countDevolucionRechazadaBobinas(t.devolucionRechazadaBobinas, t.devolucionRechazadaKg) > 0
+  ) {
+    return true
+  }
+  for (const c of t.capturas ?? []) {
+    if (
+      readNumber(c.devolucionBuenaKg) > 0 ||
+      countDevolucionRechazadaBobinas(c.devolucionRechazadaBobinas, c.devolucionRechazadaKg) > 0
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+export function buildPrintingCapturaFromTurno(t: PrintingTurnoEntry): PrintingCapturaProduccion {
+  return {
+    id: newTurnoId(),
+    saved_at: new Date().toISOString(),
+    entradaBobinasKg: [...t.entradaBobinasKg],
+    entradaBobinasMeta: t.entradaBobinasMeta.map((m) => ({ ...m })),
+    salidaBobinasKg: [...t.salidaBobinasKg],
+    salidaBobinasMeta: t.salidaBobinasMeta.map((m) => ({ ...m })),
+    devolucionBuenaKg: t.devolucionBuenaKg,
+    devolucionRechazadaKg: "",
+    devolucionRechazadaBobinas: t.devolucionRechazadaBobinas,
+    devolucionRechazadaMotivo: t.devolucionRechazadaMotivo,
+    scrapTransparenteKg: t.scrapTransparenteKg,
+    scrapImpresoKg: t.scrapImpresoKg,
+  }
+}
+
+/** Vacía rejillas y desperdicio/devoluciones del turno (tras guardar captura). */
+export function clearPrintingTurnoOperativo(t: PrintingTurnoEntry): PrintingTurnoEntry {
+  return {
+    ...t,
+    entradaBobinasKg: emptyNumericSeries(IMP_BOBINAS_SLOTS),
+    entradaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
+    salidaBobinasKg: emptyNumericSeries(IMP_BOBINAS_SLOTS),
+    salidaBobinasMeta: emptyMetaSeries(IMP_BOBINAS_SLOTS),
+    devolucionBuenaKg: "",
+    devolucionRechazadaKg: "",
+    devolucionRechazadaBobinas: "",
+    devolucionRechazadaMotivo: "",
+    scrapTransparenteKg: "0",
+    scrapImpresoKg: "0",
+  }
+}
+
+/** Mueve datos operativos actuales a capturas y limpia la rejilla para nuevo registro. */
+export function flushPrintingTurnoOperativoToCapturas(t: PrintingTurnoEntry): PrintingTurnoEntry {
+  const hasGridOrScrap =
+    sumEntradaKg(t) > 0.005 ||
+    sumSalidaKg(t) > 0.005 ||
+    sumScrapKg(t) > 0.005 ||
+    readNumber(t.devolucionBuenaKg) > 0 ||
+    countDevolucionRechazadaBobinas(t.devolucionRechazadaBobinas, t.devolucionRechazadaKg) > 0
+  if (!hasGridOrScrap) return t
+  return clearPrintingTurnoOperativo({
+    ...t,
+    capturas: [...(t.capturas ?? []), buildPrintingCapturaFromTurno(t)],
+  })
+}
+
+export function countBobinasConKg(slots: string[]): number {
+  return slots.filter((v) => readNumber(v) > 0).length
+}
+
+function sumMetrajeSalidaSlots(slots: string[], metas: BobinaLabelMeta[]): number {
+  let sum = 0
+  for (let i = 0; i < slots.length; i++) {
+    if (readNumber(slots[i]) <= 0) continue
+    const meta = metas[i]
+    if (meta?.metraje) sum += readNumber(meta.metraje)
+  }
+  return sum
+}
+
+export function sumMetrajeSalidaM(t: PrintingTurnoEntry): number {
+  let sum = 0
+  for (const c of t.capturas ?? []) {
+    sum += sumMetrajeSalidaSlots(c.salidaBobinasKg, c.salidaBobinasMeta)
+  }
+  sum += sumMetrajeSalidaSlots(t.salidaBobinasKg, t.salidaBobinasMeta)
+  return sum
+}
+
+export function buildPrintingTurnoResumenCierre(t: PrintingTurnoEntry): PrintingTurnoResumenCierre {
+  const pauses = Array.isArray(t.timer.pauses) ? t.timer.pauses : []
+  const tot = turnoProduccionTotals(t)
+  let numBobinasSalida = 0
+  for (const c of t.capturas ?? []) {
+    numBobinasSalida += countBobinasConKg(c.salidaBobinasKg)
+  }
+  numBobinasSalida += countBobinasConKg(t.salidaBobinasKg)
+  return {
+    numBobinasSalida,
+    pesoSalidaKg: tot.salidaKg,
+    pesoEntradaKg: tot.entradaKg,
+    scrapKg: tot.scrapKg,
+    numParadas: pauses.length,
+    metrajeTotalM: sumMetrajeSalidaM(t),
+  }
+}
+
+export function getLastClosedPrintingTurno(cerrados: PrintingTurnoEntry[]): PrintingTurnoEntry | null {
+  if (cerrados.length === 0) return null
+  return [...cerrados].sort((a, b) =>
+    readString(b.closed_at ?? "").localeCompare(readString(a.closed_at ?? "")),
+  )[0]
+}
+
+export function printingTurnoResumen(t: PrintingTurnoEntry): PrintingTurnoResumenCierre {
+  return t.resumenCierre ?? buildPrintingTurnoResumenCierre(t)
 }
 
 export type JsonAccumulatedPrinting = {
@@ -567,14 +899,16 @@ export function accumulatePrintingFromJson(
   let entradaKg = 0
   let scrapKg = 0
   for (const t of cerrados) {
-    producidoKg += sumSalidaKg(t)
-    entradaKg += sumEntradaKg(t)
-    scrapKg += sumScrapKg(t)
+    const tot = turnoProduccionTotals(t)
+    producidoKg += tot.salidaKg
+    entradaKg += tot.entradaKg
+    scrapKg += tot.scrapKg
   }
   if (actual) {
-    producidoKg += sumSalidaKg(actual)
-    entradaKg += sumEntradaKg(actual)
-    scrapKg += sumScrapKg(actual)
+    const tot = turnoProduccionTotals(actual)
+    producidoKg += tot.salidaKg
+    entradaKg += tot.entradaKg
+    scrapKg += tot.scrapKg
   }
 
   const ultimo = [...cerrados].sort((a, b) => readString(b.closed_at ?? "").localeCompare(readString(a.closed_at ?? "")))[0]

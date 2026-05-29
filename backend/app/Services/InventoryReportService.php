@@ -1268,15 +1268,15 @@ class InventoryReportService
             $corImpresoResolved = $this->resolvedCorteBucketDestino($form, $r->product_structure, 'corScrapImpresoDestino');
             $globalSub = $this->resolvedGlobalCorteSubstrate($form, $r->product_structure);
 
-            if ($substrateGroup === 'transparente') {
+            if ($substrateGroup === 'poliestireno') {
                 $impT_out = $impT;
-                $impI_out = $impDest === 'transparente' ? $impI : 0.0;
+                $impI_out = $impDest === 'poliestireno' ? $impI : 0.0;
                 $lamT_out = $lamT;
                 $lamI_out = 0.0;
                 $lamL_out = 0.0;
                 $corR_out = 0.0;
                 $corI_out = 0.0;
-                $corM_out = $globalSub === 'transparente' ? $corM : 0.0;
+                $corM_out = $globalSub === 'poliestireno' ? $corM : 0.0;
             } elseif ($substrateGroup === 'bopp') {
                 $impT_out = 0.0;
                 $impI_out = $impDest === 'bopp' ? $impI : 0.0;
@@ -1335,36 +1335,18 @@ class InventoryReportService
     }
 
     /**
-     * Destino del scrap impreso en impresión: explícito bopp/transparente, o automático según estructura del producto.
+     * Destino del scrap impreso en impresión (solo selección explícita en planilla: BOPP o poliestireno).
      *
      * @param  array<string, mixed>|null  $form
      */
     private function resolveImpScrapImpresoDestino(?array $form, ?string $productStructure): ?string
     {
-        $raw = strtolower(trim((string) (($form ?? [])['impScrapImpresoDestino'] ?? '')));
-        if ($raw === 'transparente') {
-            return 'transparente';
-        }
+        $raw = ScrapSubstrateCatalog::normalizeGroupId((string) (($form ?? [])['impScrapImpresoDestino'] ?? ''));
         if ($raw === 'bopp') {
             return 'bopp';
         }
-        if (ScrapSubstrateGroup::isPolietileno($raw)) {
-            return ScrapSubstrateGroup::POLIETILENO;
-        }
-
-        $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
-        if ($explicit === 'bopp' || $explicit === 'transparente' || ScrapSubstrateGroup::isPolietileno($explicit)) {
-            return $explicit;
-        }
-
-        if (ScrapSubstrateCatalog::structureInferenceIsAmbiguous($productStructure)) {
-            return null;
-        }
-        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
-            return 'transparente';
-        }
-        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'bopp')) {
-            return 'bopp';
+        if ($raw === 'poliestireno') {
+            return 'poliestireno';
         }
 
         return null;
@@ -1384,14 +1366,14 @@ class InventoryReportService
 
         $resolvedImpDest = $this->resolveImpScrapImpresoDestino($form, $productStructure);
 
-        if ($substrateGroup === 'transparente') {
-            if ($explicit === 'transparente') {
+        if ($substrateGroup === 'poliestireno') {
+            if ($explicit === 'poliestireno') {
                 return true;
             }
-            if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
+            if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'poliestireno')) {
                 return true;
             }
-            if ($resolvedImpDest === 'transparente' && $parseKg($form, 'impScrapImpresoKg') > 0) {
+            if ($resolvedImpDest === 'poliestireno' && $parseKg($form, 'impScrapImpresoKg') > 0) {
                 return true;
             }
             if ($parseKg($form, 'impScrapTransparenteKg') > 0 || $parseKg($form, 'lamScrapTransparenteKg') > 0) {
@@ -1485,7 +1467,7 @@ class InventoryReportService
     private function resolvedGlobalCorteSubstrate(?array $form, ?string $productStructure): ?string
     {
         $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
-        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'transparente') {
+        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'poliestireno') {
             return $explicit;
         }
 
@@ -1498,8 +1480,8 @@ class InventoryReportService
         if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, ScrapSubstrateGroup::POLIETILENO)) {
             return ScrapSubstrateGroup::POLIETILENO;
         }
-        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
-            return 'transparente';
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'poliestireno')) {
+            return 'poliestireno';
         }
 
         return null;

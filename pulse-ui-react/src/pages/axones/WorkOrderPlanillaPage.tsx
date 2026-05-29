@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
+  AlertCircle,
   ArrowDownToLine,
   ArrowLeftRight,
   ArrowUpFromLine,
@@ -73,7 +74,7 @@ import {
 import { apiFetch, ApiError } from "@/lib/api"
 import { latestRowInGroup } from "@/lib/axones-work-order-grouping"
 import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
-import { syncMontajeAutoFields, withMontajeAutoFields } from "@/lib/montaje-planilla-metrics"
+import { fillMontajeAutoFieldsIfEmpty, montajeAutoFieldsIfEmpty } from "@/lib/montaje-planilla-metrics"
 import {
   countFilledTintaColorsInRange,
   structureLayersToOtFormFields,
@@ -203,6 +204,14 @@ type SaveOrdenTrabajoResponse = {
 
 type SustratoRow = { material_id: string; kg: string; material_free_text?: string }
 
+type SustratoKgStockModalState = {
+  area: "impresion" | "laminacion"
+  rowIndex: number
+  requestedKg: string
+  availableLabel: string
+  materialLabel: string
+}
+
 const MIN_SUSTRATO_ROWS = 1
 const MAX_SUSTRATO_ROWS = 4
 
@@ -259,26 +268,41 @@ function prefillFromProduct(p: ProductRecord): Record<string, unknown> {
     estructuraMaterial: p.structure ?? null,
     ...structureLayersToOtFormFields(p.structure, tipoEstructura),
   }
-  const raw = p.print_type
-  if (raw == null) return out
-  const t = readString(String(raw)).toLowerCase()
-  if (t.includes("reverso")) out.tipoImpresion = "Reverso"
-  else if (t.includes("superficie") || t.includes("superf")) out.tipoImpresion = "Superficie"
+  const tipo = normalizeTipoImpresion(p.print_type)
+  if (tipo) out.tipoImpresion = tipoImpresionLabel(tipo)
   return out
 }
 
-function normalizeTipoImpresion(v: unknown): "" | "superficie" | "reverso" {
+const TIPO_IMPRESION_ESPEC_OPTIONS = ["superficie", "bilaminado", "trilaminado"] as const
+type TipoImpresionKey = (typeof TIPO_IMPRESION_ESPEC_OPTIONS)[number]
+
+function tipoImpresionLabel(tipo: TipoImpresionKey): "Superficie" | "Bilaminado" | "Trilaminado" {
+  if (tipo === "superficie") return "Superficie"
+  if (tipo === "bilaminado") return "Bilaminado"
+  return "Trilaminado"
+}
+
+function tipoImpresionCapas(tipo: "" | TipoImpresionKey): 0 | 1 | 2 | 3 {
+  if (tipo === "superficie") return 1
+  if (tipo === "bilaminado") return 2
+  if (tipo === "trilaminado") return 3
+  return 0
+}
+
+function normalizeTipoImpresion(v: unknown): "" | TipoImpresionKey {
   const s = readString(v).toLowerCase().trim()
+  if (s === "bilaminado") return "bilaminado"
+  if (s === "trilaminado" || s === "trimilaminado" || s === "reverso") return "trilaminado"
   if (s === "superficie" || s === "superf") return "superficie"
-  if (s === "reverso") return "reverso"
   return ""
 }
 
-function normalizeTipoImpresionEstructura(value: unknown): "superficie" | "reverso" {
+function normalizeTipoImpresionEstructura(value: unknown): "" | TipoImpresionKey {
   const raw = readString(value).toLowerCase().trim()
+  if (raw.includes("bilamin")) return "bilaminado"
+  if (raw.includes("trilamin") || raw.includes("trimilamin") || raw.includes("revers")) return "trilaminado"
   if (raw.includes("superf")) return "superficie"
-  if (raw.includes("revers")) return "reverso"
-  return "reverso"
+  return ""
 }
 
 function toDateInputValue(iso: string | null | undefined): string {
@@ -461,6 +485,33 @@ function sustratoCatalogStockLabel(materials: MaterialRow[], row: SustratoRow): 
   return formatKgForOtHint(q)
 }
 
+function buildSustratoKgStockModalIfExceeds(
+  area: "impresion" | "laminacion",
+  rowIndex: number,
+  row: SustratoRow,
+  materials: MaterialRow[],
+): SustratoKgStockModalState | null {
+  if (!sustratoRowUsesCatalogMaterial(row)) return null
+  const m = materialRowById(materials, sustratoMaterialIdDigits(row))
+  if (!m) return null
+  const kg = readNumberString(row.kg).trim()
+  if (!kg || !decimalKgExceedsStock(kg, m.quantity_on_hand)) return null
+  const availLabel = sustratoCatalogStockLabel(materials, row) ?? "—"
+  const materialLabel =
+    sustratoVirgenDisplayValue(materials, row) || readString(m.name).trim() || `ID ${m.id}`
+  return {
+    area,
+    rowIndex,
+    requestedKg: kg,
+    availableLabel: availLabel,
+    materialLabel,
+  }
+}
+
+function sustratoKgStockModalDismissKey(area: "impresion" | "laminacion", rowIndex: number): string {
+  return `${area}:${rowIndex}`
+}
+
 function SustratoKgStockFooter({ row, materials }: { row: SustratoRow; materials: MaterialRow[] }) {
   if (!sustratoRowUsesCatalogMaterial(row)) return null
   const id = sustratoMaterialIdDigits(row)
@@ -476,16 +527,26 @@ function SustratoKgStockFooter({ row, materials }: { row: SustratoRow; materials
   const kgStr = readNumberString(row.kg).trim()
   const exceeds = kgStr ? decimalKgExceedsStock(kgStr, m.quantity_on_hand) : false
   return (
-    <div className="mt-1 space-y-0.5">
-      {availLabel != null ? (
-        <p className="text-xs text-muted-foreground">Disponible: {availLabel} kg</p>
-      ) : null}
-      {exceeds ? (
-        <p className="text-xs font-medium text-destructive">
-          Supera el stock disponible
-          {availLabel != null ? ` (${availLabel} kg)` : "."}
-        </p>
-      ) : null}
+    <div className="ot-sustrato-kg-footer-slot" aria-live="polite">
+      <p
+        className={cn(
+          "ot-sustrato-kg-disponible",
+          availLabel == null && "ot-sustrato-kg-disponible--placeholder",
+        )}
+      >
+        {availLabel != null ? `Disponible: ${availLabel} kg` : "\u00a0"}
+      </p>
+      <div className="ot-sustrato-kg-alert-row" aria-hidden={!exceeds}>
+        {exceeds ? (
+          <div className="ot-sustrato-kg-alert ot-sustrato-kg-alert--warn" role="alert">
+            <AlertCircle className="ot-sustrato-kg-alert-icon" aria-hidden />
+            <span>
+              Supera el stock disponible
+              {availLabel != null ? ` (${availLabel} kg)` : "."}
+            </span>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -632,6 +693,7 @@ type OtBlurCtx = {
   canViewImpresion: boolean
   canViewLaminacion: boolean
   canViewCorte: boolean
+  canViewProgramacion: boolean
 }
 
 function sustratosImpBlockEmpty(form: Record<string, unknown>): boolean {
@@ -655,8 +717,17 @@ function lam2BlockAny(form: Record<string, unknown>): boolean {
 
 /** Vacío según criterio “obligatorio al guardar” (solo texto vacío / sin selección; no valida formatos). */
 function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
-  const { form, prefill, tipoImpresion, canEditShared, canViewMontaje, canViewImpresion, canViewLaminacion, canViewCorte } =
-    ctx
+  const {
+    form,
+    prefill,
+    tipoImpresion,
+    canEditShared,
+    canViewMontaje,
+    canViewImpresion,
+    canViewLaminacion,
+    canViewCorte,
+    canViewProgramacion,
+  } = ctx
 
   const shared = new Set([
     "pedidoKg",
@@ -692,6 +763,7 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
   const montaje = new Set([
     "frecuencia",
     "numBandas",
+    "tipoImpresionMontaje",
     "anchoCorteMontaje",
     "numRepeticion",
     "desarrollo",
@@ -776,6 +848,12 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
   if (corteDec.has(key)) {
     if (!canViewCorte) return false
     return !readNumberString(form[key]).trim()
+  }
+
+  const programacion = new Set(["observacionesGenerales", "fechaInicio", "fechaEntrega", "programacionMotivo"])
+  if (programacion.has(key)) {
+    if (!canEditShared || !canViewProgramacion) return false
+    return !readString(form[key]).trim()
   }
 
   return false
@@ -910,7 +988,8 @@ function buildRandomPlanillaPatch(prev: Record<string, unknown>): Record<string,
     maquina: randomMachineValue(),
     planchasReferencia: String(randomInt(1, 999)).padStart(3, "0"),
     metrosEstimados: String(randomInt(5000, 28000)),
-    tipoImpresionEstructura: randomInt(0, 1) === 0 ? "superficie" : "reverso",
+    tipoImpresionEstructura: TIPO_IMPRESION_ESPEC_OPTIONS[randomInt(0, TIPO_IMPRESION_ESPEC_OPTIONS.length - 1)],
+    tipoImpresionMontaje: TIPO_IMPRESION_ESPEC_OPTIONS[randomInt(0, TIPO_IMPRESION_ESPEC_OPTIONS.length - 1)],
     frecuencia: `${randomInt(200, 360)}±${randomInt(1, 5)}`,
     numBandas: String(randomInt(1, 6)),
     anchoCorteMontaje: `${randomInt(300, 450)}±${randomInt(1, 4)}`,
@@ -1002,7 +1081,7 @@ function computeRandomFill(
   next.sustratoVirgenImp1 = readString(impAfter[0]?.material_id)
   next.kgUtilizarImp1 = readString(impAfter[0]?.kg)
 
-  Object.assign(next, syncMontajeAutoFields(next))
+  Object.assign(next, montajeAutoFieldsIfEmpty(next))
 
   return { next, filled }
 }
@@ -1120,6 +1199,46 @@ export default function WorkOrderPlanillaPage() {
   const [rellenoAzarDialogOpen, setRellenoAzarDialogOpen] = useState(false)
   const [rellenoAzarCount, setRellenoAzarCount] = useState(0)
   const [pendingHeaderAction, setPendingHeaderAction] = useState<PendingHeaderAction | null>(null)
+  const [sustratoKgStockModal, setSustratoKgStockModal] = useState<SustratoKgStockModalState | null>(
+    null,
+  )
+  const sustratoKgStockModalDismissedRef = useRef<string | null>(null)
+
+  const syncSustratoKgStockModal = useCallback(
+    (
+      area: "impresion" | "laminacion",
+      rowIndex: number,
+      row: SustratoRow,
+      materialsList: MaterialRow[],
+    ) => {
+      const dismissKey = sustratoKgStockModalDismissKey(area, rowIndex)
+      const modal = buildSustratoKgStockModalIfExceeds(area, rowIndex, row, materialsList)
+      if (!modal) {
+        if (sustratoKgStockModalDismissedRef.current === dismissKey) {
+          sustratoKgStockModalDismissedRef.current = null
+        }
+        setSustratoKgStockModal((prev) =>
+          prev?.area === area && prev.rowIndex === rowIndex ? null : prev,
+        )
+        return
+      }
+      if (sustratoKgStockModalDismissedRef.current === dismissKey) return
+      setSustratoKgStockModal(modal)
+    },
+    [],
+  )
+
+  const dismissSustratoKgStockModal = useCallback(() => {
+    setSustratoKgStockModal((prev) => {
+      if (prev) {
+        sustratoKgStockModalDismissedRef.current = sustratoKgStockModalDismissKey(
+          prev.area,
+          prev.rowIndex,
+        )
+      }
+      return null
+    })
+  }, [])
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
   const canSaveCorteProduction = useMemo(
@@ -1148,6 +1267,7 @@ export default function WorkOrderPlanillaPage() {
   const [productPickerOpen, setProductPickerOpen] = useState(false)
   const [maquinaPickerOpen, setMaquinaPickerOpen] = useState(false)
   const [tipoImpresionPickerOpen, setTipoImpresionPickerOpen] = useState(false)
+  const [tipoImpresionMontajePickerOpen, setTipoImpresionMontajePickerOpen] = useState(false)
   const [lineaCortePickerOpen, setLineaCortePickerOpen] = useState(false)
   const [priorityPickerOpen, setPriorityPickerOpen] = useState(false)
   const [sustratoImpPickerIdx, setSustratoImpPickerIdx] = useState<number | null>(null)
@@ -1175,6 +1295,7 @@ export default function WorkOrderPlanillaPage() {
     canViewImpresion: false,
     canViewLaminacion: false,
     canViewCorte: false,
+    canViewProgramacion: false,
   })
 
   const clearAllBlurDismissTimers = () => {
@@ -1267,7 +1388,7 @@ export default function WorkOrderPlanillaPage() {
           merged.programacionMotivo = ""
         }
       }
-      setForm(withCorteAutoFields(withMontajeAutoFields(merged)))
+      setForm(withCorteAutoFields(fillMontajeAutoFieldsIfEmpty(merged)))
       clearAllBlurDismissTimers()
       setBlurFieldMessages({})
     } catch (e) {
@@ -1367,7 +1488,7 @@ export default function WorkOrderPlanillaPage() {
       setPrefill(p)
       setWoClientId(Number.isFinite(Number(co.client_id)) ? Number(co.client_id) : null)
       setWoProductId(productId)
-      setForm(withCorteAutoFields(withMontajeAutoFields(merged)))
+      setForm(withCorteAutoFields(fillMontajeAutoFieldsIfEmpty(merged)))
       clearAllBlurDismissTimers()
       setBlurFieldMessages({})
     } catch (e) {
@@ -1456,47 +1577,19 @@ export default function WorkOrderPlanillaPage() {
   )
 
   const tipoImpresionComboLabel = useMemo(() => {
-    if (tipoImpresion === "superficie") return "Superficie"
-    if (tipoImpresion === "reverso") return "Reverso"
+    if (tipoImpresion) return tipoImpresionLabel(tipoImpresion)
     return "Elegir…"
   }, [tipoImpresion])
 
-  /** Montaje copia el tipo de la especificación (datos del producto); el select de montaje queda deshabilitado. */
-  useEffect(() => {
-    const montajeLabel =
-      tipoImpresion === "superficie" ? "Superficie" : tipoImpresion === "reverso" ? "Reverso" : ""
-    setForm((f) => {
-      if (readString(f.tipoImpresionMontaje) === montajeLabel) return f
-      return { ...f, tipoImpresionMontaje: montajeLabel }
-    })
-  }, [tipoImpresion])
+  const tipoImpresionMontaje = useMemo(
+    () => normalizeTipoImpresion(readString(form.tipoImpresionMontaje)),
+    [form.tipoImpresionMontaje],
+  )
 
-  /** Desarrollo y ancho montaje: frecuencia×rep y ancho corte×bandas. */
-  useEffect(() => {
-    if (!canEditShared || !canViewMontaje) return
-    const patch = syncMontajeAutoFields(formRef.current)
-    if (!patch.desarrollo && !patch.anchoMontaje) return
-    setForm((f) => {
-      let changed = false
-      const next = { ...f }
-      if (patch.desarrollo && readString(f.desarrollo) !== patch.desarrollo) {
-        next.desarrollo = patch.desarrollo
-        changed = true
-      }
-      if (patch.anchoMontaje && readString(f.anchoMontaje) !== patch.anchoMontaje) {
-        next.anchoMontaje = patch.anchoMontaje
-        changed = true
-      }
-      return changed ? next : f
-    })
-  }, [
-    canEditShared,
-    canViewMontaje,
-    form.frecuencia,
-    form.numRepeticion,
-    form.anchoCorteMontaje,
-    form.numBandas,
-  ])
+  const tipoImpresionMontajeLabel = useMemo(() => {
+    if (tipoImpresionMontaje) return tipoImpresionLabel(tipoImpresionMontaje)
+    return "Elegir…"
+  }, [tipoImpresionMontaje])
 
   const productComboLabel = useMemo(() => {
     const n = readString(form.producto) || readString(prefill.producto)
@@ -1523,15 +1616,11 @@ export default function WorkOrderPlanillaPage() {
         n.cpe = readString(p.cpe)
         n.mpps = readString(p.mps)
         n.codigoBarra = trimBarcodeForPrefill(p.barcode) ?? ""
-        const tipoEstructura =
-          delta.tipoImpresion === "Reverso"
-            ? "reverso"
-            : delta.tipoImpresion === "Superficie"
-              ? "superficie"
-              : normalizeTipoImpresion(readString(f.tipoImpresionEstructura))
+        const tipoEstructura = normalizeTipoImpresion(
+          readString(delta.tipoImpresion) || readString(f.tipoImpresionEstructura),
+        )
         Object.assign(n, structureLayersToOtFormFields(p.structure, tipoEstructura))
-        if (delta.tipoImpresion === "Reverso") n.tipoImpresionEstructura = "reverso"
-        else if (delta.tipoImpresion === "Superficie") n.tipoImpresionEstructura = "superficie"
+        if (tipoEstructura) n.tipoImpresionEstructura = tipoEstructura
         n.tipoImpresion = delta.tipoImpresion ?? f.tipoImpresion
         return n
       })
@@ -1587,6 +1676,7 @@ export default function WorkOrderPlanillaPage() {
     canViewImpresion,
     canViewLaminacion,
     canViewCorte,
+    canViewProgramacion,
   }
 
   const errorFor = (key: string) => {
@@ -1732,14 +1822,7 @@ export default function WorkOrderPlanillaPage() {
       toast.error(MES_SAVE_BLOCKED_MESSAGE)
       return
     }
-    const formToSave = withCorteAutoFields(withMontajeAutoFields(form))
-    const montajePatch = syncMontajeAutoFields(form)
-    if (
-      (montajePatch.desarrollo && readString(form.desarrollo) !== montajePatch.desarrollo) ||
-      (montajePatch.anchoMontaje && readString(form.anchoMontaje) !== montajePatch.anchoMontaje)
-    ) {
-      setForm(formToSave)
-    }
+    const formToSave = withCorteAutoFields(form)
     const errors: Record<string, string> = {}
     const addError = (key: string, message: string) => {
       if (!errors[key]) errors[key] = message
@@ -1776,7 +1859,7 @@ export default function WorkOrderPlanillaPage() {
     }
 
     if (canEditShared) {
-      if (tipoImpresion === "reverso") {
+      if (tipoImpresion === "trilaminado") {
         if (!readString(formToSave.estructuraCapa1Rev).trim()) {
           addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
         }
@@ -1785,6 +1868,13 @@ export default function WorkOrderPlanillaPage() {
         }
         if (!readString(formToSave.estructuraCapa3Rev).trim()) {
           addError("estructuraCapa3Rev", "Capa 3 es obligatoria (revise estructura del producto).")
+        }
+      } else if (tipoImpresion === "bilaminado") {
+        if (!readString(formToSave.estructuraCapa1Rev).trim()) {
+          addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
+        }
+        if (!readString(formToSave.estructuraCapa2Rev).trim()) {
+          addError("estructuraCapa2Rev", "Capa 2 es obligatoria (revise estructura del producto).")
         }
       } else if (tipoImpresion === "superficie") {
         const estructuraSuperficie =
@@ -1809,15 +1899,18 @@ export default function WorkOrderPlanillaPage() {
       if (!isPositiveIntLike(formToSave.numRepeticion)) {
         addError("numRepeticion", "Debe ser entero mayor a 0.")
       }
+      if (!normalizeTipoImpresion(formToSave.tipoImpresionMontaje)) {
+        addError("tipoImpresionMontaje", "Seleccione el tipo de impresión en montaje.")
+      }
       const desarrollo = readString(formToSave.desarrollo).trim()
       if (!desarrollo) {
-        addError("desarrollo", "Desarrollo (mm) es obligatorio (complete frecuencia y N° repetición).")
+        addError("desarrollo", "Desarrollo (mm) es obligatorio.")
       } else if (!isMetricLike(desarrollo)) {
         addError("desarrollo", "Formato válido: 330±2, 330 o 329-331.")
       }
       const anchoMontaje = readString(formToSave.anchoMontaje).trim()
       if (!anchoMontaje) {
-        addError("anchoMontaje", "Ancho montaje (mm) es obligatorio (complete ancho corte y N° bandas).")
+        addError("anchoMontaje", "Ancho montaje (mm) es obligatorio.")
       } else if (!isMetricLike(anchoMontaje)) {
         addError("anchoMontaje", "Formato válido: 330±2, 330 o 329-331.")
       }
@@ -2121,6 +2214,24 @@ export default function WorkOrderPlanillaPage() {
       const kg = readString(sustratosLam[i]?.kg).trim()
       if (kg && !isDecimalLike(kg)) {
         addError("sustratosLam", `Laminación: 'Kg a utilizar' de sustrato ${i + 1} debe ser numérico.`)
+      }
+    }
+
+    if (canViewProgramacion) {
+      if (!readString(form.observacionesGenerales).trim()) {
+        addError("observacionesGenerales", "Observaciones generales es obligatorio.")
+      }
+      if (!readString(form.fechaInicio).trim()) {
+        addError("fechaInicio", "F. Inicio es obligatoria.")
+      }
+      if (!readString(form.fechaEntrega).trim()) {
+        addError("fechaEntrega", "F. Entrega es obligatoria.")
+      }
+      if (!readString(form.programacionMotivo).trim()) {
+        addError("programacionMotivo", "Motivo de asignación es obligatorio.")
+      }
+      if (readProgramacionAreas(form).length === 0) {
+        addError("programacionAreas", "Seleccione al menos un área.")
       }
     }
 
@@ -2938,38 +3049,25 @@ export default function WorkOrderPlanillaPage() {
                                     />
                                     Elegir…
                                   </CommandItem>
-                                  <CommandItem
-                                    value="superficie tipo impresion"
-                                    onSelect={() => {
-                                      setKey(setForm, "tipoImpresionEstructura", "superficie")
-                                      setTipoImpresionPickerOpen(false)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        tipoImpresion === "superficie" ? "opacity-100" : "opacity-0",
-                                      )}
-                                      aria-hidden
-                                    />
-                                    Superficie
-                                  </CommandItem>
-                                  <CommandItem
-                                    value="reverso tipo impresion"
-                                    onSelect={() => {
-                                      setKey(setForm, "tipoImpresionEstructura", "reverso")
-                                      setTipoImpresionPickerOpen(false)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        tipoImpresion === "reverso" ? "opacity-100" : "opacity-0",
-                                      )}
-                                      aria-hidden
-                                    />
-                                    Reverso
-                                  </CommandItem>
+                                  {TIPO_IMPRESION_ESPEC_OPTIONS.map((opt) => (
+                                    <CommandItem
+                                      key={opt}
+                                      value={`${opt} tipo impresion`}
+                                      onSelect={() => {
+                                        setKey(setForm, "tipoImpresionEstructura", opt)
+                                        setTipoImpresionPickerOpen(false)
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          tipoImpresion === opt ? "opacity-100" : "opacity-0",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      {tipoImpresionLabel(opt)}
+                                    </CommandItem>
+                                  ))}
                                 </CommandGroup>
                               </CommandList>
                             </Command>
@@ -3000,9 +3098,9 @@ export default function WorkOrderPlanillaPage() {
                         </div>
                       ) : null}
 
-                      {tipoImpresion === "reverso" ? (
-                        <>
-                          <div className="ot-field ot-dpm-span-2">
+                      {tipoImpresionCapas(tipoImpresion) >= 2 ? (
+                        <div className="ot-dpm-estructura-capas">
+                          <div className="ot-field">
                             <label className="ot-label required">Capa 1</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
@@ -3015,9 +3113,9 @@ export default function WorkOrderPlanillaPage() {
                                 aria-invalid={otInvalid("estructuraCapa1Rev")}
                               />
                             </OtPlanillaInputIcon>
-                          
-                            {renderError("estructuraCapa1Rev")}</div>
-                          <div className="ot-field ot-dpm-span-2">
+                            {renderError("estructuraCapa1Rev")}
+                          </div>
+                          <div className="ot-field">
                             <label className="ot-label required">Capa 2</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
@@ -3030,24 +3128,26 @@ export default function WorkOrderPlanillaPage() {
                                 aria-invalid={otInvalid("estructuraCapa2Rev")}
                               />
                             </OtPlanillaInputIcon>
-                          
-                            {renderError("estructuraCapa2Rev")}</div>
-                          <div className="ot-field ot-dpm-span-2">
-                            <label className="ot-label required">Capa 3</label>
-                            <OtPlanillaInputIcon icon={LucideLayers}>
-                              <input
-                                className="ot-input"
-                                data-field="estructuraCapa3Rev"
-                                value={readString(form.estructuraCapa3Rev)}
-                                onChange={(ev) => setKey(setForm, "estructuraCapa3Rev", ev.target.value)}
-                                placeholder="PEBD coextrusión 55 µm"
-                                disabled={!canEditShared}
-                                aria-invalid={otInvalid("estructuraCapa3Rev")}
-                              />
-                            </OtPlanillaInputIcon>
-                          
-                            {renderError("estructuraCapa3Rev")}</div>
-                        </>
+                            {renderError("estructuraCapa2Rev")}
+                          </div>
+                          {tipoImpresionCapas(tipoImpresion) === 3 ? (
+                            <div className="ot-field">
+                              <label className="ot-label required">Capa 3</label>
+                              <OtPlanillaInputIcon icon={LucideLayers}>
+                                <input
+                                  className="ot-input"
+                                  data-field="estructuraCapa3Rev"
+                                  value={readString(form.estructuraCapa3Rev)}
+                                  onChange={(ev) => setKey(setForm, "estructuraCapa3Rev", ev.target.value)}
+                                  placeholder="PEBD coextrusión 55 µm"
+                                  disabled={!canEditShared}
+                                  aria-invalid={otInvalid("estructuraCapa3Rev")}
+                                />
+                              </OtPlanillaInputIcon>
+                              {renderError("estructuraCapa3Rev")}
+                            </div>
+                          ) : null}
+                        </div>
                       ) : null}
 
                       <div className="ot-field ot-dpm-span-2">
@@ -3147,25 +3247,82 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <div className="ot-field">
                       <label className="ot-label required">Tipo impresión en montaje</label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        role="combobox"
-                        data-field="tipoImpresionMontaje"
-                        disabled
-                        title="Mismo valor que «Tipo impresión (especificación)» en Datos del producto; solo se edita allí."
-                        className="ot-input-unified h-9 w-full min-w-0 max-w-full cursor-not-allowed justify-between gap-2 bg-muted/40 px-2 font-normal opacity-100 print:hidden"
+                      <Popover
+                        open={tipoImpresionMontajePickerOpen}
+                        onOpenChange={setTipoImpresionMontajePickerOpen}
                       >
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                          <span className="min-w-0 flex-1 truncate text-left text-sm">{tipoImpresionComboLabel}</span>
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                      </Button>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            data-field="tipoImpresionMontaje"
+                            aria-expanded={tipoImpresionMontajePickerOpen}
+                            aria-invalid={otInvalid("tipoImpresionMontaje")}
+                            className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                          >
+                            <span className="flex min-w-0 flex-1 items-center gap-2">
+                              <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                              <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                {tipoImpresionMontajeLabel}
+                              </span>
+                            </span>
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="p-0 no-print w-[min(100vw-2rem,20rem)] min-w-[var(--radix-popover-trigger-width)]"
+                          align="start"
+                          side="bottom"
+                        >
+                          <Command>
+                            <CommandList>
+                              <CommandGroup>
+                                <CommandItem
+                                  value="elegir tipo impresion montaje vacio"
+                                  onSelect={() => {
+                                    setKey(setForm, "tipoImpresionMontaje", "")
+                                    setTipoImpresionMontajePickerOpen(false)
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      tipoImpresionMontaje === "" ? "opacity-100" : "opacity-0",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  Elegir…
+                                </CommandItem>
+                                {TIPO_IMPRESION_ESPEC_OPTIONS.map((opt) => (
+                                  <CommandItem
+                                    key={opt}
+                                    value={`${opt} tipo impresion montaje`}
+                                    onSelect={() => {
+                                      setKey(setForm, "tipoImpresionMontaje", opt)
+                                      setTipoImpresionMontajePickerOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        tipoImpresionMontaje === opt ? "opacity-100" : "opacity-0",
+                                      )}
+                                      aria-hidden
+                                    />
+                                    {tipoImpresionLabel(opt)}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                       <div className="ot-input-unified hidden h-9 items-center gap-2 bg-muted/40 px-2 text-sm print:flex">
                         <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate">{tipoImpresionComboLabel}</span>
+                        <span className="min-w-0 flex-1 truncate">{tipoImpresionMontajeLabel}</span>
                       </div>
+                      {renderError("tipoImpresionMontaje")}
                     </div>
                     <div className="ot-field">
                       <label className="ot-label required">Ancho Corte (mm)</label>
@@ -3201,32 +3358,30 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("numRepeticion")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Desarrollo (mm) (auto)</label>
+                      <label className="ot-label required">Desarrollo (mm)</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="desarrollo"
-                          className="ot-input cursor-not-allowed bg-muted/40"
-                          readOnly
-                          tabIndex={-1}
-                          title="Calculado: frecuencia × N° repetición"
+                          className="ot-input"
                           value={readString(form.desarrollo)}
+                          onChange={(e) => setKey(setForm, "desarrollo", sanitizeMetricInput(e.target.value))}
                           placeholder="812±2"
+                          inputMode="decimal"
                           aria-invalid={otInvalid("desarrollo")}
                         />
                       </OtPlanillaInputIcon>
                       {renderError("desarrollo")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Ancho Montaje (mm) (auto)</label>
+                      <label className="ot-label required">Ancho Montaje (mm)</label>
                       <OtPlanillaInputIcon icon={Columns}>
                         <input
                           data-field="anchoMontaje"
-                          className="ot-input cursor-not-allowed bg-muted/40"
-                          readOnly
-                          tabIndex={-1}
-                          title="Calculado: ancho corte × N° bandas"
+                          className="ot-input"
                           value={readString(form.anchoMontaje)}
+                          onChange={(e) => setKey(setForm, "anchoMontaje", sanitizeMetricInput(e.target.value))}
                           placeholder="1040±2"
+                          inputMode="decimal"
                           aria-invalid={otInvalid("anchoMontaje")}
                         />
                       </OtPlanillaInputIcon>
@@ -3437,8 +3592,7 @@ export default function WorkOrderPlanillaPage() {
                         </div>
                         <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
                           <span className="font-medium text-foreground">Sustrato:</span> puede escribir la referencia,
-                          abrir el catálogo de inventario o crear un material nuevo en otra pestaña (botón{" "}
-                          <PackagePlus className="inline-block h-3 w-3 align-text-bottom opacity-80" aria-hidden />).
+                          abrir el catálogo de inventario.
                         </p>
                         <div className="ot-sustratos-virgen-rows">
                           {sustratosImp.map((r, idx) => (
@@ -3527,13 +3681,21 @@ export default function WorkOrderPlanillaPage() {
                                                   value={search}
                                                   onSelect={() => {
                                                     const next = [...sustratosImp]
-                                                    next[idx] = {
+                                                    const updated: SustratoRow = {
                                                       ...next[idx],
                                                       material_id: String(m.id),
                                                       material_free_text: "",
                                                     }
+                                                    next[idx] = updated
+                                                    sustratoKgStockModalDismissedRef.current = null
                                                     setSustratosImp(setForm, next)
                                                     setSustratoImpPickerIdx(null)
+                                                    syncSustratoKgStockModal(
+                                                      "impresion",
+                                                      idx,
+                                                      updated,
+                                                      materials,
+                                                    )
                                                   }}
                                                 >
                                                   <Check
@@ -3559,11 +3721,7 @@ export default function WorkOrderPlanillaPage() {
                                       </Command>
                                     </PopoverContent>
                                   </Popover>
-                                  <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" asChild title="Crear material en inventario">
-                                    <Link to="/materiales/nuevo" target="_blank" rel="noopener noreferrer">
-                                      <PackagePlus className="h-4 w-4" aria-hidden />
-                                    </Link>
-                                  </Button>
+                                  
                                 </div>
                                 <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
                                   <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -3572,27 +3730,46 @@ export default function WorkOrderPlanillaPage() {
                                   </span>
                                 </div>
                               </div>
-                              <div className="ot-field">
+                              <div
+                                className={cn(
+                                  "ot-field",
+                                  sustratoRowUsesCatalogMaterial(r) && "ot-field-kg-stock--reserved",
+                                )}
+                              >
                                 <label className="ot-label required">Kg a utilizar</label>
-                                <OtPlanillaInputIcon icon={Weight}>
-                                  <input
-                                    data-field="sustratosImp"
-                                    type="number"
-                                    inputMode="decimal"
-                                    step="0.01"
-                                    min="0"
-                                    className="ot-input"
-                                    value={r.kg}
-                                    onChange={(e) => {
-                                      const next = [...sustratosImp]
-                                      next[idx] = { ...next[idx], kg: e.target.value }
-                                      setSustratosImp(setForm, next)
-                                    }}
-                                    placeholder="420.50"
-                                    aria-invalid={otInvalid("sustratosImp")}
-                                  />
-                                </OtPlanillaInputIcon>
-                                <SustratoKgStockFooter row={r} materials={materials} />
+                                <div className="ot-field-kg-stock-body">
+                                  <div className="ot-field-kg-stock-input">
+                                  <OtPlanillaInputIcon icon={Weight}>
+                                    <input
+                                      data-field="sustratosImp"
+                                      type="number"
+                                      inputMode="decimal"
+                                      step="0.01"
+                                      min="0"
+                                      className="ot-input"
+                                      value={r.kg}
+                                      onChange={(e) => {
+                                        const next = [...sustratosImp]
+                                        const updated: SustratoRow = {
+                                          ...next[idx],
+                                          kg: e.target.value,
+                                        }
+                                        next[idx] = updated
+                                        setSustratosImp(setForm, next)
+                                        syncSustratoKgStockModal(
+                                          "impresion",
+                                          idx,
+                                          updated,
+                                          materials,
+                                        )
+                                      }}
+                                      placeholder="420.50"
+                                      aria-invalid={otInvalid("sustratosImp")}
+                                    />
+                                  </OtPlanillaInputIcon>
+                                  </div>
+                                  <SustratoKgStockFooter row={r} materials={materials} />
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -3808,8 +3985,7 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
                       <span className="font-medium text-foreground">Sustrato:</span> puede escribir la referencia,
-                      abrir el catálogo de inventario o crear un material nuevo en otra pestaña (botón{" "}
-                      <PackagePlus className="inline-block h-3 w-3 align-text-bottom opacity-80" aria-hidden />).
+                      abrir el catálogo de inventario 
                     </p>
                     <div className="ot-sustratos-virgen-rows">
                       {sustratosLam.map((r, idx) => (
@@ -3898,13 +4074,21 @@ export default function WorkOrderPlanillaPage() {
                                               value={search}
                                               onSelect={() => {
                                                 const next = [...sustratosLam]
-                                                next[idx] = {
+                                                const updated: SustratoRow = {
                                                   ...next[idx],
                                                   material_id: String(m.id),
                                                   material_free_text: "",
                                                 }
+                                                next[idx] = updated
+                                                sustratoKgStockModalDismissedRef.current = null
                                                 setSustratosLam(setForm, next)
                                                 setSustratoLamPickerIdx(null)
+                                                syncSustratoKgStockModal(
+                                                  "laminacion",
+                                                  idx,
+                                                  updated,
+                                                  materials,
+                                                )
                                               }}
                                             >
                                               <Check
@@ -3930,11 +4114,7 @@ export default function WorkOrderPlanillaPage() {
                                   </Command>
                                 </PopoverContent>
                               </Popover>
-                              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" asChild title="Crear material en inventario">
-                                <Link to="/materiales/nuevo" target="_blank" rel="noopener noreferrer">
-                                  <PackagePlus className="h-4 w-4" aria-hidden />
-                                </Link>
-                              </Button>
+                              
                             </div>
                             <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
                               <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -3943,27 +4123,46 @@ export default function WorkOrderPlanillaPage() {
                               </span>
                             </div>
                           </div>
-                          <div className="ot-field">
+                          <div
+                            className={cn(
+                              "ot-field",
+                              sustratoRowUsesCatalogMaterial(r) && "ot-field-kg-stock--reserved",
+                            )}
+                          >
                             <label className="ot-label required">Kg a utilizar</label>
-                            <OtPlanillaInputIcon icon={Weight}>
-                              <input
-                                data-field="sustratosLam"
-                                type="number"
-                                inputMode="decimal"
-                                step="0.01"
-                                min="0"
-                                className="ot-input"
-                                value={r.kg}
-                                onChange={(e) => {
-                                  const next = [...sustratosLam]
-                                  next[idx] = { ...next[idx], kg: e.target.value }
-                                  setSustratosLam(setForm, next)
-                                }}
-                                placeholder="420.50"
-                                aria-invalid={otInvalid("sustratosLam")}
-                              />
-                            </OtPlanillaInputIcon>
-                            <SustratoKgStockFooter row={r} materials={materials} />
+                            <div className="ot-field-kg-stock-body">
+                              <div className="ot-field-kg-stock-input">
+                              <OtPlanillaInputIcon icon={Weight}>
+                                <input
+                                  data-field="sustratosLam"
+                                  type="number"
+                                  inputMode="decimal"
+                                  step="0.01"
+                                  min="0"
+                                  className="ot-input"
+                                  value={r.kg}
+                                  onChange={(e) => {
+                                    const next = [...sustratosLam]
+                                    const updated: SustratoRow = {
+                                      ...next[idx],
+                                      kg: e.target.value,
+                                    }
+                                    next[idx] = updated
+                                    setSustratosLam(setForm, next)
+                                    syncSustratoKgStockModal(
+                                      "laminacion",
+                                      idx,
+                                      updated,
+                                      materials,
+                                    )
+                                  }}
+                                  placeholder="420.50"
+                                  aria-invalid={otInvalid("sustratosLam")}
+                                />
+                              </OtPlanillaInputIcon>
+                              </div>
+                              <SustratoKgStockFooter row={r} materials={materials} />
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -4458,12 +4657,15 @@ export default function WorkOrderPlanillaPage() {
                         <label className="ot-label required">Observaciones generales</label>
                         <OtPlanillaInputIcon icon={FileText} align="top">
                           <Textarea
+                            data-field="observacionesGenerales"
                             className="min-h-[5rem] resize-y"
                             value={readString(form.observacionesGenerales)}
                             onChange={(e) => setKey(setForm, "observacionesGenerales", e.target.value)}
                             placeholder="Revisar secuencia de color y embalaje final acordado con el cliente"
+                            aria-invalid={otInvalid("observacionesGenerales")}
                           />
                         </OtPlanillaInputIcon>
+                        {renderError("observacionesGenerales")}
                       </div>
                     </div>
                   </div>
@@ -4476,22 +4678,28 @@ export default function WorkOrderPlanillaPage() {
                           <OtPlanillaInputIcon icon={CalendarClock}>
                             <input
                               type="date"
+                              data-field="fechaInicio"
                               className="ot-input"
                               value={readString(form.fechaInicio)}
                               onChange={(e) => setKey(setForm, "fechaInicio", e.target.value)}
+                              aria-invalid={otInvalid("fechaInicio")}
                             />
                           </OtPlanillaInputIcon>
+                          {renderError("fechaInicio")}
                         </div>
                         <div className="ot-field">
                           <label className="ot-label required">F. Entrega</label>
                           <OtPlanillaInputIcon icon={CalendarDays}>
                             <input
                               type="date"
+                              data-field="fechaEntrega"
                               className="ot-input"
                               value={readString(form.fechaEntrega)}
                               onChange={(e) => setKey(setForm, "fechaEntrega", e.target.value)}
+                              aria-invalid={otInvalid("fechaEntrega")}
                             />
                           </OtPlanillaInputIcon>
+                          {renderError("fechaEntrega")}
                         </div>
                         <div className="ot-field">
                           <label className="ot-label required">Prioridad</label>
@@ -4567,8 +4775,9 @@ export default function WorkOrderPlanillaPage() {
                               aria-hidden
                               strokeWidth={2.25}
                             />
-                            <AreasMultiCheckbox value={[...PROGRAMACION_AREAS]} />
+                            <AreasMultiCheckbox value={readProgramacionAreas(form)} />
                           </div>
+                          {renderError("programacionAreas")}
                         </div>
                         <div className="ot-field sm:col-span-2">
                           <label className="ot-label required">Motivo de asignación</label>
@@ -4579,8 +4788,10 @@ export default function WorkOrderPlanillaPage() {
                               value={readString(form.programacionMotivo)}
                               onChange={(e) => setKey(setForm, "programacionMotivo", e.target.value)}
                               placeholder="Cliente confirma ventanas de corte; coordinar con programación"
+                              aria-invalid={otInvalid("programacionMotivo")}
                             />
                           </OtPlanillaInputIcon>
+                          {renderError("programacionMotivo")}
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-muted-foreground">
@@ -4766,6 +4977,72 @@ export default function WorkOrderPlanillaPage() {
                   onClick={() => setDuplicateOtMatches(null)}
                 >
                   Cerrar
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={sustratoKgStockModal !== null}
+        onOpenChange={(open) => {
+          if (!open) dismissSustratoKgStockModal()
+        }}
+      >
+        <DialogContent
+          overlayClassName="z-[100] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            "max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl sm:max-w-md",
+            "z-[101] w-full translate-x-[-50%] translate-y-[-50%]",
+            "[&>button.absolute]:hidden",
+          )}
+        >
+          {sustratoKgStockModal ? (
+            <>
+              <DialogHeader className="border-b border-border/60 bg-gradient-to-b from-amber-50/80 to-transparent px-6 py-6 text-center sm:text-center dark:from-amber-950/30">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                  <AlertCircle className="h-6 w-6 shrink-0" aria-hidden />
+                </div>
+                <DialogTitle className="text-balance text-xl font-bold leading-tight tracking-tight text-amber-950 dark:text-amber-100 sm:text-2xl">
+                  Supera el stock disponible
+                </DialogTitle>
+              </DialogHeader>
+              <DialogDescription asChild>
+                <div className="space-y-3 px-6 py-4 text-center text-sm leading-relaxed text-muted-foreground">
+                  <p>
+                    <span className="font-medium text-foreground">
+                      {sustratoKgStockModal.area === "impresion" ? "Impresión" : "Laminación"}
+                    </span>
+                    {" · "}
+                    Sustrato {sustratoKgStockModal.rowIndex + 1}: {sustratoKgStockModal.materialLabel}
+                  </p>
+                  <p>
+                    Disponible en inventario:{" "}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {sustratoKgStockModal.availableLabel} kg
+                    </span>
+                    . Indicó{" "}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {sustratoKgStockModal.requestedKg} kg
+                    </span>{" "}
+                    a utilizar.
+                  </p>
+                  <p className="text-xs">
+                    Puede seguir editando la planilla. Al guardar la OT se volverá a validar el
+                    inventario.
+                  </p>
+                </div>
+              </DialogDescription>
+              <DialogFooter className="flex flex-row flex-wrap items-center justify-center gap-3 border-t border-border/60 bg-muted/20 px-6 py-4 sm:flex-row sm:justify-center">
+                <Button
+                  type="button"
+                  variant="default"
+                  className="min-w-[9.5rem] gap-2"
+                  onClick={dismissSustratoKgStockModal}
+                >
+                  <Check className="h-4 w-4 shrink-0" aria-hidden />
+                  Entendido
                 </Button>
               </DialogFooter>
             </>

@@ -50,6 +50,60 @@ class MesProductionSaveGuard
     }
 
     /**
+     * Cierre de turno de planta: el formulario pasa a sin turno actual (null) tras haber tenido uno abierto.
+     * En ese caso no exigir turno+cronómetro activos aunque notify_on_production_save sea true.
+     *
+     * @param  array<string, mixed>  $previousForm
+     * @param  array<string, mixed>  $mergedForm
+     */
+    public static function shouldSkipSaveGuardForTurnClose(
+        string $originArea,
+        array $previousForm,
+        array $mergedForm,
+    ): bool {
+        $area = strtolower(trim($originArea));
+        if ($area === '' || ! isset(self::AREA_CONFIG[$area])) {
+            return false;
+        }
+
+        $config = self::AREA_CONFIG[$area];
+        $actualKey = $config['actual_key'];
+        if (array_key_exists($actualKey, $mergedForm) && $mergedForm[$actualKey] !== null) {
+            return false;
+        }
+
+        return self::hasOpenTurnoInForm(
+            $previousForm,
+            $actualKey,
+            $config['legacy_turno_keys'] ?? [],
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @param  list<string>  $legacyTurnoKeys
+     */
+    private static function hasOpenTurnoInForm(array $form, string $actualKey, array $legacyTurnoKeys): bool
+    {
+        $actual = $form[$actualKey] ?? null;
+        if (is_array($actual) && $actual !== [] && ! self::turnoEntryIsClosed($actual)) {
+            return true;
+        }
+
+        return self::hasActiveTurno($form, $actualKey, $legacyTurnoKeys);
+    }
+
+    /**
+     * @param  array<string, mixed>  $turno
+     */
+    private static function turnoEntryIsClosed(array $turno): bool
+    {
+        $closed = $turno['closed_at'] ?? null;
+
+        return is_string($closed) && trim($closed) !== '';
+    }
+
+    /**
      * @param  array<string, mixed>  $form
      * @param  list<string>  $legacyTurnoKeys
      */
@@ -78,25 +132,25 @@ class MesProductionSaveGuard
      */
     private static function hasProductionTimerStarted(array $form, string $prefix): bool
     {
-        $state = strtolower(trim((string) ($form[$prefix.'TimerState'] ?? 'pending')));
+        $state = strtolower(trim((string) ($form[$prefix . 'TimerState'] ?? 'pending')));
         if (in_array($state, ['running', 'paused', 'stopped', 'completed'], true)) {
             return true;
         }
 
-        if (self::numericField($form, $prefix.'TimerEffectiveAccSec') > 0) {
+        if (self::numericField($form, $prefix . 'TimerEffectiveAccSec') > 0) {
             return true;
         }
-        if (self::numericField($form, $prefix.'TimerDeadAccSec') > 0) {
+        if (self::numericField($form, $prefix . 'TimerDeadAccSec') > 0) {
             return true;
         }
-        if (self::numericField($form, $prefix.'TimerLastResumeAtMs') > 0) {
+        if (self::numericField($form, $prefix . 'TimerLastResumeAtMs') > 0) {
             return true;
         }
-        if (self::numericField($form, $prefix.'TimerPauseAtMs') > 0) {
+        if (self::numericField($form, $prefix . 'TimerPauseAtMs') > 0) {
             return true;
         }
 
-        $pauses = $form[$prefix.'TimerPauses'] ?? null;
+        $pauses = $form[$prefix . 'TimerPauses'] ?? null;
         if (is_array($pauses)) {
             foreach ($pauses as $entry) {
                 if (! is_array($entry)) {

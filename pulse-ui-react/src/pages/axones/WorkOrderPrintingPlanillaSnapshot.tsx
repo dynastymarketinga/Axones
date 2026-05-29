@@ -9,8 +9,6 @@ import {
   Minus,
   PackagePlus,
   Plus,
-  Ruler,
-  TrendingDown,
   Warehouse,
   Weight,
 } from "lucide-react"
@@ -267,7 +265,7 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
           </div>
         </div>
 
-        <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
+        <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-2">
           <div className="ot-field">
             <label htmlFor={sid("kg-ingresado")} className="ot-label required">
               Kg ingresado
@@ -309,50 +307,6 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
                 placeholder="1825.00"
                 aria-invalid={false}
                 value={readNumberString(form.kgSalidaImp)}
-              />
-            </OtPlanillaInputIcon>
-          </div>
-          <div className="ot-field">
-            <label htmlFor={sid("merma-imp")} className="ot-label required">
-              Merma
-            </label>
-            <OtPlanillaInputIcon icon={TrendingDown}>
-              <input
-                id={sid("merma-imp")}
-                name="mermaImp"
-                data-field="mermaImp"
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min={0}
-                className="ot-input"
-                readOnly
-                tabIndex={-1}
-                placeholder="14.25"
-                aria-invalid={false}
-                value={readNumberString(form.mermaImp)}
-              />
-            </OtPlanillaInputIcon>
-          </div>
-          <div className="ot-field">
-            <label htmlFor={sid("metros-imp")} className="ot-label required">
-              Metros
-            </label>
-            <OtPlanillaInputIcon icon={Ruler}>
-              <input
-                id={sid("metros-imp")}
-                name="metrosImp"
-                data-field="metrosImp"
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min={0}
-                className="ot-input"
-                readOnly
-                tabIndex={-1}
-                placeholder="8200"
-                aria-invalid={false}
-                value={readNumberString(form.metrosImp)}
               />
             </OtPlanillaInputIcon>
           </div>

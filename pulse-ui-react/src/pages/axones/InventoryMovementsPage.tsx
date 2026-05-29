@@ -37,6 +37,7 @@ const REFERENCE_TYPES = [
   "purchase_receipt",
   "miscellaneous_receipt",
   "material_request",
+  "material_request_bobina",
   "inventory_return",
   "inventory_adjustment",
 ]
@@ -184,6 +185,7 @@ export default function InventoryMovementsPage() {
     purchase_receipt: "Recepción",
     miscellaneous_receipt: "Ingreso misceláneo",
     material_request: "Despacho / solicitud",
+    material_request_bobina: "Despacho / solicitud (bobina)",
     inventory_return: "Devolución",
     inventory_adjustment: "Ajuste",
   }

@@ -87,6 +87,8 @@ export type ClientOrderRow = {
   /** En listado suele resumirse; en detalle el API devuelve el registro completo. */
   client?: ClientRecord | null
   lines_count?: number
+  /** OT vinculadas no canceladas (listado OC). */
+  active_work_orders_count?: number
   /** Primera línea con producto maestro (API Laravel) */
   first_line_with_product?: {
     id: number
@@ -288,6 +290,12 @@ export type UserRecord = {
   role?: string | null
 }
 
+/** OC abiertas sin OT activa — columna Pendientes del tablero de programación. */
+export type ProgramacionPendingClientOrder = ClientOrderRow & {
+  lines?: ClientOrderLineDetail[]
+}
+
 export type ProgramacionBoardResponse = {
   columns: Record<string, WorkOrderListRow[]>
+  pending_client_orders?: ProgramacionPendingClientOrder[]
 }

@@ -31,7 +31,24 @@ class MontajePlanillaMetricsTest extends TestCase
 
         $out = MontajePlanillaMetrics::applyAutoFields($form);
 
+        $this->assertSame('490', $out['desarrollo']);
+        $this->assertSame('407', $out['anchoMontaje']);
+    }
+
+    public function test_apply_auto_fields_fills_empty_only(): void
+    {
+        $form = [
+            'frecuencia' => '209±1',
+            'numRepeticion' => '4',
+            'anchoCorteMontaje' => '357±2',
+            'numBandas' => '2',
+            'desarrollo' => '',
+            'anchoMontaje' => '',
+        ];
+
+        $out = MontajePlanillaMetrics::applyAutoFields($form);
+
         $this->assertSame('836±4', $out['desarrollo']);
-        $this->assertSame('357±2', $out['anchoMontaje']);
+        $this->assertSame('714±4', $out['anchoMontaje']);
     }
 }

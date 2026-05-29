@@ -77,7 +77,6 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
         url: "recepciones-oc",
         icon: PackageOpen,
       },
-      { title: "Bobinas", url: "bobinas", icon: Package },
       { title: "Movimientos", url: "movimientos-inventario", icon: ScrollText },
       { title: "Devoluciones", url: "devoluciones", icon: PackageOpen },
     ],
@@ -113,7 +112,6 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
     items: [
       { title: "Inventario", url: "reportes/inventario", icon: Boxes },
       { title: "Producción y tiempos", url: "reportes/produccion", icon: Activity },
-      { title: "Reporte de tiempos", url: "reportes/tiempos", icon: ScrollText },
       { title: "Desperdicio", url: "reportes/mermas", icon: PackageOpen },
       { title: "Por orden de trabajo", url: "reportes/por-orden-trabajo", icon: ClipboardList },
     ],

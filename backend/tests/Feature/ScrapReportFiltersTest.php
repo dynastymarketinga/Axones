@@ -138,6 +138,7 @@ class ScrapReportFiltersTest extends TestCase
             'form' => [
                 'impScrapTransparenteKg' => '1.5',
                 'impScrapImpresoKg' => '0.25',
+                'impScrapImpresoDestino' => 'bopp',
                 'lamScrapTransparenteKg' => '2',
                 'lamScrapImpresoKg' => '0.5',
                 'lamScrapLaminadoKg' => '0.125',
@@ -186,12 +187,75 @@ class ScrapReportFiltersTest extends TestCase
         $this->assertStringContainsString('OT-HIST-1', $body);
 
         $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($qBase, [
-            'substrate_group' => 'transparente',
+            'substrate_group' => 'poliestireno',
         ])), $h)
             ->assertOk()
             ->assertJsonPath('rows.0.imp_scrap_transparente_kg', '1.500')
             ->assertJsonPath('rows.0.imp_scrap_impreso_kg', '0.000')
             ->assertJsonPath('rows.0.lam_scrap_impreso_kg', '0.000');
+
+        Carbon::setTestNow();
+    }
+
+    public function test_scrap_impreso_kg_routes_by_printing_destino_bopp_or_poliestireno(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-01 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Dest', 'rif' => 'J-D1']);
+
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Film',
+            'structure' => 'BOPP + PE',
+        ]);
+
+        $woBopp = WorkOrder::query()->create([
+            'code' => 'OT-IMP-BOPP',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $woBopp->id,
+            'form' => [
+                'impScrapImpresoKg' => '150',
+                'impScrapImpresoDestino' => 'bopp',
+            ],
+        ]);
+
+        $woPs = WorkOrder::query()->create([
+            'code' => 'OT-IMP-PS',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $woPs->id,
+            'form' => [
+                'impScrapImpresoKg' => '80',
+                'impScrapImpresoDestino' => 'poliestireno',
+            ],
+        ]);
+
+        $q = [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+            'layout' => 'history_kg',
+        ];
+
+        $boppRows = $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'bopp',
+        ])), $h)->assertOk()->json('rows');
+        $bopp = collect($boppRows)->firstWhere('work_order_code', 'OT-IMP-BOPP');
+        $this->assertNotNull($bopp);
+        $this->assertSame('150.000', $bopp['imp_scrap_impreso_kg']);
+
+        $psRows = $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'poliestireno',
+        ])), $h)->assertOk()->json('rows');
+        $ps = collect($psRows)->firstWhere('work_order_code', 'OT-IMP-PS');
+        $this->assertNotNull($ps);
+        $this->assertSame('80.000', $ps['imp_scrap_impreso_kg']);
 
         Carbon::setTestNow();
     }
@@ -466,7 +530,7 @@ class ScrapReportFiltersTest extends TestCase
         $ids = collect($groups)->pluck('id')->all();
         $this->assertContains('bopp', $ids);
         $this->assertContains('polietileno', $ids);
-        $this->assertContains('transparente', $ids);
+        $this->assertContains('poliestireno', $ids);
     }
 
     public function test_scrap_substrate_group_legacy_politerlero_alias_normalizes_to_polietileno(): void

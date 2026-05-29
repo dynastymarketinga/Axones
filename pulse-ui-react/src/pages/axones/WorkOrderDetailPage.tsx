@@ -30,15 +30,18 @@ export default function WorkOrderDetailPage() {
   const canUseTintasOps = isBoss || role === "tintas"
   const canUseMontajeOps = isBoss || role === "montaje" || role === "planificador" || role === "supervisor"
   const isPrintingOperator = role === "impresion" || role === "printing"
+  const isLaminacionOperator = role === "laminacion"
   const isMontajeOperator = role === "montaje"
   const isCorteOperator = role === "corte"
   const headerBackPath = isPrintingOperator
     ? "/impresion"
-    : isMontajeOperator
-      ? "/montaje"
-      : isCorteOperator
-        ? "/corte"
-        : "/ordenes-trabajo"
+    : isLaminacionOperator
+      ? "/laminacion"
+      : isMontajeOperator
+        ? "/montaje"
+        : isCorteOperator
+          ? "/corte"
+          : "/ordenes-trabajo"
   const [searchParams] = useSearchParams()
   const tabParam = (searchParams.get("tab") ?? "").toLowerCase().trim()
   const initialTab = (() => {
@@ -92,12 +95,13 @@ export default function WorkOrderDetailPage() {
   const code = order?.code ?? `OT #${id}`
   const form = (order?.technical_document?.form ?? {}) as Record<string, unknown>
   const isPrintingFocusedView = tabParam === "printing" && canUsePrintingOps
+  const isLaminacionFocusedView = tabParam === "laminacion" && canUseLaminacionOps
   const isMontajeFocusedView = tabParam === "montaje" && canUseMontajeOps
   const isCorteFocusedView = tabParam === "corte"
   const showPrintingPrefill = isPrintingFocusedView && isBoss
   const showMontajePrefill = isMontajeFocusedView && isBoss
   const showMasterDataOnProduction =
-    !isMontajeFocusedView && !isPrintingFocusedView && !isCorteFocusedView
+    !isMontajeFocusedView && !isPrintingFocusedView && !isLaminacionFocusedView && !isCorteFocusedView
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -109,11 +113,13 @@ export default function WorkOrderDetailPage() {
           <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
           {isPrintingOperator
             ? "Área Impresión"
-            : isMontajeOperator
-              ? "Área Montaje"
-              : isCorteOperator
-                ? "Área Corte"
-                : "Órdenes de trabajo"}
+            : isLaminacionOperator
+              ? "Área Laminación"
+              : isMontajeOperator
+                ? "Área Montaje"
+                : isCorteOperator
+                  ? "Área Corte"
+                  : "Órdenes de trabajo"}
         </Link>
       </div>
 
@@ -149,6 +155,11 @@ export default function WorkOrderDetailPage() {
                   <>
                     Registre turno, cronómetro y producción. Pulse <strong>Guardar</strong> para enviar al sistema.
                   </>
+                ) : isLaminacionFocusedView ? (
+                  <>
+                    Registre turno de planta, cronómetro y producción. Pulse <strong>Guardar</strong> para enviar al
+                    sistema.
+                  </>
                 ) : (
                   <>
                     Seleccione una pestaña de fase para temporizadores, consumos y mermas. Los datos se guardan en el
@@ -173,6 +184,8 @@ export default function WorkOrderDetailPage() {
 
           {isPrintingFocusedView ? (
             <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+          ) : isLaminacionFocusedView ? (
+            <WorkOrderLaminacionControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
           ) : isMontajeFocusedView ? (
             <WorkOrderMontajeControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
           ) : isCorteFocusedView ? (

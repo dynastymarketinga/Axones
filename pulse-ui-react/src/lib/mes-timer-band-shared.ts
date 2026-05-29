@@ -16,6 +16,8 @@ export type MesBandejaMes = {
   totalHms: string
   showTimes: boolean
   showDeadBreakdown: boolean
+  /** Kg de salida acumulados (p. ej. impresión: cerrados + turno actual). */
+  producidoKg?: number
 }
 
 export type MesTurnTimerLike = {
@@ -75,9 +77,8 @@ export function cumulativeDeadSeconds(
   if (!actual) return sum
   const tim = actual.timer
   let d = tim.deadAccSec
-  // Solo sumar parada «en vivo» si aún no se registró motivo (evita que el muerto siga corriendo tras pausar).
-  const pauses = Array.isArray(tim.pauses) ? tim.pauses : []
-  if (tim.state === "paused" && tim.pauseAtMs > 0 && pauses.length === 0) {
+  // Parada en curso: sumar desde pauseAtMs (se reinicia al registrar motivo para no duplicar).
+  if (tim.state === "paused" && tim.pauseAtMs > 0) {
     d += (nowMs - tim.pauseAtMs) / 1000
   }
   return sum + d

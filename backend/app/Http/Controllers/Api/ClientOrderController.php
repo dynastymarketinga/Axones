@@ -21,6 +21,11 @@ class ClientOrderController extends Controller
         $query = ClientOrder::query()
             ->with(['client', 'firstLineWithProduct.product'])
             ->withCount('lines')
+            ->withCount([
+                'workOrders as active_work_orders_count' => function ($q) {
+                    $q->where('status', '!=', WorkOrderStatus::Cancelled->value);
+                },
+            ])
             ->orderBy('created_at', $sortDirection)
             ->orderBy('id', $sortDirection);
 
@@ -55,10 +60,7 @@ class ClientOrderController extends Controller
         }
 
         if (filter_var($request->query('awaiting_ot'), FILTER_VALIDATE_BOOLEAN)) {
-            $query->where('status', ClientOrderStatus::Open->value)
-                ->whereDoesntHave('workOrders', function ($q) {
-                    $q->where('status', '!=', WorkOrderStatus::Cancelled->value);
-                });
+            $query->awaitingProductionOt();
         }
 
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));

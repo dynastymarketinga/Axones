@@ -19,6 +19,7 @@ class WorkOrderOrdenTrabajoService
     public function __construct(
         private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
         private readonly MesTimerSegmentSyncService $mesTimerSegmentSync,
+        private readonly MontajeTurnosSegmentSyncService $montajeTurnosSegmentSync,
     ) {}
 
     /**
@@ -75,7 +76,7 @@ class WorkOrderOrdenTrabajoService
 
         $assignedAreas = [];
         foreach ($assignmentTitles as $area => $title) {
-            if ($pendingAssignment->contains(fn (AreaRequest $r): bool => $r->area === $area && $r->title === $title)) {
+            if ($pendingAssignment->contains(fn(AreaRequest $r): bool => $r->area === $area && $r->title === $title)) {
                 $assignedAreas[] = $area;
             }
         }
@@ -138,6 +139,7 @@ class WorkOrderOrdenTrabajoService
         );
 
         $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $form, $user);
+        $this->montajeTurnosSegmentSync->syncClosedTurnosFromForm($workOrder, $form, $user);
 
         if ($this->shouldSyncCorteDispatch($form)) {
             $this->cortePlanillaDispatchSync->syncFromForm($workOrder->fresh(), $form);
@@ -194,6 +196,8 @@ class WorkOrderOrdenTrabajoService
                 $existing[$k] = $value;
             }
         }
+
+        $this->stripPrintingMermaMetrajeFromForm($existing);
 
         $doc = WorkOrderTechnicalDocument::query()->updateOrCreate(
             ['work_order_id' => $workOrder->getKey()],
@@ -387,5 +391,35 @@ class WorkOrderOrdenTrabajoService
     private function userCanFinalizeProductionArea(?User $user): bool
     {
         return BossAccess::allows($user);
+    }
+
+    /**
+     * Impresión ya no registra merma/metraje de turno ni % refil calculado: limpia claves legacy al guardar.
+     *
+     * @param  array<string, mixed>  $form
+     */
+    private function stripPrintingMermaMetrajeFromForm(array &$form): void
+    {
+        unset($form['impMermaKg'], $form['impMetrajeProduccion']);
+
+        $stripTurno = static function (mixed $turno): mixed {
+            if (! is_array($turno)) {
+                return $turno;
+            }
+            unset($turno['mermaKg'], $turno['metrajeProduccion']);
+
+            return $turno;
+        };
+
+        if (array_key_exists('impTurnoActual', $form)) {
+            $form['impTurnoActual'] = $stripTurno($form['impTurnoActual']);
+        }
+
+        if (isset($form['impTurnosImpresion']) && is_array($form['impTurnosImpresion'])) {
+            $form['impTurnosImpresion'] = array_map(
+                static fn (mixed $t) => is_array($t) ? $stripTurno($t) : $t,
+                $form['impTurnosImpresion'],
+            );
+        }
     }
 }

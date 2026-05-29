@@ -40,7 +40,7 @@ const fieldIconClass =
 const fieldIconClassSelect =
   "pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 transition-colors"
 
-const PRODUCT_PRINT_TYPES = ["Trimilaminado", "Bilaminado", "Superficie"] as const
+const PRODUCT_PRINT_TYPES = ["Superficie", "Bilaminado", "Trilaminado"] as const
 
 /** Límite alineado con validación API (`structure` en productos). */
 const PRODUCT_STRUCTURE_MAX_LEN = 300
@@ -62,6 +62,7 @@ function canonicalizeLoadedPrintType(raw: string): string {
   const t = raw.trim()
   if (!t) return ""
   const lower = t.toLowerCase()
+  if (lower === "trimilaminado") return "Trilaminado"
   for (const opt of PRODUCT_PRINT_TYPES) {
     if (opt.toLowerCase() === lower) return opt
   }

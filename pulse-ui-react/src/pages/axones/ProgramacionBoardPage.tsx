@@ -1,68 +1,34 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link } from "react-router-dom"
-import {
-  Barcode,
-  CalendarClock,
-  CircleDot,
-  ClipboardList,
-  ListOrdered,
-  Package,
-  Settings2,
-  Users,
-} from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { AlertTriangle, ClipboardList } from "lucide-react"
 import { toast } from "sonner"
 
-import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
-import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+ 
+ 
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
-import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
+ 
+import { ProgramacionKanbanBoard } from "@/components/axones/programacion/ProgramacionKanbanBoard"
 import {
-  CatalogTableHead,
-  CatalogTableHeadRight,
-} from "@/components/axones/CatalogTableHead"
-import {
-  catalogSelectTriggerClass,
-  catalogTableBodyCellClass,
-  catalogTableBodyRowClass,
-  catalogTableHeaderRowClass,
-} from "@/components/axones/catalog-list-classes"
-import { LoadingTableRow } from "@/components/axones/LoadingStates"
+  KANBAN_COLUMNS,
+  STAGE_OPTIONS,
+  stageTitle,
+  type BoardStageKey,
+} from "@/components/axones/programacion/programacion-kanban-config"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+ 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, WorkOrderListRow } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
-import { cn } from "@/lib/utils"
+
+import type {
+  ProgramacionBoardResponse,
+  ProgramacionPendingClientOrder,
+  WorkOrderListRow,
+} from "@/types/api"
 
 const SEARCH_DEBOUNCE_MS = 320
 
-const STAGE_OPTIONS: { value: string; label: string }[] = [
-  { value: "nueva", label: "Pendiente por OT" },
-  { value: "pendiente", label: "Programación" },
-  { value: "montaje", label: "Montaje" },
-  { value: "impresion", label: "Impresión" },
-  { value: "laminacion", label: "Laminación" },
-  { value: "corte", label: "Corte" },
-  { value: "completada", label: "Completada" },
-]
-
-function allowedStagesForRole(roleNorm: string): string[] | null {
+function allowedStagesForRole(roleNorm: string): BoardStageKey[] | null {
   if (!roleNorm || roleNorm === "general") return null
   if (roleNorm === "printing" || roleNorm === "impresion") {
     return ["nueva", "pendiente", "montaje", "impresion"]
@@ -79,10 +45,6 @@ function allowedStagesForRole(roleNorm: string): string[] | null {
   return null
 }
 
-function stageLabels(): Record<string, string> {
-  return Object.fromEntries(STAGE_OPTIONS.map((o) => [o.value, o.label]))
-}
-
 function otStatusLabel(value: string | null | undefined): string {
   const m: Record<string, string> = {
     open: "Abierta",
@@ -94,6 +56,49 @@ function otStatusLabel(value: string | null | undefined): string {
   return m[k] ?? (value?.trim() || "—")
 }
 
+function matchesSearch(row: WorkOrderListRow, q: string): boolean {
+  if (!q) return true
+  const hay = q.toLowerCase()
+  const parts = [
+    row.code,
+    row.client?.name,
+    row.product?.name,
+    row.client_order?.code,
+  ]
+    .filter((p): p is string => typeof p === "string" && p.trim() !== "")
+    .map((p) => p.toLowerCase())
+  return parts.some((p) => p.includes(hay))
+}
+
+function matchesStatus(row: WorkOrderListRow, statusFilter: string): boolean {
+  if (statusFilter === "all") return true
+  return (row.status ?? "").toLowerCase().trim() === statusFilter
+}
+
+function matchesClientOrderSearch(
+  row: ProgramacionPendingClientOrder,
+  q: string,
+): boolean {
+  if (!q) return true
+  const hay = q.toLowerCase()
+  const parts = [
+    row.code,
+    row.client?.name,
+    row.first_line_with_product?.product?.name,
+    ...(row.lines ?? []).map((l) => l.product?.name),
+  ]
+    .filter((p): p is string => typeof p === "string" && p.trim() !== "")
+    .map((p) => p.toLowerCase())
+  return parts.some((p) => p.includes(hay))
+}
+
+function allOrdersFromBoard(
+  board: ProgramacionBoardResponse | null,
+): WorkOrderListRow[] {
+  if (!board?.columns) return []
+  return Object.values(board.columns).flat()
+}
+
 export default function ProgramacionBoardPage() {
   const session = getStoredUser()
   const role = (session?.role ?? "").toLowerCase().trim()
@@ -102,15 +107,10 @@ export default function ProgramacionBoardPage() {
   const [search, setSearch] = useState("")
   const [boardStageFilter, setBoardStageFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(
-    null,
-  )
+  const [board, setBoard] = useState<ProgramacionBoardResponse | null>(null)
   const [movingId, setMovingId] = useState<number | null>(null)
 
-  const skipSearchPageReset = useRef(true)
-  const labels = useMemo(() => stageLabels(), [])
   const restrictedStages = useMemo(() => allowedStagesForRole(role), [role])
 
   const stageSelectOptions = useMemo(() => {
@@ -123,14 +123,6 @@ export default function ProgramacionBoardPage() {
     return () => window.clearTimeout(id)
   }, [qInput])
 
-  useEffect(() => {
-    if (skipSearchPageReset.current) {
-      skipSearchPageReset.current = false
-      return
-    }
-    setPage(1)
-  }, [search])
-
   const allowedStagesSet = useMemo(() => {
     if (!restrictedStages) return null
     return new Set(restrictedStages)
@@ -139,7 +131,8 @@ export default function ProgramacionBoardPage() {
   const canMoveStage = useCallback(
     (currentStage: string, targetStage: string): boolean => {
       if (!allowedStagesSet) return true
-      return allowedStagesSet.has(currentStage) && allowedStagesSet.has(targetStage)
+      return allowedStagesSet.has(currentStage as BoardStageKey) &&
+        allowedStagesSet.has(targetStage as BoardStageKey)
     },
     [allowedStagesSet],
   )
@@ -147,34 +140,18 @@ export default function ProgramacionBoardPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const query: Record<string, string | number | undefined> = {
-        page,
-        per_page: 20,
-        exclude_cancelled: 1,
-        q: search || undefined,
-      }
-      if (statusFilter !== "all") {
-        query.status = statusFilter
-      }
-      if (boardStageFilter !== "all") {
-        query.board_stage = boardStageFilter
-      } else if (restrictedStages?.length) {
-        query.board_stage_in = restrictedStages.join(",")
-      }
-
-      const data = await apiFetch<LaravelPaginated<WorkOrderListRow>>(
-        "work-orders",
-        { query },
+      const data = await apiFetch<ProgramacionBoardResponse>(
+        "work-orders/programacion-board",
       )
-      setRows(data)
+      setBoard(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar el listado de programación.")
-      setRows(null)
+      else toast.error("No se pudo cargar el tablero de programación.")
+      setBoard(null)
     } finally {
       setLoading(false)
     }
-  }, [boardStageFilter, page, restrictedStages, search, statusFilter])
+  }, [])
 
   useEffect(() => {
     void load()
@@ -187,11 +164,11 @@ export default function ProgramacionBoardPage() {
         method: "PATCH",
         body: JSON.stringify({ board_stage: targetStage }),
       })
-      toast.success(`OT movida a ${labels[targetStage] ?? targetStage}.`)
+      toast.success(`Orden movida a «${stageTitle(targetStage)}».`)
       void load()
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo mover la OT.")
+      else toast.error("No se pudo mover la orden.")
     } finally {
       setMovingId(null)
     }
@@ -204,212 +181,112 @@ export default function ProgramacionBoardPage() {
         method: "PATCH",
         body: JSON.stringify({ board_stage: "pendiente" }),
       })
-      toast.success("OT enviada a programación.")
+      toast.success("Orden enviada a programación.")
       void load()
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo mover la OT.")
+      else toast.error("No se pudo mover la orden.")
     } finally {
       setMovingId(null)
     }
   }
 
+  function handleMove(woId: number, targetStage: string, fromNueva: boolean) {
+    if (fromNueva) void moveToProgramming(woId)
+    else void moveStage(woId, targetStage)
+  }
+
   function quickMovesForStage(stage: string): { stage: string; label: string }[] {
     if (stage === "nueva") return [{ stage: "pendiente", label: "Enviar a programación" }]
-    if (stage === "pendiente") return [{ stage: "montaje", label: "Pasar a Montaje" }]
-    if (stage === "impresion") return [{ stage: "laminacion", label: "Pasar a Laminación" }]
-    if (stage === "laminacion") return [{ stage: "corte", label: "Pasar a Corte" }]
-    if (stage === "corte") return [{ stage: "completada", label: "Marcar completada" }]
+    if (stage === "pendiente") return [{ stage: "montaje", label: "Pasar a montaje" }]
+    if (stage === "impresion") return [{ stage: "laminacion", label: "Pasar a laminación" }]
+    if (stage === "corte") return [{ stage: "completada", label: "Marcar como completada" }]
     return []
   }
 
+  const visibleColumns = useMemo(() => {
+    let cols = KANBAN_COLUMNS
+    if (restrictedStages) {
+      cols = cols.filter((c) => restrictedStages.includes(c.stage))
+    }
+    if (boardStageFilter !== "all") {
+      cols = cols.filter((c) => c.stage === boardStageFilter)
+    }
+    return cols
+  }, [restrictedStages, boardStageFilter])
+
+  const filteredByStage = useMemo(() => {
+    const result: Record<string, WorkOrderListRow[]> = {}
+    for (const col of visibleColumns) {
+      const items = board?.columns?.[col.stage] ?? []
+      result[col.stage] = items.filter(
+        (row) => matchesSearch(row, search) && matchesStatus(row, statusFilter),
+      )
+    }
+    return result
+  }, [board, visibleColumns, search, statusFilter])
+
+  const filteredPendingClientOrders = useMemo(() => {
+    const list = board?.pending_client_orders ?? []
+    return list.filter((row) => matchesClientOrderSearch(row, search))
+  }, [board, search])
+
+  const urgentCount = useMemo(() => {
+    return allOrdersFromBoard(board)
+      .filter((row) => matchesSearch(row, search) && matchesStatus(row, statusFilter))
+      .filter((row) => (row.priority ?? "").toLowerCase().trim() === "urgente").length
+  }, [board, search, statusFilter])
+
+  const forcedStage =
+    boardStageFilter !== "all" ? (boardStageFilter as BoardStageKey) : null
+
   const subtitle =
-    "Listado paginado de órdenes de trabajo en el tablero de producción. Use los filtros y las acciones para avanzar etapas."
+    "Vea pedidos cliente pendientes de OT, en qué etapa está cada orden de trabajo y aváncela con el botón grande de la tarjeta."
 
   return (
     <CatalogPageShell
-      title="Programación"
+      title="Programación de producción"
       subtitle={subtitle}
       icon={ClipboardList}
-      action={
-        <Button type="button" variant="outline" onClick={() => void load()}>
-          Actualizar
-        </Button>
-      }
-    >
-      <CatalogFilterGrid>
-        <CatalogSearchField
-          id="prog-q"
-          placeholder="Código OT, referencia, cliente…"
-          value={qInput}
-          onChange={(ev) => setQInput(ev.target.value)}
-          className="min-w-0 md:col-span-5"
-        />
-        <CatalogLabeledField label="Etapa en tablero" className="md:col-span-3">
-          <Select
-            value={boardStageFilter}
-            onValueChange={(v) => {
-              setBoardStageFilter(v)
-              setPage(1)
-            }}
+      headerExtras={
+        urgentCount > 0 ? (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900"
+            role="status"
           >
-            <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas (según permiso)</SelectItem>
-              {stageSelectOptions.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CatalogLabeledField>
-        <CatalogLabeledField label="Estado OT" className="md:col-span-4">
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => {
-              setStatusFilter(v)
-              setPage(1)
-            }}
-          >
-            <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="open">Abierta</SelectItem>
-              <SelectItem value="in_progress">En proceso</SelectItem>
-              <SelectItem value="completed">Completada</SelectItem>
-              <SelectItem value="cancelled">Cancelada</SelectItem>
-            </SelectContent>
-          </Select>
-        </CatalogLabeledField>
-        <p className="text-muted-foreground text-xs md:col-span-12">
-          Las órdenes canceladas no aparecen. La búsqueda filtra al escribir (código, referencia o cliente).
-        </p>
-      </CatalogFilterGrid>
-
-      <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
-        <Table>
-          <TableHeader>
-            <TableRow className={catalogTableHeaderRowClass}>
-              <CatalogTableHead icon={ListOrdered} className="w-14">
-                N.º
-              </CatalogTableHead>
-              <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
-              <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
-              <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
-              <CatalogTableHead icon={CalendarClock}>Etapa</CatalogTableHead>
-              <CatalogTableHead icon={CircleDot}>Estado OT</CatalogTableHead>
-              <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <LoadingTableRow colSpan={7} />
-            ) : !rows?.data.length ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
-                  Sin órdenes para estos filtros.
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.data.map((o, idx) => {
-                const stage = (o.board_stage ?? "").toLowerCase().trim()
-                const n = (rows.current_page - 1) * rows.per_page + idx + 1
-                const moves = quickMovesForStage(stage).filter((m) =>
-                  canMoveStage(stage, m.stage),
-                )
-                return (
-                  <TableRow key={o.id} className={catalogTableBodyRowClass}>
-                    <TableCell
-                      className={cn(
-                        "tabular-nums text-muted-foreground",
-                        catalogTableBodyCellClass,
-                      )}
-                    >
-                      {n}
-                    </TableCell>
-                    <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
-                      <Link
-                        className="text-primary hover:underline"
-                        to={`/ordenes-trabajo/${o.id}`}
-                      >
-                        {o.code}
-                      </Link>
-                    </TableCell>
-                    <TableCell className={catalogTableBodyCellClass}>
-                      {o.client?.name ?? "—"}
-                    </TableCell>
-                    <TableCell className={catalogTableBodyCellClass}>
-                      {o.product?.name ?? "—"}
-                    </TableCell>
-                    <TableCell className={catalogTableBodyCellClass}>
-                      {labels[stage] ?? (o.board_stage ?? "—")}
-                    </TableCell>
-                    <TableCell className={catalogTableBodyCellClass}>
-                      {otStatusLabel(o.status)}
-                    </TableCell>
-                    <TableCell className={cn("text-right", catalogTableBodyCellClass)}>
-                      <div className="flex flex-col items-end gap-2">
-                        <Button variant="outline" size="sm" className="border-primary/25" asChild>
-                          <Link to={`/ordenes-trabajo/${o.id}`}>Abrir</Link>
-                        </Button>
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {moves.map((m) => (
-                            <Button
-                              key={m.stage}
-                              type="button"
-                              size="sm"
-                              variant={m.stage === "completada" ? "default" : "secondary"}
-                              disabled={movingId === o.id}
-                              onClick={() =>
-                                stage === "nueva"
-                                  ? void moveToProgramming(o.id)
-                                  : void moveStage(o.id, m.stage)
-                              }
-                            >
-                              {movingId === o.id ? "…" : m.label}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {rows && rows.last_page > 1 ? (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            Página {rows.current_page} de {rows.last_page} · {rows.total}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page >= rows.last_page || loading}
-              onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-            >
-              Siguiente
-            </Button>
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+            <span>
+              Hay <strong>{urgentCount}</strong>{" "}
+              {urgentCount === 1 ? "orden urgente" : "órdenes urgentes"} — revíselas primero.
+            </span>
           </div>
+        ) : null
+      }
+       
+    >
+       
+
+      {board === null && !loading ? (
+        <div className="bg-card text-muted-foreground rounded-2xl border p-10 text-center text-base">
+          <p className="mb-3">No se pudo cargar el tablero.</p>
+          <Button type="button" variant="outline" className="h-11 text-base" onClick={() => void load()}>
+            Reintentar
+          </Button>
         </div>
-      ) : null}
+      ) : (
+        <ProgramacionKanbanBoard
+          columns={visibleColumns}
+          filteredByStage={filteredByStage}
+          pendingClientOrders={filteredPendingClientOrders}
+          loading={loading}
+          movingId={movingId}
+          statusLabel={otStatusLabel}
+          quickMovesForStage={quickMovesForStage}
+          canMoveStage={canMoveStage}
+          onMove={handleMove}
+          forcedStage={forcedStage}
+        />
+      )}
     </CatalogPageShell>
   )
 }

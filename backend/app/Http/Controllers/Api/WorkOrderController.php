@@ -90,6 +90,16 @@ class WorkOrderController extends Controller
         };
     }
 
+    /** Solicitud de coordinación OT más reciente (sin insumos) para un área. */
+    private function constrainLatestCoordinationAreaRequest(\Illuminate\Database\Eloquent\Builder $q, string $area): void
+    {
+        $q->whereNull('material_request_id')
+            ->whereRaw(
+                'id = (SELECT MAX(ar2.id) FROM area_requests ar2 WHERE ar2.work_order_id = area_requests.work_order_id AND ar2.area = ? AND ar2.material_request_id IS NULL)',
+                [$area],
+            );
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = WorkOrder::query()
@@ -156,6 +166,7 @@ class WorkOrderController extends Controller
                     $active->whereHas('areaRequests', function ($q) use ($miArea, $areaRequestedFrom, $areaRequestedTo) {
                         $q->where('area', $miArea)
                             ->where('status', AreaRequestStatus::Pending->value);
+                        $this->constrainLatestCoordinationAreaRequest($q, $miArea);
                         if ($areaRequestedFrom !== null) {
                             $q->where('created_at', '>=', $areaRequestedFrom);
                         }
@@ -194,18 +205,7 @@ class WorkOrderController extends Controller
                         $query->whereRaw('1 = 0');
                     }
                 } elseif ($areaProcessTag === 'active') {
-                    /** Cola + etapa del área: mismas etapas que `not_started` ∪ `in_progress` (hasta la columna Kanban del área). */
-                    $through = [];
-                    foreach (WorkOrderBoardStage::cases() as $i => $case) {
-                        if ($i <= $targetIdx) {
-                            $through[] = $case->value;
-                        }
-                    }
-                    if ($through !== []) {
-                        $query->whereIn('board_stage', $through);
-                    } else {
-                        $query->whereRaw('1 = 0');
-                    }
+                    /** Áreas en paralelo: la bandeja usa solicitud al área + MES, no el tablero Kanban. */
                 } else {
                     $query->where('board_stage', $targetStage);
                 }
@@ -236,6 +236,7 @@ class WorkOrderController extends Controller
                     $historialExcludePending,
                 ) {
                     $q->where('area', $historialArea);
+                    $this->constrainLatestCoordinationAreaRequest($q, $historialArea);
                     if ($onlyPendingArea) {
                         $q->where('status', AreaRequestStatus::Pending->value);
                     } elseif ($historialExcludePending) {
@@ -329,9 +330,7 @@ class WorkOrderController extends Controller
             $query->with(['areaRequests' => function ($q) use ($targetAreaForPayload) {
                 $q->select(['id', 'area', 'status', 'work_order_id', 'created_at'])
                     ->where('area', $targetAreaForPayload)
-                    ->orderByRaw(
-                        "CASE status WHEN 'done' THEN 0 WHEN 'cancelled' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END",
-                    )
+                    ->whereNull('material_request_id')
                     ->orderByDesc('created_at');
             }]);
         }
@@ -383,7 +382,18 @@ class WorkOrderController extends Controller
             $columns[$case->value] = $grouped->get($case->value, collect())->values();
         }
 
-        return response()->json(['columns' => $columns]);
+        $pendingClientOrders = ClientOrder::query()
+            ->awaitingProductionOt()
+            ->with(['client', 'firstLineWithProduct.product', 'lines.product'])
+            ->withCount('lines')
+            ->orderByDesc('created_at')
+            ->get()
+            ->values();
+
+        return response()->json([
+            'columns' => $columns,
+            'pending_client_orders' => $pendingClientOrders,
+        ]);
     }
 
     public function store(WorkOrderStoreRequest $request): JsonResponse

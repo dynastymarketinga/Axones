@@ -52,7 +52,11 @@ class WorkOrderOrdenTrabajoController extends Controller
             FILTER_VALIDATE_BOOLEAN,
         );
         if ($notifyOnProductionSave && $originArea !== '') {
-            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $form);
+            $previous = $this->ordenTrabajo->getDocumentPayload($work_order);
+            $previousForm = is_array($previous['form']) ? $previous['form'] : [];
+            if (! MesProductionSaveGuard::shouldSkipSaveGuardForTurnClose($originArea, $previousForm, $form)) {
+                MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $form);
+            }
         }
 
         if (
@@ -134,7 +138,9 @@ class WorkOrderOrdenTrabajoController extends Controller
             $doc = $this->ordenTrabajo->getDocumentPayload($work_order);
             $existing = is_array($doc['form']) ? $doc['form'] : [];
             $merged = array_merge($existing, $form);
-            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+            if (! MesProductionSaveGuard::shouldSkipSaveGuardForTurnClose($originArea, $existing, $merged)) {
+                MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+            }
         }
 
         $doc = $this->ordenTrabajo->mergePrintingKeysIntoForm($work_order, $form, $request->user());
@@ -173,7 +179,9 @@ class WorkOrderOrdenTrabajoController extends Controller
             $doc = $this->ordenTrabajo->getDocumentPayload($work_order);
             $existing = is_array($doc['form']) ? $doc['form'] : [];
             $merged = array_merge($existing, $form);
-            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+            if (! MesProductionSaveGuard::shouldSkipSaveGuardForTurnClose($originArea, $existing, $merged)) {
+                MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+            }
         }
 
         $doc = $this->ordenTrabajo->mergeLaminacionKeysIntoForm($work_order, $form, $request->user());
@@ -212,7 +220,9 @@ class WorkOrderOrdenTrabajoController extends Controller
             $doc = $this->ordenTrabajo->getDocumentPayload($work_order);
             $existing = is_array($doc['form']) ? $doc['form'] : [];
             $merged = array_merge($existing, $form);
-            MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+            if (! MesProductionSaveGuard::shouldSkipSaveGuardForTurnClose($originArea, $existing, $merged)) {
+                MesProductionSaveGuard::assertProductionSaveAllowed($originArea, $merged);
+            }
         }
 
         $doc = $this->ordenTrabajo->mergeCorteKeysIntoForm($work_order, $form, $request->user());

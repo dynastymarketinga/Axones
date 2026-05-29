@@ -221,6 +221,80 @@
   gap: 12px;
 }
 
+/* Kg a utilizar: pie fijo bajo el input (disponible + alerta fuera del flujo) */
+.ax-ot .ot-field-kg-stock--reserved {
+  align-content: start;
+}
+
+.ax-ot .ot-field-kg-stock-body {
+  position: relative;
+  min-height: calc(36px + 3.85rem);
+}
+
+.ax-ot .ot-field-kg-stock-input {
+  position: relative;
+  z-index: 1;
+  height: 36px;
+}
+
+.ax-ot .ot-field-kg-stock-input > .ot-input-icon-wrap {
+  height: 36px;
+}
+
+.ax-ot .ot-sustrato-kg-footer-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 3.65rem;
+  pointer-events: none;
+}
+
+.ax-ot .ot-sustrato-kg-disponible {
+  margin: 0;
+  min-height: 1rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  color: rgba(17, 17, 17, 0.55);
+}
+
+.ax-ot .ot-sustrato-kg-disponible--placeholder {
+  visibility: hidden;
+}
+
+.ax-ot .ot-sustrato-kg-alert-row {
+  min-height: 2.35rem;
+  flex-shrink: 0;
+}
+
+.ax-ot .ot-sustrato-kg-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  border-radius: 0.375rem;
+  border: 1px solid color-mix(in srgb, #d97706 45%, var(--ax-ot-border));
+  background: color-mix(in srgb, #fffbeb 88%, #fff);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  font-weight: 500;
+  color: #92400e;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  pointer-events: auto;
+}
+
+.ax-ot .ot-sustrato-kg-alert--warn .ot-sustrato-kg-alert-icon {
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-top: 0.05rem;
+  color: #d97706;
+}
+
 .ax-ot .ot-sustratos-virgen-toolbar {
   margin-top: 14px;
   padding-top: 12px;
@@ -402,6 +476,7 @@
 /* 2fr / 1fr: apilar en móvil */
 .ax-ot .ot-grid.ot-cols-2-asym {
   grid-template-columns: 1fr;
+  align-items: start;
 }
 @media (min-width: 640px) {
   .ax-ot .ot-grid.ot-cols-2-asym {
@@ -468,6 +543,19 @@
   grid-column: span 6;
 }
 
+/* Capas 2/3: fila propia para que C.P.E. / M.P.P.S. / Cod. Barra no suban a la misma línea */
+.ax-ot .ot-datos-producto-master > .ot-dpm-estructura-capas {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.ax-ot .ot-datos-producto-master > .ot-dpm-estructura-capas > .ot-field {
+  grid-column: span 2;
+}
+
 @media (max-width: 639px) {
   .ax-ot .ot-datos-producto-master {
     grid-template-columns: 1fr;
@@ -476,6 +564,14 @@
   .ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-2,
   .ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-4,
   .ax-ot .ot-datos-producto-master > .ot-field.ot-dpm-span-6 {
+    grid-column: 1 / -1;
+  }
+
+  .ax-ot .ot-datos-producto-master > .ot-dpm-estructura-capas {
+    grid-template-columns: 1fr;
+  }
+
+  .ax-ot .ot-datos-producto-master > .ot-dpm-estructura-capas > .ot-field {
     grid-column: 1 / -1;
   }
 }
@@ -1129,6 +1225,141 @@
   border-color: #115e59 !important;
 }
 
+/* Ajustes de legibilidad e intuicion solo para bloque inicial de Montaje */
+.ax-mes .montaje-personal-turno-section .mes-toggle-row.mes-toggle-turno button,
+.ax-mes .montaje-personal-turno-section .mes-toggle-row.mes-toggle-grupo button {
+  min-height: 48px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.ax-mes .montaje-personal-turno-section .mes-setup-steps {
+  border-color: color-mix(in srgb, var(--ax-mes-border) 82%, #64748b 18%);
+  background: color-mix(in srgb, var(--ax-mes-surface) 88%, #fff 12%);
+}
+
+.ax-mes .montaje-personal-turno-section button[role="combobox"] {
+  min-height: 40px;
+  font-size: 0.95rem;
+}
+
+.ax-mes .montaje-personal-turno-section .montaje-save-person-btn {
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.ax-mes .montaje-personal-turno-section .montaje-save-person-btn:hover:not(:disabled) {
+  background: #0f172a;
+}
+
+.ax-mes .montaje-personal-turno-section .montaje-save-person-btn:disabled {
+  border-color: #94a3b8;
+  background: #cbd5e1;
+  color: #334155;
+}
+
+.ax-mes .montaje-personal-turno-section .montaje-operador-warning {
+  border-color: #fda4af;
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.dark .ax-mes .montaje-personal-turno-section .montaje-operador-warning {
+  border-color: #be123c;
+  background: color-mix(in srgb, #881337 35%, #0f172a 65%);
+  color: #fecdd3;
+}
+
+/* Segunda pasada: modo accesible (tercera edad) — solo Montaje / personal y turno */
+.ax-mes .montaje-personal-turno-section--accessible .mes-section__body--flush {
+  padding: 16px;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-setup-steps-list,
+.ax-mes .montaje-personal-turno-section--accessible .montaje-setup-note {
+  font-size: 0.9375rem;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-setup-note {
+  color: #334155;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .mes-field-hint,
+.ax-mes .montaje-personal-turno-section--accessible .montaje-role-hint {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .ot-label {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-cuadrilla-heading {
+  font-size: 0.8125rem;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .mes-toggle-row.mes-toggle-turno button,
+.ax-mes .montaje-personal-turno-section--accessible .mes-toggle-row.mes-toggle-grupo button {
+  min-height: 52px;
+  font-size: 1.05rem;
+  gap: 0.5rem;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-person-input,
+.ax-mes .montaje-personal-turno-section--accessible .montaje-person-role-trigger,
+.ax-mes .montaje-personal-turno-section--accessible button[role="combobox"] {
+  min-height: 44px;
+  font-size: 1rem;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-save-person-btn {
+  min-height: 48px;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-saved-list-trigger,
+.ax-mes .montaje-personal-turno-section--accessible .montaje-saved-list-empty {
+  font-size: 0.9375rem;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-saved-person-label {
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-grupo-badge {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-operador-warning {
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-iniciar-turno-btn {
+  min-height: 52px;
+  font-size: 1.0625rem;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-iniciar-turno-btn:disabled {
+  opacity: 0.55;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-remove-person-btn {
+  border: 1px solid color-mix(in srgb, var(--ax-mes-border) 80%, #64748b 20%);
+  border-radius: 8px;
+}
+
+.ax-mes .montaje-personal-turno-section--accessible .montaje-saved-person-row {
+  min-height: 3.25rem;
+}
+
 /* Botonera temporizador: iconos circulares (HMI) */
 .ax-mes .mes-timer-actions {
   display: flex;
@@ -1168,10 +1399,8 @@
 }
 
 .ax-mes .mes-timer-action-labeled {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  display: flex;
+  width: 100%;
   max-width: 100%;
 }
 
@@ -1185,6 +1414,26 @@
   max-width: 10rem;
 }
 
+.ax-mes .mes-timer-actions .mes-timer-action-btn {
+  width: 100%;
+  min-height: 3rem;
+  justify-content: flex-start !important;
+  gap: 0.6rem !important;
+  border-radius: 10px !important;
+  padding: 0.55rem 0.75rem !important;
+  font-size: 0.9rem !important;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.ax-mes .mes-timer-actions .mes-timer-action-btn svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  stroke-width: 2.2px;
+  flex-shrink: 0;
+}
+
 .ax-mes .mes-timer-actions .mes-btn-primary {
   background: #047857 !important;
   color: #fff !important;
@@ -1196,19 +1445,19 @@
 }
 
 .ax-mes .mes-timer-actions .mes-btn-secondary {
-  background: #fff !important;
-  color: #0f172a !important;
-  border: 1px solid #475569 !important;
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  border: 1px solid #d97706 !important;
 }
 
 .ax-mes .mes-timer-actions .mes-btn-secondary:hover:not(:disabled) {
-  background: #f1f5f9 !important;
+  background: #fde68a !important;
 }
 
 .ax-mes .mes-timer-actions .mes-btn-muted {
   background: #f8fafc !important;
-  color: #334155 !important;
-  border: 1px solid #94a3b8 !important;
+  color: #475569 !important;
+  border: 1px solid #cbd5e1 !important;
 }
 
 .ax-mes .mes-timer-actions .mes-btn-muted:hover:not(:disabled) {

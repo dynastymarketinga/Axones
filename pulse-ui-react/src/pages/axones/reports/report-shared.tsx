@@ -33,6 +33,212 @@ export const REPORT_EMPTY_WORK_ORDER_TIMES =
 export const REPORT_EMPTY_PRODUCTION_TIME_BY_AREA =
   "Sin tiempos registrados en este período."
 
+export const PRODUCTION_AREA_LABELS: Record<string, string> = {
+  printing: "Impresión",
+  laminacion: "Laminación",
+  corte: "Corte",
+  montaje: "Montaje",
+  tintas: "Tintas",
+}
+
+/** Orden fijo de las cinco áreas de producción en tablas y KPI. */
+export const PRODUCTION_AREA_ORDER = [
+  "montaje",
+  "printing",
+  "laminacion",
+  "corte",
+  "tintas",
+] as const
+
+export type ProductionAreaKey = (typeof PRODUCTION_AREA_ORDER)[number]
+
+export type ProductionTimeRawRow = {
+  area: string
+  segment_type: string
+  machine_code: string
+  total_seconds: number
+  segment_count: number
+}
+
+export type ProductionTimeAggRow = {
+  area: string
+  machine_code: string
+  mount_sec: number
+  demount_sec: number
+  prod_sec: number
+  down_sec: number
+  segment_count: number
+}
+
+export type ProductionTimeAreaSummaryRow = {
+  area: string
+  mount_sec: number
+  demount_sec: number
+  prod_sec: number
+  down_sec: number
+  segment_count: number
+}
+
+export type WorkOrderTimeCandidate = {
+  work_order_id: number
+  work_order_code: string
+  client_name: string | null
+  product_name: string | null
+  areas: string[]
+  production_seconds: number
+  downtime_seconds: number
+  mount_seconds: number
+  demount_seconds: number
+  total_seconds: number
+  effective_percent: string
+}
+
+export function pivotProductionRows(rows: ProductionTimeRawRow[]): ProductionTimeAggRow[] {
+  const agg = new Map<string, ProductionTimeAggRow>()
+  for (const r of rows) {
+    const area = String(r.area ?? "")
+    const machine = String(r.machine_code ?? "")
+    const type = String(r.segment_type ?? "")
+    const sec = Number(r.total_seconds ?? 0)
+    const cnt = Number(r.segment_count ?? 0)
+    const k = `${area}|${machine}`
+    let row = agg.get(k)
+    if (!row) {
+      row = {
+        area,
+        machine_code: machine,
+        mount_sec: 0,
+        demount_sec: 0,
+        prod_sec: 0,
+        down_sec: 0,
+        segment_count: 0,
+      }
+      agg.set(k, row)
+    }
+    row.segment_count += cnt
+    if (type === "mount") row.mount_sec += sec
+    if (type === "demount") row.demount_sec += sec
+    if (type === "production") row.prod_sec += sec
+    if (type === "downtime") row.down_sec += sec
+  }
+
+  return Array.from(agg.values()).sort((a, b) => {
+    const ia = PRODUCTION_AREA_ORDER.indexOf(a.area as ProductionAreaKey)
+    const ib = PRODUCTION_AREA_ORDER.indexOf(b.area as ProductionAreaKey)
+    const ao = (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    if (ao !== 0) return ao
+    return a.machine_code.localeCompare(b.machine_code, "es")
+  })
+}
+
+/** Agrupa filas por máquina en totales por área (las cinco áreas siempre presentes). */
+export function rollupByArea(aggRows: ProductionTimeAggRow[]): ProductionTimeAreaSummaryRow[] {
+  const map = new Map<string, ProductionTimeAreaSummaryRow>()
+  for (const r of aggRows) {
+    let row = map.get(r.area)
+    if (!row) {
+      row = {
+        area: r.area,
+        mount_sec: 0,
+        demount_sec: 0,
+        prod_sec: 0,
+        down_sec: 0,
+        segment_count: 0,
+      }
+      map.set(r.area, row)
+    }
+    row.mount_sec += r.mount_sec
+    row.demount_sec += r.demount_sec
+    row.prod_sec += r.prod_sec
+    row.down_sec += r.down_sec
+    row.segment_count += r.segment_count
+  }
+
+  return PRODUCTION_AREA_ORDER.map((area) => {
+    const existing = map.get(area)
+    if (existing) return existing
+    return {
+      area,
+      mount_sec: 0,
+      demount_sec: 0,
+      prod_sec: 0,
+      down_sec: 0,
+      segment_count: 0,
+    }
+  })
+}
+
+export function buildWorkOrderTimeReportQuery(
+  from: string,
+  to: string,
+  aggregateAll: boolean,
+  woId: string,
+): Record<string, string | number> {
+  const q: Record<string, string | number> = { from, to }
+  if (!aggregateAll && woId.trim() !== "") {
+    q.work_order_id = Number(woId.trim())
+  }
+  return q
+}
+
+export function sumCandidateTotals(candidates: WorkOrderTimeCandidate[]) {
+  let prod = 0
+  let down = 0
+  let mount = 0
+  let demount = 0
+  let total = 0
+  for (const r of candidates) {
+    prod += r.production_seconds
+    down += r.downtime_seconds
+    mount += r.mount_seconds
+    demount += r.demount_seconds
+    total += r.total_seconds
+  }
+  const eff = total > 0 ? ((prod / total) * 100).toFixed(2) : "0.00"
+  return { prod, down, mount, demount, total, eff }
+}
+
+/** Áreas con al menos un segmento cerrado en el rango. */
+export function areasWithRecordedTime(
+  areaRows: ProductionTimeAreaSummaryRow[],
+): ProductionAreaKey[] {
+  return PRODUCTION_AREA_ORDER.filter((area) => {
+    const row = areaRows.find((r) => r.area === area)
+    return row != null && row.segment_count > 0
+  })
+}
+
+/** OT sugerida para abrir Montaje (cronómetro / segmentos en planilla). */
+export function resolveMontajeWorkOrderId(
+  candidates: WorkOrderTimeCandidate[],
+  woId: string,
+): number | null {
+  if (woId.trim() !== "") {
+    const id = Number(woId.trim())
+    return Number.isFinite(id) && id > 0 ? id : null
+  }
+  const withMontaje = candidates.filter((c) => c.areas.includes("montaje"))
+  if (withMontaje.length >= 1) return withMontaje[0].work_order_id
+  if (candidates.length === 1) return candidates[0].work_order_id
+  return null
+}
+
+export function sumAggRowsTotals(rows: ProductionTimeAggRow[] | ProductionTimeAreaSummaryRow[]) {
+  let prod = 0
+  let down = 0
+  let mount = 0
+  let demount = 0
+  let segments = 0
+  for (const r of rows) {
+    prod += r.prod_sec
+    down += r.down_sec
+    mount += r.mount_sec
+    demount += r.demount_sec
+    segments += r.segment_count
+  }
+  return { prod, down, mount, demount, segments }
+}
+
 /**
  * Hook compartido para todas las páginas de Reportes:
  * - Mantiene el rango global Desde/Hasta.

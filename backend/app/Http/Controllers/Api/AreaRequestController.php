@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreFacilityAreaRequest;
 use App\Http\Requests\UpdateFacilityAreaRequest;
 use App\Models\AreaRequest;
+use App\Services\AreaRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -14,6 +15,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AreaRequestController extends Controller
 {
+    public function __construct(
+        private readonly AreaRequestService $areaRequestService,
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
         $query = AreaRequest::query()
@@ -25,6 +30,15 @@ class AreaRequestController extends Controller
         }
         if ($request->query('status')) {
             $query->where('status', $request->query('status'));
+        }
+
+        $insumosOnly = $request->boolean('insumos_only')
+            || strtolower(trim((string) $request->query('source', ''))) === 'insumos';
+
+        if ($insumosOnly) {
+            $this->areaRequestService->applyMaterialInsumosOnlyFilter($query);
+        } else {
+            $this->areaRequestService->applyWorkOrderCoordinationListFilter($query);
         }
 
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));

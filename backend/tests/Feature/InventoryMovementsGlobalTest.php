@@ -93,6 +93,50 @@ class InventoryMovementsGlobalTest extends TestCase
         $this->assertCount(1, $search->json('data'));
     }
 
+    public function test_date_only_to_includes_movements_later_on_same_day(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $mat = Material::query()->create([
+            'sku' => 'SUBOPP',
+            'name' => 'Sustrato',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+
+        InventoryMovement::query()->create([
+            'material_id' => $mat->id,
+            'movement_type' => 'in',
+            'quantity' => 18000,
+            'reference_type' => 'purchase_receipt',
+            'reference_id' => 1,
+            'user_id' => $user->id,
+            'occurred_at' => '2026-05-28 00:00:00',
+        ]);
+
+        InventoryMovement::query()->create([
+            'material_id' => $mat->id,
+            'movement_type' => 'out',
+            'quantity' => 10000,
+            'reference_type' => 'material_request',
+            'reference_id' => 1,
+            'user_id' => $user->id,
+            'occurred_at' => '2026-05-28 15:30:00',
+        ]);
+
+        $response = $this->getJson('/api/inventory-movements?from=2026-05-21&to=2026-05-28', [
+            'Authorization' => 'Bearer '.$token,
+        ]);
+
+        $response->assertOk();
+        $this->assertCount(2, $response->json('data'));
+
+        $types = collect($response->json('data'))->pluck('movement_type')->sort()->values()->all();
+        $this->assertEquals(['in', 'out'], $types);
+    }
+
     public function test_invalid_movement_type_returns_422(): void
     {
         $user = User::factory()->create();

@@ -24,11 +24,8 @@ type WastagePreviewPayload = {
     total_entrada_kg: number
     salida_kg: number
     scrap_kg: number
-    merma_kg: number
-    refil_pct: number
     devolucion_buena_kg: number
     devolucion_rechazada_kg: number
-    material_consumido_kg: number
   }
 }
 
@@ -64,7 +61,7 @@ export default function WorkOrderPrintingDesperdicioPreviewPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Vista previa · Desperdicio (impresión)</h1>
           <p className="text-muted-foreground text-sm">
-            Revise métricas de merma, scrap y materiales antes de imprimir el resumen operativo del turno.
+            Revise métricas de desperdicio y materiales antes de imprimir el resumen operativo del turno.
           </p>
         </div>
         <div className="flex gap-2">
@@ -147,21 +144,9 @@ export default function WorkOrderPrintingDesperdicioPreviewPage() {
                   </TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>Scrap total</TableCell>
+                  <TableCell>Total desperdicio</TableCell>
                   <TableCell className="text-right font-mono font-medium">
                     {readNum(m?.scrap_kg).toFixed(2)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Merma (registro / efectiva)</TableCell>
-                  <TableCell className="text-right font-mono font-medium">
-                    {readNum(m?.merma_kg).toFixed(2)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>% Refil</TableCell>
-                  <TableCell className="text-right font-mono font-medium">
-                    {readNum(m?.refil_pct).toFixed(2)}%
                   </TableCell>
                 </TableRow>
                 <TableRow>
@@ -174,12 +159,6 @@ export default function WorkOrderPrintingDesperdicioPreviewPage() {
                   <TableCell>Devolución rechazada</TableCell>
                   <TableCell className="text-right font-mono font-medium">
                     {readNum(m?.devolucion_rechazada_kg).toFixed(2)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Material consumido</TableCell>
-                  <TableCell className="text-right font-mono font-medium">
-                    {readNum(m?.material_consumido_kg).toFixed(2)}
                   </TableCell>
                 </TableRow>
               </TableBody>

@@ -9,6 +9,7 @@ import {
   Barcode,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   CircleDot,
@@ -23,6 +24,7 @@ import {
   Scale,
   Scissors,
   Settings2,
+  SlidersHorizontal,
   UserCircle,
   Users,
 } from "lucide-react"
@@ -68,7 +70,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
@@ -193,6 +194,137 @@ function boardStageLabel(value: string | null | undefined): string {
 function canPreviewPlanillaReport(row: WorkOrderListRow): boolean {
   const s = (row.status ?? "").toLowerCase().trim()
   return s !== "completed" && s !== "cancelled"
+}
+
+type SummaryItem = { label: string; value: string }
+type SummarySlide = { key: string; title: string; items: SummaryItem[]; tintasColors?: string[] }
+
+function technicalForm(row: WorkOrderListRow): Record<string, unknown> | null {
+  const f = row.technical_document?.form
+  if (f && typeof f === "object" && !Array.isArray(f)) return f
+  return null
+}
+
+function readText(value: unknown): string | null {
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : null
+  if (typeof value === "string") {
+    const t = value.trim()
+    return t.length ? t : null
+  }
+  return null
+}
+
+function parseNum(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value !== "string") return null
+  const t = value.trim().replace(",", ".")
+  if (!t) return null
+  const n = Number.parseFloat(t)
+  return Number.isFinite(n) ? n : null
+}
+
+function parseTintasRows(form: Record<string, unknown> | null): Array<Record<string, unknown>> {
+  if (!form) return []
+  const raw = form.tintas
+  if (!Array.isArray(raw)) return []
+  return raw.filter((r): r is Record<string, unknown> => Boolean(r && typeof r === "object"))
+}
+
+function uniqueColors(rows: Array<Record<string, unknown>>): string[] {
+  const set = new Set<string>()
+  for (const row of rows) {
+    const c = readText(row.color)
+    if (c) set.add(c)
+  }
+  return Array.from(set)
+}
+
+function aniloxSummary(rows: Array<Record<string, unknown>>): string | null {
+  const vals = rows
+    .map((r) => parseNum(r.anilox))
+    .filter((v): v is number => v !== null)
+  if (!vals.length) return null
+  const min = Math.min(...vals)
+  const max = Math.max(...vals)
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length
+  return `min ${min.toFixed(2)} · prom ${avg.toFixed(2)} · max ${max.toFixed(2)}`
+}
+
+function buildSummarySlides(row: WorkOrderListRow): SummarySlide[] {
+  const form = technicalForm(row)
+  const tintasRows = parseTintasRows(form)
+  const colors = uniqueColors(tintasRows)
+  const pushIf = (arr: SummaryItem[], label: string, value: unknown) => {
+    const text = readText(value)
+    if (text) arr.push({ label, value: text })
+  }
+
+  const montaje: SummaryItem[] = []
+  pushIf(montaje, "Tipo impresión montaje", form?.tipoImpresionMontaje)
+  pushIf(montaje, "Ancho corte (mm)", form?.anchoCorteMontaje)
+  pushIf(montaje, "N° bandas", form?.numBandas)
+  pushIf(montaje, "Figura embobinado", form?.orientacion)
+
+  const impresionTintas: SummaryItem[] = []
+  pushIf(impresionTintas, "Línea de corte", form?.lineaCorteImp)
+  pushIf(impresionTintas, "N° colores", form?.numColores)
+  const anilox = aniloxSummary(tintasRows)
+  if (anilox) impresionTintas.push({ label: "Anilox (min/prom/max)", value: anilox })
+  if (colors.length) impresionTintas.push({ label: "Colores distintos", value: String(colors.length) })
+
+  const laminacion: SummaryItem[] = []
+  pushIf(laminacion, "Gramaje adhesivo (g/m²)", form?.gramajeAdhesivo)
+  pushIf(laminacion, "Relación mezcla", form?.relacionMezcla)
+  const kgEntrada = readText(form?.kgEntradaLam)
+  const kgSalida = readText(form?.kgSalidaLam)
+  if (kgEntrada || kgSalida) {
+    laminacion.push({ label: "Kg entrada / salida", value: `${kgEntrada ?? "0"} / ${kgSalida ?? "0"}` })
+  }
+  pushIf(laminacion, "Merma", form?.mermaLam)
+
+  const corteEmbalaje: SummaryItem[] = []
+  pushIf(corteEmbalaje, "Peso bobina (kg)", form?.pesoBobina)
+  pushIf(corteEmbalaje, "Metros por bobina (m)", form?.metrosBobina)
+  pushIf(corteEmbalaje, "Cantidad de cores", form?.cantCores)
+  pushIf(corteEmbalaje, "Kg salida corte", form?.kgSalidaCorte)
+
+  const programacion: SummaryItem[] = []
+  pushIf(programacion, "Prioridad", form?.priority)
+  const areas = Array.isArray(form?.programacionAreas)
+    ? (form?.programacionAreas as unknown[]).map((a) => readText(a)).filter((a): a is string => Boolean(a))
+    : []
+  if (areas.length) programacion.push({ label: "Áreas asignadas", value: areas.join(", ") })
+  const inicio = readText(form?.fechaInicio)
+  const entrega = readText(form?.fechaEntrega)
+  if (inicio || entrega) programacion.push({ label: "Inicio / Entrega", value: `${inicio ?? "—"} / ${entrega ?? "—"}` })
+  const motivo = readText(form?.programacionMotivo)
+  if (motivo) programacion.push({ label: "Motivo", value: motivo.length > 120 ? `${motivo.slice(0, 120)}…` : motivo })
+
+  return [
+    { key: "montaje", title: "Montaje", items: montaje },
+    { key: "impresion-tintas", title: "Impresión y tintas", items: impresionTintas, tintasColors: colors },
+    { key: "laminacion", title: "Laminación", items: laminacion },
+    { key: "corte-embalaje", title: "Corte / embalaje", items: corteEmbalaje },
+    { key: "programacion", title: "Programación", items: programacion },
+  ]
+}
+
+function SummarySlideCard({ title, items }: { title: string; items: SummaryItem[] }) {
+  return (
+    <div className="rounded-lg border bg-muted/15 p-3 md:p-4">
+      <p className="mb-2 text-base font-semibold text-foreground">{title}</p>
+      <div className="space-y-1.5">
+        {items.length ? items.map((item) => (
+          <div key={`${title}-${item.label}`} className="flex items-start justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">{item.label}</span>
+            <span className="max-w-[55%] text-right font-medium text-foreground">{item.value}</span>
+          </div>
+        )) : (
+          <p className="text-xs text-muted-foreground">Sin datos reales registrados en esta sección.</p>
+        )}
+      </div>
+    </div>
+  )
 }
 
 const SUPERVISOR_BUCKET_STYLES: Record<
@@ -344,6 +476,7 @@ type HubWorkOrderTableRowProps = {
   nested?: boolean
   canDeactivate: boolean
   onDeactivateClick: (row: WorkOrderListRow) => void
+  onSummaryClick: (row: WorkOrderListRow) => void
 }
 
 function HubWorkOrderTableRow({
@@ -354,6 +487,7 @@ function HubWorkOrderTableRow({
   nested,
   canDeactivate,
   onDeactivateClick,
+  onSummaryClick,
 }: HubWorkOrderTableRowProps) {
   const RowBadgeIcon = accent.BadgeIcon
   return (
@@ -459,6 +593,21 @@ function HubWorkOrderTableRow({
               <TooltipContent>Vista previa del reporte de esta OT.</TooltipContent>
             </Tooltip>
           ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className={cn("shrink-0", catalogActionButtonClass)}
+                aria-label="Resumen rápido de la OT"
+                onClick={() => onSummaryClick(o)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Resumen rápido de la OT.</TooltipContent>
+          </Tooltip>
         </div>
       </TableCell>
     </TableRow>
@@ -471,6 +620,7 @@ export default function WorkOrdersHubPage() {
   const session = getStoredUser()
   const role = (session?.role ?? "").toLowerCase().trim()
   const canDeactivate = role === "admin" || role === "boss"
+  const canCreateOt = role !== "printing" && role !== "impresion"
 
   const [qInput, setQInput] = useState("")
   const [qApi, setQApi] = useState("")
@@ -492,6 +642,8 @@ export default function WorkOrdersHubPage() {
   const [deactivateOpen, setDeactivateOpen] = useState(false)
   const [deactivateTarget, setDeactivateTarget] = useState<WorkOrderListRow | null>(null)
   const [deactivateSaving, setDeactivateSaving] = useState(false)
+  const [summaryTarget, setSummaryTarget] = useState<WorkOrderListRow | null>(null)
+  const [summarySlideIndex, setSummarySlideIndex] = useState(0)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   const canImportMaterialFromCo = useMemo(() => {
@@ -611,7 +763,7 @@ export default function WorkOrdersHubPage() {
 
   const groupedVisible = useMemo(() => groupWorkOrdersForHub(visibleRows), [visibleRows])
 
-  const supervisorCounts = useMemo(() => {
+  const supervisorCounts = useMemo<Record<HubSupervisorFilter, number>>(() => {
     const all = rows?.data ?? []
     const countFor = (filter: HubSupervisorFilter) => {
       if (filter === "all") return all.length
@@ -625,6 +777,7 @@ export default function WorkOrdersHubPage() {
       in_progress: countFor("in_progress"),
       closed: countFor("closed"),
       closed_complete: countFor("closed_complete"),
+      cancelled: countFor("cancelled"),
     }
   }, [rows?.data, mesNow])
 
@@ -636,6 +789,10 @@ export default function WorkOrdersHubPage() {
   }
 
   function createOt() {
+    if (!canCreateOt) {
+      toast.error("Su rol no tiene permiso para crear órdenes de trabajo.")
+      return
+    }
     const coId = clientOrderId.trim() ? Number(clientOrderId) : null
     if (!coId || !Number.isFinite(coId) || coId < 1) {
       toast.error("Seleccione un pedido cliente (OC) ya registrado.")
@@ -672,6 +829,12 @@ export default function WorkOrdersHubPage() {
       setDeactivateSaving(false)
     }
   }
+
+  const summarySlides = useMemo(
+    () => (summaryTarget ? buildSummarySlides(summaryTarget) : []),
+    [summaryTarget],
+  )
+  const currentSlide = summarySlides[summarySlideIndex] ?? null
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -718,6 +881,124 @@ export default function WorkOrdersHubPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <Dialog
+          open={summaryTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSummaryTarget(null)
+              setSummarySlideIndex(0)
+            }
+          }}
+        >
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>
+                Resumen OT {summaryTarget?.code ?? ""}
+              </DialogTitle>
+              <DialogDescription>
+                {(summaryTarget?.client?.name ?? "")} · {(summaryTarget?.product?.name ?? "")} · Etapa:{" "}
+                {boardStageLabel(summaryTarget?.board_stage)}
+              </DialogDescription>
+            </DialogHeader>
+            {summarySlides.length > 0 && currentSlide ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setSummarySlideIndex((i) => (i - 1 + summarySlides.length) % summarySlides.length)
+                    }
+                  >
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Anterior
+                  </Button>
+                  <div className="text-xs text-muted-foreground">
+                    {summarySlideIndex + 1} / {summarySlides.length}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSummarySlideIndex((i) => (i + 1) % summarySlides.length)}
+                  >
+                    Siguiente
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                </div>
+
+                <SummarySlideCard title={currentSlide.title} items={currentSlide.items} />
+
+                {currentSlide.key === "impresion-tintas" ? (
+                  <div className="rounded-lg border bg-muted/15 p-3 md:p-4">
+                    <p className="mb-2 text-sm font-semibold text-foreground">Colores de tintas</p>
+                    {(currentSlide.tintasColors ?? []).length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(currentSlide.tintasColors ?? []).slice(0, 12).map((c) => (
+                          <Badge key={c} variant="outline" className="max-w-[14rem] truncate text-[11px]">
+                            {c}
+                          </Badge>
+                        ))}
+                        {(currentSlide.tintasColors ?? []).length > 12 ? (
+                          <Badge variant="outline" className="text-[11px]">
+                            +{(currentSlide.tintasColors ?? []).length - 12}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Sin colores de tintas registrados.</p>
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="flex items-center justify-center gap-1.5">
+                  {summarySlides.map((slide, i) => (
+                    <button
+                      key={`dot-${slide.key}`}
+                      type="button"
+                      aria-label={`Ir a ${slide.title}`}
+                      className={cn(
+                        "h-2.5 w-2.5 rounded-full border transition-colors",
+                        i === summarySlideIndex
+                          ? "border-primary bg-primary"
+                          : "border-muted-foreground/40 bg-muted",
+                      )}
+                      onClick={() => setSummarySlideIndex(i)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Sin datos reales para resumir en esta OT.</p>
+            )}
+            <DialogFooter>
+              {summaryTarget ? (
+                <Button asChild>
+                  <Link
+                    to={`/ordenes-trabajo/${summaryTarget.id}`}
+                    onClick={() => {
+                      setSummaryTarget(null)
+                      setSummarySlideIndex(0)
+                    }}
+                  >
+                    Abrir planilla completa
+                  </Link>
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSummaryTarget(null)
+                  setSummarySlideIndex(0)
+                }}
+              >
+                Cerrar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {showInitialSkeleton ? (
           <div className="space-y-4">
@@ -727,94 +1008,109 @@ export default function WorkOrdersHubPage() {
           </div>
         ) : (
           <>
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-center text-base font-semibold">
-                  Crear orden de trabajo
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-3">
-              <p className="md:col-span-3 text-sm text-muted-foreground">
-                Elija el{" "}
-                <span className="font-medium text-foreground">pedido cliente (OC)</span> y, si ya lo sabe, la{" "}
-                <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
-                <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
-                <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
-                <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
-              </p>
-              <div className="grid min-w-0 gap-2 md:col-span-2">
-                <Label>Pedido cliente (OC) a vincular *</Label>
-                <Select
-                  value={clientOrderId || undefined}
-                  onValueChange={(v) => setClientOrderId(v)}
-                  onOpenChange={(open) => {
-                    if (open && clientOrders.length === 0 && !coLoading) void loadClientOrders()
-                  }}
-                >
-                  <SelectTrigger
-                    className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+            {canCreateOt ? (
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-center text-base font-semibold">
+                    Crear orden de trabajo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 md:grid-cols-3">
+                <p className="md:col-span-3 text-sm text-muted-foreground">
+                  Elija el{" "}
+                  <span className="font-medium text-foreground">pedido cliente (OC)</span> y, si ya lo sabe, la{" "}
+                  <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
+                  <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
+                  <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
+                  <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
+                </p>
+                <div className="grid min-w-0 gap-2 md:col-span-2">
+                  <Label>Pedido cliente (OC) a vincular *</Label>
+                  <Select
+                    value={clientOrderId || undefined}
+                    onValueChange={(v) => setClientOrderId(v)}
+                    onOpenChange={(open) => {
+                      if (open && clientOrders.length === 0 && !coLoading) void loadClientOrders()
+                    }}
                   >
-                    <SelectValue placeholder={coLoading ? "Cargando…" : "Seleccione…"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clientOrders.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {clientOrderLabel(c)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {clientOrderId && coDetailLoading ? (
-                  <p className="text-sm text-muted-foreground">
-                    <span className="inline-flex items-center gap-2">
-                      <InlineSpinner />
-                      Cargando...
-                    </span>
-                  </p>
-                ) : null}
-                {clientOrderId && !coDetailLoading && !coDetail ? (
-                  <p className="text-sm text-destructive">
-                    No se pudo cargar la información del pedido cliente (OC). Intente otra vez en unos segundos.
-                  </p>
-                ) : null}
-              </div>
+                    <SelectTrigger
+                      className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+                    >
+                      <SelectValue placeholder={coLoading ? "Cargando…" : "Seleccione…"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientOrders.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {clientOrderLabel(c)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {clientOrderId && coDetailLoading ? (
+                    <p className="text-sm text-muted-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <InlineSpinner />
+                        Cargando...
+                      </span>
+                    </p>
+                  ) : null}
+                  {clientOrderId && !coDetailLoading && !coDetail ? (
+                    <p className="text-sm text-destructive">
+                      No se pudo cargar la información del pedido cliente (OC). Intente otra vez en unos segundos.
+                    </p>
+                  ) : null}
+                </div>
 
-              <div className="grid min-w-0 gap-2 self-start">
-                <Label>Máquina</Label>
-                <Select
-                  value={maquina || undefined}
-                  onValueChange={(v) =>
-                    setMaquina(v === "__clear__" ? "" : (v as MachineValue))
-                  }
-                >
-                  <SelectTrigger
-                    className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+                <div className="grid min-w-0 gap-2 self-start">
+                  <Label>Máquina</Label>
+                  <Select
+                    value={maquina || undefined}
+                    onValueChange={(v) =>
+                      setMaquina(v === "__clear__" ? "" : (v as MachineValue))
+                    }
                   >
-                    <SelectValue placeholder="Seleccionar…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__clear__">Seleccionar…</SelectItem>
-                    {MACHINE_OPTIONS.map((g) => (
-                      <SelectGroup key={g.group}>
-                        <SelectLabel>{g.group}</SelectLabel>
-                        {g.options.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                    <SelectTrigger
+                      className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+                    >
+                      <SelectValue placeholder="Seleccionar…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__clear__">Seleccionar…</SelectItem>
+                      {MACHINE_OPTIONS.map((g) => (
+                        <SelectGroup key={g.group}>
+                          <SelectLabel>{g.group}</SelectLabel>
+                          {g.options.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="md:col-span-3 flex justify-center">
-                <Button type="button" onClick={() => createOt()}>
-                  Crear orden
-                </Button>
-              </div>
-            </CardContent>
-            </Card>
+                <div className="md:col-span-3 flex justify-center">
+                  <Button type="button" onClick={() => createOt()}>
+                    Crear orden
+                  </Button>
+                </div>
+              </CardContent>
+              </Card>
+            ) : (
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-center text-base font-semibold">
+                    Crear orden de trabajo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-center text-sm text-muted-foreground">
+                    Su rol tiene acceso de ejecución en producción, pero no permiso para crear órdenes de trabajo.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
             <div
               role="tablist"
@@ -823,10 +1119,7 @@ export default function WorkOrdersHubPage() {
             >
               {SUPERVISOR_TAB_DEFS.map(({ filter: f, label, Icon }) => {
                 const active = supervisorFilter === f
-                const count =
-                  f === "all"
-                    ? supervisorCounts.all
-                    : supervisorCounts[f as Exclude<HubSupervisorFilter, "all">]
+                const count = supervisorCounts[f]
                 if (f === "all") {
                   return (
                     <button
@@ -967,6 +1260,10 @@ export default function WorkOrdersHubPage() {
                               setDeactivateTarget(row)
                               setDeactivateOpen(true)
                             }}
+                            onSummaryClick={(row) => {
+                              setSummarySlideIndex(0)
+                              setSummaryTarget(row)
+                            }}
                             numCell={
                               <span className="tabular-nums text-muted-foreground text-sm">{n}</span>
                             }
@@ -1079,6 +1376,10 @@ export default function WorkOrdersHubPage() {
                               onDeactivateClick={(row) => {
                                 setDeactivateTarget(row)
                                 setDeactivateOpen(true)
+                              }}
+                              onSummaryClick={(row) => {
+                                setSummarySlideIndex(0)
+                                setSummaryTarget(row)
                               }}
                               numCell={
                                 <span className="tabular-nums text-muted-foreground text-sm">

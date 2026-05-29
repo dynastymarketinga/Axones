@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\ClientOrderStatus;
+use App\Enums\WorkOrderStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -63,5 +66,17 @@ class ClientOrder extends Model
             ->whereNotNull('product_id')
             ->orderBy('position')
             ->orderBy('id');
+    }
+
+    /**
+     * OC abiertas sin OT de producción activa (no cancelada).
+     */
+    public function scopeAwaitingProductionOt(Builder $query): Builder
+    {
+        return $query
+            ->where('status', ClientOrderStatus::Open->value)
+            ->whereDoesntHave('workOrders', function (Builder $wo): void {
+                $wo->where('status', '!=', WorkOrderStatus::Cancelled->value);
+            });
     }
 }

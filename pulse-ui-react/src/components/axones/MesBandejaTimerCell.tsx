@@ -64,6 +64,12 @@ export function MesBandejaTimerCell({ mesBand, onOpenDetail }: Props) {
             {mesBand.showDeadBreakdown ? ` · Muerto ${mesBand.deadHms}` : null}
           </p>
         ) : null}
+        {mesBand?.producidoKg != null ? (
+          <p className="text-muted-foreground text-xs tabular-nums">
+            Producido acum.:{" "}
+            <span className="font-mono font-semibold text-foreground">{mesBand.producidoKg.toFixed(2)} Kg</span>
+          </p>
+        ) : null}
       </div>
     </TooltipProvider>
   )

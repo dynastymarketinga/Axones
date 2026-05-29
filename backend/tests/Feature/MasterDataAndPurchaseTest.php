@@ -77,7 +77,7 @@ class MasterDataAndPurchaseTest extends TestCase
         $this->assertEquals('40.000', (string) $po->lines->first()->quantity_received);
     }
 
-    public function test_receipt_must_reference_purchase_order(): void
+    public function test_receipt_without_purchase_order_updates_stock(): void
     {
         $user = User::factory()->create(['role' => 'inventory_chief']);
         $token = $user->createToken('t')->plainTextToken;
@@ -95,13 +95,20 @@ class MasterDataAndPurchaseTest extends TestCase
         ]);
         $material->forceFill(['quantity_on_hand' => 0])->save();
 
-        $this->postJson('/api/purchase-receipts', [
+        $recResponse = $this->postJson('/api/purchase-receipts', [
             'supplier_id' => $supplier->id,
             'without_purchase_order' => true,
+            'invoice_number' => 'FAC-001',
             'lines' => [
                 ['material_id' => $material->id, 'item_type' => 'quimico', 'quantity' => 5, 'unit' => 'kg'],
             ],
-        ], ['Authorization' => 'Bearer '.$token])->assertUnprocessable();
+        ], ['Authorization' => 'Bearer '.$token]);
+
+        $recResponse->assertCreated();
+        $recResponse->assertJsonPath('without_purchase_order', true);
+
+        $material->refresh();
+        $this->assertEquals('5.000', (string) $material->quantity_on_hand);
 
         $this->postJson('/api/purchase-receipts', [
             'supplier_id' => $supplier->id,
@@ -109,6 +116,80 @@ class MasterDataAndPurchaseTest extends TestCase
                 ['material_id' => $material->id, 'item_type' => 'quimico', 'quantity' => 5, 'unit' => 'kg'],
             ],
         ], ['Authorization' => 'Bearer '.$token])->assertUnprocessable();
+    }
+
+    public function test_receipt_with_purchase_order_rejects_quantity_over_pending(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory_chief']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov tope',
+            'rif' => 'J-TOPE',
+        ]);
+
+        $material = Material::query()->create([
+            'sku' => 'MAT-TOPE',
+            'name' => 'Material tope',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $material->forceFill(['quantity_on_hand' => 0])->save();
+
+        $poResponse = $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-TOPE-1',
+            'lines' => [
+                [
+                    'description' => 'Pedido tope',
+                    'material_id' => $material->id,
+                    'quantity_ordered' => 100,
+                    'unit' => 'kg',
+                    'unit_price' => 1,
+                ],
+            ],
+        ], ['Authorization' => 'Bearer '.$token]);
+
+        $poResponse->assertCreated();
+        $poId = $poResponse->json('id');
+        $lineId = $poResponse->json('lines.0.id');
+
+        $this->postJson('/api/purchase-receipts', [
+            'purchase_order_id' => $poId,
+            'supplier_id' => $supplier->id,
+            'lines' => [
+                [
+                    'purchase_order_line_id' => $lineId,
+                    'material_id' => $material->id,
+                    'item_type' => 'sustrato',
+                    'quantity' => 150,
+                    'unit' => 'kg',
+                    'micras' => 20,
+                    'ancho_mm' => 1200,
+                ],
+            ],
+        ], ['Authorization' => 'Bearer '.$token])->assertUnprocessable();
+
+        $okResponse = $this->postJson('/api/purchase-receipts', [
+            'purchase_order_id' => $poId,
+            'supplier_id' => $supplier->id,
+            'lines' => [
+                [
+                    'purchase_order_line_id' => $lineId,
+                    'material_id' => $material->id,
+                    'item_type' => 'sustrato',
+                    'quantity' => 40,
+                    'unit' => 'kg',
+                    'micras' => 20,
+                    'ancho_mm' => 1200,
+                ],
+            ],
+        ], ['Authorization' => 'Bearer '.$token]);
+
+        $okResponse->assertCreated();
+        $material->refresh();
+        $this->assertEquals('40.000', (string) $material->quantity_on_hand);
     }
 
     public function test_receipt_rejects_closed_purchase_order_without_full_lines(): void

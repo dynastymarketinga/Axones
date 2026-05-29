@@ -77,8 +77,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
+  clientOrderAwaitingOtBadgeClass,
+  clientOrderAwaitingProductionOt,
   clientOrderStatusBadgeClass,
   clientOrderStatusLabel,
+  CLIENT_ORDER_AWAITING_OT_BADGE,
   CLIENT_ORDER_CANCEL_DIALOG_TITLE,
   CLIENT_ORDER_DETAIL_NO_OT_LINK,
   CLIENT_ORDER_EDIT_LINES_SECTION_TITLE,
@@ -490,12 +493,22 @@ export default function ClientOrdersPage() {
                               {r.client?.name ?? `#${r.client_id}`}
                             </TableCell>
                             <TableCell className={cn("align-middle", catalogTableBodyCellClass)}>
-                              <Badge
-                                variant="outline"
-                                className={cn("font-medium border", clientOrderStatusBadgeClass(r.status))}
-                              >
-                                {clientOrderStatusLabel(r.status)}
-                              </Badge>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <Badge
+                                  variant="outline"
+                                  className={cn("font-medium border", clientOrderStatusBadgeClass(r.status))}
+                                >
+                                  {clientOrderStatusLabel(r.status)}
+                                </Badge>
+                                {clientOrderAwaitingProductionOt(r) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn("font-medium border", clientOrderAwaitingOtBadgeClass())}
+                                  >
+                                    {CLIENT_ORDER_AWAITING_OT_BADGE}
+                                  </Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className={cn("text-right align-middle p-2", catalogTableBodyCellClass)}>
                               <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
@@ -671,6 +684,20 @@ export default function ClientOrdersPage() {
                         >
                           {clientOrderStatusLabel(detailModalRecord.status)}
                         </Badge>
+                        {clientOrderAwaitingProductionOt({
+                          status: detailModalRecord.status,
+                          active_work_orders_count:
+                            detailModalRecord.workOrders?.filter(
+                              (w) => (w.status ?? "").toLowerCase() !== "cancelled",
+                            ).length ?? 0,
+                        }) ? (
+                          <Badge
+                            variant="outline"
+                            className={cn("font-medium border", clientOrderAwaitingOtBadgeClass())}
+                          >
+                            {CLIENT_ORDER_AWAITING_OT_BADGE}
+                          </Badge>
+                        ) : null}
                         <span>
                           Cliente:{" "}
                           <span className="font-medium text-foreground">

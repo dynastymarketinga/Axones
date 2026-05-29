@@ -112,6 +112,21 @@ export function clientOrderStatusLabel(status: string): string {
   return CLIENT_ORDER_STATUS_ES[status] ?? status
 }
 
+/** Badge cuando la OC está abierta y aún no tiene OT de producción. */
+export const CLIENT_ORDER_AWAITING_OT_BADGE = "Pendiente de OT"
+
+export function clientOrderAwaitingProductionOt(row: {
+  status: string
+  active_work_orders_count?: number
+}): boolean {
+  if (row.status !== "open") return false
+  return (row.active_work_orders_count ?? 0) === 0
+}
+
+export function clientOrderAwaitingOtBadgeClass(): string {
+  return "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/40 dark:text-amber-100"
+}
+
 /** Texto breve para ayudas (filtros, tooltips). */
 export const CLIENT_ORDER_STATUS_HELP: Record<string, string> = {
   open:

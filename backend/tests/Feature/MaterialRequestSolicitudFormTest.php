@@ -265,6 +265,51 @@ class MaterialRequestSolicitudFormTest extends TestCase
         );
     }
 
+    public function test_dispatch_rejects_quantity_above_stock(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $mat = Material::query()->create([
+            'sku' => 'M-STOCK-CAP',
+            'name' => 'BOPP',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 13])->save();
+
+        $mr = $this->postJson('/api/material-requests', [
+            'notes' => 'Solicitud directa',
+            'lines' => [
+                ['material_id' => $mat->id, 'quantity_requested' => 100],
+            ],
+        ], $h)->assertCreated();
+
+        $lineId = $mr->json('lines.0.id');
+        $mrId = $mr->json('id');
+
+        $this->postJson("/api/material-requests/{$mrId}/authorize", [], $h)->assertOk();
+
+        $this->postJson("/api/material-requests/{$mrId}/dispatch", [
+            'lines' => [
+                ['material_request_line_id' => $lineId, 'quantity' => 100],
+            ],
+        ], $h)->assertUnprocessable();
+
+        $mat->refresh();
+        $this->assertEquals('13.000', (string) $mat->quantity_on_hand);
+
+        $this->postJson("/api/material-requests/{$mrId}/dispatch", [
+            'lines' => [
+                ['material_request_line_id' => $lineId, 'quantity' => 13],
+            ],
+        ], $h)->assertOk()->assertJsonPath('status', MaterialRequestStatus::Partial->value);
+
+        $mat->refresh();
+        $this->assertEquals('0.000', (string) $mat->quantity_on_hand);
+    }
+
     public function test_area_request_mirror_cannot_be_patched_via_area_api(): void
     {
         $user = User::factory()->create();

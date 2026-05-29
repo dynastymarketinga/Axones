@@ -60,8 +60,8 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
             $validator->errors()->add('form.maquina', 'Maquina es obligatoria.');
         }
 
-        $tipoImpresion = $this->asStringValue($form['tipoImpresionEstructura'] ?? null);
-        if (! in_array($tipoImpresion, ['superficie', 'reverso'], true)) {
+        $tipoImpresion = strtolower($this->asStringValue($form['tipoImpresionEstructura'] ?? null));
+        if (! in_array($tipoImpresion, ['superficie', 'bilaminado', 'trilaminado', 'trimilaminado', 'reverso'], true)) {
             $validator->errors()->add('form.tipoImpresionEstructura', 'Tipo impresión es obligatorio.');
         }
     }
@@ -250,18 +250,7 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
             return;
         }
 
-        if ($kg === '' || ! $this->isDecimalLike($kg)) {
-            return;
-        }
-
-        $kgNorm = str_replace(',', '.', $kg);
-        $stock = (string) $material->quantity_on_hand;
-        if (bccomp($kgNorm, $stock, 3) === 1) {
-            $validator->errors()->add(
-                "$path.$i.kg",
-                'La cantidad solicitada supera el stock disponible ('.$stock.' kg).',
-            );
-        }
+        // Stock: aviso en UI de planilla; no bloquea guardado de la OT.
     }
 
     private function asStringValue(mixed $value): string
@@ -299,9 +288,9 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
     {
         $n = '\d+(?:[.,]\d+)?';
 
-        return preg_match('/^'.$n.'$/', $value) === 1
-            || preg_match('/^'.$n.'\s*±\s*'.$n.'$/u', $value) === 1
-            || preg_match('/^'.$n.'\s*-\s*'.$n.'$/', $value) === 1;
+        return preg_match('/^' . $n . '$/', $value) === 1
+            || preg_match('/^' . $n . '\s*±\s*' . $n . '$/u', $value) === 1
+            || preg_match('/^' . $n . '\s*-\s*' . $n . '$/', $value) === 1;
     }
 
     private function isMetricLikeOrNA(string $value): bool

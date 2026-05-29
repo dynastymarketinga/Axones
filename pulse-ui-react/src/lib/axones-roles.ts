@@ -1,9 +1,19 @@
+import type { AuthUser } from "@/lib/auth-storage"
+import type { LucideIcon } from "lucide-react"
+
 /** Normaliza rol del API (login) para reglas de menú. */
 export function normalizeRole(role?: string | null): string {
   return (role ?? "").toLowerCase().trim()
 }
 
-import type { LucideIcon } from "lucide-react"
+/** Cuenta de desarrollo (usuario `Desarrollador` en seeders / entorno local). */
+export function isAxonesDeveloperSession(user?: AuthUser | null): boolean {
+  if (!user) return false
+  const username = normalizeRole(user.username)
+  if (username === "desarrollador") return true
+  const email = (user.email ?? "").toLowerCase().trim()
+  return email === "victorcarrillox2@gmail.com"
+}
 
 const BOSS_ROLES = new Set(["boss", "admin", "jefe_supremo", "superadmin", "jefe_operaciones"])
 
@@ -32,7 +42,6 @@ const INVENTORY_CHIEF_URLS = new Set([
   "recepciones-nueva",
   "miscelaneos",
   "miscelaneos/nuevo",
-  "bobinas",
   "devoluciones",
   "despacho-corte",
   "nota-entrega-nueva",
@@ -53,7 +62,6 @@ const INVENTORY_URLS = new Set([
   "recepciones-nueva",
   "miscelaneos",
   "miscelaneos/nuevo",
-  "bobinas",
   "devoluciones",
   "despacho-corte",
   "nota-entrega-nueva",

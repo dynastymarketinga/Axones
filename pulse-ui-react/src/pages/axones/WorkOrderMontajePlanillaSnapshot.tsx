@@ -1,7 +1,6 @@
 "use client"
 
-import { useId, useMemo } from "react"
-import { withMontajeAutoFields } from "@/lib/montaje-planilla-metrics"
+import { useId } from "react"
 import {
   Activity,
   ArrowLeftRight,
@@ -34,14 +33,14 @@ function tipoImpresionLabel(displayForm: Record<string, unknown>): string {
   if (!raw) return "—"
   const t = raw.toLowerCase()
   if (t === "superficie" || t.includes("superf")) return "Superficie"
-  if (t === "reverso" || t.includes("rever")) return "Reverso"
+  if (t === "bilaminado" || t.includes("bilamin")) return "Bilaminado"
+  if (t === "trilaminado" || t.includes("trilamin") || t === "reverso" || t.includes("rever")) return "Trilaminado"
   return raw
 }
 
 export function WorkOrderMontajePlanillaSnapshot({ form }: { form: Record<string, unknown> }) {
   const baseId = useId().replace(/:/g, "")
   const sid = (suffix: string) => `${baseId}-${suffix}`
-  const displayForm = useMemo(() => withMontajeAutoFields(form), [form])
 
   return (
     <div className="ax-ot">
@@ -94,7 +93,7 @@ export function WorkOrderMontajePlanillaSnapshot({ form }: { form: Record<string
               >
                 <span className="flex min-w-0 flex-1 items-center gap-2">
                   <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate text-left text-sm">{tipoImpresionLabel(displayForm)}</span>
+                  <span className="min-w-0 flex-1 truncate text-left text-sm">{tipoImpresionLabel(form)}</span>
                 </span>
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
               </Button>
@@ -131,7 +130,7 @@ export function WorkOrderMontajePlanillaSnapshot({ form }: { form: Record<string
             </div>
             <div className="ot-field">
               <label htmlFor={sid("desarrollo")} className="ot-label required">
-                Desarrollo (mm) (auto)
+                Desarrollo (mm)
               </label>
               <OtPlanillaInputIcon icon={Ruler}>
                 <input
@@ -140,13 +139,13 @@ export function WorkOrderMontajePlanillaSnapshot({ form }: { form: Record<string
                   className="ot-input"
                   readOnly
                   tabIndex={-1}
-                  value={readString(displayForm.desarrollo)}
+                  value={readString(form.desarrollo)}
                 />
               </OtPlanillaInputIcon>
             </div>
             <div className="ot-field">
               <label htmlFor={sid("ancho-mont")} className="ot-label required">
-                Ancho Montaje (mm) (auto)
+                Ancho Montaje (mm)
               </label>
               <OtPlanillaInputIcon icon={Columns}>
                 <input
@@ -155,7 +154,7 @@ export function WorkOrderMontajePlanillaSnapshot({ form }: { form: Record<string
                   className="ot-input"
                   readOnly
                   tabIndex={-1}
-                  value={readString(displayForm.anchoMontaje)}
+                  value={readString(form.anchoMontaje)}
                 />
               </OtPlanillaInputIcon>
             </div>

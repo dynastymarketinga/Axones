@@ -91,7 +91,18 @@ export function syncMontajeAutoFields(form: Record<string, unknown>): Partial<Re
   return patch
 }
 
-/** Formulario con desarrollo y ancho montaje recalculados para mostrar o guardar. */
-export function withMontajeAutoFields(form: Record<string, unknown>): Record<string, unknown> {
-  return { ...form, ...syncMontajeAutoFields(form) }
+/** Sugiere desarrollo/ancho montaje solo cuando el campo está vacío (no sobrescribe entrada manual). */
+export function montajeAutoFieldsIfEmpty(
+  form: Record<string, unknown>,
+): Partial<Record<"desarrollo" | "anchoMontaje", string>> {
+  const patch = syncMontajeAutoFields(form)
+  const out: Partial<Record<"desarrollo" | "anchoMontaje", string>> = {}
+  if (!readString(form.desarrollo).trim() && patch.desarrollo) out.desarrollo = patch.desarrollo
+  if (!readString(form.anchoMontaje).trim() && patch.anchoMontaje) out.anchoMontaje = patch.anchoMontaje
+  return out
+}
+
+/** Formulario con sugerencias auto solo en campos vacíos. */
+export function fillMontajeAutoFieldsIfEmpty(form: Record<string, unknown>): Record<string, unknown> {
+  return { ...form, ...montajeAutoFieldsIfEmpty(form) }
 }

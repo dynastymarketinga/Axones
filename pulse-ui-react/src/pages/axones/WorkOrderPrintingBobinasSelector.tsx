@@ -243,10 +243,10 @@ export default function WorkOrderPrintingBobinasSelector({
               />
             </div>
             <div className="rounded border bg-muted/10 p-2 text-sm">
-              <span className="text-muted-foreground">Dev. rechazada</span>
+              <span className="text-muted-foreground">Dev. rechazada (bobinas)</span>
               <Input
                 className="ot-input-unified mt-1 h-8"
-                inputMode="decimal"
+                inputMode="numeric"
                 value={devolucionRechazadaRaw}
                 onChange={(e) => onSetDevolucionRechazada(e.target.value)}
                 placeholder="0"

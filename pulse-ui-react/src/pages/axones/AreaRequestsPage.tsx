@@ -2,37 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { MoreHorizontal, Pencil } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -49,7 +24,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 
 const AREA_OPTIONS = [
@@ -73,10 +47,7 @@ type AreaReqRow = {
   area: string
   status: string
   title: string | null
-  body?: string | null
-  work_order_id: number | null
-  material_request_id?: number | null
-  work_order?: { code: string }
+  material_request_id: number
   requester?: { name: string }
 }
 
@@ -87,14 +58,6 @@ export default function AreaRequestsPage() {
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<AreaReqRow> | null>(null)
 
-  const [editRow, setEditRow] = useState<AreaReqRow | null>(null)
-  const [editTitle, setEditTitle] = useState("")
-  const [editBody, setEditBody] = useState("")
-  const [editSaving, setEditSaving] = useState(false)
-
-  const [deleteRow, setDeleteRow] = useState<AreaReqRow | null>(null)
-  const [deleteLoading, setDeleteLoading] = useState(false)
-
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -102,6 +65,7 @@ export default function AreaRequestsPage() {
         query: {
           page,
           per_page: 20,
+          insumos_only: "1",
           area: area !== "all" ? area : undefined,
           status: status !== "all" ? status : undefined,
         },
@@ -119,64 +83,6 @@ export default function AreaRequestsPage() {
   useEffect(() => {
     void load()
   }, [load])
-
-  function openEdit(r: AreaReqRow) {
-    setEditRow(r)
-    setEditTitle(r.title ?? "")
-    setEditBody(r.body ?? "")
-  }
-
-  async function saveEdit() {
-    if (!editRow) return
-    setEditSaving(true)
-    try {
-      await apiFetch(`area-requests/${editRow.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          title: editTitle.trim(),
-          body: editBody.trim() || null,
-        }),
-      })
-      toast.success("Solicitud actualizada.")
-      setEditRow(null)
-      void load()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo guardar.")
-    } finally {
-      setEditSaving(false)
-    }
-  }
-
-  async function patchStatus(id: number, next: "done" | "cancelled") {
-    try {
-      await apiFetch(`area-requests/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: next }),
-      })
-      toast.success(next === "done" ? "Marcada como completada." : "Solicitud cancelada.")
-      void load()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo actualizar el estado.")
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteRow) return
-    setDeleteLoading(true)
-    try {
-      await apiFetch(`area-requests/${deleteRow.id}`, { method: "DELETE" })
-      toast.success("Solicitud eliminada.")
-      setDeleteRow(null)
-      void load()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo eliminar.")
-    } finally {
-      setDeleteLoading(false)
-    }
-  }
 
   function areaLabel(code: string) {
     return AREA_OPTIONS.find((o) => o.value === code)?.label ?? code
@@ -205,17 +111,21 @@ export default function AreaRequestsPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Solicitudes entre áreas
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Solicitudes entre áreas</h1>
         <p className="text-muted-foreground max-w-3xl text-sm">
-          Esta vista es para <strong>recibir</strong> y dar seguimiento a la coordinación entre áreas de producción
-          (pase de trabajo y avisos entre áreas). Las filas de{" "}
+          Bandeja del almacén con las{" "}
           <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/solicitudes-material">
             solicitudes de insumos
           </Link>{" "}
-          aparecen aquí como aviso; desde <strong>Ver insumos</strong> el almacén puede{" "}
-          <strong>aprobar la salida</strong> y rebajar inventario. El historial queda en{" "}
+          registradas por las áreas (formulario{" "}
+          <Link
+            className="text-primary font-medium underline-offset-4 hover:underline"
+            to="/solicitudes-material/nueva"
+          >
+            Nueva solicitud
+          </Link>
+          ). No incluye avisos automáticos de OT. Desde <strong>Ver insumos</strong> puede autorizar la salida y rebajar
+          inventario; el historial queda en{" "}
           <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/movimientos-inventario">
             Movimientos
           </Link>
@@ -307,7 +217,7 @@ export default function AreaRequestsPage() {
               ) : !rows?.data.length ? (
                 <TableRow className="border-border/50 hover:bg-transparent">
                   <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
-                    Sin solicitudes.
+                    Sin solicitudes de insumos.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -345,54 +255,9 @@ export default function AreaRequestsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="pr-5 text-right align-middle">
-                      {r.material_request_id != null ? (
-                        <Button variant="outline" size="sm" className="h-9 border-primary/25 shadow-sm" asChild>
-                          <Link to={`/solicitudes-area/insumos/${r.material_request_id}`}>Ver insumos</Link>
-                        </Button>
-                      ) : (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-9 w-9 border-primary/20 shadow-sm"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                              <span className="sr-only">Menú</span>
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="rounded-xl">
-                            {r.status === "pending" ? (
-                              <>
-                                <DropdownMenuItem onClick={() => openEdit(r)}>
-                                  <Pencil className="mr-2 h-4 w-4" />
-                                  Editar
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => void patchStatus(r.id, "done")}>
-                                  Marcar completada
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => void patchStatus(r.id, "cancelled")}>
-                                  Cancelar
-                                </DropdownMenuItem>
-                              </>
-                            ) : null}
-                            {r.status !== "done" ? (
-                              <>
-                                {r.status === "pending" ? <DropdownMenuSeparator /> : null}
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  onClick={() => setDeleteRow(r)}
-                                >
-                                  Eliminar
-                                </DropdownMenuItem>
-                              </>
-                            ) : null}
-                            {r.status === "done" ? (
-                              <DropdownMenuItem disabled>Solo lectura (completada)</DropdownMenuItem>
-                            ) : null}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
+                      <Button variant="outline" size="sm" className="h-9 border-primary/25 shadow-sm" asChild>
+                        <Link to={`/solicitudes-area/insumos/${r.material_request_id}`}>Ver insumos</Link>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
@@ -427,62 +292,6 @@ export default function AreaRequestsPage() {
           </div>
         </div>
       ) : null}
-
-      <Dialog open={!!editRow} onOpenChange={(v) => !v && setEditRow(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Editar solicitud #{editRow?.id}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="ed-title">Título</Label>
-              <Input
-                id="ed-title"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ed-body">Detalle</Label>
-              <Textarea
-                id="ed-body"
-                rows={4}
-                value={editBody}
-                onChange={(e) => setEditBody(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditRow(null)}>
-              Cancelar
-            </Button>
-            <Button type="button" disabled={editSaving} onClick={() => void saveEdit()}>
-              {editSaving ? "Guardando…" : "Guardar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={!!deleteRow} onOpenChange={(v) => !v && setDeleteRow(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar solicitud #{deleteRow?.id}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. Las solicitudes completadas no pueden eliminarse.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteLoading}>Cancelar</AlertDialogCancel>
-            <Button
-              variant="destructive"
-              disabled={deleteLoading}
-              onClick={() => void confirmDelete()}
-            >
-              {deleteLoading ? "Eliminando…" : "Eliminar"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

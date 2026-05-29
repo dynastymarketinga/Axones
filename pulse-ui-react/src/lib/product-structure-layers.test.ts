@@ -38,11 +38,19 @@ describe("parseProductStructureLayers", () => {
 describe("structureLayersToOtFormFields", () => {
   const structure = "Capa A + Capa B + Capa C"
 
-  it("maps reverso to three fields", () => {
-    expect(structureLayersToOtFormFields(structure, "reverso")).toEqual({
+  it("maps trilaminado to three fields", () => {
+    expect(structureLayersToOtFormFields(structure, "trilaminado")).toEqual({
       estructuraCapa1Rev: "Capa A",
       estructuraCapa2Rev: "Capa B",
       estructuraCapa3Rev: "Capa C",
+    })
+  })
+
+  it("maps bilaminado to two fields", () => {
+    expect(structureLayersToOtFormFields(structure, "bilaminado")).toEqual({
+      estructuraCapa1Rev: "Capa A",
+      estructuraCapa2Rev: "Capa B",
+      estructuraCapa3Rev: "",
     })
   })
 
@@ -54,8 +62,9 @@ describe("structureLayersToOtFormFields", () => {
 })
 
 describe("tipoImpresionFromProductPrintType", () => {
-  it("detects reverso and superficie", () => {
-    expect(tipoImpresionFromProductPrintType("Flexo Reverso")).toBe("reverso")
+  it("detects trilaminado/bilaminado/superficie", () => {
+    expect(tipoImpresionFromProductPrintType("Flexo Reverso")).toBe("trilaminado")
+    expect(tipoImpresionFromProductPrintType("Bilaminado")).toBe("bilaminado")
     expect(tipoImpresionFromProductPrintType("Superficie")).toBe("superficie")
   })
 })

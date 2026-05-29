@@ -42,9 +42,6 @@ export type MontajeTurnoEntry = {
   operador: string
   ayudante: string
   supervisor: string
-  kgProduccion: string
-  mermaKg: string
-  metrajeMontaje: string
   observaciones: string
   timer: MontajeTurnTimer
 }
@@ -60,12 +57,6 @@ function readNumber(v: unknown): number {
     return Number.isFinite(n) ? n : 0
   }
   return 0
-}
-
-function readNumberString(v: unknown): string {
-  if (typeof v === "number") return String(v)
-  if (typeof v === "string") return v
-  return ""
 }
 
 export function newMontajeTurnoId(): string {
@@ -107,9 +98,6 @@ export function createNewMontajeTurno(params: {
     operador: params.operador.trim(),
     ayudante: "",
     supervisor: "",
-    kgProduccion: "",
-    mermaKg: "",
-    metrajeMontaje: "",
     observaciones: "",
     timer: emptyMontajeTurnTimer(),
   }
@@ -212,9 +200,6 @@ export function normalizeMontajeTurno(raw: unknown): MontajeTurnoEntry | null {
     operador: readString(o.operador),
     ayudante: readString(o.ayudante),
     supervisor: readString(o.supervisor),
-    kgProduccion: readNumberString(o.kgProduccion),
-    mermaKg: readNumberString(o.mermaKg),
-    metrajeMontaje: readNumberString(o.metrajeMontaje),
     observaciones: readString(o.observaciones),
     timer: parseTimer(o.timer),
   }
@@ -284,9 +269,6 @@ export function synthesizeMontajeTurnoFromLegacyMirror(
     operador: readString(form.montOperador),
     ayudante: readString(form.montAyudante),
     supervisor: readString(form.montSupervisor),
-    kgProduccion: readNumberString(form.montKgProduccion),
-    mermaKg: readNumberString(form.montMermaKg),
-    metrajeMontaje: readNumberString(form.montMetraje),
     observaciones: readString(form.montObservaciones),
     timer: timerFromLegacyFlatForm(form),
   }
@@ -312,27 +294,28 @@ export function montajeTurnoToMirror(t: MontajeTurnoEntry): Record<string, unkno
     montOperador: t.operador,
     montAyudante: t.ayudante,
     montSupervisor: t.supervisor,
-    montKgProduccion: t.kgProduccion,
-    montMermaKg: t.mermaKg,
-    montMetraje: t.metrajeMontaje,
     montObservaciones: t.observaciones,
     ...timerToLegacyFlat(t.timer),
   }
 }
 
-export function clearMontajeMirrorKeys(): Record<string, unknown> {
+/** Limpia solo datos del turno de planta en curso; no toca el cronómetro. */
+export function clearMontajeShiftMirrorKeysOnly(): Record<string, unknown> {
   return {
     montTurno: "",
     montGrupo: "",
     montOperador: "",
     montAyudante: "",
     montSupervisor: "",
-    montKgProduccion: "",
-    montMermaKg: "",
-    montMetraje: "",
     montObservaciones: "",
     montAcumuladoProducidoKg: "",
     montRegistrosTurnos: "",
+  }
+}
+
+export function clearMontajeMirrorKeys(): Record<string, unknown> {
+  return {
+    ...clearMontajeShiftMirrorKeysOnly(),
     ...timerToLegacyFlat(emptyMontajeTurnTimer()),
   }
 }
@@ -352,14 +335,15 @@ export function bootstrapMontajeFormState(mergedForm: Record<string, unknown>): 
   if (actual) {
     next = { ...next, ...montajeTurnoToMirror(actual) }
   } else {
-    next = { ...next, ...clearMontajeMirrorKeys() }
+    next = { ...next, ...clearMontajeShiftMirrorKeysOnly() }
   }
 
   return next
 }
 
 export function sumProduccionKg(t: MontajeTurnoEntry): number {
-  return readNumber(t.kgProduccion)
+  void t
+  return 0
 }
 
 export type JsonAccumulatedMontaje = {

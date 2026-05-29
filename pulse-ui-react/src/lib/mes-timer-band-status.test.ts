@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import { montajeMesBandFromWorkOrderRow } from "@/lib/montaje-mes-band-status"
 import { laminacionMesBandFromWorkOrderRow } from "@/lib/laminacion-mes-band-status"
-import { mesBandFromAreaTimeSummary } from "@/lib/mes-timer-band-shared"
+import { cumulativeDeadSeconds, mesBandFromAreaTimeSummary } from "@/lib/mes-timer-band-shared"
 import {
   MON_ACTUAL_KEY,
   MON_TURNOS_KEY,
@@ -223,5 +223,37 @@ describe("mesBandFromAreaTimeSummary", () => {
       parseInt(parts[1] ?? "0", 10) * 60 +
       parseInt(parts[2] ?? "0", 10)
     expect(totalSec).toBeGreaterThan(140)
+  })
+})
+
+describe("cumulativeDeadSeconds", () => {
+  it("sigue sumando tiempo muerto en pausa aunque ya haya motivo registrado", () => {
+    const nowMs = 1_000_000
+    const pauseAtMs = nowMs - 12_000
+    const dead = cumulativeDeadSeconds(
+      [],
+      {
+        turno: "nocturno",
+        grupo: "B",
+        timer: {
+          state: "paused",
+          effectiveAccSec: 41,
+          deadAccSec: 4,
+          lastResumeAtMs: 0,
+          pauseAtMs,
+          pauses: [
+            {
+              at: new Date(pauseAtMs).toISOString(),
+              reason: "Cambio de bobina",
+              obs: "aa",
+              duration_sec: 4,
+            },
+          ],
+        },
+      },
+      nowMs,
+    )
+    expect(dead).toBeGreaterThan(15.9)
+    expect(dead).toBeLessThan(16.1)
   })
 })

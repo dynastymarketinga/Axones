@@ -10,25 +10,31 @@ namespace App\Support;
 final class MontajePlanillaMetrics
 {
     /**
+     * Sugiere desarrollo/ancho montaje solo si el campo viene vacío (respeta valores manuales).
+     *
      * @param  array<string, mixed>  $form
      * @return array<string, mixed>
      */
     public static function applyAutoFields(array $form): array
     {
-        $desarrollo = self::computeDesarrollo(
-            $form['frecuencia'] ?? null,
-            $form['numRepeticion'] ?? null,
-        );
-        if ($desarrollo !== '') {
-            $form['desarrollo'] = $desarrollo;
+        if (trim((string) ($form['desarrollo'] ?? '')) === '') {
+            $desarrollo = self::computeDesarrollo(
+                $form['frecuencia'] ?? null,
+                $form['numRepeticion'] ?? null,
+            );
+            if ($desarrollo !== '') {
+                $form['desarrollo'] = $desarrollo;
+            }
         }
 
-        $anchoMontaje = self::computeAnchoMontaje(
-            $form['anchoCorteMontaje'] ?? null,
-            $form['numBandas'] ?? null,
-        );
-        if ($anchoMontaje !== '') {
-            $form['anchoMontaje'] = $anchoMontaje;
+        if (trim((string) ($form['anchoMontaje'] ?? '')) === '') {
+            $anchoMontaje = self::computeAnchoMontaje(
+                $form['anchoCorteMontaje'] ?? null,
+                $form['numBandas'] ?? null,
+            );
+            if ($anchoMontaje !== '') {
+                $form['anchoMontaje'] = $anchoMontaje;
+            }
         }
 
         return $form;

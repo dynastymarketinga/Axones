@@ -5,8 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\InventoryMovementsIndexRequest;
 use App\Models\InventoryMovement;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 
 class InventoryMovementsController extends Controller
 {
@@ -25,12 +26,13 @@ class InventoryMovementsController extends Controller
             ->orderByDesc('occurred_at')
             ->orderByDesc('id');
 
+        // Misma ventana que reports/inventory-movements-general (inicio/fin de día).
         if (! empty($filters['from'])) {
-            $query->where('occurred_at', '>=', $filters['from']);
+            $query->where('occurred_at', '>=', Carbon::parse($filters['from'])->startOfDay());
         }
 
         if (! empty($filters['to'])) {
-            $query->where('occurred_at', '<=', $filters['to']);
+            $query->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay());
         }
 
         if (! empty($filters['movement_type'])) {

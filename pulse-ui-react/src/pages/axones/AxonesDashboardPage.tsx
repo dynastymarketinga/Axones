@@ -27,7 +27,7 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { DashboardSummary, MaterialRow } from "@/types/api"
-import { Button } from "@/components/ui/button"
+ 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -284,9 +284,6 @@ export default function AxonesDashboardPage() {
             pulsar <span className="text-foreground/90">Actualizar</span> con lo último del sistema.
           </p>
         </div>
-        <Button type="button" variant="secondary" onClick={() => void load()}>
-          {loading ? "Actualizando…" : "Actualizar"}
-        </Button>
       </div>
 
       {loading && !data ? (

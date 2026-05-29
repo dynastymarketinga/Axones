@@ -132,6 +132,14 @@ class CortePlanillaDispatchSyncService
             $this->upsertPaletaUsage($workOrder, $materialId, $notes, $usedKg, $finishedKg);
         }
 
+        // Compatibilidad: cuando el formulario no trae paletas útiles todavía, sincronizamos
+        // el acumulado directo de kgSalidaCorte/corAcumuladoProducidoKg (legacy).
+        if ($syncedDefinitiveNotes === [] && $activeProvisionalNotes === []) {
+            $this->syncLegacyAggregateUsage($workOrder, $materialId, $usedKg, $form);
+        } else {
+            $this->deleteUsageIfUnallocated($workOrder, self::PLANILLA_NOTES);
+        }
+
         $this->retireStaleProvisionalUsages($workOrder, $activeProvisionalNotes);
         $this->retireLegacyAggregateUsage($workOrder, $syncedDefinitiveNotes);
     }
@@ -245,6 +253,66 @@ class CortePlanillaDispatchSyncService
                 'quantity_used_kg' => $usedKg,
                 'quantity_finished_kg' => $finishedKg,
                 'notes' => $notes,
+            ]);
+
+            return;
+        }
+
+        $usage->update([
+            'material_id' => $materialId,
+            'quantity_used_kg' => $usedKg,
+            'quantity_finished_kg' => $finishedKg,
+        ]);
+    }
+
+    /**
+     * Compatibilidad con guardados de corte sin paletas cerradas.
+     *
+     * @param  array<string, mixed>  $form
+     */
+    private function syncLegacyAggregateUsage(
+        WorkOrder $workOrder,
+        int $materialId,
+        string $usedKg,
+        array $form,
+    ): void {
+        $finishedKg = CortePlanillaSalida::finishedKgFromForm($form);
+        $usage = CorteBobinaUsage::query()
+            ->where('work_order_id', $workOrder->getKey())
+            ->whereNull('bobina_id')
+            ->where('notes', self::PLANILLA_NOTES)
+            ->orderByDesc('id')
+            ->first();
+
+        $allocated = $usage !== null
+            ? $this->quantityAllocatedToUsage((int) $usage->getKey())
+            : '0.000';
+
+        if (bccomp($finishedKg, $allocated, 3) < 0) {
+            throw ValidationException::withMessages([
+                'form.kgSalidaCorte' => [
+                    sprintf(
+                        'No se puede reducir Kg salida de corte por debajo de lo ya asignado en notas (%s kg).',
+                        $allocated,
+                    ),
+                ],
+            ]);
+        }
+
+        if (bccomp($finishedKg, '0', 3) <= 0) {
+            $this->deleteUsageIfUnallocated($workOrder, self::PLANILLA_NOTES);
+
+            return;
+        }
+
+        if ($usage === null) {
+            CorteBobinaUsage::query()->create([
+                'work_order_id' => $workOrder->getKey(),
+                'bobina_id' => null,
+                'material_id' => $materialId,
+                'quantity_used_kg' => $usedKg,
+                'quantity_finished_kg' => $finishedKg,
+                'notes' => self::PLANILLA_NOTES,
             ]);
 
             return;

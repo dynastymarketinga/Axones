@@ -19,6 +19,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderLine;
+use App\Models\WorkOrderTechnicalDocument;
 use App\Services\CortePlanillaDispatchSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -29,7 +30,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
 
     private function auth(User $user): array
     {
-        return ['Authorization' => 'Bearer '.$user->createToken('t')->plainTextToken];
+        return ['Authorization' => 'Bearer ' . $user->createToken('t')->plainTextToken];
     }
 
     public function test_get_orden_trabajo_prefill_from_masters(): void
@@ -240,7 +241,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'form' => [
                 'pedidoKg' => '112.000',
                 'maquina' => 'COMEXI 1',
-                'tipoImpresionEstructura' => 'reverso',
+                'tipoImpresionEstructura' => 'trilaminado',
                 'frecuencia' => '250±2',
                 'numBandas' => '2',
                 'anchoCorteMontaje' => '330±2',
@@ -273,7 +274,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
     }
 
-    public function test_put_orden_trabajo_rejects_sustrato_kg_above_stock(): void
+    public function test_put_orden_trabajo_accepts_sustrato_kg_above_stock(): void
     {
         $user = User::factory()->create(['role' => 'calidad']);
         $h = $this->auth($user);
@@ -303,9 +304,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             ],
         ];
 
-        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors(['form.sustratosVirgenImp.0.kg']);
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
     }
 
     public function test_put_orden_trabajo_accepts_sustrato_kg_within_stock(): void
@@ -358,7 +357,6 @@ class WorkOrderOrdenTrabajoTest extends TestCase
                 'impOperador' => 'Operador test',
                 'impTurno' => '1',
                 'impGrupo' => 'A',
-                'impMetrajeProduccion' => '100',
                 'impTimerState' => 'running',
             ],
             'origin_area' => 'impresion',
@@ -401,6 +399,45 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         );
     }
 
+    public function test_printing_control_strips_merma_and_metraje_on_save(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'impresion']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-STRIP-MERMA',
+            'status' => 'in_progress',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impMermaKg' => '200',
+                'impMetrajeProduccion' => '999',
+                'impTurnosImpresion' => [[
+                    'id' => 'turn-legacy-1',
+                    'turno' => 'diurno',
+                    'grupo' => 'A',
+                    'mermaKg' => '50',
+                    'metrajeProduccion' => '100',
+                ]],
+            ],
+        ], $h)->assertOk();
+
+        $form = WorkOrderTechnicalDocument::query()
+            ->where('work_order_id', $wo->id)
+            ->value('form');
+        $this->assertIsArray($form);
+        $this->assertArrayNotHasKey('impMermaKg', $form);
+        $this->assertArrayNotHasKey('impMetrajeProduccion', $form);
+        $turnos = $form['impTurnosImpresion'] ?? [];
+        $this->assertIsArray($turnos);
+        $this->assertNotEmpty($turnos);
+        $this->assertArrayNotHasKey('mermaKg', $turnos[0]);
+        $this->assertArrayNotHasKey('metrajeProduccion', $turnos[0]);
+    }
+
     public function test_production_save_with_notify_rejected_without_timer_started(): void
     {
         User::factory()->create();
@@ -428,6 +465,81 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         ], $h)
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['form']);
+    }
+
+    public function test_printing_control_close_turn_with_notify_on_production_save_persists_acumulado(): void
+    {
+        User::factory()->create();
+        $user = User::factory()->create(['role' => 'impresion']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CLOSE-NOTIFY',
+            'status' => 'in_progress',
+            'board_stage' => WorkOrderBoardStage::Impresion->value,
+            'created_by' => $user->id,
+        ]);
+
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'impEstadoArea' => 'abierta',
+                'impTurnoActual' => [
+                    'id' => 't-open',
+                    'operador' => 'Victor',
+                    'turno' => 'nocturno',
+                    'grupo' => 'B',
+                    'salidaBobinasKg' => ['12000', ...array_fill(0, 29, '')],
+                    'timer' => [
+                        'state' => 'running',
+                        'effectiveAccSec' => 40,
+                        'deadAccSec' => 0,
+                        'lastResumeAtMs' => 0,
+                        'pauseAtMs' => 0,
+                        'pauses' => [],
+                    ],
+                ],
+                'impTimerState' => 'running',
+                'impTurnosImpresion' => [],
+            ],
+        ]);
+
+        $closedAt = now()->toIso8601String();
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impTurnoActual' => null,
+                'impTurnosImpresion' => [
+                    [
+                        'id' => 't-open',
+                        'operador' => 'Victor',
+                        'turno' => 'nocturno',
+                        'grupo' => 'B',
+                        'closed_at' => $closedAt,
+                        'salidaBobinasKg' => ['12000', ...array_fill(0, 29, '')],
+                        'timer' => [
+                            'state' => 'stopped',
+                            'effectiveAccSec' => 40,
+                            'deadAccSec' => 0,
+                        ],
+                        'resumenCierre' => [
+                            'pesoSalidaKg' => 12000,
+                            'pesoEntradaKg' => 12000,
+                            'scrapKg' => 24,
+                        ],
+                    ],
+                ],
+                'impAcumuladoProducidoKg' => '12000',
+                'impTimerState' => 'completed',
+                'impTimerEffectiveAccSec' => '40',
+            ],
+            'origin_area' => 'impresion',
+            'notify_on_production_save' => true,
+        ], $h)->assertOk();
+
+        $this->getJson("/api/work-orders/{$wo->id}/orden-trabajo", $h)
+            ->assertOk()
+            ->assertJsonPath('form.impTurnoActual', null)
+            ->assertJsonPath('form.impAcumuladoProducidoKg', '12000')
+            ->assertJsonPath('form.impTurnosImpresion.0.resumenCierre.pesoSalidaKg', 12000);
     }
 
     public function test_impresion_cannot_put_full_orden_trabajo(): void
@@ -932,7 +1044,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
 
         $client = Client::query()->create([
             'name' => 'C-SYNC',
-            'rif' => 'J-'.random_int(10000000, 99999999),
+            'rif' => 'J-' . random_int(10000000, 99999999),
         ]);
         $product = Product::query()->create([
             'client_id' => $client->id,
@@ -940,14 +1052,14 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'cpe' => 'CPE-SYNC',
         ]);
         $wo = WorkOrder::query()->create([
-            'code' => 'OT-CORTE-SYNC-'.uniqid(),
+            'code' => 'OT-CORTE-SYNC-' . uniqid(),
             'client_id' => $client->id,
             'product_id' => $product->id,
             'status' => 'open',
             'created_by' => $user->id,
         ]);
         $mat = Material::query()->create([
-            'sku' => 'M-SYNC-'.uniqid(),
+            'sku' => 'M-SYNC-' . uniqid(),
             'name' => 'Mat',
             'inventory_area' => 'material',
             'unit' => 'kg',
@@ -985,7 +1097,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
 
         $client = Client::query()->create([
             'name' => 'C-BLOCK',
-            'rif' => 'J-'.random_int(10000000, 99999999),
+            'rif' => 'J-' . random_int(10000000, 99999999),
         ]);
         $product = Product::query()->create([
             'client_id' => $client->id,
@@ -993,14 +1105,14 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'cpe' => 'CPE-BLOCK',
         ]);
         $wo = WorkOrder::query()->create([
-            'code' => 'OT-CORTE-BLOCK-'.uniqid(),
+            'code' => 'OT-CORTE-BLOCK-' . uniqid(),
             'client_id' => $client->id,
             'product_id' => $product->id,
             'status' => 'open',
             'created_by' => $user->id,
         ]);
         $mat = Material::query()->create([
-            'sku' => 'M-BLOCK-'.uniqid(),
+            'sku' => 'M-BLOCK-' . uniqid(),
             'name' => 'Mat',
             'inventory_area' => 'material',
             'unit' => 'kg',
@@ -1292,10 +1404,10 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertContains($woQueued->id, $ids);
         $this->assertContains($woAtStage->id, $ids);
-        $this->assertNotContains($woPast->id, $ids);
+        $this->assertContains($woPast->id, $ids);
     }
 
-    public function test_mi_area_montaje_active_excludes_impresion_stage_but_includes_nueva(): void
+    public function test_mi_area_montaje_active_includes_pending_despite_later_board_stage(): void
     {
         $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
@@ -1347,7 +1459,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
 
         $r = $this->getJson('/api/work-orders?mi_area=montaje&area_process_tag=active&per_page=20', $h)->assertOk();
         $ids = collect($r->json('data'))->pluck('id')->all();
-        $this->assertNotContains($woAtImpresion->id, $ids);
+        $this->assertContains($woAtImpresion->id, $ids);
         $this->assertContains($woNueva->id, $ids);
         $this->assertContains($woPendiente->id, $ids);
     }

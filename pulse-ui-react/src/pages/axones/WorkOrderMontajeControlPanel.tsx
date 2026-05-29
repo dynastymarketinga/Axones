@@ -24,18 +24,27 @@ import WorkOrderMontajeOpsSection, {
 import WorkOrderMontajeClicheMaterialSection from "./WorkOrderMontajeClicheMaterialSection"
 import {
   clearMontajeClicheMaterialKeys,
-  MON_CLICHE_KEY,
   MON_CILINDRO_KEY,
+  MON_CLICHE_KEY,
+  MON_CODIGO_KEY,
+  MON_COLOR_KEY,
+  MON_FILAS_EXTRA_KEY,
   MON_MATERIALES_KEY,
+  MON_MATERIALES_MONTAJE_KEY,
+  MON_STICKY_BACK_KEY,
+  montajeFilasExtraForSave,
   montajeMaterialesForSave,
-  parseMontajeMateriales,
-  type MontajeMaterialRow,
+  readMontajeFilasExtraState,
+  readMontajeMaterialesState,
+  type MontajeFilaMontaje,
+  type MontajeMaterialFila,
 } from "./montaje-cliche-material"
 import {
   deriveMontajeOperativoEstado,
   MONTAJE_CONTROL_SAVED_EVENT,
 } from "@/lib/montaje-mes-band-status"
 import {
+  cumulativeDeadSeconds,
   cumulativeEffectiveSeconds,
   formatHmsFromSeconds,
   mesBandejaStatePillClass,
@@ -50,13 +59,14 @@ import {
 import {
   MON_ACTUAL_KEY,
   MON_ESTADO_KEY,
-  MON_OBS_KEY,
   MON_PAUSE_REASONS,
   MON_TURNOS_KEY,
   accumulateMontajeFromJson,
   bootstrapMontajeFormState,
   clearMontajeMirrorKeys,
+  clearMontajeShiftMirrorKeysOnly,
   createNewMontajeTurno,
+  timerToLegacyFlat,
   finalizeTurnTimerNow,
   formatTimerHms,
   legacyMirrorIndicatesOpenMontajeShift,
@@ -87,6 +97,7 @@ import {
 } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
+import { isAxonesDeveloperSession } from "@/lib/axones-roles"
 
 type OrdenTrabajoPayload = {
   work_order_id: number
@@ -97,6 +108,18 @@ type OrdenTrabajoPayload = {
 }
 
 type MontajePauseEntry = { at: string; reason: string; obs: string; duration_sec: number }
+type MontajeLastClosedSnapshot = {
+  turno: "diurno" | "nocturno" | ""
+  grupo: "A" | "B" | "C" | ""
+  operador: string
+  ayudante: string
+  supervisor: string
+  observaciones: string
+  numCliche: string
+  numCilindro: string
+  filasExtra: MontajeFilaMontaje[]
+  materialesMontaje: MontajeMaterialFila[]
+}
 
 function readString(v: unknown): string {
   return typeof v === "string" ? v : ""
@@ -130,7 +153,48 @@ function normalizeNumericString(v: unknown): string {
   return String(n)
 }
 
+function parseLastClosedSnapshot(raw: unknown): MontajeLastClosedSnapshot | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
+  const o = raw as Record<string, unknown>
+  const turnoRaw = readString(o.turno).toLowerCase()
+  const grupoRaw = readString(o.grupo).toUpperCase()
+  const turno: MontajeLastClosedSnapshot["turno"] =
+    turnoRaw === "diurno" || turnoRaw === "nocturno" ? (turnoRaw as "diurno" | "nocturno") : ""
+  const grupo: MontajeLastClosedSnapshot["grupo"] =
+    grupoRaw === "A" || grupoRaw === "B" || grupoRaw === "C" ? (grupoRaw as "A" | "B" | "C") : ""
+  return {
+    turno,
+    grupo,
+    operador: readString(o.operador),
+    ayudante: readString(o.ayudante),
+    supervisor: readString(o.supervisor),
+    observaciones: readString(o.observaciones),
+    numCliche: readString(o.numCliche),
+    numCilindro: (() => {
+      const leg = readString(o.numCilindro)
+      if (leg) return leg
+      if (Array.isArray(o.cilindros) && o.cilindros.length > 0) {
+        return readString(o.cilindros[0])
+      }
+      return ""
+    })(),
+    filasExtra: Array.isArray(o.filasExtra)
+      ? readMontajeFilasExtraState(o.filasExtra)
+      : readMontajeFilasExtraState(undefined, o.clichesAdicionales, o.cilindrosAdicionales),
+    materialesMontaje: Array.isArray(o.materialesMontaje)
+      ? readMontajeMaterialesState(o.materialesMontaje)
+      : readMontajeMaterialesState(
+          undefined,
+          o.stickyBack,
+          o.codigo,
+          o.color,
+          o.materialesUsados,
+        ),
+  }
+}
+
 const LOCAL_MONTAJE_DRAFT_PREFIX = "axones.montaje.control.draft."
+const MON_LAST_CLOSED_SNAPSHOT_KEY = "montLastClosedSnapshot"
 
 /** Tonos visuales para confirmaciones del panel de montaje (alineados a cada acción). */
 type MesMontajeConfirmTone =
@@ -338,14 +402,20 @@ export default function WorkOrderMontajeControlPanel({
   const draftPeopleRef = useRef<DraftPerson[]>([])
   draftPeopleRef.current = draftPeople
 
-  const draftOperadorName = useMemo(
-    () => draftPeople.find((p) => p.role === "operador")?.name.trim() ?? "",
-    [draftPeople],
-  )
-  const draftSupervisorName = useMemo(
-    () => draftPeople.find((p) => p.role === "supervisor")?.name.trim() ?? "",
-    [draftPeople],
-  )
+  const draftOperadoresLabel = useMemo(() => {
+    const names = draftPeople
+      .filter((p) => p.role === "operador")
+      .map((p) => p.name.trim())
+      .filter(Boolean)
+    return names.join("; ")
+  }, [draftPeople])
+  const draftSupervisoresLabel = useMemo(() => {
+    const names = draftPeople
+      .filter((p) => p.role === "supervisor")
+      .map((p) => p.name.trim())
+      .filter(Boolean)
+    return names.join("; ")
+  }, [draftPeople])
   const draftAyudantesLabel = useMemo(() => {
     const names = draftPeople
       .filter((p) => p.role === "ayudante")
@@ -353,7 +423,7 @@ export default function WorkOrderMontajeControlPanel({
       .filter(Boolean)
     return names.join("; ")
   }, [draftPeople])
-  const draftOperadorMissing = useMemo(() => !draftOperadorName, [draftOperadorName])
+  const draftOperadorMissing = useMemo(() => !draftOperadoresLabel, [draftOperadoresLabel])
 
   const onDraftStagingName = useCallback((v: string) => {
     setDraftStaging((s) => ({ ...s, name: v }))
@@ -369,19 +439,10 @@ export default function WorkOrderMontajeControlPanel({
       toast.error("Escriba el nombre antes de guardar.")
       return
     }
-    const prev = draftPeopleRef.current
-    if (role === "supervisor" && prev.some((p) => p.role === "supervisor")) {
-      mesMontajeToastWarning("Solo puede haber un Supervisor en el turno.")
-      return
-    }
-    if (role === "operador" && prev.some((p) => p.role === "operador")) {
-      mesMontajeToastWarning("Solo puede haber un Operador principal en el turno.")
-      return
-    }
     const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    setDraftPeople((p) => [...p, { id, role, name: trimmed }])
+    setDraftPeople((p) => [...p, { id, role, name: trimmed, grupo: draftGrupo, turno: draftTurno }])
     setDraftStaging((s) => ({ ...s, name: "" }))
-  }, [])
+  }, [draftGrupo, draftTurno])
 
   const removeDraftPerson = useCallback((id: string) => {
     setDraftPeople((prev) => prev.filter((p) => p.id !== id))
@@ -485,11 +546,52 @@ export default function WorkOrderMontajeControlPanel({
     () => deriveMontajeOperativoEstado(form, Date.now()),
     [form],
   )
+  const montajeFilasExtra = useMemo(
+    () =>
+      readMontajeFilasExtraState(
+        form[MON_FILAS_EXTRA_KEY],
+        form.montClichesAdicionales,
+        form.montCilindrosAdicionales,
+      ),
+    [form],
+  )
   const montajeMateriales = useMemo(
-    () => parseMontajeMateriales(form[MON_MATERIALES_KEY]),
+    () =>
+      readMontajeMaterialesState(
+        form[MON_MATERIALES_MONTAJE_KEY],
+        form[MON_STICKY_BACK_KEY],
+        form[MON_CODIGO_KEY],
+        form[MON_COLOR_KEY],
+        form[MON_MATERIALES_KEY],
+      ),
     [form],
   )
   const hasActiveTurno = activeTurno !== null
+  const lastClosedTurno = useMemo(
+    () => (closedTurnos.length > 0 ? closedTurnos[closedTurnos.length - 1] : null),
+    [closedTurnos],
+  )
+  const lastClosedSnapshot = useMemo(
+    () => parseLastClosedSnapshot(form[MON_LAST_CLOSED_SNAPSHOT_KEY]),
+    [form],
+  )
+  const visibleNumCliche = hasActiveTurno
+    ? readString(form[MON_CLICHE_KEY])
+    : (lastClosedSnapshot?.numCliche ?? readString(form[MON_CLICHE_KEY]))
+  const visibleNumCilindro = hasActiveTurno
+    ? readString(form[MON_CILINDRO_KEY])
+    : (lastClosedSnapshot?.numCilindro ?? readString(form[MON_CILINDRO_KEY]))
+  const visibleFilasExtra = hasActiveTurno
+    ? montajeFilasExtra
+    : (lastClosedSnapshot?.filasExtra.length ? lastClosedSnapshot.filasExtra : montajeFilasExtra)
+  const visibleMaterialesMontaje = hasActiveTurno
+    ? montajeMateriales
+    : lastClosedSnapshot?.materialesMontaje.length
+      ? lastClosedSnapshot.materialesMontaje
+      : montajeMateriales
+  const visibleObsTurno = hasActiveTurno
+    ? readString(form.montObservaciones)
+    : (lastClosedSnapshot?.observaciones ?? readString(form.montObservaciones))
   const jsonAccum = useMemo(
     () => accumulateMontajeFromJson(closedTurnos, activeTurno),
     [closedTurnos, activeTurno],
@@ -508,7 +610,6 @@ export default function WorkOrderMontajeControlPanel({
     })
   }, [])
 
-  const kgProduccionTurno = readNumber(form.montKgProduccion)
   const pedidoTotalKg = readNumber(form.pedidoKg ?? prefill.pedidoKg)
   const producidoAcumuladoKg =
     readNumber(form.montAcumuladoProducidoKg) > 0
@@ -517,9 +618,7 @@ export default function WorkOrderMontajeControlPanel({
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
   const turnosRegistrados = jsonAccum.turnosRegistrados
   const totalProduccionAcumulada = jsonAccum.producidoKg
-  const totalMermaAcumulada =
-    closedTurnos.reduce((a, t) => a + readNumber(t.mermaKg), 0) +
-    (activeTurno ? readNumber(activeTurno.mermaKg) : 0)
+  const totalMermaAcumulada = 0
   const ultimoTurnoLabel = hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel
 
   const [timerTick, setTimerTick] = useState(0)
@@ -562,17 +661,31 @@ export default function WorkOrderMontajeControlPanel({
   const lastResumeAt = readNumber(form.montTimerLastResumeAtMs)
   const pauseAt = readNumber(form.montTimerPauseAtMs)
   const nowMs = Date.now() + timerTick * 0
-  const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
+  const shiftEffectiveSec =
+    effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
   const pauseAwaitingMotive = timerPaused && pauseAt > 0 && pauseEntries.length === 0
-  const deadSec = deadAcc + (pauseAwaitingMotive ? (nowMs - pauseAt) / 1000 : 0)
-  const totalSec = effectiveSec + deadSec
+  const shiftDeadSec = deadAcc + (pauseAwaitingMotive ? (nowMs - pauseAt) / 1000 : 0)
+  const shiftTotalSec = shiftEffectiveSec + shiftDeadSec
   const otEffectiveAccSec = useMemo(
-    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, Date.now()),
+    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
   )
-  const kgHora = effectiveSec > 0 ? (kgProduccionTurno / (effectiveSec / 3600)).toFixed(2) : "0.00"
+  const otDeadAccSec = useMemo(
+    () => cumulativeDeadSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otTotalAccSec = otEffectiveAccSec + otDeadAccSec
+  /** Cronómetro visible: acumulado OT (todos los turnos), alineado con la bandeja Montaje. */
+  const displayEffectiveSec = otEffectiveAccSec
+  const displayDeadSec = otDeadAccSec
+  const displayTotalSec = otTotalAccSec
+  const kgHora = "0.00"
 
   const sessionUser = useMemo(() => getStoredUser(), [])
+  const canDevResetMontaje = useMemo(
+    () => isAxonesDeveloperSession(sessionUser),
+    [sessionUser],
+  )
   const isBossLike = canFinalizeOrder
   const activeOwnerId = activeTurno?.control_owner_user_id ?? null
   const activeOwnerName = activeTurno?.control_owner_name ?? null
@@ -708,9 +821,9 @@ export default function WorkOrderMontajeControlPanel({
       },
       timer: {
         state: timerState,
-        total_hms: formatTimerHms(totalSec),
-        dead_hms: formatTimerHms(deadSec),
-        effective_hms: formatTimerHms(effectiveSec),
+        total_hms: formatTimerHms(shiftTotalSec),
+        dead_hms: formatTimerHms(shiftDeadSec),
+        effective_hms: formatTimerHms(shiftEffectiveSec),
         kg_hora: kgHora,
       },
       pauses: pauseEntries.map((p) => ({
@@ -778,28 +891,13 @@ export default function WorkOrderMontajeControlPanel({
 
   const outlierWarnings = useMemo(() => {
     const warnings: string[] = []
-    const MAX_KG_PRODUCCION = 50000
-    const MAX_MERMA = 10000
-    const MAX_METRAJE = 1000000
-
-    if (kgProduccionTurno > MAX_KG_PRODUCCION) {
-      warnings.push(`Producción del turno elevada (${kgProduccionTurno.toFixed(2)} Kg). Verifique unidad y captura.`)
-    }
-    const mermaTurno = readNumber(form.montMermaKg)
-    if (mermaTurno > MAX_MERMA) {
-      warnings.push(`Merma del turno alta (${mermaTurno.toFixed(2)} Kg).`)
-    }
-    const metraje = readNumber(form.montMetraje)
-    if (metraje > MAX_METRAJE) {
-      warnings.push(`Metraje elevado (${metraje.toFixed(0)}). Revise que no haya ceros extra.`)
-    }
     if (pedidoTotalKg > 0 && producidoAcumuladoKg > pedidoTotalKg + 0.01) {
       warnings.push(
         `Producido acumulado (${producidoAcumuladoKg.toFixed(2)} Kg) supera el pedido (${pedidoTotalKg.toFixed(2)} Kg). Verifique unidades o captura.`,
       )
     }
     return warnings
-  }, [kgProduccionTurno, form.montMermaKg, form.montMetraje, pedidoTotalKg, producidoAcumuladoKg])
+  }, [pedidoTotalKg, producidoAcumuladoKg])
 
   const persistMontajeForm = useCallback(
     async (
@@ -859,16 +957,35 @@ export default function WorkOrderMontajeControlPanel({
         [MON_TURNOS_KEY]: closedP,
         [MON_ACTUAL_KEY]: actualP,
         [MON_ESTADO_KEY]: readEstadoArea(src[MON_ESTADO_KEY]),
-        montKgProduccion: normalizeNumericString(actualP?.kgProduccion ?? src.montKgProduccion),
-        montMermaKg: normalizeNumericString(actualP?.mermaKg ?? src.montMermaKg),
-        montMetraje: normalizeNumericString(actualP?.metrajeMontaje ?? src.montMetraje),
         montTimerEffectiveAccSec: normalizeNumericString(src.montTimerEffectiveAccSec),
         montTimerDeadAccSec: normalizeNumericString(src.montTimerDeadAccSec),
         montRegistrosTurnos: String(accFromJson.turnosRegistrados),
         montAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
         [MON_CLICHE_KEY]: readString(src[MON_CLICHE_KEY]).trim(),
         [MON_CILINDRO_KEY]: readString(src[MON_CILINDRO_KEY]).trim(),
-        [MON_MATERIALES_KEY]: montajeMaterialesForSave(parseMontajeMateriales(src[MON_MATERIALES_KEY])),
+        [MON_FILAS_EXTRA_KEY]: montajeFilasExtraForSave(
+          readMontajeFilasExtraState(
+            src[MON_FILAS_EXTRA_KEY],
+            src.montClichesAdicionales,
+            src.montCilindrosAdicionales,
+          ),
+        ),
+        [MON_MATERIALES_MONTAJE_KEY]: montajeMaterialesForSave(
+          readMontajeMaterialesState(
+            src[MON_MATERIALES_MONTAJE_KEY],
+            src[MON_STICKY_BACK_KEY],
+            src[MON_CODIGO_KEY],
+            src[MON_COLOR_KEY],
+            src[MON_MATERIALES_KEY],
+          ),
+        ),
+        [MON_STICKY_BACK_KEY]: "",
+        [MON_CODIGO_KEY]: "",
+        [MON_COLOR_KEY]: "",
+        montClichesAdicionales: [],
+        montCilindrosAdicionales: [],
+        montCilindros: [],
+        montMaterialesUsados: [],
       }
 
       setSaving(true)
@@ -1074,7 +1191,7 @@ export default function WorkOrderMontajeControlPanel({
   function requestIniciarTurno() {
     if (readOnlyOps) return
     if (hasActiveTurno) return
-    if (!draftOperadorName) {
+    if (!draftOperadoresLabel) {
       toast.error(
         draftPeople.length > 0
           ? "Falta un Operador en la cuadrilla. Guarde al menos una persona con rol Operador (Ayudante no basta)."
@@ -1088,7 +1205,7 @@ export default function WorkOrderMontajeControlPanel({
   function confirmIniciarTurno() {
     if (readOnlyOps) return
     if (hasActiveTurno) return
-    if (!draftOperadorName) {
+    if (!draftOperadoresLabel) {
       setStartTurnConfirmOpen(false)
       toast.error(
         draftPeople.length > 0
@@ -1101,19 +1218,20 @@ export default function WorkOrderMontajeControlPanel({
     const t = createNewMontajeTurno({
       turno: draftTurno,
       grupo: draftGrupo,
-      operador: draftOperadorName,
+      operador: draftOperadoresLabel,
       controlOwner: u ? { id: u.id, name: u.name } : null,
     })
     const turnoWithPeople: MontajeTurnoEntry = {
       ...t,
       ayudante: draftAyudantesLabel,
-      supervisor: draftSupervisorName,
+      supervisor: draftSupervisoresLabel,
     }
     const nextForm: Record<string, unknown> = {
       ...form,
       [MON_ACTUAL_KEY]: turnoWithPeople,
       ...montajeTurnoToMirror(turnoWithPeople),
       [MON_TURNOS_KEY]: parseMontajeTurnos(form[MON_TURNOS_KEY]),
+      [MON_MATERIALES_KEY]: [],
     }
     setForm(nextForm)
     setDraftPeople([])
@@ -1144,11 +1262,25 @@ export default function WorkOrderMontajeControlPanel({
       closed_at: new Date().toISOString(),
       closed_by: u ? { id: u.id, name: u.name } : null,
     }
+    const closedSnapshot: MontajeLastClosedSnapshot = {
+      turno: cur.turno,
+      grupo: cur.grupo,
+      operador: cur.operador,
+      ayudante: cur.ayudante,
+      supervisor: cur.supervisor,
+      observaciones: readString(form.montObservaciones),
+      numCliche: readString(form[MON_CLICHE_KEY]),
+      numCilindro: readString(form[MON_CILINDRO_KEY]),
+      filasExtra: montajeFilasExtraForSave(montajeFilasExtra),
+      materialesMontaje: montajeMaterialesForSave(montajeMateriales),
+    }
     const nextForm: Record<string, unknown> = {
       ...form,
       [MON_TURNOS_KEY]: [...parseMontajeTurnos(form[MON_TURNOS_KEY]), closed],
       [MON_ACTUAL_KEY]: null,
-      ...clearMontajeMirrorKeys(),
+      ...clearMontajeShiftMirrorKeysOnly(),
+      ...timerToLegacyFlat(finalizedTimer),
+      [MON_LAST_CLOSED_SNAPSHOT_KEY]: closedSnapshot,
     }
     setForm(bootstrapMontajeFormState(nextForm))
     const ok = await persistMontajeForm(nextForm, {
@@ -1157,7 +1289,7 @@ export default function WorkOrderMontajeControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesMontajeToastWithBandeja(nextForm, "Turno de planta cerrado y guardado.")
+      mesMontajeToastWithBandeja(nextForm, "Finalizar turno: registro guardado en el sistema.")
       await load()
     }
   }
@@ -1208,6 +1340,7 @@ export default function WorkOrderMontajeControlPanel({
       [MON_ACTUAL_KEY]: null,
       [MON_ESTADO_KEY]: "finalizada",
       ...clearMontajeMirrorKeys(),
+      [MON_LAST_CLOSED_SNAPSHOT_KEY]: null,
     }
     clearLocalMontajeDrafts(workOrderId)
     pendingDraftSyncRef.current = null
@@ -1273,12 +1406,14 @@ export default function WorkOrderMontajeControlPanel({
   }
 
   function requestResetAll() {
+    if (!canDevResetMontaje) return
     if (saving) return
     if (controlReadOnly) return
     setResetConfirmOpen(true)
   }
 
   async function confirmResetAll() {
+    if (!canDevResetMontaje) return
     if (saving) return
     if (controlReadOnly) return
     setResetConfirmOpen(false)
@@ -1290,6 +1425,7 @@ export default function WorkOrderMontajeControlPanel({
       [MON_ESTADO_KEY]: "abierta",
       ...clearMontajeMirrorKeys(),
       ...clearMontajeClicheMaterialKeys(),
+      [MON_LAST_CLOSED_SNAPSHOT_KEY]: null,
     }
     for (const k of Object.keys(cleared)) {
       if (k.startsWith("montBlockDone.")) delete cleared[k]
@@ -1387,13 +1523,13 @@ export default function WorkOrderMontajeControlPanel({
         faltanteKg={faltanteKg}
         turnosRegistrados={turnosRegistrados}
         totalProduccionAcumulada={totalProduccionAcumulada}
-        kgProduccionTurno={kgProduccionTurno}
         totalMermaAcumulada={totalMermaAcumulada}
         ultimoTurnoLabel={ultimoTurnoLabel}
         timerState={timerState}
-        totalSec={totalSec}
-        deadSec={deadSec}
-        effectiveSec={effectiveSec}
+        totalSec={displayTotalSec}
+        deadSec={displayDeadSec}
+        effectiveSec={displayEffectiveSec}
+        timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
         timerRunning={timerRunning}
         timerPaused={timerPaused}
@@ -1408,9 +1544,6 @@ export default function WorkOrderMontajeControlPanel({
         montOperador={readString(form.montOperador)}
         montAyudante={readString(form.montAyudante)}
         montSupervisor={readString(form.montSupervisor)}
-        kgProduccionRaw={readNumberString(form.montKgProduccion)}
-        mermaRaw={readNumberString(form.montMermaKg)}
-        metrajeRaw={readNumberString(form.montMetraje)}
         formatTimerHms={formatTimerHms}
         setPauseReason={setPauseReason}
         setPauseObs={setPauseObs}
@@ -1437,36 +1570,38 @@ export default function WorkOrderMontajeControlPanel({
         onCerrarTurnoActual={requestCerrarTurnoActual}
         onFinalizarAreaMontaje={requestFinalizarAreaMontaje}
         closedTurnos={closedTurnos}
+        lastClosedTurno={lastClosedTurno}
         onSetTurno={(v) => patchActiveTurn((t) => ({ ...t, turno: v }))}
         onSetGrupo={(v) => patchActiveTurn((t) => ({ ...t, grupo: v }))}
         onActivePersonnelApply={(people) => {
           const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
           patchActiveTurn((t) => ({ ...t, operador, ayudante, supervisor }))
         }}
-        onSetKgProduccion={(v) => patchActiveTurn((t) => ({ ...t, kgProduccion: v }))}
-        onSetMerma={(v) => patchActiveTurn((t) => ({ ...t, mermaKg: v }))}
-        onSetMetraje={(v) => patchActiveTurn((t) => ({ ...t, metrajeMontaje: v }))}
         canPreviewTimerReport={canPreviewTimerReport}
         onPreviewTimerReport={requestOpenTimerReportPreview}
-        canResetAll={!saving && !controlReadOnly}
+        canResetAll={canDevResetMontaje && !saving && !controlReadOnly}
         onResetAll={requestResetAll}
         simplifiedTimerActions
       />
 
       <WorkOrderMontajeClicheMaterialSection
-        numCliche={readString(form[MON_CLICHE_KEY])}
-        numCilindro={readString(form[MON_CILINDRO_KEY])}
-        materiales={montajeMateriales}
-        readOnly={controlReadOnly}
+        numCliche={visibleNumCliche}
+        numCilindro={visibleNumCilindro}
+        filasExtra={visibleFilasExtra}
+        materialesMontaje={visibleMaterialesMontaje}
+        readOnly={controlReadOnly || !hasActiveTurno}
         onNumClicheChange={(v) => setForm((prev) => ({ ...prev, [MON_CLICHE_KEY]: v }))}
         onNumCilindroChange={(v) => setForm((prev) => ({ ...prev, [MON_CILINDRO_KEY]: v }))}
-        onMaterialesChange={(rows: MontajeMaterialRow[]) =>
-          setForm((prev) => ({ ...prev, [MON_MATERIALES_KEY]: rows }))
+        onFilasExtraChange={(rows: MontajeFilaMontaje[]) =>
+          setForm((prev) => ({ ...prev, [MON_FILAS_EXTRA_KEY]: rows }))
+        }
+        onMaterialesMontajeChange={(rows: MontajeMaterialFila[]) =>
+          setForm((prev) => ({ ...prev, [MON_MATERIALES_MONTAJE_KEY]: rows }))
         }
       />
 
       {(() => {
-        const doneObs = !!readString(form.montObservaciones).trim()
+        const doneObs = !!visibleObsTurno.trim()
         return (
           <MesSectionShell
             title={
@@ -1489,7 +1624,7 @@ export default function WorkOrderMontajeControlPanel({
               id={montObsTextareaId}
               name="montObservaciones"
               aria-label="Observaciones del turno"
-              value={readString(form.montObservaciones)}
+              value={visibleObsTurno}
               onChange={(e) => {
                 if (!hasActiveTurno || controlReadOnly) return
                 patchActiveTurn((t) => ({ ...t, observaciones: e.target.value }))
@@ -1514,7 +1649,7 @@ export default function WorkOrderMontajeControlPanel({
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
-          {!controlReadOnly && !areaFinalizada ? (
+          {canDevResetMontaje && !controlReadOnly && !areaFinalizada ? (
             <Button
               type="button"
               variant="outline"
@@ -1524,28 +1659,6 @@ export default function WorkOrderMontajeControlPanel({
             >
               <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
               Empezar de cero
-            </Button>
-          ) : null}
-          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-orange-300 text-orange-950 hover:bg-orange-50"
-              disabled={saving}
-              onClick={requestCerrarTurnoActual}
-            >
-              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Finalizar turno
-            </Button>
-          ) : null}
-          {canFinalizeOrder && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving}
-              onClick={requestFinalizarAreaMontaje}
-            >
-              Finalizar área Montaje
             </Button>
           ) : null}
         </div>
@@ -1568,7 +1681,7 @@ export default function WorkOrderMontajeControlPanel({
         onOpenChange={setPauseConfirmOpen}
         icon={<CirclePause className="h-5 w-5" aria-hidden />}
         title="Pausar cronómetro (parada)"
-        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada (tiempo muerto). No cierra el turno de planta; use «Cerrar turno» para eso. Tras registrar el motivo, el cronómetro seguirá en pausa hasta que pulse play. ¿Desea pausar ahora?"
+        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada (tiempo muerto). No finaliza el turno de planta; use «Finalizar turno» para eso. Tras registrar el motivo, el cronómetro seguirá en pausa hasta que pulse play. ¿Desea pausar ahora?"
         confirmLabel="Sí, pausar"
         onConfirm={() => confirmPauseProductionTimer()}
       />
@@ -1623,9 +1736,9 @@ export default function WorkOrderMontajeControlPanel({
         open={closeTurnConfirmOpen}
         onOpenChange={setCloseTurnConfirmOpen}
         icon={<LogOut className="h-5 w-5" aria-hidden />}
-        title="Cerrar turno"
+        title="Finalizar turno"
         description="Se cerrará el registro de turno de planta en curso y se consolidará el cronómetro en el historial. Podrá abrir otro turno de planta después. ¿Confirma el cierre?"
-        confirmLabel="Sí, cerrar turno"
+        confirmLabel="Sí, finalizar turno"
         onConfirm={() => confirmCloseTurnFirstStep()}
       />
 
@@ -1649,7 +1762,7 @@ export default function WorkOrderMontajeControlPanel({
           if (!open) pendingEmptyShiftCloseRef.current = null
         }}
         icon={<AlertCircle className="h-5 w-5" aria-hidden />}
-        title="Cerrar turno sin actividad"
+        title="Finalizar turno sin actividad"
         description="El turno no registra tiempo efectivo ni producción. ¿Desea cerrarlo igual?"
         confirmLabel="Sí, cerrar igual"
         onConfirm={() => confirmEmptyShiftClose()}

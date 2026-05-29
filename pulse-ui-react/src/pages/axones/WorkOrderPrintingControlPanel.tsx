@@ -3,8 +3,6 @@
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
-import { useNavigate } from "react-router-dom"
-
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
@@ -25,7 +23,11 @@ import WorkOrderPrintingOpsSection, {
   type DraftPersonRole,
   stringsFromActivePersonnel,
 } from "./WorkOrderPrintingOpsSection"
-import { cumulativeEffectiveSeconds, formatHmsFromSeconds } from "@/lib/mes-timer-band-shared"
+import {
+  cumulativeDeadSeconds,
+  cumulativeEffectiveSeconds,
+  formatHmsFromSeconds,
+} from "@/lib/mes-timer-band-shared"
 import { PRINTING_CONTROL_SAVED_EVENT } from "@/lib/printing-mes-band-status"
 import {
   canSaveProductionAreaForm,
@@ -40,9 +42,13 @@ import {
   IMP_TURNOS_KEY,
   accumulatePrintingFromJson,
   bootstrapPrintingFormState,
+  buildPrintingTurnoResumenCierre,
+  countDevolucionRechazadaBobinas,
   clearPrintingMirrorKeys,
   createNewPrintingTurno,
+  getLastClosedPrintingTurno,
   finalizeTurnTimerNow,
+  flushPrintingTurnoOperativoToCapturas,
   printingAggregatedTimerMirrorFromTurnos,
   IMP_BOBINAS_SLOTS,
   parsePrintingTurnoActual,
@@ -50,8 +56,10 @@ import {
   printingTurnoToMirror,
   PRINTING_REJECT_REASONS,
   readEstadoArea,
+  syncPrintingTurnoFromFormMirror,
   sumEntradaKg,
   sumSalidaKg,
+  turnoProduccionTotals,
   type PrintingTurnoEntry,
   type PrintingTurnTimer,
   type WarehouseReturnDraft,
@@ -121,7 +129,8 @@ function normalizeNumericString(v: unknown): string {
   return String(n)
 }
 
-const LOCAL_PRINTING_DRAFT_PREFIX = "axones.printing.control.draft."
+/** Respaldo local obsoleto del panel (solo se elimina al cargar; ya no se escribe). */
+const LOCAL_PRINTING_CONTROL_DRAFT_PREFIX = "axones.printing.control.draft."
 
 /** Tonos visuales para confirmaciones del panel de impresión (alineados a cada acción). */
 type MesPrintingConfirmTone =
@@ -254,20 +263,16 @@ function mesPrintingToastWarning(message: string) {
   })
 }
 
-type LocalPrintingDraft = {
-  work_order_id: number
-  saved_at_ms: number
-  // Guardamos lo mínimo para rehidratar el temporizador + turno actual.
-  active_turno: unknown
-  mirror: Record<string, unknown>
-}
-
-function clearLocalPrintingDrafts(workOrderId: number) {
+function clearLocalPrintingControlDraft(workOrderId: number) {
   try {
-    localStorage.removeItem(`${LOCAL_PRINTING_DRAFT_PREFIX}${workOrderId}`)
+    localStorage.removeItem(`${LOCAL_PRINTING_CONTROL_DRAFT_PREFIX}${workOrderId}`)
   } catch {
     // ignore
   }
+}
+
+function clearLocalPrintingDrafts(workOrderId: number) {
+  clearLocalPrintingControlDraft(workOrderId)
   try {
     localStorage.removeItem(`axones.printing.timer-preview.${workOrderId}`)
     localStorage.removeItem(`axones.printing.wastage-preview.${workOrderId}`)
@@ -361,7 +366,6 @@ export default function WorkOrderPrintingControlPanel({
   /** Solo jefe/admin puede finalizar el área de impresión (impEstadoArea). */
   canFinalizeOrder?: boolean
 }) {
-  const _navigate = useNavigate()
   const impObsTextareaId = useId().replace(/:/g, "")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -421,9 +425,9 @@ export default function WorkOrderPrintingControlPanel({
       return
     }
     const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    setDraftPeople((p) => [...p, { id, role, name: trimmed }])
+    setDraftPeople((p) => [...p, { id, role, name: trimmed, grupo: draftGrupo, turno: draftTurno }])
     setDraftStaging((s) => ({ ...s, name: "" }))
-  }, [])
+  }, [draftGrupo, draftTurno])
 
   const removeDraftPerson = useCallback((id: string) => {
     setDraftPeople((prev) => prev.filter((p) => p.id !== id))
@@ -437,40 +441,14 @@ export default function WorkOrderPrintingControlPanel({
       setPrefill(payload.prefill ?? {})
       const mergedForm = mergePrefill(payload.prefill ?? {}, payload.form)
       const boot = bootstrapPrintingFormState(mergedForm)
-      // Rehidratar desde respaldo local si hay un temporizador más reciente.
-      try {
-        const raw = localStorage.getItem(`${LOCAL_PRINTING_DRAFT_PREFIX}${workOrderId}`)
-        if (raw) {
-          const draft = JSON.parse(raw) as Partial<LocalPrintingDraft>
-          const serverLastResume = readNumber(boot.impTimerLastResumeAtMs)
-          const serverPauseAt = readNumber(boot.impTimerPauseAtMs)
-          const serverTimerAny = Math.max(serverLastResume, serverPauseAt)
-
-          const draftMirror =
-            draft.mirror && typeof draft.mirror === "object"
-              ? (draft.mirror as Record<string, unknown>)
-              : null
-          const draftLastResume = readNumber(draftMirror?.impTimerLastResumeAtMs)
-          const draftPauseAt = readNumber(draftMirror?.impTimerPauseAtMs)
-          const draftTimerAny = Math.max(draftLastResume, draftPauseAt)
-
-          if (draftTimerAny > serverTimerAny && draft.active_turno) {
-            setForm(
-              bootstrapPrintingFormState({
-                ...boot,
-                [IMP_ACTUAL_KEY]: draft.active_turno,
-                ...(draftMirror ?? {}),
-              }),
-            )
-          } else {
-            setForm(boot)
-          }
-        } else {
-          setForm(boot)
-        }
-      } catch {
-        setForm(boot)
+      const areaEstadoOnLoad = readEstadoArea(boot[IMP_ESTADO_KEY])
+      if (areaEstadoOnLoad === "finalizada") {
+        clearLocalPrintingDrafts(workOrderId)
+      } else {
+        // Descartar respaldos locales antiguos: la fuente de verdad es el servidor.
+        clearLocalPrintingControlDraft(workOrderId)
       }
+      setForm(boot)
       try {
         const summary = await apiFetch<ProductionSummaryPayload>(
           `work-orders/${workOrderId}/production-summary`,
@@ -494,7 +472,11 @@ export default function WorkOrderPrintingControlPanel({
     void load()
   }, [load])
 
+  const formRef = useRef(form)
+  formRef.current = form
+
   const closedTurnos = useMemo(() => parsePrintingTurnos(form[IMP_TURNOS_KEY]), [form])
+  const lastClosedTurno = useMemo(() => getLastClosedPrintingTurno(closedTurnos), [closedTurnos])
   const activeTurno = useMemo(() => parsePrintingTurnoActual(form[IMP_ACTUAL_KEY]), [form])
   const areaEstado = readEstadoArea(form[IMP_ESTADO_KEY])
   const areaFinalizada = areaEstado === "finalizada"
@@ -531,30 +513,34 @@ export default function WorkOrderPrintingControlPanel({
   const scrapImpreso = readNumber(form.impScrapImpresoKg)
   const totalScrap = scrapTransparente + scrapImpreso
   const devolucionBuena = readNumber(form.impDevolucionBuenaKg)
-  const devolucionRechazada = readNumber(form.impDevolucionRechazadaKg)
+  const devolucionRechazadaBobinas = countDevolucionRechazadaBobinas(
+    form.impDevolucionRechazadaBobinas,
+    form.impDevolucionRechazadaKg,
+  )
   const devolucionesPendienteAlmacen = useMemo(() => {
     const b = toFiniteOrNull(form.impDevolucionBuenaKg) ?? 0
-    const r = toFiniteOrNull(form.impDevolucionRechazadaKg) ?? 0
+    const r = countDevolucionRechazadaBobinas(
+      form.impDevolucionRechazadaBobinas,
+      form.impDevolucionRechazadaKg,
+    )
     if (b <= 0 && r <= 0) return false
     const envioMs = readNumber(form.impDevolucionesAlmacenUltimoEnvioMs)
     const snapB = readString(form.impDevolucionesAlmacenSnapBuena)
     const snapR = readString(form.impDevolucionesAlmacenSnapRech)
     const curB = normalizeNumericString(form.impDevolucionBuenaKg)
-    const curR = normalizeNumericString(form.impDevolucionRechazadaKg)
+    const curR = normalizeNumericString(
+      readNumberString(form.impDevolucionRechazadaBobinas) || String(r),
+    )
     if (envioMs <= 0) return true
     return curB !== snapB || curR !== snapR
   }, [
     form.impDevolucionBuenaKg,
+    form.impDevolucionRechazadaBobinas,
     form.impDevolucionRechazadaKg,
     form.impDevolucionesAlmacenUltimoEnvioMs,
     form.impDevolucionesAlmacenSnapBuena,
     form.impDevolucionesAlmacenSnapRech,
   ])
-  const materialConsumido = Math.max(0, totalEntradaTurnoActual - devolucionBuena - devolucionRechazada)
-  const mermaCalcRaw = materialConsumido - totalSalida - totalScrap
-  const mermaManual = toFiniteOrNull(form.impMermaKg)
-  const mermaCalc = mermaManual ?? Math.abs(mermaCalcRaw)
-  const refilPct = materialConsumido > 0 ? (totalScrap / materialConsumido) * 100 : 0
   const pedidoTotalKg = readNumber(form.pedidoKg ?? prefill.pedidoKg)
   const summaryPrinting = productionSummary?.printing
   const historicalBobinaUsages = summaryPrinting?.bobina_usages ?? []
@@ -625,6 +611,7 @@ export default function WorkOrderPrintingControlPanel({
   const pendingEmptyShiftCloseRef = useRef<{
     cur: PrintingTurnoEntry
     finalizedTimer: PrintingTurnTimer
+    notifyProductionSave?: boolean
   } | null>(null)
   const [returnLoadingMaterialsGood, setReturnLoadingMaterialsGood] = useState(false)
   const [returnLoadingMaterialsBad, setReturnLoadingMaterialsBad] = useState(false)
@@ -657,15 +644,6 @@ export default function WorkOrderPrintingControlPanel({
   const deadAcc = readNumber(form.impTimerDeadAccSec)
   const lastResumeAt = readNumber(form.impTimerLastResumeAtMs)
   const pauseAt = readNumber(form.impTimerPauseAtMs)
-  const nowMs = Date.now() + timerTick * 0
-  const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
-  const deadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
-  const totalSec = effectiveSec + deadSec
-  const otEffectiveAccSec = useMemo(
-    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, Date.now()),
-    [closedTurnos, activeTurno, timerTick],
-  )
-  const kgHora = effectiveSec > 0 ? (totalSalida / (effectiveSec / 3600)).toFixed(2) : "0.00"
   const pauseEntries = useMemo<PrintingPauseEntry[]>(() => {
     const raw = form.impTimerPauses
     if (!Array.isArray(raw)) return []
@@ -679,6 +657,24 @@ export default function WorkOrderPrintingControlPanel({
       }))
       .filter((x) => x.reason)
   }, [form.impTimerPauses])
+
+  const nowMs = Date.now() + timerTick * 0
+  const otEffectiveAccSec = useMemo(
+    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otDeadAccSec = useMemo(
+    () => cumulativeDeadSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otTotalAccSec = otEffectiveAccSec + otDeadAccSec
+  const displayEffectiveSec = otEffectiveAccSec
+  const displayDeadSec = otDeadAccSec
+  const displayTotalSec = otTotalAccSec
+  const kgHora =
+    displayEffectiveSec > 0.01
+      ? (producidoAcumuladoKg / (displayEffectiveSec / 3600)).toFixed(2)
+      : "0.00"
 
   const sessionUser = useMemo(() => getStoredUser(), [])
   const isBossLike = canFinalizeOrder
@@ -703,26 +699,6 @@ export default function WorkOrderPrintingControlPanel({
     wasTimerPausedRef.current = timerPaused
   }, [timerPaused])
 
-  // Respaldo local del turno abierto (evita pérdida al navegar atrás/recargar antes del play).
-  useEffect(() => {
-    if (!Number.isFinite(workOrderId) || workOrderId < 1) return
-    if (!hasActiveTurno) return
-    try {
-      const cur = parsePrintingTurnoActual(form[IMP_ACTUAL_KEY])
-      if (!cur) return
-      const mirror = printingTurnoToMirror(cur)
-      const draft: LocalPrintingDraft = {
-        work_order_id: workOrderId,
-        saved_at_ms: Date.now(),
-        active_turno: cur,
-        mirror,
-      }
-      localStorage.setItem(`${LOCAL_PRINTING_DRAFT_PREFIX}${workOrderId}`, JSON.stringify(draft))
-    } catch {
-      // no-op
-    }
-  }, [form, hasActiveTurno, workOrderId])
-
   const canPreviewDesperdicioReport = useMemo(() => {
     return hasActiveTurno && !controlReadOnly && !areaFinalizada
   }, [areaFinalizada, controlReadOnly, hasActiveTurno])
@@ -742,16 +718,27 @@ export default function WorkOrderPrintingControlPanel({
     return hasActiveTurno
   }, [controlReadOnly, hasActiveTurno])
 
-  const canClickGuardar = canSaveProduction || canPersistShiftOpen
+  const canPersistEntreTurnos = useMemo(() => {
+    if (controlReadOnly || areaFinalizada) return false
+    if (hasActiveTurno) return false
+    return closedTurnos.length > 0
+  }, [areaFinalizada, closedTurnos.length, controlReadOnly, hasActiveTurno])
+
+  const canClickGuardar = canSaveProduction || canPersistShiftOpen || canPersistEntreTurnos
 
   const guardarHint = useMemo(() => {
     if (controlReadOnly) return ""
-    if (canSaveProduction) return ""
+    if (canSaveProduction) {
+      return "Guardar cierra este turno, lo deja en el historial arriba y reinicia las rejillas para abrir otro turno (Turno / Grupo / Personal)."
+    }
     if (canPersistShiftOpen) {
-      return "Turno abierto: puede guardar el registro. Para avisar a otras áreas, inicie el cronómetro (play) y vuelva a guardar."
+      return "Turno abierto: puede guardar cuadrilla sin producción. Para cerrar el turno con bobinas y tiempos, inicie el cronómetro (play) y pulse Guardar."
+    }
+    if (canPersistEntreTurnos) {
+      return "Entre turnos: puede guardar de nuevo el historial y los kg acumulados en el servidor (p. ej. si la bandeja no se actualizó)."
     }
     return MES_SAVE_BLOCKED_MESSAGE
-  }, [canPersistShiftOpen, canSaveProduction, controlReadOnly])
+  }, [canPersistEntreTurnos, canPersistShiftOpen, canSaveProduction, controlReadOnly])
 
   const canPreviewTimerReport = useMemo(() => {
     if (!hasActiveTurno) return false
@@ -803,6 +790,13 @@ export default function WorkOrderPrintingControlPanel({
   }
 
   function runOpenTimerReportPreview() {
+    const previewNow = Date.now()
+    const shiftEffectiveSec =
+      effectiveAcc + (timerRunning && lastResumeAt > 0 ? (previewNow - lastResumeAt) / 1000 : 0)
+    const shiftDeadSec = deadAcc + (timerPaused && pauseAt > 0 ? (previewNow - pauseAt) / 1000 : 0)
+    const shiftTotalSec = shiftEffectiveSec + shiftDeadSec
+    const previewKgHora =
+      shiftEffectiveSec > 0.01 ? (totalSalida / (shiftEffectiveSec / 3600)).toFixed(2) : "0.00"
     const payload = {
       generated_at: new Date().toISOString(),
       work_order_id: workOrderId,
@@ -818,10 +812,10 @@ export default function WorkOrderPrintingControlPanel({
       },
       timer: {
         state: timerState,
-        total_hms: formatTimerHms(totalSec),
-        dead_hms: formatTimerHms(deadSec),
-        effective_hms: formatTimerHms(effectiveSec),
-        kg_hora: kgHora,
+        total_hms: formatTimerHms(shiftTotalSec),
+        dead_hms: formatTimerHms(shiftDeadSec),
+        effective_hms: formatTimerHms(shiftEffectiveSec),
+        kg_hora: previewKgHora,
       },
       pauses: pauseEntries.map((p) => ({
         at: p.at,
@@ -882,11 +876,8 @@ export default function WorkOrderPrintingControlPanel({
         total_entrada_kg: totalEntradaTurnoActual,
         salida_kg: totalSalida,
         scrap_kg: totalScrap,
-        merma_kg: mermaCalc,
-        refil_pct: refilPct,
         devolucion_buena_kg: devolucionBuena,
-        devolucion_rechazada_kg: devolucionRechazada,
-        material_consumido_kg: materialConsumido,
+        devolucion_rechazada_bobinas: devolucionRechazadaBobinas,
       },
     }
     try {
@@ -912,7 +903,10 @@ export default function WorkOrderPrintingControlPanel({
       toast.error("Complete turno, grupo y operador.")
       return
     }
-    const rechCierre = toFiniteOrNull(cur.devolucionRechazadaKg) ?? 0
+    const rechCierre = countDevolucionRechazadaBobinas(
+      cur.devolucionRechazadaBobinas,
+      cur.devolucionRechazadaKg,
+    )
     if (rechCierre > 0 && !readString(cur.devolucionRechazadaMotivo).trim()) {
       toast.error("Devolución rechazada: indique un motivo antes de cerrar el turno.")
       return
@@ -939,7 +933,6 @@ export default function WorkOrderPrintingControlPanel({
     const warnings: string[] = []
     const MAX_BOBINA_KG = 5000
     const MAX_DEVOLUCION_KG = 10000
-    const MAX_METRAJE = 1000000
     const MAX_TOTAL_ENTRADA = 50000
 
     if (totalEntradaTurnoActual > MAX_TOTAL_ENTRADA) {
@@ -950,12 +943,10 @@ export default function WorkOrderPrintingControlPanel({
     if (devolucionBuena > MAX_DEVOLUCION_KG) {
       warnings.push(`Devolución buena alta (${devolucionBuena.toFixed(2)} Kg).`)
     }
-    if (devolucionRechazada > MAX_DEVOLUCION_KG) {
-      warnings.push(`Devolución rechazada alta (${devolucionRechazada.toFixed(2)} Kg).`)
-    }
-    const metraje = readNumber(form.impMetrajeProduccion)
-    if (metraje > MAX_METRAJE) {
-      warnings.push(`Metraje elevado (${metraje.toFixed(0)}). Revise que no haya ceros extra.`)
+    if (devolucionRechazadaBobinas > IMP_BOBINAS_SLOTS) {
+      warnings.push(
+        `Muchas bobinas rechazadas (${devolucionRechazadaBobinas}). Verifique el conteo (máx. ${IMP_BOBINAS_SLOTS}).`,
+      )
     }
     entradaBobinas.forEach((v, idx) => {
       const n = readNumber(v)
@@ -965,9 +956,6 @@ export default function WorkOrderPrintingControlPanel({
       const n = readNumber(v)
       if (n > MAX_BOBINA_KG) warnings.push(`Salida bobina ${idx + 1} fuera de rango (${n.toFixed(2)} Kg).`)
     })
-    if (Math.abs(mermaCalcRaw) > Math.max(5000, pedidoTotalKg * 5)) {
-      warnings.push(`Merma atípica (${mermaCalcRaw.toFixed(2)} Kg). Revise entradas/salidas/devoluciones.`)
-    }
     if (pedidoTotalKg > 0 && producidoAcumuladoKg > pedidoTotalKg + 0.01) {
       warnings.push(
         `Producido acumulado (${producidoAcumuladoKg.toFixed(2)} Kg) supera el pedido (${pedidoTotalKg.toFixed(2)} Kg). Verifique unidades o captura.`,
@@ -977,11 +965,9 @@ export default function WorkOrderPrintingControlPanel({
   }, [
     totalEntradaTurnoActual,
     devolucionBuena,
-    devolucionRechazada,
-    form.impMetrajeProduccion,
+    devolucionRechazadaBobinas,
     entradaBobinas,
     salidaBobinas,
-    mermaCalcRaw,
     pedidoTotalKg,
     producidoAcumuladoKg,
   ])
@@ -997,7 +983,7 @@ export default function WorkOrderPrintingControlPanel({
         suppressSuccessToast?: boolean
       },
     ): Promise<boolean> => {
-      const src = srcBase ?? form
+      const src = srcBase ?? formRef.current
       if (!Number.isFinite(workOrderId) || workOrderId < 1) return false
       const notifyProductionSave = options?.notifyProductionSave !== false
 
@@ -1031,8 +1017,11 @@ export default function WorkOrderPrintingControlPanel({
       }
 
       const rechKgValidar = act
-        ? toFiniteOrNull(act.devolucionRechazadaKg) ?? 0
-        : toFiniteOrNull(src.impDevolucionRechazadaKg) ?? 0
+        ? countDevolucionRechazadaBobinas(act.devolucionRechazadaBobinas, act.devolucionRechazadaKg)
+        : countDevolucionRechazadaBobinas(
+            src.impDevolucionRechazadaBobinas,
+            src.impDevolucionRechazadaKg,
+          )
       const motivoRechValidar = act
         ? readString(act.devolucionRechazadaMotivo).trim()
         : readString(src.impDevolucionRechazadaMotivo).trim()
@@ -1045,41 +1034,81 @@ export default function WorkOrderPrintingControlPanel({
         mesPrintingToastWarning(`Se detectaron ${outlierWarnings.length} valores atípicos. Se guardará de todas formas.`)
       }
 
-      const eb = getNumericSeries(src, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS)
-      const sb = getNumericSeries(src, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS)
-      const em = getMetaSeries(src, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS)
-      const sm = getMetaSeries(src, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS)
+      let closedP = parsePrintingTurnos(src[IMP_TURNOS_KEY])
+      let actualP = parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
+      if (actualP) {
+        actualP = syncPrintingTurnoFromFormMirror(src, actualP)
+      }
 
-      const closedP = parsePrintingTurnos(src[IMP_TURNOS_KEY])
-      const actualP = parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
+      const shouldFlushCaptura =
+        notifyProductionSave && !options?.skipProductionSaveGuard && actualP !== null
+      if (shouldFlushCaptura && actualP) {
+        actualP = flushPrintingTurnoOperativoToCapturas(actualP)
+      }
+
       const accFromJson = accumulatePrintingFromJson(closedP, actualP)
+      const closedTimerMirror =
+        actualP === null && closedP.length > 0 ? printingAggregatedTimerMirrorFromTurnos(closedP) : null
+
+      const ebAfter =
+        actualP?.entradaBobinasKg ?? getNumericSeries(src, "impEntradaBobinasKg", IMP_BOBINAS_SLOTS)
+      const sbAfter =
+        actualP?.salidaBobinasKg ?? getNumericSeries(src, "impSalidaBobinasKg", IMP_BOBINAS_SLOTS)
+      const emAfter =
+        actualP?.entradaBobinasMeta ?? getMetaSeries(src, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS)
+      const smAfter =
+        actualP?.salidaBobinasMeta ?? getMetaSeries(src, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS)
 
       const normalizedForm: Record<string, unknown> = {
         ...src,
         [IMP_TURNOS_KEY]: closedP,
         [IMP_ACTUAL_KEY]: actualP,
         [IMP_ESTADO_KEY]: readEstadoArea(src[IMP_ESTADO_KEY]),
-        impEntradaBobinasKg: eb.map((v) => normalizeNumericString(v)),
-        impSalidaBobinasKg: sb.map((v) => normalizeNumericString(v)),
-        impEntradaBobinasMeta: em.map((m) => normalizeBobinaLabelMeta(m)),
-        impSalidaBobinasMeta: sm.map((m) => normalizeBobinaLabelMeta(m)),
-        impDevolucionBuenaKg: normalizeNumericString(src.impDevolucionBuenaKg),
-        impDevolucionRechazadaKg: normalizeNumericString(src.impDevolucionRechazadaKg),
-        impMetrajeProduccion: normalizeNumericString(src.impMetrajeProduccion),
-        impScrapTransparenteKg: normalizeNumericString(src.impScrapTransparenteKg),
-        impScrapImpresoKg: normalizeNumericString(src.impScrapImpresoKg),
+        impEntradaBobinasKg: ebAfter.map((v) => normalizeNumericString(v)),
+        impSalidaBobinasKg: sbAfter.map((v) => normalizeNumericString(v)),
+        impEntradaBobinasMeta: emAfter.map((m) => normalizeBobinaLabelMeta(m)),
+        impSalidaBobinasMeta: smAfter.map((m) => normalizeBobinaLabelMeta(m)),
+        impDevolucionBuenaKg: normalizeNumericString(
+          actualP?.devolucionBuenaKg ?? src.impDevolucionBuenaKg,
+        ),
+        impDevolucionRechazadaKg: "",
+        impDevolucionRechazadaBobinas: normalizeNumericString(
+          actualP?.devolucionRechazadaBobinas ?? readNumberString(src.impDevolucionRechazadaBobinas),
+        ),
+        impScrapTransparenteKg: normalizeNumericString(
+          actualP?.scrapTransparenteKg ?? src.impScrapTransparenteKg,
+        ),
+        impScrapImpresoKg: normalizeNumericString(actualP?.scrapImpresoKg ?? src.impScrapImpresoKg),
         impScrapImpresoDestino: (() => {
           const d = readString(src.impScrapImpresoDestino).toLowerCase()
-          if (d === "transparente") return "transparente"
+          if (d === "poliestireno" || d === "transparente") return "poliestireno"
           if (d === "bopp") return "bopp"
-          return ""
+          return "bopp"
         })(),
         impScrapAcumuladoKg: normalizeNumericString(accFromJson.scrapKg),
-        impMermaKg: normalizeNumericString(src.impMermaKg),
-        impTimerEffectiveAccSec: normalizeNumericString(src.impTimerEffectiveAccSec),
-        impTimerDeadAccSec: normalizeNumericString(src.impTimerDeadAccSec),
+        impTimerEffectiveAccSec: normalizeNumericString(
+          closedTimerMirror?.impTimerEffectiveAccSec ?? src.impTimerEffectiveAccSec,
+        ),
+        impTimerDeadAccSec: normalizeNumericString(
+          closedTimerMirror?.impTimerDeadAccSec ?? src.impTimerDeadAccSec,
+        ),
+        impTimerState: readString(closedTimerMirror?.impTimerState ?? src.impTimerState) || "pending",
+        impTimerLastResumeAtMs: normalizeNumericString(
+          closedTimerMirror?.impTimerLastResumeAtMs ?? src.impTimerLastResumeAtMs,
+        ),
+        impTimerPauseAtMs: normalizeNumericString(
+          closedTimerMirror?.impTimerPauseAtMs ?? src.impTimerPauseAtMs,
+        ),
         impRegistrosTurnos: String(accFromJson.turnosRegistrados),
         impAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
+      }
+      delete normalizedForm.impMermaKg
+      delete normalizedForm.impMetrajeProduccion
+
+      if (shouldFlushCaptura) {
+        for (const k of Object.keys(normalizedForm)) {
+          if (k.startsWith("impBlockDone.")) delete normalizedForm[k]
+        }
       }
 
       const printingOnlyForm: Record<string, unknown> = Object.fromEntries(
@@ -1100,9 +1129,11 @@ export default function WorkOrderPrintingControlPanel({
         if (!options?.suppressSuccessToast) {
           mesPrintingToastSuccess(
             options?.successMessage ??
-              (notifyProductionSave
-                ? "Control de impresión guardado."
-                : "Turno de planta guardado en el servidor."),
+              (shouldFlushCaptura
+                ? "Producción guardada. Bobinas y desperdicio del turno quedaron en cero para un nuevo registro."
+                : notifyProductionSave
+                  ? "Control de impresión guardado."
+                  : "Turno de planta guardado en el servidor."),
           )
         }
         window.dispatchEvent(
@@ -1120,28 +1151,11 @@ export default function WorkOrderPrintingControlPanel({
     [form, outlierWarnings.length, workOrderId],
   )
 
-  // Wrapper estable para intervalos.
-  const persistPrintingFormCb = useCallback((srcBase?: Record<string, unknown>) => {
-    void persistPrintingForm(srcBase)
-  }, [persistPrintingForm])
-
   useEffect(() => {
     if (!timerRunning && !timerPaused) return
     const id = window.setInterval(() => setTimerTick((n) => n + 1), 1000)
     return () => window.clearInterval(id)
   }, [timerPaused, timerRunning])
-
-  // Auto-guardado cada 60s mientras corre el temporizador (si tengo control).
-  useEffect(() => {
-    if (!timerRunning) return
-    if (controlReadOnly) return
-    const id = window.setInterval(() => {
-      if (controlReadOnly) return
-      if (saving) return
-      persistPrintingFormCb(form)
-    }, 60000)
-    return () => window.clearInterval(id)
-  }, [timerRunning, controlReadOnly, saving, persistPrintingFormCb, form])
 
   function startProductionTimer() {
     if (!hasActiveTurno || controlReadOnly) return
@@ -1165,11 +1179,18 @@ export default function WorkOrderPrintingControlPanel({
     }
     patchActiveTurn(() => nextTurn)
     setStartTimerConfirmOpen(false)
-    void persistPrintingForm({
-      ...form,
-      [IMP_ACTUAL_KEY]: nextTurn,
-      ...printingTurnoToMirror(nextTurn),
-    })
+    void persistPrintingForm(
+      {
+        ...form,
+        [IMP_ACTUAL_KEY]: nextTurn,
+        ...printingTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        suppressSuccessToast: true,
+      },
+    )
   }
 
   function requestPauseProductionTimer() {
@@ -1206,7 +1227,11 @@ export default function WorkOrderPrintingControlPanel({
         ...printingTurnoToMirror(nextTurn),
       }
       queueMicrotask(() => {
-        void persistPrintingForm(nextForm)
+        void persistPrintingForm(nextForm, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        })
       })
       return nextForm
     })
@@ -1251,14 +1276,23 @@ export default function WorkOrderPrintingControlPanel({
         ...printingTurnoToMirror(nextTurn),
       }
       queueMicrotask(() => {
-        void persistPrintingForm(nextForm)
+        void persistPrintingForm(nextForm, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        }).then((ok) => {
+          if (ok) {
+            mesPrintingToastSuccess(
+              "Parada registrada. El cronómetro sigue en pausa; use play para reanudar el tiempo efectivo.",
+            )
+          }
+        })
       })
       return nextForm
     })
     setPauseReason("")
     setPauseObs("")
     setPauseMotivoModalOpen(false)
-    mesPrintingToastSuccess("Parada registrada. El cronómetro sigue en pausa; use play para reanudar el tiempo efectivo.")
   }
 
   function requestIniciarTurno() {
@@ -1335,21 +1369,98 @@ export default function WorkOrderPrintingControlPanel({
     }
   }
 
-  function applyCerrarTurno(cur: PrintingTurnoEntry, finalizedTimer: PrintingTurnTimer) {
+  async function applyCerrarTurno(
+    cur: PrintingTurnoEntry,
+    finalizedTimer: PrintingTurnTimer,
+    options?: { notifyProductionSave?: boolean; successMessage?: string },
+  ): Promise<boolean> {
+    const latestForm = formRef.current
+    const syncedCur = syncPrintingTurnoFromFormMirror(latestForm, cur)
     const u = getStoredUser()
+    const closedAt = new Date().toISOString()
+    const curFlushed = flushPrintingTurnoOperativoToCapturas({ ...syncedCur, timer: finalizedTimer })
     const closed: PrintingTurnoEntry = {
-      ...cur,
+      ...curFlushed,
       timer: finalizedTimer,
-      closed_at: new Date().toISOString(),
+      closed_at: closedAt,
       closed_by: u ? { id: u.id, name: u.name } : null,
+      resumenCierre: buildPrintingTurnoResumenCierre(curFlushed),
     }
-    setForm((prev) => ({
-      ...prev,
-      [IMP_TURNOS_KEY]: [...parsePrintingTurnos(prev[IMP_TURNOS_KEY]), closed],
+    const turnos = [...parsePrintingTurnos(latestForm[IMP_TURNOS_KEY]), closed]
+    const acc = accumulatePrintingFromJson(turnos, null)
+    const nextForm: Record<string, unknown> = {
+      ...latestForm,
+      [IMP_TURNOS_KEY]: turnos,
       [IMP_ACTUAL_KEY]: null,
       ...clearPrintingMirrorKeys(),
-    }))
-    mesPrintingToastSuccess("Turno cerrado. Puede iniciar otro turno cuando corresponda.")
+      ...printingAggregatedTimerMirrorFromTurnos(turnos),
+      impAcumuladoProducidoKg: normalizeNumericString(acc.producidoKg),
+      impRegistrosTurnos: String(acc.turnosRegistrados),
+      impScrapAcumuladoKg: normalizeNumericString(acc.scrapKg),
+    }
+    for (const k of Object.keys(nextForm)) {
+      if (k.startsWith("impBlockDone.")) delete nextForm[k]
+    }
+    clearLocalPrintingControlDraft(workOrderId)
+    const ok = await persistPrintingForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: options?.notifyProductionSave === true,
+      suppressSuccessToast: true,
+    })
+    if (ok) {
+      mesPrintingToastSuccess(
+        options?.successMessage ??
+          "Turno guardado en el historial. Elija Turno, Grupo y Personal para iniciar el siguiente.",
+      )
+      await load()
+    } else {
+      toast.error("No se pudo guardar el cierre del turno en el servidor. Se restauraron los datos del servidor.")
+      await load()
+    }
+    return ok
+  }
+
+  async function cerrarTurnoYGuardarHistorial(options?: {
+    notifyProductionSave?: boolean
+  }): Promise<boolean> {
+    if (controlReadOnly) return false
+    const latestForm = formRef.current
+    const curRaw = parsePrintingTurnoActual(latestForm[IMP_ACTUAL_KEY])
+    if (!curRaw) {
+      toast.error("No hay turno de planta abierto.")
+      return false
+    }
+    const cur = syncPrintingTurnoFromFormMirror(latestForm, curRaw)
+    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
+      toast.error("Complete turno, grupo y operador antes de guardar.")
+      return false
+    }
+    const rechCierre = countDevolucionRechazadaBobinas(
+      cur.devolucionRechazadaBobinas,
+      cur.devolucionRechazadaKg,
+    )
+    if (rechCierre > 0 && !readString(cur.devolucionRechazadaMotivo).trim()) {
+      toast.error("Devolución rechazada: indique un motivo antes de cerrar el turno.")
+      return false
+    }
+    const finalizedTimer = finalizeTurnTimerNow(cur.timer)
+    const totCierre = turnoProduccionTotals({ ...cur, timer: finalizedTimer })
+    if (
+      finalizedTimer.effectiveAccSec < 0.01 &&
+      totCierre.salidaKg < 0.005 &&
+      totCierre.entradaKg < 0.005
+    ) {
+      pendingEmptyShiftCloseRef.current = {
+        cur,
+        finalizedTimer,
+        notifyProductionSave: options?.notifyProductionSave,
+      }
+      setEmptyShiftCloseDialogOpen(true)
+      return false
+    }
+    return applyCerrarTurno(cur, finalizedTimer, {
+      notifyProductionSave: options?.notifyProductionSave,
+    })
   }
 
   function confirmEmptyShiftClose() {
@@ -1357,33 +1468,13 @@ export default function WorkOrderPrintingControlPanel({
     pendingEmptyShiftCloseRef.current = null
     setEmptyShiftCloseDialogOpen(false)
     if (!p) return
-    applyCerrarTurno(p.cur, p.finalizedTimer)
+    void applyCerrarTurno(p.cur, p.finalizedTimer, {
+      notifyProductionSave: p.notifyProductionSave,
+    })
   }
 
   function cerrarTurnoActual() {
-    if (controlReadOnly) return
-    const cur = parsePrintingTurnoActual(form[IMP_ACTUAL_KEY])
-    if (!cur) return
-    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
-      toast.error("Complete turno, grupo y operador.")
-      return
-    }
-    const rechCierre = toFiniteOrNull(cur.devolucionRechazadaKg) ?? 0
-    if (rechCierre > 0 && !readString(cur.devolucionRechazadaMotivo).trim()) {
-      toast.error("Devolución rechazada: indique un motivo antes de cerrar el turno.")
-      return
-    }
-    const finalizedTimer = finalizeTurnTimerNow(cur.timer)
-    if (
-      finalizedTimer.effectiveAccSec < 0.01 &&
-      sumSalidaKg(cur) === 0 &&
-      sumEntradaKg(cur) === 0
-    ) {
-      pendingEmptyShiftCloseRef.current = { cur, finalizedTimer }
-      setEmptyShiftCloseDialogOpen(true)
-      return
-    }
-    applyCerrarTurno(cur, finalizedTimer)
+    void cerrarTurnoYGuardarHistorial({ notifyProductionSave: true })
   }
 
   async function finalizarAreaImpresion() {
@@ -1393,19 +1484,27 @@ export default function WorkOrderPrintingControlPanel({
     const cur = parsePrintingTurnoActual(prev[IMP_ACTUAL_KEY])
     const u = getStoredUser()
     if (cur) {
-      const rechFin = toFiniteOrNull(cur.devolucionRechazadaKg) ?? 0
+      const rechFin = countDevolucionRechazadaBobinas(
+        cur.devolucionRechazadaBobinas,
+        cur.devolucionRechazadaKg,
+      )
       if (rechFin > 0 && !readString(cur.devolucionRechazadaMotivo).trim()) {
         toast.error("Devolución rechazada: indique un motivo antes de finalizar el área.")
         return
       }
+      const finalizedTimer = finalizeTurnTimerNow(cur.timer)
+      const syncedCur = syncPrintingTurnoFromFormMirror(prev, cur)
+      const curFlushed = flushPrintingTurnoOperativoToCapturas({ ...syncedCur, timer: finalizedTimer })
       const closed: PrintingTurnoEntry = {
-        ...cur,
-        timer: finalizeTurnTimerNow(cur.timer),
+        ...curFlushed,
+        timer: finalizedTimer,
         closed_at: new Date().toISOString(),
         closed_by: u ? { id: u.id, name: u.name } : null,
+        resumenCierre: buildPrintingTurnoResumenCierre(curFlushed),
       }
       turnos = [...turnos, closed]
     }
+    const acc = accumulatePrintingFromJson(turnos, null)
     const nextForm: Record<string, unknown> = {
       ...prev,
       [IMP_TURNOS_KEY]: turnos,
@@ -1413,6 +1512,9 @@ export default function WorkOrderPrintingControlPanel({
       [IMP_ESTADO_KEY]: "finalizada",
       ...clearPrintingMirrorKeys(),
       ...printingAggregatedTimerMirrorFromTurnos(turnos),
+      impAcumuladoProducidoKg: normalizeNumericString(acc.producidoKg),
+      impRegistrosTurnos: String(acc.turnosRegistrados),
+      impScrapAcumuladoKg: normalizeNumericString(acc.scrapKg),
     }
     clearLocalPrintingDrafts(workOrderId)
     setForm(bootstrapPrintingFormState(nextForm))
@@ -1468,7 +1570,17 @@ export default function WorkOrderPrintingControlPanel({
       const next = [...t.salidaBobinasMeta]
       next[labelEditorIndex] = normalized
       while (next.length < size) next.push(emptyBobinaLabelMeta())
-      return { ...t, salidaBobinasMeta: next.slice(0, size) }
+      const nextSalidaKg = [...t.salidaBobinasKg]
+      while (nextSalidaKg.length < size) nextSalidaKg.push("")
+      const pesoLabel = readNumber(normalized.peso)
+      if (pesoLabel > 0.005 && readNumber(nextSalidaKg[labelEditorIndex]) < 0.005) {
+        nextSalidaKg[labelEditorIndex] = normalizeNumericString(pesoLabel)
+      }
+      return {
+        ...t,
+        salidaBobinasMeta: next.slice(0, size),
+        salidaBobinasKg: nextSalidaKg.slice(0, size),
+      }
     })
     setLabelEditorOpen(false)
     setLabelEditorError("")
@@ -1518,12 +1630,15 @@ export default function WorkOrderPrintingControlPanel({
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
 
     const buenaKg = Number(readString(readNumberString(form.impDevolucionBuenaKg)).trim().replace(",", "."))
-    const rechKg = Number(readString(readNumberString(form.impDevolucionRechazadaKg)).trim().replace(",", "."))
+    const rechBobinas = countDevolucionRechazadaBobinas(
+      form.impDevolucionRechazadaBobinas,
+      form.impDevolucionRechazadaKg,
+    )
     const rechMotivo = readString(form.impDevolucionRechazadaMotivo)
     const hasBuena = Number.isFinite(buenaKg) && buenaKg > 0
-    const hasRech = Number.isFinite(rechKg) && rechKg > 0
+    const hasRech = rechBobinas > 0
     if (!hasBuena && !hasRech) {
-      toast.error("Indique Kg en devolución buena y/o rechazada.")
+      toast.error("Indique Kg en devolución buena y/o bobinas en devolución rechazada.")
       return
     }
 
@@ -1578,8 +1693,8 @@ export default function WorkOrderPrintingControlPanel({
             material_id: rechMaterialId,
             work_order_id: workOrderId,
             destination_area: "bobinas_rechazadas",
-            quantity: rechKg.toFixed(3),
-            reason: reasonParts.join(" · "),
+            quantity: String(rechBobinas),
+            reason: [`${rechBobinas} bobina(s) rechazada(s)`, ...reasonParts].join(" · "),
           }),
         })
         createdRechId = created.id
@@ -1592,7 +1707,7 @@ export default function WorkOrderPrintingControlPanel({
         `OT: ${titleBase}`,
         hasBuena ? `Devolución buena: ${buenaKg.toFixed(3)} Kg (return_id=${createdBuenaId ?? "—"})` : null,
         hasRech
-          ? `Devolución rechazada: ${rechKg.toFixed(3)} Kg · Motivo: ${rejectReasonLabel} (return_id=${createdRechId ?? "—"})`
+          ? `Devolución rechazada: ${rechBobinas} bobina(s) · Motivo: ${rejectReasonLabel} (return_id=${createdRechId ?? "—"})`
           : null,
         bobinaRef ? `Bobina/Ref: ${bobinaRef}` : null,
         createdIds.length ? `IDs devoluciones: ${createdIds.join(", ")}` : null,
@@ -1615,14 +1730,15 @@ export default function WorkOrderPrintingControlPanel({
             ? normalizeNumericString(buenaKg)
             : normalizeNumericString(prev.impDevolucionBuenaKg)
           const nextRech = hasRech
-            ? normalizeNumericString(rechKg)
-            : normalizeNumericString(prev.impDevolucionRechazadaKg)
+            ? normalizeNumericString(rechBobinas)
+            : normalizeNumericString(prev.impDevolucionRechazadaBobinas)
           return {
             ...prev,
             ...(hasBuena ? { impDevolucionBuenaKg: normalizeNumericString(buenaKg) } : null),
             ...(hasRech
               ? {
-                  impDevolucionRechazadaKg: normalizeNumericString(rechKg),
+                  impDevolucionRechazadaKg: "",
+                  impDevolucionRechazadaBobinas: normalizeNumericString(rechBobinas),
                   impDevolucionRechazadaMotivo: rechMotivo.trim(),
                 }
               : null),
@@ -1636,9 +1752,10 @@ export default function WorkOrderPrintingControlPanel({
           devolucionBuenaKg: hasBuena
             ? normalizeNumericString(buenaKg)
             : cur.devolucionBuenaKg,
-          devolucionRechazadaKg: hasRech
-            ? normalizeNumericString(rechKg)
-            : cur.devolucionRechazadaKg,
+          devolucionRechazadaKg: "",
+          devolucionRechazadaBobinas: hasRech
+            ? normalizeNumericString(rechBobinas)
+            : cur.devolucionRechazadaBobinas,
           devolucionRechazadaMotivo: hasRech
             ? rechMotivo.trim()
             : cur.devolucionRechazadaMotivo,
@@ -1649,7 +1766,7 @@ export default function WorkOrderPrintingControlPanel({
           ...printingTurnoToMirror(nextTurn),
           impDevolucionesAlmacenUltimoEnvioMs: Date.now(),
           impDevolucionesAlmacenSnapBuena: normalizeNumericString(nextTurn.devolucionBuenaKg),
-          impDevolucionesAlmacenSnapRech: normalizeNumericString(nextTurn.devolucionRechazadaKg),
+          impDevolucionesAlmacenSnapRech: normalizeNumericString(nextTurn.devolucionRechazadaBobinas),
         }
       }
       setForm((prev) => patchDev(prev))
@@ -1666,7 +1783,7 @@ export default function WorkOrderPrintingControlPanel({
 
   async function guardar() {
     if (canSaveProduction) {
-      await persistPrintingForm()
+      await cerrarTurnoYGuardarHistorial({ notifyProductionSave: true })
       return
     }
     if (canPersistShiftOpen) {
@@ -1675,6 +1792,14 @@ export default function WorkOrderPrintingControlPanel({
         notifyProductionSave: false,
         successMessage:
           "Turno guardado. Inicie el cronómetro (play) para habilitar el guardado de producción con aviso a otras áreas.",
+      })
+      return
+    }
+    if (canPersistEntreTurnos) {
+      await persistPrintingForm(undefined, {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage: "Producción acumulada sincronizada con el servidor.",
       })
       return
     }
@@ -1752,9 +1877,10 @@ export default function WorkOrderPrintingControlPanel({
         totalScrap={totalScrapAcumulado}
         ultimoTurnoLabel={ultimoTurnoLabel}
         timerState={timerState}
-        totalSec={totalSec}
-        deadSec={deadSec}
-        effectiveSec={effectiveSec}
+        totalSec={displayTotalSec}
+        deadSec={displayDeadSec}
+        effectiveSec={displayEffectiveSec}
+        timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
         timerRunning={timerRunning}
         timerPaused={timerPaused}
@@ -1772,32 +1898,26 @@ export default function WorkOrderPrintingControlPanel({
         entradaBobinas={entradaBobinas}
         entradaMeta={entradaBobinasMeta}
         devolucionBuenaRaw={readNumberString(form.impDevolucionBuenaKg)}
-        devolucionRechazadaRaw={readNumberString(form.impDevolucionRechazadaKg)}
+        devolucionRechazadaRaw={readNumberString(form.impDevolucionRechazadaBobinas)}
         devolucionRechazadaMotivoRaw={readString(form.impDevolucionRechazadaMotivo)}
         salidaBobinas={salidaBobinas}
         salidaMeta={salidaBobinasMeta}
-        mermaCalc={mermaCalc}
-        mermaRaw={readNumberString(form.impMermaKg)}
-        metrajeRaw={readNumberString(form.impMetrajeProduccion)}
         scrapTransparenteRaw={readNumberString(form.impScrapTransparenteKg)}
         scrapImpresoRaw={readNumberString(form.impScrapImpresoKg)}
         scrapImpresoDestino={(() => {
           const d = readString(form.impScrapImpresoDestino).toLowerCase()
-          if (d === "transparente") return "transparente"
-          if (d === "bopp") return "bopp"
-          return "auto"
+          if (d === "poliestireno" || d === "transparente") return "poliestireno"
+          return "bopp"
         })()}
         onSetScrapImpresoDestino={(v) =>
           setForm((prev) => ({
             ...prev,
-            impScrapImpresoDestino: v === "auto" ? "" : v,
+            impScrapImpresoDestino: v,
           }))
         }
         devolucionBuena={devolucionBuena}
-        devolucionRechazada={devolucionRechazada}
-        materialConsumido={materialConsumido}
+        devolucionRechazada={devolucionRechazadaBobinas}
         totalSalida={totalSalida}
-        refilPct={refilPct}
         formatTimerHms={formatTimerHms}
         setPauseReason={setPauseReason}
         setPauseObs={setPauseObs}
@@ -1824,6 +1944,7 @@ export default function WorkOrderPrintingControlPanel({
         onCerrarTurnoActual={requestCerrarTurnoActual}
         onFinalizarAreaImpresion={requestFinalizarAreaImpresion}
         closedTurnos={closedTurnos}
+        lastClosedTurno={lastClosedTurno}
         onSetTurno={(v) => patchActiveTurn((t) => ({ ...t, turno: v }))}
         onSetGrupo={(v) => patchActiveTurn((t) => ({ ...t, grupo: v }))}
         onActivePersonnelApply={(people) => {
@@ -1846,9 +1967,11 @@ export default function WorkOrderPrintingControlPanel({
             const raw = String(v ?? "").trim().replace(",", ".")
             const n = raw === "" ? 0 : Number(raw)
             const rechZero = !Number.isFinite(n) || n <= 0
+            const bobinas = rechZero ? "" : String(Math.max(0, Math.floor(n)))
             return {
               ...t,
-              devolucionRechazadaKg: v,
+              devolucionRechazadaKg: "",
+              devolucionRechazadaBobinas: bobinas,
               devolucionRechazadaMotivo: rechZero ? "" : t.devolucionRechazadaMotivo,
             }
           })
@@ -1880,8 +2003,6 @@ export default function WorkOrderPrintingControlPanel({
           })
         }
         onOpenSalidaLabel={(idx) => openLabelEditor("salida", idx)}
-        onSetMerma={(v) => patchActiveTurn((t) => ({ ...t, mermaKg: v }))}
-        onSetMetraje={(v) => patchActiveTurn((t) => ({ ...t, metrajeProduccion: v }))}
         onSetScrapTransparente={(v) =>
           patchActiveTurn((t) => ({ ...t, scrapTransparenteKg: v }))
         }
@@ -1969,36 +2090,7 @@ export default function WorkOrderPrintingControlPanel({
               Empezar de cero
             </Button>
           ) : null}
-          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-orange-300 text-orange-950 hover:bg-orange-50"
-              disabled={saving}
-              onClick={requestCerrarTurnoActual}
-            >
-              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Terminar turno de planta
-            </Button>
-          ) : null}
-          {canFinalizeOrder && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving}
-              onClick={requestFinalizarAreaImpresion}
-            >
-              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Finalizar área de impresión
-            </Button>
-          ) : null}
         </div>
-        {!canFinalizeOrder && !areaFinalizada ? (
-          <p className="max-w-lg text-center text-xs text-muted-foreground">
-            Para cerrar el área de impresión en la OT (historial en bandeja), hace falta rol de jefatura (
-            <span className="font-medium text-foreground/90">Finalizar área de impresión</span>).
-          </p>
-        ) : null}
       </div>
 
       <MesPrintingConfirmDialog
@@ -2042,7 +2134,7 @@ export default function WorkOrderPrintingControlPanel({
         title="Reiniciar impresión (OT)"
         description={
           <>
-            Esto borrará turnos, cronómetro, entradas/salidas/scrap/merma/metraje registrados en Impresión para esta
+            Esto borrará turnos, cronómetro, entradas/salidas y desperdicio registrados en Impresión para esta
             OT. También limpia el respaldo local del navegador. ¿Desea continuar?
           </>
         }

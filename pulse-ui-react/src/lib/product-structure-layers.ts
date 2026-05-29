@@ -31,11 +31,12 @@ export function joinStructureLayers(layers: StructureLayers): string {
   return [layers.capa1, layers.capa2, layers.capa3].filter(Boolean).join(" + ")
 }
 
-export type TipoImpresionEstructura = "" | "superficie" | "reverso"
+export type TipoImpresionEstructura = "" | "superficie" | "bilaminado" | "trilaminado"
 
 export function tipoImpresionFromProductPrintType(printType: unknown): TipoImpresionEstructura {
   const t = String(printType ?? "").toLowerCase()
-  if (t.includes("reverso")) return "reverso"
+  if (t.includes("trilaminado") || t.includes("reverso")) return "trilaminado"
+  if (t.includes("bilaminado")) return "bilaminado"
   if (t.includes("superficie") || t.includes("superf")) return "superficie"
   return ""
 }
@@ -46,11 +47,18 @@ export function structureLayersToOtFormFields(
   tipo: TipoImpresionEstructura,
 ): Record<string, string> {
   const layers = parseProductStructureLayers(structure)
-  if (tipo === "reverso") {
+  if (tipo === "trilaminado") {
     return {
       estructuraCapa1Rev: layers.capa1,
       estructuraCapa2Rev: layers.capa2,
       estructuraCapa3Rev: layers.capa3,
+    }
+  }
+  if (tipo === "bilaminado") {
+    return {
+      estructuraCapa1Rev: layers.capa1,
+      estructuraCapa2Rev: layers.capa2,
+      estructuraCapa3Rev: "",
     }
   }
   if (tipo === "superficie") {

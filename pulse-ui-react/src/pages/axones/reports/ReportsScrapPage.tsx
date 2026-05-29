@@ -170,9 +170,9 @@ const HISTORY_KG_SUM_KEYS = [
 
 type HistoryKgTotalsShape = Record<(typeof HISTORY_KG_SUM_KEYS)[number], number>
 
-/** El backend enmascara kg transparentes salvo en la pestaña Transparente. */
+/** El backend enmascara kg transparentes salvo en la pestaña Poliestireno. */
 function historyKgHideTransparentColumns(tab: ScrapTab): boolean {
-  return tab !== "transparente" && tab !== "por-ot" && tab !== "por-areas"
+  return tab !== "poliestireno" && tab !== "por-ot" && tab !== "por-areas"
 }
 
 const HISTORY_KG_COL_COUNT_FULL = 18
@@ -589,12 +589,12 @@ export default function ReportsScrapPage() {
               <>
                 {historyKgHeadKg(
                   "Imp. transp.",
-                  "Kg de desperdicio transparente registrados en impresión (planilla técnica). En la pestaña Transparente concentra este concepto.",
+                  "Kg de desperdicio transparente registrados en impresión (planilla técnica). En la pestaña Poliestireno concentra este concepto.",
                   kgHeadClass,
                 )}
                 {historyKgHeadKg(
                   "Imp. impreso",
-                  "Kg de desperdicio impreso en impresión (no transparente), según destino BOPP / transparente en planilla.",
+                  "Kg de desperdicio impreso en impresión, según destino BOPP o Poliestireno en la planilla de impresión.",
                   kgHeadClass,
                 )}
                 {historyKgHeadKg(
@@ -987,14 +987,14 @@ export default function ReportsScrapPage() {
         </TabsList>
 
         {substrateGroups.map((group) => {
-          const hideTransparent = group.id !== "transparente"
+          const hideTransparent = group.id !== "poliestireno"
           return (
             <TabsContent key={group.id} value={group.id} className="space-y-3">
               <p className="text-muted-foreground text-sm">
                 Desperdicio en kg de OTs clasificadas como <strong>{group.label}</strong>. Los datos salen de la planilla
                 técnica; cargue primero los kg en producción y, si hace falta, el sustrato en Corte.
                 {hideTransparent ? (
-                  <> Los kg de film transparente en impresión/laminación se ven en la pestaña Transparente.</>
+                  <> Los kg de film transparente en impresión/laminación se ven en la pestaña Poliestireno.</>
                 ) : (
                   <> Aquí se listan también los kg transparentes registrados en impresión y laminación.</>
                 )}
@@ -1037,7 +1037,7 @@ export default function ReportsScrapPage() {
         <TabsContent value="por-ot" className="space-y-3">
           <p className="text-muted-foreground text-sm">
             Rendimiento de merma por OT: % en Impresión, Corte, Laminación y Montaje. No separa BOPP, polietileno ni
-            transparente.
+            poliestireno.
           </p>
           <Button
             type="button"

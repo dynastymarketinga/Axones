@@ -26,6 +26,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <RouterProvider router={router} />
       </UIThemeProvider>
     </ThemeProvider>
-    <Toaster position="top-right" richColors closeButton />
+    <Toaster position="top-right" richColors closeButton offset={{ top: "72px", right: "16px" }} />
   </React.StrictMode>
 )

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import {
-  ArrowRight,
   ArrowUp,
   Calendar,
   CalendarClock,
@@ -127,19 +126,27 @@ import {
   areaRequestStatusLabel,
 } from "@/lib/axones-area-request-display"
 import {
+  areaBandejaProgressStickerClass,
+  processStateForAreaBandeja,
+} from "@/lib/area-mes-progress"
+import {
   areaRequestCreatedAtFromRow,
   resolveAreaRequestStatusForTab,
 } from "@/lib/area-request-for-row"
 import { cn } from "@/lib/utils"
 import {
+  accumulatePrintingFromJson,
   IMP_ACTUAL_KEY,
   IMP_TURNOS_KEY,
   parsePrintingTurnoActual,
   parsePrintingTurnos,
-  sumSalidaKg,
-  sumScrapKg,
   type PrintingTurnoEntry,
 } from "@/pages/axones/printing-turnos"
+import {
+  PrintingTurnoHistorialItem,
+  personnelLinesFromPrintingTurno,
+  turnoGrupoLabelPrinting,
+} from "@/pages/axones/printing-shift-history"
 
 export type AreaKey = "printing" | "montaje" | "laminacion" | "corte" | "tintas"
 
@@ -285,6 +292,14 @@ function MesBandDetailBlock({
                   Total (efectivo + paradas):{" "}
                   <span className="font-mono text-foreground/90">{mesBand.totalHms}</span>
                 </p>
+                {mesBand.producidoKg != null ? (
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Producido acumulado:{" "}
+                    <span className="font-mono font-semibold text-foreground">
+                      {mesBand.producidoKg.toFixed(2)} Kg
+                    </span>
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -304,30 +319,6 @@ function MesBandDetailBlock({
 function printingFormRecord(row: WorkOrderListRow): Record<string, unknown> | null {
   const f = row.technical_document?.form
   return f && typeof f === "object" && !Array.isArray(f) ? (f as Record<string, unknown>) : null
-}
-
-function printingPersonnelLinesFromTurno(t: PrintingTurnoEntry): string[] {
-  const lines: string[] = []
-  const op = t.operador.trim()
-  if (op) lines.push(`${op} — Operador`)
-  t.ayudante
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .forEach((n) => lines.push(`${n} — Ayudante`))
-  const sup = t.supervisor.trim()
-  if (sup) lines.push(`${sup} — Supervisor`)
-  return lines
-}
-
-function turnoGrupoFromTurno(t: PrintingTurnoEntry): string {
-  const p: string[] = []
-  if (t.turno === "diurno") p.push("Diurno")
-  else if (t.turno === "nocturno") p.push("Nocturno")
-  else if (String(t.turno ?? "").trim()) p.push(String(t.turno).trim())
-  if (t.grupo === "A" || t.grupo === "B" || t.grupo === "C") p.push(`Grupo ${t.grupo}`)
-  else if (String(t.grupo ?? "").trim()) p.push(String(t.grupo).trim())
-  return p.join(" · ") || "—"
 }
 
 function printingTimerStateEs(st: string): string {
@@ -354,6 +345,7 @@ function PrintingMesModalTurnosSection({ row }: { row: WorkOrderListRow }) {
   }
 
   const totalReg = cerrados.length + (actual ? 1 : 0)
+  const acum = accumulatePrintingFromJson(cerrados, actual)
 
   return (
     <div className="space-y-3 border-t border-black/[0.06] pt-4 dark:border-white/[0.08]">
@@ -363,38 +355,29 @@ function PrintingMesModalTurnosSection({ row }: { row: WorkOrderListRow }) {
           Turnos acumulativos · {totalReg} registro(s)
         </p>
       </div>
-      <ul className="max-h-[min(42vh,18rem)] space-y-2.5 overflow-y-auto pr-1">
-        {cerrados.map((t) => {
-          const people = printingPersonnelLinesFromTurno(t)
-          return (
-            <li key={t.id} className="rounded-md border bg-muted/5 p-2.5 text-xs">
-              <p className="font-medium text-foreground">
-                {t.closed_at
-                  ? new Date(t.closed_at).toLocaleString("es-VE")
-                  : "Sin fecha de cierre"}{" "}
-                · {turnoGrupoFromTurno(t)}
-              </p>
-              <p className="text-muted-foreground mt-1">
-                Salida {sumSalidaKg(t).toFixed(2)} Kg · Scrap {sumScrapKg(t).toFixed(2)} Kg · Efectivo{" "}
-                {formatHmsFromSeconds(t.timer.effectiveAccSec)} · Muerto{" "}
-                {formatHmsFromSeconds(t.timer.deadAccSec)}
-              </p>
-              <p className="mt-1.5 font-medium text-foreground/90">Personal</p>
-              {people.length === 0 ? (
-                <p className="text-muted-foreground">Sin personal registrado.</p>
-              ) : (
-                <ul className="mt-0.5 space-y-0.5">
-                  {people.map((line, i) => (
-                    <li key={`${t.id}-p-${i}`}>{line}</li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          )
-        })}
+      <div className="grid gap-2 text-xs sm:grid-cols-3">
+        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+          <p className="text-muted-foreground">Producido (salida)</p>
+          <p className="font-mono font-semibold tabular-nums text-foreground">{acum.producidoKg.toFixed(2)} Kg</p>
+        </div>
+        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+          <p className="text-muted-foreground">Entrada</p>
+          <p className="font-mono font-semibold tabular-nums text-foreground">{acum.entradaKg.toFixed(2)} Kg</p>
+        </div>
+        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+          <p className="text-muted-foreground">Desperdicio</p>
+          <p className="font-mono font-semibold tabular-nums text-foreground">{acum.scrapKg.toFixed(2)} Kg</p>
+        </div>
+      </div>
+      <ul className="max-h-[min(42vh,18rem)] space-y-2 overflow-y-auto pr-1">
+        {cerrados.map((t) => (
+          <li key={t.id}>
+            <PrintingTurnoHistorialItem turno={t} />
+          </li>
+        ))}
         {actual ? (
           <li className="rounded-md border border-violet-300/40 bg-violet-500/6 p-2.5 text-xs">
-            <p className="font-medium text-foreground">Turno en curso · {turnoGrupoFromTurno(actual)}</p>
+            <p className="font-medium text-foreground">Turno en curso · {turnoGrupoLabelPrinting(actual.turno, actual.grupo)}</p>
             <p className="text-muted-foreground mt-1">
               Temporizador: {printingTimerStateEs(String(actual.timer.state))}
             </p>
@@ -404,11 +387,11 @@ function PrintingMesModalTurnosSection({ row }: { row: WorkOrderListRow }) {
               {formatHmsFromSeconds(actual.timer.effectiveAccSec + actual.timer.deadAccSec)}
             </p>
             <p className="mt-1.5 font-medium text-foreground/90">Personal</p>
-            {printingPersonnelLinesFromTurno(actual).length === 0 ? (
+            {personnelLinesFromPrintingTurno(actual).length === 0 ? (
               <p className="text-muted-foreground">Sin personal registrado.</p>
             ) : (
               <ul className="mt-0.5 space-y-0.5">
-                {printingPersonnelLinesFromTurno(actual).map((line, i) => (
+                {personnelLinesFromPrintingTurno(actual).map((line, i) => (
                   <li key={`actual-p-${i}`}>{line}</li>
                 ))}
               </ul>
@@ -443,7 +426,6 @@ function mesActivasBucketFromRow(area: AreaKey, row: WorkOrderListRow, nowMs: nu
 
 export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const session = getStoredUser()
-  const role = (session?.role ?? "").toLowerCase().trim()
   const [activeTab, setActiveTab] = useState<AreaBandejaTab>("activas")
   const [qInput, setQInput] = useState("")
   const [search, setSearch] = useState("")
@@ -452,7 +434,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(
     null,
   )
-  const [movingId, setMovingId] = useState<number | null>(null)
   const [totalActivas, setTotalActivas] = useState(0)
   const [unseenActivas, setUnseenActivas] = useState(0)
 
@@ -759,52 +740,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     }
   }, [area, activeTab, rows, mesBandNowMs, mesActivasSubTab])
 
-  const stageLabel: Record<string, string> = {
-    nueva: "Pendiente por OT",
-    pendiente: "Programación",
-    montaje: "Montaje",
-    impresion: "Impresión",
-    laminacion: "Laminación",
-    corte: "Corte",
-    completada: "Completada",
-  }
-  const stageOrder: Record<string, number> = {
-    nueva: 0,
-    pendiente: 1,
-    montaje: 2,
-    impresion: 3,
-    laminacion: 4,
-    corte: 5,
-    completada: 6,
-  }
-  const areaStageForProgress: Record<AreaKey, string> = {
-    printing: "impresion",
-    montaje: "montaje",
-    laminacion: "laminacion",
-    corte: "corte",
-    tintas: "impresion",
-  }
-
-  function processStateForArea(bs?: string | null): string {
-    if (!bs) return "Sin etapa"
-    const current = stageOrder[bs] ?? -1
-    const areaStage = stageOrder[areaStageForProgress[area]] ?? -1
-    if (current > areaStage) return "Hecho en área"
-    if (current === areaStage) return "En proceso"
-    return "Antes de esta etapa"
-  }
-
-  function printingTrayMesStickerClass(bs?: string | null): string {
-    const t = processStateForArea(bs)
-    const base =
-      "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold leading-tight"
-    if (t === "Hecho en área") {
-      return `${base} border-emerald-500/35 bg-emerald-500/12 text-emerald-950 dark:text-emerald-50`
-    }
-    if (t === "En proceso") {
-      return `${base} border-sky-500/35 bg-sky-500/12 text-sky-950 dark:text-sky-50`
-    }
-    return `${base} border-violet-400/35 bg-violet-500/10 text-violet-950 dark:border-violet-500/30 dark:bg-violet-950/35 dark:text-violet-100`
+  function areaProgressLabel(
+    row: WorkOrderListRow,
+    mesBand: ReturnType<typeof mesBandFromWorkOrderRow> | null,
+  ): string {
+    return processStateForAreaBandeja(area, row, mesBand?.workflow ?? null)
   }
 
   function openUrl(woId: number): string {
@@ -822,61 +762,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     }
     const tab = TAB_BY_AREA[area]
     return `/ordenes-trabajo/${woId}?tab=${encodeURIComponent(tab)}`
-  }
-
-  const nextStageByArea: Record<AreaKey, string | null> = {
-    printing: null,
-    // Montaje: sin «Pasar a Impresión»; cierre/avance de etapa vía MES (Finalizar área) u otros flujos.
-    montaje: null,
-    laminacion: "corte",
-    // En Corte no exponemos botón "Pasar a Completada" desde la bandeja del área.
-    // El cierre/completado se maneja por despacho/nota de entrega u otro flujo.
-    corte: null,
-    tintas: null,
-  }
-
-  const stageByArea: Record<AreaKey, string> = {
-    printing: "impresion",
-    montaje: "montaje",
-    laminacion: "laminacion",
-    corte: "corte",
-    tintas: "impresion",
-  }
-
-  const isBoss =
-    role === "boss" ||
-    role === "admin" ||
-    role === "jefe_supremo" ||
-    role === "superadmin"
-
-  function canMoveFromHere(bs?: string | null): boolean {
-    if (!bs) return false
-    const here = stageByArea[area]
-    if (bs !== here) return false
-
-    if (area === "printing") return isBoss || role === "printing" || role === "impresion"
-    if (area === "laminacion") return isBoss || role === "laminacion"
-    if (area === "corte") return isBoss || role === "corte"
-    return false
-  }
-
-  async function moveToNextStage(woId: number) {
-    const target = nextStageByArea[area]
-    if (!target) return
-    setMovingId(woId)
-    try {
-      await apiFetch(`work-orders/${woId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ board_stage: target }),
-      })
-      toast.success(`OT movida a ${stageLabel[target] ?? target}.`)
-      void load()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo mover la OT.")
-    } finally {
-      setMovingId(null)
-    }
   }
 
   const AreaIcon = AREA_ICON[area]
@@ -935,7 +820,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       return "Primera vez en el área o sin turno iniciado. Abra la OT, arme cuadrilla e inicie turno de planta."
     }
     if (mesActivasSubTab === "produccion") {
-      return `Turno en curso, entre turnos o cronómetro activo/pausado. Al cerrar la jornada use «Terminar turno» y luego «${finalizeLabel}».`
+      return `Turno en curso o entre turnos (sin cronómetro activo tras cerrar). Use Guardar o Terminar turno de planta en la OT; luego «${finalizeLabel}» cuando cierre el área.`
     }
     return "Área MES finalizada. También aparecen en la pestaña Historial."
   }, [area, mesActivasSubTab])
@@ -1328,11 +1213,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                                   </span>
                                 ) : (
                                   <span
-                                    className={printingTrayMesStickerClass(o.board_stage)}
-                                    title={`La OT aún no está en etapa ${mesAreaDisplayName(area as MesBandejaAreaKey)} en el tablero.`}
+                                    className={areaBandejaProgressStickerClass(areaProgressLabel(o, mesBand))}
+                                    title="Estado de producción en esta área (no depende del tablero Kanban)"
                                   >
                                     <CircleDashed className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                    <span className="min-w-0">{processStateForArea(o.board_stage)}</span>
+                                    <span className="min-w-0">{areaProgressLabel(o, mesBand)}</span>
                                   </span>
                                 )}
                                 <Badge
@@ -1383,25 +1268,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                                 Abrir
                               </Link>
                             </Button>
-                            {canMoveFromHere(o.board_stage) && nextStageByArea[area] ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                className="gap-1.5"
-                                disabled={movingId === o.id}
-                                onClick={() => void moveToNextStage(o.id)}
-                              >
-                                {movingId === o.id ? (
-                                  "…"
-                                ) : (
-                                  <>
-                                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-                                    {`Pasar a ${stageLabel[nextStageByArea[area]!]}`}
-                                  </>
-                                )}
-                              </Button>
-                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1508,11 +1374,11 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                                   </span>
                                 ) : (
                                   <span
-                                    className={printingTrayMesStickerClass(o.board_stage)}
-                                    title={`La OT aún no está en etapa ${mesAreaDisplayName(area as MesBandejaAreaKey)} en el tablero.`}
+                                    className={areaBandejaProgressStickerClass(areaProgressLabel(o, mesBand))}
+                                    title="Estado de producción en esta área (no depende del tablero Kanban)"
                                   >
                                     <CircleDashed className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                    <span className="min-w-0">{processStateForArea(o.board_stage)}</span>
+                                    <span className="min-w-0">{areaProgressLabel(o, mesBand)}</span>
                                   </span>
                                 )}
                                 {reqStatus ? (
@@ -1557,7 +1423,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                                 {areaRequestStatusLabel(reqStatus)}
                               </Badge>
                               <div className="text-muted-foreground text-xs leading-snug">
-                                <span className="text-foreground/90">{processStateForArea(o.board_stage)}</span>
+                                <span className="text-foreground/90">{areaProgressLabel(o, mesBand)}</span>
                                 {reqCreatedAt ? (
                                   <span>
                                     {" "}

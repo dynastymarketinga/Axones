@@ -50,6 +50,7 @@ class DashboardApiTest extends TestCase
                 'material_requests_pending',
                 'work_orders_pending_programming',
                 'work_orders_in_programming',
+                'work_orders_pending_production',
                 'operational_alerts_unread',
                 'tinta_mixtures_total',
                 'movements_today',

@@ -256,6 +256,7 @@ export type DashboardSummary = {
   material_requests_by_status: Record<string, number>
   work_orders_pending_programming: number
   work_orders_in_programming: number
+  work_orders_pending_production: number
   operational_alerts_unread: number
   tinta_mixtures_total: number
   movements_today: number

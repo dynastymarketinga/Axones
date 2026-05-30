@@ -11,8 +11,7 @@ import {
 } from "recharts"
 import {
   Bell,
-  CalendarClock,
-  CalendarDays,
+  ClipboardList,
   Factory,
   Inbox,
   RotateCcw,
@@ -204,22 +203,13 @@ export default function AxonesDashboardPage() {
         iconClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
       },
       {
-        title: "Órdenes sin fecha de programa",
-        hint: "Candidatas a asignar en el tablero.",
-        value: data.work_orders_pending_programming,
-        href: "/programacion",
-        icon: CalendarClock,
+        title: "Órdenes sin producir",
+        hint: "OT abiertas o en curso, pendientes de terminar en planta.",
+        value: data.work_orders_pending_production ?? 0,
+        href: "/ordenes-trabajo",
+        icon: ClipboardList,
         ringClass: "border-l-violet-500/80",
         iconClass: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-      },
-      {
-        title: "Órdenes en programación",
-        hint: "En curso en el calendario de planta.",
-        value: data.work_orders_in_programming,
-        href: "/programacion",
-        icon: CalendarDays,
-        ringClass: "border-l-fuchsia-500/80",
-        iconClass: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
       },
       {
         title: "Alertas sin leer",

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\MaterialRequestStatus;
+use App\Enums\WorkOrderBoardStage;
 use App\Enums\WorkOrderSchedulingStatus;
 use App\Enums\WorkOrderStatus;
 use App\Http\Controllers\Controller;
@@ -74,6 +75,14 @@ class DashboardController extends Controller
             ->where('scheduling_status', WorkOrderSchedulingStatus::InProgramming->value)
             ->count();
 
+        $workOrdersPendingProduction = WorkOrder::query()
+            ->whereIn('status', [
+                WorkOrderStatus::Open->value,
+                WorkOrderStatus::InProgress->value,
+            ])
+            ->where('board_stage', '!=', WorkOrderBoardStage::Completada->value)
+            ->count();
+
         $operationalAlertsUnread = OperationalAlert::query()->unread()->count();
 
         $monthStart = now()->startOfMonth();
@@ -100,6 +109,7 @@ class DashboardController extends Controller
             'material_requests_by_status' => $materialRequestsByStatus,
             'work_orders_pending_programming' => $workOrdersPendingProgramming,
             'work_orders_in_programming' => $workOrdersInProgramming,
+            'work_orders_pending_production' => $workOrdersPendingProduction,
             'operational_alerts_unread' => $operationalAlertsUnread,
             'tinta_mixtures_total' => $mixturesTotal,
             'movements_today' => $movementsToday,

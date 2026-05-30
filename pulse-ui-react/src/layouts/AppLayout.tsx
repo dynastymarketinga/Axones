@@ -18,6 +18,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { GlobalSearch } from "@/components/global-search"
+import { PwaInstallPrompt } from "@/components/pwa-install-prompt"
 
 import Footer from "@/layouts/Footer"
 
@@ -86,6 +87,7 @@ export default function AppLayout() {
 
           <div className="ml-auto px-6">
             <div className="flex items-center gap-1">
+              <PwaInstallPrompt />
               <GlobalSearch />
               <div className="relative">
                 <NotificationDropdown />

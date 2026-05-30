@@ -6,8 +6,12 @@ import { Toaster } from "sonner"
 
 import UIThemeProvider from "@/providers/ui-theme-provider"
 
+import { registerSW } from "virtual:pwa-register"
+
 import { router } from "@/routes"
 import "@/index.css"
+
+registerSW({ immediate: true })
 
 if (typeof document !== "undefined") {
   document.title = "Axones"

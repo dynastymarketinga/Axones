@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite"
 import react from "@vitejs/plugin-react"
+import { VitePWA } from "vite-plugin-pwa"
 import path from "path"
 
 export default defineConfig(({ mode }) => {
@@ -11,6 +12,46 @@ export default defineConfig(({ mode }) => {
   base: "/axones/",
   plugins: [
     react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      includeAssets: ["brand/*.png"],
+      manifest: {
+        name: "Axones",
+        short_name: "Axones",
+        description: "Sistema de producción e inventario Axones",
+        theme_color: "#6d28d9",
+        background_color: "#ffffff",
+        display: "standalone",
+        orientation: "any",
+        start_url: "/axones/",
+        scope: "/axones/",
+        lang: "es",
+        icons: [
+          {
+            src: "brand/pwa-192.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+          {
+            src: "brand/pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
+          },
+          {
+            src: "brand/pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+      },
+      workbox: {
+        navigateFallback: "/axones/index.html",
+        navigateFallbackDenylist: [/^\/api/],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+      },
+    }),
     {
       name: "redirect-root-to-base",
       configureServer(server) {

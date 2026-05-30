@@ -1,3 +1,14 @@
+import {
+  emptyMesPhaseTimerFields,
+  finalizeMesPhaseSlotsOnTimer,
+  mesPhaseFieldsFromLegacyForm,
+  mesPhaseFieldsToLegacyFlat,
+  parseMesPhaseFieldsFromRecord,
+  type MesPhaseTimerFields,
+} from "@/lib/mes-phase-timer-fields"
+
+export { cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
+
 export type BobinaLabelMeta = {
   fecha: string
   hora: string
@@ -12,7 +23,13 @@ export type BobinaLabelMeta = {
   tratamiento_externo: string
   maquina_origen: string
   pedido_lote: string
+  /** Empalmes en bobina de salida (planilla física). */
+  empalmes: string
 }
+
+/** Campos usados solo en etiqueta de salida impresa (planilla física). */
+export const SALIDA_BOBINA_LABEL_KEYS = ["peso", "fecha", "metraje", "hora", "empalmes"] as const
+export type SalidaBobinaLabelKey = (typeof SALIDA_BOBINA_LABEL_KEYS)[number]
 
 export const IMP_TURNOS_KEY = "impTurnosImpresion"
 export const IMP_ACTUAL_KEY = "impTurnoActual"
@@ -21,12 +38,64 @@ export const IMP_ESTADO_KEY = "impEstadoArea"
 /** Casillas por rejilla: ingreso material virgen y salida bobina impresa (OT impresión). */
 export const IMP_BOBINAS_SLOTS = 30
 
-/** Borrador de campos solo para el envío a almacén (materiales y referencia). Los Kg y motivo van en el formulario del turno (`impDevolucion*`). */
+/** Línea de devolución rechazada en el panel de envío a almacén (puede haber varias por motivo/material). */
+export type WarehouseRejectedEntry = {
+  id: string
+  bobinas: string
+  /** Peso de referencia en Kg (opcional; no reemplaza el conteo de bobinas). */
+  kg: string
+  motivo: string
+  /** Proveedor (catálogo); opcional. */
+  proveedorId: string
+  materialId: string
+  obs: string
+}
+
+export function newWarehouseRejectedEntry(
+  partial?: Partial<Omit<WarehouseRejectedEntry, "id">> & { id?: string },
+): WarehouseRejectedEntry {
+  const id =
+    partial?.id ??
+    (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `rech-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
+  return {
+    id,
+    bobinas: "",
+    kg: "",
+    motivo: "",
+    proveedorId: "",
+    materialId: "",
+    obs: "",
+    ...partial,
+  }
+}
+
+export function countRejectedEntryBobinas(raw: unknown): number {
+  const n = readNumber(raw)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.floor(n)
+}
+
+export function sumRejectedEntryBobinas(entries: WarehouseRejectedEntry[]): number {
+  return entries.reduce((acc, e) => acc + countRejectedEntryBobinas(e.bobinas), 0)
+}
+
+export function rejectedEntriesWithBobinas(entries: WarehouseRejectedEntry[]): WarehouseRejectedEntry[] {
+  return entries.filter((e) => countRejectedEntryBobinas(e.bobinas) > 0)
+}
+
+export function allRejectedEntriesHaveMotivo(entries: WarehouseRejectedEntry[]): boolean {
+  const active = rejectedEntriesWithBobinas(entries)
+  if (active.length === 0) return true
+  return active.every((e) => e.motivo.trim().length > 0)
+}
+
+/** Borrador de campos solo para el envío a almacén (materiales, referencia y líneas rechazadas). */
 export type WarehouseReturnDraft = {
   buenaMaterialId: string
-  rechazadaMaterialId: string
   bobinaCode: string
-  rechazadaObs: string
+  rechazadaEntries: WarehouseRejectedEntry[]
 }
 
 /** Motivos estándar para devolución rechazada (impresión); mismo criterio que el panel de envío a almacén. */
@@ -62,7 +131,7 @@ export type PrintingTurnTimer = {
   effectiveAccSec: number
   deadAccSec: number
   pauses: PrintingPauseEntry[]
-}
+} & MesPhaseTimerFields
 
 export type PrintingTurnoEntry = {
   id: string
@@ -189,6 +258,7 @@ export function emptyBobinaLabelMeta(): BobinaLabelMeta {
     tratamiento_externo: "",
     maquina_origen: "",
     pedido_lote: "",
+    empalmes: "",
   }
 }
 
@@ -208,7 +278,38 @@ function normalizeBobinaLabelMeta(meta: Partial<BobinaLabelMeta>): BobinaLabelMe
     tratamiento_externo: readString(meta.tratamiento_externo).trim(),
     maquina_origen: readString(meta.maquina_origen).trim(),
     pedido_lote: readString(meta.pedido_lote).trim(),
+    empalmes: readString(meta.empalmes).trim(),
   }
+}
+
+/** Etiqueta de salida: solo campos de la planilla física (Peso, Fecha, Metraje, Hora, Empalmes). */
+export function normalizeSalidaBobinaLabelMeta(meta: Partial<BobinaLabelMeta>): BobinaLabelMeta {
+  const base = emptyBobinaLabelMeta()
+  const normalized = normalizeBobinaLabelMeta(meta)
+  return {
+    ...base,
+    peso: normalized.peso,
+    fecha: normalized.fecha,
+    metraje: normalized.metraje,
+    hora: normalized.hora,
+    empalmes: normalized.empalmes,
+  }
+}
+
+export function hasSalidaBobinaMeta(meta: BobinaLabelMeta | undefined): boolean {
+  if (!meta) return false
+  return SALIDA_BOBINA_LABEL_KEYS.some((key) => meta[key].trim() !== "")
+}
+
+export function salidaBobinaLabelTooltipText(meta: BobinaLabelMeta | undefined): string {
+  if (!meta || !hasSalidaBobinaMeta(meta)) return "Sin etiqueta registrada"
+  const parts: string[] = []
+  if (meta.peso.trim()) parts.push(`Peso: ${meta.peso} Kg`)
+  if (meta.fecha.trim()) parts.push(`Fecha: ${meta.fecha}`)
+  if (meta.metraje.trim()) parts.push(`Metraje: ${meta.metraje} m`)
+  if (meta.hora.trim()) parts.push(`Hora: ${meta.hora}`)
+  if (meta.empalmes.trim()) parts.push(`Empalmes: ${meta.empalmes}`)
+  return parts.join(" · ")
 }
 
 export function emptyNumericSeries(size: number): string[] {
@@ -228,6 +329,7 @@ export function emptyPrintingTurnTimer(): PrintingTurnTimer {
     effectiveAccSec: 0,
     deadAccSec: 0,
     pauses: [],
+    ...emptyMesPhaseTimerFields(),
   }
 }
 
@@ -292,6 +394,7 @@ function parseTimer(raw: unknown): PrintingTurnTimer {
     effectiveAccSec: readNumber(o.effectiveAccSec),
     deadAccSec: readNumber(o.deadAccSec),
     pauses: parsePauseEntries(o.pauses),
+    ...parseMesPhaseFieldsFromRecord(o),
   }
 }
 
@@ -307,6 +410,7 @@ export function timerFromLegacyFlatForm(form: Record<string, unknown>): Printing
     effectiveAccSec: readNumber(form.impTimerEffectiveAccSec),
     deadAccSec: readNumber(form.impTimerDeadAccSec),
     pauses: parsePauseEntries(form.impTimerPauses),
+    ...mesPhaseFieldsFromLegacyForm(form, "impTimer"),
   }
 }
 
@@ -320,6 +424,7 @@ export function timerToLegacyFlat(timer: PrintingTurnTimer): Record<string, unkn
     impTimerEffectiveAccSec: timer.effectiveAccSec,
     impTimerDeadAccSec: timer.deadAccSec,
     impTimerPauses: timer.pauses,
+    ...mesPhaseFieldsToLegacyFlat(timer, "impTimer"),
   }
 }
 
@@ -961,12 +1066,12 @@ export function finalizeTurnTimerNow(timer: PrintingTurnTimer): PrintingTurnTime
   if (timer.state === "paused" && timer.pauseAtMs > 0) {
     dead += (now - timer.pauseAtMs) / 1000
   }
-  return {
+  return finalizeMesPhaseSlotsOnTimer({
     ...timer,
     state: "stopped",
     effectiveAccSec: effective,
     deadAccSec: dead,
     pauseAtMs: 0,
     lastResumeAtMs: 0,
-  }
+  })
 }

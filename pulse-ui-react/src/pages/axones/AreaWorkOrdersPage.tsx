@@ -15,6 +15,7 @@ import {
   ClipboardList,
   Droplets,
   ExternalLink,
+  FileSearch,
   History,
   Inbox,
   Info,
@@ -120,6 +121,10 @@ import {
   printingActivasBucketFromRow,
   type PrintingActivasSubTab,
 } from "@/lib/printing-mes-band-status"
+import {
+  canOpenPrintingPlanillaPreview,
+  openPrintingPlanillaPreviewFromSource,
+} from "@/lib/printing-planilla-preview"
 import {
   areaRequestBadgeClass,
   areaRequestStatusGlyph,
@@ -444,6 +449,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [areaRequestedFrom, setAreaRequestedFrom] = useState("")
   const [areaRequestedTo, setAreaRequestedTo] = useState("")
   const skipSearchPageReset = useRef(true)
+  /** Evita forzar «En producción» tras elegir manualmente otra sub-vista MES. */
+  const mesActivasSubTabAutoPickedRef = useRef(false)
   /** Reloj en vivo para tiempo efectivo acumulado (bandeja impresión). */
   const [mesBandNowMs, setMesBandNowMs] = useState(() => Date.now())
   /** Modal de detalle MES (impresión): id de OT abierta o null. */
@@ -699,13 +706,13 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   useEffect(() => {
     if (activeTab !== "activas") {
       setMesActivasSubTab("pendientes")
+      mesActivasSubTabAutoPickedRef.current = false
     }
   }, [activeTab])
 
   useEffect(() => {
-    if (!areaUsesMesActivasSubTabs(area)) {
-      setMesActivasSubTab("pendientes")
-    }
+    setMesActivasSubTab("pendientes")
+    mesActivasSubTabAutoPickedRef.current = false
   }, [area])
 
   useEffect(() => {
@@ -731,14 +738,15 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   useEffect(() => {
     if (!areaUsesMesActivasSubTabs(area) || activeTab !== "activas" || !rows?.data.length) return
-    if (mesActivasSubTab !== "pendientes") return
+    if (mesActivasSubTabAutoPickedRef.current) return
+    mesActivasSubTabAutoPickedRef.current = true
     const hasProduccion = rows.data.some(
       (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === "produccion",
     )
     if (hasProduccion) {
       setMesActivasSubTab("produccion")
     }
-  }, [area, activeTab, rows, mesBandNowMs, mesActivasSubTab])
+  }, [area, activeTab, rows, mesBandNowMs])
 
   function areaProgressLabel(
     row: WorkOrderListRow,
@@ -762,6 +770,30 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     }
     const tab = TAB_BY_AREA[area]
     return `/ordenes-trabajo/${woId}?tab=${encodeURIComponent(tab)}`
+  }
+
+  function openPrintingPlanillaPreview(row: WorkOrderListRow) {
+    const form = printingFormRecord(row)
+    if (!form) {
+      toast.error("Esta OT no tiene datos de impresión para la vista previa.")
+      return
+    }
+    if (!canOpenPrintingPlanillaPreview(form)) {
+      toast.error("La vista previa de planilla está disponible tras «Finalizar área de impresión».")
+      return
+    }
+    const ok = openPrintingPlanillaPreviewFromSource({
+      work_order_id: row.id,
+      work_order_code: row.code,
+      client: row.client?.name ?? null,
+      product: row.product?.name ?? null,
+      form,
+      technical_document: row.technical_document ?? undefined,
+      board_stage: row.board_stage ?? "impresion",
+    })
+    if (!ok) {
+      toast.error("No se pudo abrir la vista previa de planilla.")
+    }
   }
 
   const AreaIcon = AREA_ICON[area]
@@ -1192,6 +1224,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       : null
                     const rowAccent = mesBand ? mesBandejaRowAccentClass(mesBand.workflow) : ""
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
+                    const planillaPreviewForm = area === "printing" ? printingFormRecord(o) : null
+                    const planillaPreviewEnabled = canOpenPrintingPlanillaPreview(planillaPreviewForm)
                     return (
                       <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
                         <TableCell className="pl-5 align-middle">
@@ -1262,6 +1296,24 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                         </TableCell>
                         <TableCell className="pr-5 text-right align-middle">
                           <div className="flex flex-wrap justify-end gap-2">
+                            {area === "printing" ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5"
+                                disabled={!planillaPreviewEnabled}
+                                title={
+                                  planillaPreviewEnabled
+                                    ? "Vista previa de la planilla física de impresión"
+                                    : "Disponible tras «Finalizar área de impresión»"
+                                }
+                                onClick={() => openPrintingPlanillaPreview(o)}
+                              >
+                                <FileSearch className="h-3.5 w-3.5" aria-hidden />
+                                Vista previa
+                              </Button>
+                            ) : null}
                             <Button variant="outline" size="sm" className="border-primary/25 gap-1.5" asChild>
                               <Link to={openUrl(o.id)}>
                                 <ExternalLink className="h-3.5 w-3.5" aria-hidden />
@@ -1353,6 +1405,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       : null
                     const rowAccent = mesBand ? mesBandejaRowAccentClass(mesBand.workflow) : ""
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
+                    const planillaPreviewForm = area === "printing" ? printingFormRecord(o) : null
+                    const planillaPreviewEnabled = canOpenPrintingPlanillaPreview(planillaPreviewForm)
                     return (
                       <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
                         <TableCell className="pl-5 align-middle">
@@ -1455,6 +1509,24 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                         </TableCell>
                         <TableCell className="pr-5 text-right align-middle">
                           <div className="flex flex-wrap justify-end gap-2">
+                            {area === "printing" ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5"
+                                disabled={!planillaPreviewEnabled}
+                                title={
+                                  planillaPreviewEnabled
+                                    ? "Vista previa de la planilla física de impresión"
+                                    : "Disponible tras «Finalizar área de impresión»"
+                                }
+                                onClick={() => openPrintingPlanillaPreview(o)}
+                              >
+                                <FileSearch className="h-3.5 w-3.5" aria-hidden />
+                                Vista previa
+                              </Button>
+                            ) : null}
                             <Button variant="outline" size="sm" className="border-primary/25 gap-1.5" asChild>
                               <Link to={openUrl(o.id)}>
                                 <ExternalLink className="h-3.5 w-3.5" aria-hidden />

@@ -429,6 +429,12 @@ class MaterialRequestService
     /**
      * Fila espejo en solicitudes entre áreas para visibilidad; el stock solo cambia en insumos.
      */
+    /** Expone sincronización de fila espejo en solicitudes entre áreas (p. ej. tras actualizar líneas de planilla). */
+    public function refreshShadowAreaRequest(MaterialRequest $mr): void
+    {
+        $this->syncShadowAreaRequestForMaterialRequest($mr);
+    }
+
     private function syncShadowAreaRequestForMaterialRequest(MaterialRequest $mr): void
     {
         $mr->loadMissing(['lines.material', 'workOrder']);

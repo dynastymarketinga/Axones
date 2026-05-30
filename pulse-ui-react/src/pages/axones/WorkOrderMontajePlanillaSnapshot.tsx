@@ -26,8 +26,15 @@ function readString(v: unknown): string {
 }
 
 function tipoImpresionLabel(displayForm: Record<string, unknown>): string {
+  const montaje = readString(displayForm.tipoImpresionMontaje).trim()
+  if (montaje) {
+    const t = montaje.toLowerCase()
+    if (t === "superficie" || t.includes("superf")) return "Superficie"
+    if (t === "reverso" || t.includes("rever")) return "Reverso"
+    if (t === "trilaminado" || t.includes("trilamin")) return "Reverso"
+    return montaje
+  }
   const raw =
-    readString(displayForm.tipoImpresionMontaje).trim() ||
     readString(displayForm.tipoImpresionEstructura).trim() ||
     readString(displayForm.tipoImpresion).trim()
   if (!raw) return "—"

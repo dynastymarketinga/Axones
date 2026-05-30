@@ -65,12 +65,40 @@ export function formatMetricValue(nominal: number, tolerance: number): string {
   return `${n}±${formatMetricNumber(tolerance)}`
 }
 
-/** Desarrollo (mm) = frecuencia × N° repetición (tolerancia proporcional). */
+/** Desarrollo (mm) = frecuencia × N° repetición (valor nominal, sin ±). */
 export function computeDesarrolloMontaje(frecuencia: unknown, numRepeticion: unknown): string {
   const freq = parseMetricParts(frecuencia)
   const rep = parsePositiveInt(numRepeticion)
   if (!freq || rep === null) return ""
-  return formatMetricValue(freq.nominal * rep, freq.tolerance * rep)
+  const value = Math.round(freq.nominal * rep)
+  if (value <= 0 || value > 999) return ""
+  return `${value}mm`
+}
+
+/** Entrada manual: hasta 3 dígitos y sufijo mm automático. */
+export function sanitizeDesarrolloMmInput(v: string): string {
+  const digits = v.replace(/\D/g, "").slice(0, 3)
+  if (!digits) return ""
+  return `${digits}mm`
+}
+
+export function isDesarrolloMmLike(v: unknown): boolean {
+  return /^\d{1,3}mm$/i.test(readString(v).trim())
+}
+
+/** Normaliza valores guardados (p. ej. 812, 812±2) al formato 812mm. */
+export function normalizeDesarrolloMmValue(raw: unknown): string {
+  const s = readString(raw).trim()
+  if (!s) return ""
+  const mmMatch = /^(\d{1,3})\s*mm$/i.exec(s)
+  if (mmMatch) return `${mmMatch[1]}mm`
+  const parts = parseMetricParts(s)
+  if (parts) {
+    const n = Math.round(parts.nominal)
+    if (n > 0 && n <= 999) return `${n}mm`
+  }
+  const digits = s.replace(/\D/g, "").slice(0, 3)
+  return digits ? `${digits}mm` : ""
 }
 
 /** Ancho montaje (mm) = ancho corte × N° bandas (tolerancia proporcional). */

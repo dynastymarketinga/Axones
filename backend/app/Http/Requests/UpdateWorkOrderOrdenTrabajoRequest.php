@@ -99,7 +99,7 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
             $validator->errors()->add('form.pinonImp', 'Piñón (dientes) debe ser entero mayor a 0.');
         }
 
-        foreach (['kgIngresadoImp', 'kgSalidaImp', 'mermaImp', 'metrosImp'] as $key) {
+        foreach (['gramajeTintaGm2', 'kgIngresadoImp', 'kgSalidaImp', 'mermaImp', 'metrosImp'] as $key) {
             $v = $this->asStringValue($form[$key] ?? null);
             if ($v !== '' && ! $this->isDecimalLike($v)) {
                 $validator->errors()->add("form.$key", "$key debe ser numérico.");
@@ -115,8 +115,8 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
     private function validateLaminacion(Validator $validator, array $form): void
     {
         $gramaje = $this->asStringValue($form['gramajeAdhesivo'] ?? null);
-        if ($gramaje !== '' && ! $this->isDecimalLike($gramaje)) {
-            $validator->errors()->add('form.gramajeAdhesivo', 'Gramaje adhesivo debe ser numérico.');
+        if ($gramaje !== '' && ! $this->isGramajeAdhesivoRangeLike($gramaje)) {
+            $validator->errors()->add('form.gramajeAdhesivo', 'Gramaje adhesivo debe tener formato 1,5 A 2,2.');
         }
 
         $relacion = $this->asStringValue($form['relacionMezcla'] ?? null);
@@ -124,7 +124,7 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
             $validator->errors()->add('form.relacionMezcla', 'Relación mezcla debe tener formato 100/80.');
         }
 
-        foreach (['kgEntradaLam', 'kgSalidaLam', 'metrajeLam', 'mermaLam', 'kgEntradaLam2', 'kgSalidaLam2', 'metrajeLam2', 'mermaLam2'] as $key) {
+        foreach (['kgLaminaImpresaLaminacion', 'kgLaminaVirgenLaminacion', 'kgAdhesivoLaminacion', 'kgCatalizadorLaminacion', 'kgEntradaLam', 'kgSalidaLam', 'metrajeLam', 'mermaLam', 'kgEntradaLam2', 'kgSalidaLam2', 'metrajeLam2', 'mermaLam2'] as $key) {
             $v = $this->asStringValue($form[$key] ?? null);
             if ($v !== '' && ! $this->isDecimalLike($v)) {
                 $validator->errors()->add("form.$key", "$key debe ser numérico.");
@@ -270,6 +270,13 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
         $v = str_replace(',', '.', $value);
 
         return $v !== '' && preg_match('/^-?\d+(\.\d+)?$/', $v) === 1;
+    }
+
+    private function isGramajeAdhesivoRangeLike(string $value): bool
+    {
+        $n = '\d{1,2}(?:[.,]\d{1,2})?';
+
+        return preg_match('/^' . $n . '\s+A\s+' . $n . '$/i', $value) === 1;
     }
 
     private function isRatioLike(string $value): bool

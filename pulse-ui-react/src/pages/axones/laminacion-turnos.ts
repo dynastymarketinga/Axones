@@ -3,6 +3,17 @@
  * Misma idea que printing-turnos.ts: claves lam* estables para API y planilla.
  */
 import {
+  emptyMesPhaseTimerFields,
+  finalizeMesPhaseSlotsOnTimer,
+  mesPhaseFieldsFromLegacyForm,
+  mesPhaseFieldsToLegacyFlat,
+  parseMesPhaseFieldsFromRecord,
+  type MesPhaseTimerFields,
+} from "@/lib/mes-phase-timer-fields"
+
+export { cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
+
+import {
   emptyBobinaLabelMeta,
   emptyMetaSeries,
   emptyNumericSeries,
@@ -60,7 +71,7 @@ export type LaminacionTurnTimer = {
   effectiveAccSec: number
   deadAccSec: number
   pauses: LaminacionPauseEntry[]
-}
+} & MesPhaseTimerFields
 
 export type LaminacionTurnoEntry = {
   id: string
@@ -156,6 +167,7 @@ export function normalizeBobinaLabelMeta(meta: BobinaLabelMeta): BobinaLabelMeta
     tratamiento_externo: readString(meta.tratamiento_externo).trim(),
     maquina_origen: readString(meta.maquina_origen).trim(),
     pedido_lote: readString(meta.pedido_lote).trim(),
+    empalmes: readString(meta.empalmes).trim(),
   }
 }
 
@@ -220,6 +232,7 @@ export function timerFromLegacyFlatForm(form: Record<string, unknown>): Laminaci
     effectiveAccSec: readLamNumber(form.lamTimerEffectiveAccSec),
     deadAccSec: readLamNumber(form.lamTimerDeadAccSec),
     pauses: parsePauseEntries(form.lamTimerPauses),
+    ...mesPhaseFieldsFromLegacyForm(form, "lamTimer"),
   }
 }
 
@@ -232,6 +245,7 @@ export function timerToLegacyFlat(timer: LaminacionTurnTimer): Record<string, un
     lamTimerEffectiveAccSec: timer.effectiveAccSec,
     lamTimerDeadAccSec: timer.deadAccSec,
     lamTimerPauses: timer.pauses,
+    ...mesPhaseFieldsToLegacyFlat(timer, "lamTimer"),
   }
 }
 
@@ -532,6 +546,11 @@ export function hasLaminacionSavedData(form: Record<string, unknown> | null | un
     "lamEntradaVirgenMaterialesBuenosKg",
     "lamDevolucionBuenaKg",
     "lamDevolucionRechazadaKg",
+    "lamDevolucionRechazadaBobinas",
+    "lamDevolucionRechazadaMotivo",
+    "lamDevolucionesAlmacenUltimoEnvioMs",
+    "lamDevolucionesAlmacenSnapBuena",
+    "lamDevolucionesAlmacenSnapRech",
     "lamChecklistEstado",
     "lamChecklistObs",
   ]
@@ -620,6 +639,7 @@ export function emptyLaminacionTurnTimer(): LaminacionTurnTimer {
     effectiveAccSec: 0,
     deadAccSec: 0,
     pauses: [],
+    ...emptyMesPhaseTimerFields(),
   }
 }
 
@@ -679,6 +699,7 @@ function parseTimerNested(raw: unknown): LaminacionTurnTimer {
     effectiveAccSec: readLamNumber(o.effectiveAccSec),
     deadAccSec: readLamNumber(o.deadAccSec),
     pauses: parsePauseEntries(o.pauses),
+    ...parseMesPhaseFieldsFromRecord(o),
   }
 }
 
@@ -1203,12 +1224,12 @@ export function finalizeLaminacionTurnTimerNow(timer: LaminacionTurnTimer): Lami
   if (timer.state === "paused" && timer.pauseAtMs > 0) {
     dead += (now - timer.pauseAtMs) / 1000
   }
-  return {
+  return finalizeMesPhaseSlotsOnTimer({
     ...timer,
     state: "stopped",
     effectiveAccSec: effective,
     deadAccSec: dead,
     pauseAtMs: 0,
     lastResumeAtMs: 0,
-  }
+  })
 }

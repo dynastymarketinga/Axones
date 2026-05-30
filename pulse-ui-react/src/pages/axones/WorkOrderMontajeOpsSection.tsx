@@ -38,6 +38,9 @@ import {
   mesSectionTitle,
   MesTimerFace,
 } from "@/components/axones/mes"
+
+import type { MontajeTimerActionFlags, MontajeTimerConfirmKey } from "./montaje-timer-actions"
+import { MES_TIMER_HELP_TEXT, MesProductionTimerOpsBlock } from "./mes-production-timer-ops-block"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -194,12 +197,21 @@ type Props = {
   timerState: string
   totalSec: number
   deadSec: number
+  /** Tiempo de desmontaje acumulado (OT o turno según `timerShowsOtAccumulated`). */
+  demountSec: number
   effectiveSec: number
   /** Si true, effectiveSec/deadSec/totalSec son acumulado OT (todos los turnos). */
   timerShowsOtAccumulated?: boolean
   kgHora: string
+  /** Hora de arranque del cronómetro del turno en curso (reloj, no duración). */
+  horaArranque: string
+  arranqueRunning?: boolean
+  montajeOpRunning?: boolean
+  demountRunning?: boolean
   timerRunning: boolean
   timerPaused: boolean
+  timerActionFlags?: MontajeTimerActionFlags
+  onRequestTimerConfirm?: (key: MontajeTimerConfirmKey) => void
   pauseReasons: string[]
   pauseReason: string
   pauseObs: string
@@ -214,8 +226,8 @@ type Props = {
   formatTimerHms: (s: number) => string
   setPauseReason: (v: string) => void
   setPauseObs: (v: string) => void
-  startProductionTimer: () => void
-  pauseProductionTimer: () => void
+  startProductionTimer?: () => void
+  pauseProductionTimer?: () => void
   confirmPauseAndResume: () => void
   onSetTurno: (v: "diurno" | "nocturno") => void
   onSetGrupo: (v: "A" | "B" | "C") => void
@@ -807,9 +819,10 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
           {simplifiedTimer ? (
             <>
               {" "}
-              Al terminar la jornada de registro use{" "}
-              <span className="font-semibold text-foreground">Finalizar turno</span> en el cronómetro y luego{" "}
-              <span className="font-semibold text-foreground">Guardar</span>.
+              Al terminar la jornada pulse <span className="font-semibold text-foreground">Guardar</span> al pie de
+              página y elija <span className="font-semibold text-foreground">Finalizar turno</span> o{" "}
+              <span className="font-semibold text-foreground">Finalizar área Montaje</span> (también disponibles en el
+              cronómetro).
             </>
           ) : (
             <>
@@ -998,8 +1011,9 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
           {simplifiedTimer && props.hasActiveTurno && !props.areaFinalizada ? (
             <div className="mt-4 border-t border-border/50 pt-4">
               <p className="text-muted-foreground text-xs leading-snug">
-                El cierre del turno se realiza con <span className="font-semibold text-foreground">Finalizar turno</span>{" "}
-                en el panel del cronómetro.
+                Para cerrar el turno y enviar al sistema, pulse{" "}
+                <span className="font-semibold text-foreground">Guardar</span> al pie de página o use{" "}
+                <span className="font-semibold text-foreground">Finalizar turno</span> en el cronómetro.
               </p>
             </div>
           ) : null}
@@ -1073,10 +1087,16 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
                   ? props.timerShowsOtAccumulated
                     ? "Entre turnos · tiempo acumulado"
                     : "Sin turno de planta abierto"
-                  : props.timerState === "running"
-                    ? "Cronómetro en marcha"
-                    : props.timerState === "paused"
-                      ? "Cronómetro en pausa"
+                  : props.demountRunning
+                    ? "Desmontaje en marcha"
+                    : props.montajeOpRunning
+                      ? "Montaje en marcha"
+                      : props.arranqueRunning
+                    ? "Arranque en marcha"
+                    : props.timerState === "running"
+                      ? "Producción en marcha"
+                      : props.timerState === "paused"
+                        ? "Producción en pausa"
                       : props.timerState === "completed"
                         ? "Orden finalizada"
                         : props.timerState === "stopped"
@@ -1091,10 +1111,14 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
             <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
             <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
             <span className="font-semibold">no</span> cierra el turno de planta.
-            {simplifiedTimer ? (
+            {simplifiedTimer && props.timerActionFlags ? (
+              <> {MES_TIMER_HELP_TEXT}</>
+            ) : simplifiedTimer ? (
               <>
                 {" "}
-                Use <span className="font-semibold">Finalizar turno</span> en este bloque cuando corresponda.
+                Cierre con <span className="font-semibold">Guardar</span>,{" "}
+                <span className="font-semibold">Fin del turno</span> o{" "}
+                <span className="font-semibold">Finalizar orden</span>.
               </>
             ) : (
               <>
@@ -1112,167 +1136,182 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
             registrar tiempos y paradas con motivo.
           </div>
         ) : null}
+        {simplifiedTimer && props.timerActionFlags && props.onRequestTimerConfirm ? (
+          <MesProductionTimerOpsBlock
+            formatTimerHms={props.formatTimerHms}
+            effectiveSec={props.effectiveSec}
+            deadSec={props.deadSec}
+            demountSec={props.demountSec}
+            totalSec={props.totalSec}
+            kgHora={props.kgHora}
+            horaArranque={props.horaArranque}
+            timerShowsOtAccumulated={props.timerShowsOtAccumulated}
+            timerRunning={props.timerRunning}
+            demountRunning={props.demountRunning}
+            timerActionFlags={props.timerActionFlags}
+            onRequestTimerConfirm={props.onRequestTimerConfirm}
+            onPreviewTimerReport={props.onPreviewTimerReport}
+            canFinalizeOrder={props.canFinalizeOrder}
+            areaFinalizada={props.areaFinalizada}
+            areaLabel="montaje"
+          />
+        ) : (
         <div className="mes-timer-grid">
           <MesTimerFace
             elapsedLabel={props.formatTimerHms(props.effectiveSec)}
-            elapsedCaption={
-              props.timerShowsOtAccumulated
-                ? "Tiempo efectivo acumulado (todos los turnos de la OT)"
-                : "Tiempo efectivo (se detiene al registrar parada)"
-            }
+            elapsedCaption="Tiempo efectivo (se detiene al registrar parada)"
             deadHms={props.formatTimerHms(props.deadSec)}
             effectiveHms={props.formatTimerHms(props.totalSec)}
-            productiveMetricLabel={
-              props.timerShowsOtAccumulated
-                ? "Total acumulado (efectivo + paradas)"
-                : "Total (efectivo + paradas)"
-            }
+            productiveMetricLabel="Total (efectivo + paradas)"
+            totalMetricLive={props.timerRunning}
             kgHora={props.kgHora}
+            horaArranque={props.horaArranque}
           />
           <div className="mes-timer-actions w-full min-w-0">
-            <TooltipProvider delayDuration={200}>
-              <div className="mes-timer-action-stack">
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-primary"
-                        aria-label="Iniciar cronómetro de producción"
-                        onClick={props.startProductionTimer}
-                        disabled={
-                          props.readOnlyOps ||
-                          !props.hasActiveTurno ||
-                          props.timerRunning ||
-                          props.areaFinalizada ||
-                          props.timerState === "completed"
-                        }
-                      >
-                        <CirclePlay className="shrink-0" aria-hidden />
-                        <span>Iniciar</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Iniciar cronómetro (tiempo efectivo)</TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-secondary"
-                        aria-label="Pausar cronómetro y registrar motivo de parada"
-                        onClick={props.pauseProductionTimer}
-                        disabled={props.readOnlyOps || !props.timerRunning}
-                      >
-                        <CirclePause className="shrink-0" aria-hidden />
-                        <span>Parada</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-xs">
-                      Detiene el tiempo efectivo y solicita motivo de parada (tiempo muerto). No cierra el turno de
-                      planta.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-muted"
-                        aria-label="Vista previa"
-                        onClick={props.onPreviewTimerReport}
-                        disabled={props.readOnlyOps || !props.canPreviewTimerReport}
-                      >
-                        <FileSearch className="shrink-0" aria-hidden />
-                        <span>Vista previa</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {props.canPreviewTimerReport
-                        ? "Vista previa del reporte del cronómetro"
-                        : "Inicie el cronómetro para habilitar la vista previa"}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                {!simplifiedTimer ? (
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-warn-outline"
-                        aria-label="Reiniciar (desde cero)"
-                        onClick={props.onResetAll}
-                        disabled={!props.canResetAll}
-                      >
-                        <RotateCcw className="shrink-0" aria-hidden />
-                        <span>Reiniciar</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      Borra turnos, cronómetro y checks para esta OT (Montaje)
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                ) : null}
-                {props.hasActiveTurno ? (
-                  <div className="mes-timer-action-labeled mt-2 border-t border-border/60 pt-2">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mes-timer-action-btn mes-btn-danger-outline"
-                          aria-label="Finalizar turno"
-                          onClick={props.onCerrarTurnoActual}
-                          disabled={props.readOnlyOps || props.areaFinalizada}
-                        >
-                          <LogOut className="shrink-0" aria-hidden />
-                          <span>Finalizar turno</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-xs">
-                        {simplifiedTimer
-                          ? "Cierra el registro de turno de planta en curso."
-                          : "Cierra el registro de turno de planta actual (sesión). No es una parada del cronómetro ni «Finalizar OT»."}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : null}
-                {props.canFinalizeOrder && !props.areaFinalizada ? (
+            {false ? (
+              null
+            ) : (
+              <TooltipProvider delayDuration={200}>
+                <div className="mes-timer-action-stack">
                   <div className="mes-timer-action-labeled">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
                           type="button"
                           variant="outline"
-                          className="mes-timer-action-btn mes-btn-destructive-solid"
-                          aria-label={simplifiedTimer ? "Finalizar área Montaje" : "Finalizar OT"}
-                          onClick={() => void props.onFinalizarAreaMontaje()}
-                          disabled={props.readOnlyOps && !props.canFinalizeOrder}
+                          className="mes-timer-action-btn mes-btn-primary"
+                          aria-label="Iniciar cronómetro de producción"
+                          onClick={props.startProductionTimer}
+                          disabled={
+                            props.readOnlyOps ||
+                            !props.hasActiveTurno ||
+                            props.timerRunning ||
+                            props.areaFinalizada ||
+                            props.timerState === "completed"
+                          }
                         >
-                          <Flag className="shrink-0" aria-hidden />
-                          <span>{simplifiedTimer ? "Finalizar área Montaje" : "Finalizar OT"}</span>
+                          <CirclePlay className="shrink-0" aria-hidden />
+                          <span>Iniciar</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">Iniciar cronómetro (tiempo efectivo)</TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="mes-timer-action-labeled">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mes-timer-action-btn mes-btn-secondary"
+                          aria-label="Pausar cronómetro y registrar motivo de parada"
+                          onClick={props.pauseProductionTimer}
+                          disabled={props.readOnlyOps || !props.timerRunning}
+                        >
+                          <CirclePause className="shrink-0" aria-hidden />
+                          <span>Parada</span>
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="max-w-xs">
-                        {simplifiedTimer
-                          ? "Finaliza el área de Montaje en esta orden."
-                          : "Cierra el área de montaje en la orden (paso de gestión). No sustituye a «Finalizar turno» ni a «Parada» del cronómetro."}
+                        Detiene el tiempo efectivo y solicita motivo de parada (tiempo muerto). No cierra el turno de
+                        planta.
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                ) : null}
-              </div>
-            </TooltipProvider>
+                  <div className="mes-timer-action-labeled">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mes-timer-action-btn mes-btn-muted"
+                          aria-label="Vista previa"
+                          onClick={props.onPreviewTimerReport}
+                          disabled={props.readOnlyOps || !props.canPreviewTimerReport}
+                        >
+                          <FileSearch className="shrink-0" aria-hidden />
+                          <span>Vista previa</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        {props.canPreviewTimerReport
+                          ? "Vista previa del reporte del cronómetro"
+                          : "Inicie el cronómetro para habilitar la vista previa"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="mes-timer-action-labeled">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mes-timer-action-btn mes-btn-warn-outline"
+                          aria-label="Reiniciar (desde cero)"
+                          onClick={props.onResetAll}
+                          disabled={!props.canResetAll}
+                        >
+                          <RotateCcw className="shrink-0" aria-hidden />
+                          <span>Reiniciar</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        Borra turnos, cronómetro y checks para esta OT (Montaje)
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  {props.hasActiveTurno ? (
+                    <div className="mes-timer-action-labeled mt-2 border-t border-border/60 pt-2">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="mes-timer-action-btn mes-btn-danger-outline"
+                            aria-label="Finalizar turno"
+                            onClick={props.onCerrarTurnoActual}
+                            disabled={props.readOnlyOps || props.areaFinalizada}
+                          >
+                            <LogOut className="shrink-0" aria-hidden />
+                            <span>Finalizar turno</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-xs">
+                          Cierra el registro de turno de planta actual (sesión). No es una parada del cronómetro ni
+                          «Finalizar OT».
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ) : null}
+                  {props.canFinalizeOrder && !props.areaFinalizada ? (
+                    <div className="mes-timer-action-labeled">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="mes-timer-action-btn mes-btn-destructive-solid"
+                            aria-label="Finalizar OT"
+                            onClick={() => void props.onFinalizarAreaMontaje()}
+                            disabled={props.readOnlyOps && !props.canFinalizeOrder}
+                          >
+                            <Flag className="shrink-0" aria-hidden />
+                            <span>Finalizar OT</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-xs">
+                          Cierra el área de montaje en la orden (paso de gestión). No sustituye a «Finalizar turno» ni a
+                          «Parada» del cronómetro.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ) : null}
+                </div>
+              </TooltipProvider>
+            )}
           </div>
         </div>
+        )}
         {props.timerPaused && !props.pauseMotivoDialogOpen ? (
           <div className="mt-2 flex justify-center md:justify-end">
             <Button

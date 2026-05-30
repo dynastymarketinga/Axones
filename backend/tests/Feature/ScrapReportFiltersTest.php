@@ -62,6 +62,13 @@ class ScrapReportFiltersTest extends TestCase
             'work_order_id' => $woBopp->id,
             'scrap_percent' => 1.5,
         ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $woBopp->id,
+            'form' => [
+                'impScrapImpresoKg' => '1.5',
+                'impScrapImpresoDestino' => 'bopp',
+            ],
+        ]);
 
         $woPe = WorkOrder::query()->create([
             'code' => 'OT-PE1',
@@ -71,6 +78,13 @@ class ScrapReportFiltersTest extends TestCase
         WorkOrderPrintingSummary::query()->create([
             'work_order_id' => $woPe->id,
             'scrap_percent' => 2.5,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $woPe->id,
+            'form' => [
+                'impScrapImpresoKg' => '2.5',
+                'impScrapImpresoDestino' => 'bopp',
+            ],
         ]);
 
         $q = [
@@ -100,7 +114,7 @@ class ScrapReportFiltersTest extends TestCase
             'layout' => 'by_work_order',
         ])));
         $csvPivot->assertOk();
-        $this->assertStringContainsString('printing_scrap_percent', (string) $csvPivot->getContent());
+        $this->assertStringContainsString('total_scrap_kg', (string) $csvPivot->getContent());
 
         $csvArea = $this->withHeaders($h)->get('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
             'layout' => 'by_area',
@@ -108,7 +122,56 @@ class ScrapReportFiltersTest extends TestCase
         $csvArea->assertOk();
         $bodyArea = (string) $csvArea->getContent();
         $this->assertStringContainsString('printing', $bodyArea);
-        $this->assertStringContainsString('avg_scrap_percent', $bodyArea);
+        $this->assertStringContainsString('total_scrap_kg', $bodyArea);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_scrap_by_work_order_sums_planilla_kg_without_summary_percent(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-10 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Sum', 'rif' => 'J-S1']);
+
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'P sum',
+            'structure' => 'BOPP 20',
+        ]);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-SUM-1',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'created_at' => now(),
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'updated_at' => now(),
+            'form' => [
+                'impScrapTransparenteKg' => '1',
+                'impScrapImpresoKg' => '2',
+                'impScrapImpresoDestino' => 'bopp',
+                'corScrapRefileKg' => '0.5',
+            ],
+        ]);
+
+        $q = [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+            'layout' => 'by_work_order',
+        ];
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query($q), $h)
+            ->assertOk()
+            ->assertJsonPath('layout', 'by_work_order')
+            ->assertJsonPath('rows.0.work_order_code', 'OT-SUM-1')
+            ->assertJsonPath('rows.0.imp_scrap_impreso_kg', '2.000')
+            ->assertJsonPath('rows.0.imp_scrap_transparente_kg', '1.000')
+            ->assertJsonPath('rows.0.corte_scrap_kg', '0.500')
+            ->assertJsonPath('rows.0.total_scrap_kg', '3.500');
 
         Carbon::setTestNow();
     }
@@ -190,9 +253,95 @@ class ScrapReportFiltersTest extends TestCase
             'substrate_group' => 'poliestireno',
         ])), $h)
             ->assertOk()
+            ->assertJsonCount(0, 'rows');
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($qBase, [
+            'substrate_group' => 'transparente',
+        ])), $h)
+            ->assertOk()
             ->assertJsonPath('rows.0.imp_scrap_transparente_kg', '1.500')
-            ->assertJsonPath('rows.0.imp_scrap_impreso_kg', '0.000')
-            ->assertJsonPath('rows.0.lam_scrap_impreso_kg', '0.000');
+            ->assertJsonPath('rows.0.lam_scrap_transparente_kg', '2.000')
+            ->assertJsonPath('rows.0.imp_scrap_impreso_kg', '0.000');
+
+        Carbon::setTestNow();
+    }
+
+    public function test_scrap_history_kg_aggregates_printing_turn_capturas(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-20 10:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Turn', 'rif' => 'J-T1']);
+
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Film BOPP',
+            'structure' => 'BOPP 20',
+        ]);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-TURN-SCRAP',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'impScrapTransparenteKg' => '0',
+                'impScrapImpresoKg' => '0',
+                'impScrapImpresoDestino' => 'bopp',
+                'impScrapAcumuladoKg' => '3',
+                'impTurnosImpresion' => [
+                    [
+                        'id' => 't1',
+                        'turno' => 'diurno',
+                        'grupo' => 'A',
+                        'scrapTransparenteKg' => '0',
+                        'scrapImpresoKg' => '0',
+                        'capturas' => [
+                            [
+                                'scrapTransparenteKg' => '1.5',
+                                'scrapImpresoKg' => '1.5',
+                            ],
+                        ],
+                    ],
+                ],
+                'impTurnoActual' => [
+                    'id' => 't2',
+                    'turno' => 'nocturno',
+                    'grupo' => 'B',
+                    'scrapTransparenteKg' => '0',
+                    'scrapImpresoKg' => '0',
+                ],
+            ],
+        ]);
+
+        $q = [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+            'layout' => 'history_kg',
+            'substrate_group' => 'all',
+            'work_order_code' => 'OT-TURN-SCRAP',
+        ];
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query($q), $h)
+            ->assertOk()
+            ->assertJsonPath('rows.0.imp_scrap_transparente_kg', '1.500')
+            ->assertJsonPath('rows.0.imp_scrap_impreso_kg', '1.500');
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'bopp',
+        ])), $h)
+            ->assertOk()
+            ->assertJsonPath('rows.0.imp_scrap_impreso_kg', '1.500')
+            ->assertJsonPath('rows.0.imp_scrap_transparente_kg', '0.000');
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query(array_merge($q, [
+            'substrate_group' => 'transparente',
+        ])), $h)
+            ->assertOk()
+            ->assertJsonPath('rows.0.imp_scrap_transparente_kg', '1.500');
 
         Carbon::setTestNow();
     }
@@ -530,6 +679,7 @@ class ScrapReportFiltersTest extends TestCase
         $ids = collect($groups)->pluck('id')->all();
         $this->assertContains('bopp', $ids);
         $this->assertContains('polietileno', $ids);
+        $this->assertContains('transparente', $ids);
         $this->assertContains('poliestireno', $ids);
     }
 

@@ -148,8 +148,9 @@ export default function WorkOrderDetailPage() {
               <span>
                 {isMontajeFocusedView ? (
                   <>
-                    Registre turno de planta, cronómetro, kg y mermas. Pulse <strong>Guardar</strong> para enviar al
-                    sistema (base de datos de la empresa).
+                    Registre turno de planta, cronómetro, kg y mermas. Al terminar, pulse{" "}
+                    <strong>Guardar</strong> y elija si cierra el turno de planta o finaliza el área Montaje en el
+                    sistema.
                   </>
                 ) : isPrintingFocusedView ? (
                   <>

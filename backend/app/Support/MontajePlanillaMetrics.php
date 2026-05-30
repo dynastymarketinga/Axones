@@ -48,7 +48,12 @@ final class MontajePlanillaMetrics
             return '';
         }
 
-        return self::formatMetricValue($freq['nominal'] * $rep, $freq['tolerance'] * $rep);
+        $value = (int) round($freq['nominal'] * $rep);
+        if ($value <= 0 || $value > 999) {
+            return '';
+        }
+
+        return $value.'mm';
     }
 
     public static function computeAnchoMontaje(mixed $anchoCorteMontaje, mixed $numBandas): string

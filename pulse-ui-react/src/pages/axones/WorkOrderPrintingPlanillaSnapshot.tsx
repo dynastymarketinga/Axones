@@ -6,14 +6,17 @@ import {
   ArrowUpFromLine,
   ChevronsUpDown,
   Cog,
+  MapPin,
   Minus,
   PackagePlus,
   Plus,
+  Scale,
   Warehouse,
   Weight,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 
+import { formatDecimalTwoDisplay, lamMaterialMetrosDisplay } from "@/lib/decimal-two-input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -98,7 +101,8 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
         </span>
       </div>
       <div className="section-body">
-        <div className="ot-grid ot-cols-3">
+        <div className="ot-imp-params">
+          <div className="ot-grid ot-cols-2 ot-imp-metrics-grid lg:ot-cols-4">
           <div className="ot-field">
             <label htmlFor={sid("pinon")} className="ot-label required">
               Piñon (dientes)
@@ -147,7 +151,46 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
               <span className="min-w-0 flex-1 truncate">{lineaCorteComboLabel(form.lineaCorte)}</span>
             </div>
           </div>
-          <div className="ot-field sm:col-span-2 lg:col-span-1" data-field="figEmbImpDisplay">
+          <div className="ot-field">
+            <label htmlFor={sid("ubic-fotocelda")} className="ot-label">
+              Ubic. fotocelda
+            </label>
+            <OtPlanillaInputIcon icon={MapPin}>
+              <input
+                id={sid("ubic-fotocelda")}
+                name="ubicFotoceldaImp"
+                data-field="ubicFotoceldaImp"
+                type="text"
+                className="ot-input"
+                readOnly
+                tabIndex={-1}
+                placeholder="N/A"
+                value={lamMaterialMetrosDisplay(form.ubicFotoceldaImp, "ubicFotoceldaImp", null)}
+              />
+            </OtPlanillaInputIcon>
+          </div>
+          <div className="ot-field">
+            <label htmlFor={sid("gramaje-tinta")} className="ot-label">
+              Gramaje de tinta (g/m²)
+            </label>
+            <OtPlanillaInputIcon icon={Scale}>
+              <input
+                id={sid("gramaje-tinta")}
+                name="gramajeTintaGm2"
+                data-field="gramajeTintaGm2"
+                type="text"
+                className="ot-input"
+                readOnly
+                tabIndex={-1}
+                inputMode="decimal"
+                placeholder="12,50"
+                value={formatDecimalTwoDisplay(readNumberString(form.gramajeTintaGm2))}
+              />
+            </OtPlanillaInputIcon>
+          </div>
+          </div>
+
+          <div className="ot-field ot-imp-figura-field" data-field="figEmbImpDisplay">
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor={sid("fig-emb")} className="ot-label required">
                 Figura emb. (1-8)
@@ -275,16 +318,14 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
                 id={sid("kg-ingresado")}
                 name="kgIngresadoImp"
                 data-field="kgIngresadoImp"
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="0.01"
-                min={0}
                 className="ot-input"
                 readOnly
                 tabIndex={-1}
-                placeholder="1850.50"
+                placeholder="1850,50"
                 aria-invalid={false}
-                value={readNumberString(form.kgIngresadoImp)}
+                value={formatDecimalTwoDisplay(readNumberString(form.kgIngresadoImp))}
               />
             </OtPlanillaInputIcon>
           </div>
@@ -297,16 +338,14 @@ export function WorkOrderPrintingPlanillaSnapshot({ form }: { form: Record<strin
                 id={sid("kg-salida")}
                 name="kgSalidaImp"
                 data-field="kgSalidaImp"
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="0.01"
-                min={0}
                 className="ot-input"
                 readOnly
                 tabIndex={-1}
-                placeholder="1825.00"
+                placeholder="1825,00"
                 aria-invalid={false}
-                value={readNumberString(form.kgSalidaImp)}
+                value={formatDecimalTwoDisplay(readNumberString(form.kgSalidaImp))}
               />
             </OtPlanillaInputIcon>
           </div>

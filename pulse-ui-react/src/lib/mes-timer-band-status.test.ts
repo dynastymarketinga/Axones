@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import { montajeMesBandFromWorkOrderRow } from "@/lib/montaje-mes-band-status"
 import { laminacionMesBandFromWorkOrderRow } from "@/lib/laminacion-mes-band-status"
-import { cumulativeDeadSeconds, mesBandFromAreaTimeSummary } from "@/lib/mes-timer-band-shared"
+import { cumulativeDeadSeconds, cumulativeTotalPersistedSeconds, mesBandFromAreaTimeSummary } from "@/lib/mes-timer-band-shared"
 import {
   MON_ACTUAL_KEY,
   MON_TURNOS_KEY,
@@ -255,5 +255,30 @@ describe("cumulativeDeadSeconds", () => {
     )
     expect(dead).toBeGreaterThan(15.9)
     expect(dead).toBeLessThan(16.1)
+  })
+})
+
+describe("cumulativeTotalPersistedSeconds", () => {
+  it("no suma el tramo abierto de parada al total acumulado", () => {
+    const nowMs = 1_000_000
+    const pauseAtMs = nowMs - 12_000
+    const actual = {
+      turno: "nocturno",
+      grupo: "B",
+      timer: {
+        state: "paused",
+        effectiveAccSec: 41,
+        deadAccSec: 4,
+        lastResumeAtMs: 0,
+        pauseAtMs,
+        pauses: [],
+      },
+    }
+    const dead = cumulativeDeadSeconds([], actual, nowMs)
+    const total = cumulativeTotalPersistedSeconds([], actual, nowMs)
+    expect(dead).toBeGreaterThan(15.9)
+    expect(dead).toBeLessThan(16.1)
+    expect(total).toBe(45)
+    expect(total).toBeLessThan(41 + dead)
   })
 })

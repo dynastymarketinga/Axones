@@ -10,12 +10,27 @@ import { Badge } from "@/components/ui/badge"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import { MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
+import {
+  formatDecimalTwoDisplay,
+  lamMaterialMetrosDisplay,
+} from "@/lib/decimal-two-input"
 import { LAMINACION_CONTROL_SAVED_EVENT } from "@/lib/laminacion-mes-band-status"
+import { applyMesPhaseConfirmToTimer } from "@/lib/mes-multi-phase-timer-exec"
 import {
   cumulativeDeadSeconds,
   cumulativeEffectiveSeconds,
+  cumulativeTotalPersistedSeconds,
+  deadAccSecAfterResume,
   formatHmsFromSeconds,
+  formatHoraArranqueFromMs,
+  horaArranqueMsFromTimer,
 } from "@/lib/mes-timer-band-shared"
+import {
+  buildMesTimerActionFlags,
+  getMesTimerConfirm,
+  mesTimerConfirmNeedsActiveTurno,
+  type MesTimerConfirmKey,
+} from "./mes-timer-actions"
 import {
   canSaveProductionAreaForm,
   hasProductionTimerStarted,
@@ -38,6 +53,8 @@ import WorkOrderLaminacionOpsSection, {
   type DraftPersonRole,
   stringsFromActivePersonnel,
 } from "./WorkOrderLaminacionOpsSection"
+import { useMesWarehouseReturn } from "./use-mes-warehouse-return"
+import { countDevolucionRechazadaBobinas, normalizeSalidaBobinaLabelMeta } from "./printing-turnos"
 import {
   parseLamChecklistChecked,
   type LamChecklistEstado,
@@ -49,6 +66,7 @@ import {
   LAM_TURNOS_KEY,
   accumulateLaminacionFromJson,
   bootstrapLaminacionFormState,
+  cumulativeDemountSeconds,
   clearLaminacionMirrorKeys,
   createNewLaminacionTurno,
   finalizeLaminacionTurnTimerNow,
@@ -68,7 +86,6 @@ import {
   normalizeLaminacionFormForSave,
   normalizeBobinaLabelMeta,
   validateBobinaLabelSave,
-  metaKeyForLabelMode,
   emptyBobinaLabelMeta,
   readLamNumber,
   sumSeriesKg,
@@ -123,6 +140,25 @@ function normalizeNumericString(v: unknown): string {
   const n = toFiniteOrNull(v)
   if (n === null) return ""
   return String(n)
+}
+
+function todayBobinaLabelFecha(): string {
+  const now = new Date()
+  const dd = String(now.getDate()).padStart(2, "0")
+  const mm = String(now.getMonth() + 1).padStart(2, "0")
+  const yyyy = String(now.getFullYear())
+  return `${dd}/${mm}/${yyyy}`
+}
+
+function labelEditorDraftFromMeta(meta: BobinaLabelMeta | undefined, mode: LamLabelEditorMode): BobinaLabelMeta {
+  if (mode === "salida") {
+    const draft = normalizeSalidaBobinaLabelMeta(meta ?? {})
+    if (!draft.fecha.trim()) draft.fecha = todayBobinaLabelFecha()
+    return draft
+  }
+  const draft = meta ? { ...meta } : emptyBobinaLabelMeta()
+  if (!draft.fecha.trim()) draft.fecha = todayBobinaLabelFecha()
+  return draft
 }
 
 /** Tonos visuales para confirmaciones del panel de laminación (alineados a cada acción). */
@@ -265,10 +301,20 @@ function mesLaminacionToastWarning(message: string) {
   })
 }
 
-/** Limpia borradores legacy del navegador (ya no se usan; el estado viene del servidor). */
-function purgeLegacyLaminacionBrowserDrafts(workOrderId: number) {
+/** Borrador legacy del panel (solo se purga al cargar; ya no se escribe). */
+const LEGACY_LAMINACION_DRAFT_KEY = "axones.laminacion.control.draft."
+
+function purgeLegacyLaminacionDraft(workOrderId: number) {
   try {
-    localStorage.removeItem(`axones.laminacion.control.draft.${workOrderId}`)
+    localStorage.removeItem(`${LEGACY_LAMINACION_DRAFT_KEY}${workOrderId}`)
+  } catch {
+    // ignore
+  }
+}
+
+function clearLaminacionBrowserCache(workOrderId: number) {
+  purgeLegacyLaminacionDraft(workOrderId)
+  try {
     localStorage.removeItem(`axones.laminacion.timer-preview.${workOrderId}`)
   } catch {
     // ignore
@@ -367,9 +413,17 @@ export default function WorkOrderLaminacionControlPanel({
       const payload = await apiFetch<OrdenTrabajoPayload>(`work-orders/${workOrderId}/orden-trabajo`)
       setPrefill(payload.prefill ?? {})
       const mergedForm = mergePrefill(payload.prefill ?? {}, payload.form)
-      purgeLegacyLaminacionBrowserDrafts(workOrderId)
       const boot = bootstrapLaminacionFormState(mergedForm)
+      const areaEstadoOnLoad = readLaminacionEstadoArea(boot[LAM_ESTADO_KEY])
+      purgeLegacyLaminacionDraft(workOrderId)
       setForm(boot)
+      if (areaEstadoOnLoad === "finalizada") {
+        try {
+          localStorage.removeItem(`axones.laminacion.timer-preview.${workOrderId}`)
+        } catch {
+          // ignore
+        }
+      }
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar la OT para laminacion.")
@@ -386,10 +440,6 @@ export default function WorkOrderLaminacionControlPanel({
 
   const formRef = useRef(form)
   formRef.current = form
-
-  useEffect(() => {
-    purgeLegacyLaminacionBrowserDrafts(workOrderId)
-  }, [workOrderId])
 
   useEffect(() => {
     let cancelled = false
@@ -446,6 +496,34 @@ export default function WorkOrderLaminacionControlPanel({
   )
   const acetatoConsumido = Math.max(0, readLamNumber(form.lamAcetatoEntradaLt) - readLamNumber(form.lamAcetatoSobroLt))
   const totalEntradaTurno = totalEntradaImpresa + totalEntradaVirgen + adhesivoConsumido
+
+  const lamWarehouseReturn = useMesWarehouseReturn({
+    workOrderId,
+    workOrderCode:
+      readString(prefill.code) || readString(prefill.numeroOrden) || `OT-${workOrderId}`,
+    form,
+    setForm,
+    config: {
+      originArea: "Laminación",
+      areaRequestTitlePrefix: "Devolución desde Laminación",
+      keys: {
+        devolucionBuenaKg: "lamDevolucionBuenaKg",
+        devolucionRechazadaBobinas: "lamDevolucionRechazadaBobinas",
+        devolucionRechazadaKg: "lamDevolucionRechazadaKg",
+        devolucionRechazadaMotivo: "lamDevolucionRechazadaMotivo",
+        ultimoEnvioMs: "lamDevolucionesAlmacenUltimoEnvioMs",
+        snapBuena: "lamDevolucionesAlmacenSnapBuena",
+        snapRech: "lamDevolucionesAlmacenSnapRech",
+      },
+    },
+    onSuccess: mesLaminacionToastSuccess,
+  })
+
+  const devolucionRechazadaBobinas = countDevolucionRechazadaBobinas(
+    form.lamDevolucionRechazadaBobinas,
+    form.lamDevolucionRechazadaKg,
+  )
+
   const checklistCheckedIds = useMemo(
     () => parseLamChecklistChecked(form.lamChecklistChecked),
     [form.lamChecklistChecked],
@@ -504,10 +582,9 @@ export default function WorkOrderLaminacionControlPanel({
   const [pauseReason, setPauseReason] = useState("")
   const [pauseObs, setPauseObs] = useState("")
   const [startTurnConfirmOpen, setStartTurnConfirmOpen] = useState(false)
-  const [startTimerConfirmOpen, setStartTimerConfirmOpen] = useState(false)
+  const [timerConfirm, setTimerConfirm] = useState<MesTimerConfirmKey | null>(null)
   const [takeoverConfirmOpen, setTakeoverConfirmOpen] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
-  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
   const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
   const [finalizeOtConfirmOpen, setFinalizeOtConfirmOpen] = useState(false)
@@ -519,6 +596,10 @@ export default function WorkOrderLaminacionControlPanel({
   const pauseReasons = LAM_PAUSE_REASONS
 
   const timerState = readString(form.lamTimerState) || "pending"
+  const arranqueState = readString(form.lamTimerArranqueState) || "idle"
+  const demountState = readString(form.lamTimerDemountState) || "idle"
+  const arranqueRunning = arranqueState === "running"
+  const demountRunning = demountState === "running"
   const timerRunning = timerState === "running"
   const timerPaused = timerState === "paused"
   const nowMs = Date.now() + timerTick * 0
@@ -530,14 +611,30 @@ export default function WorkOrderLaminacionControlPanel({
     () => cumulativeDeadSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
   )
-  const otTotalAccSec = otEffectiveAccSec + otDeadAccSec
+  const otTotalAccSec = useMemo(
+    () => cumulativeTotalPersistedSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otDemountAccSec = useMemo(
+    () => cumulativeDemountSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
   const displayEffectiveSec = otEffectiveAccSec
   const displayDeadSec = otDeadAccSec
   const displayTotalSec = otTotalAccSec
+  const displayDemountSec = otDemountAccSec
   const kgHora =
     displayEffectiveSec > 0.01
       ? (producidoAcumuladoKg / (displayEffectiveSec / 3600)).toFixed(2)
       : "0.00"
+  const displayHoraArranque = useMemo(() => {
+    if (!activeTurno) return "—"
+    const t = activeTurno.timer
+    if (t.arranqueStartedAtMs > 0) {
+      return formatHoraArranqueFromMs(t.arranqueStartedAtMs)
+    }
+    return formatHoraArranqueFromMs(horaArranqueMsFromTimer(t))
+  }, [activeTurno])
   const pauseEntries = useMemo<LaminacionPauseEntry[]>(() => {
     const raw = form.lamTimerPauses
     if (!Array.isArray(raw)) return []
@@ -618,6 +715,34 @@ export default function WorkOrderLaminacionControlPanel({
     if (areaFinalizada) return false
     return timerEverStarted
   }, [hasActiveTurno, controlReadOnly, areaFinalizada, timerEverStarted])
+
+  const timerActionFlags = useMemo(
+    () =>
+      buildMesTimerActionFlags({
+        base: !controlReadOnly && hasActiveTurno && !areaFinalizada,
+        arranqueRunning,
+        demountRunning,
+        timerRunning,
+        timerPaused,
+        canFinalizeOrder,
+        areaFinalizada,
+        controlReadOnly,
+        timerState,
+        canPreview: canPreviewTimerReport,
+      }),
+    [
+      areaFinalizada,
+      arranqueRunning,
+      canFinalizeOrder,
+      canPreviewTimerReport,
+      controlReadOnly,
+      demountRunning,
+      hasActiveTurno,
+      timerPaused,
+      timerRunning,
+      timerState,
+    ],
+  )
 
   function requestTakeover() {
     if (readOnlyOps) return
@@ -757,7 +882,7 @@ export default function WorkOrderLaminacionControlPanel({
     }
     const scrapTurno = activeTurno ? sumScrapKgTurno(activeTurno) : readLamNumber(form.lamScrapLaminadoKg)
     if (scrapTurno > MAX_MERMA) {
-      warnings.push(`Scrap del turno alto (${scrapTurno.toFixed(2)} Kg).`)
+      warnings.push(`Desperdicio del turno alto (${scrapTurno.toFixed(2)} Kg).`)
     }
     const metraje = readNumber(form.lamMetrajeProduccion)
     if (metraje > MAX_METRAJE) {
@@ -917,14 +1042,14 @@ export default function WorkOrderLaminacionControlPanel({
   }, [persistLaminacionForm])
 
   useEffect(() => {
-    if (!timerRunning && !timerPaused) return
+    if (!timerRunning && !timerPaused && !arranqueRunning && !demountRunning) return
     const id = window.setInterval(() => setTimerTick((n) => n + 1), 1000)
     return () => window.clearInterval(id)
-  }, [timerPaused, timerRunning])
+  }, [timerPaused, timerRunning, arranqueRunning, demountRunning])
 
   // Auto-guardado cada 60s mientras corre el temporizador (si tengo control).
   useEffect(() => {
-    if (!timerRunning) return
+    if (!timerRunning && !arranqueRunning && !demountRunning) return
     if (controlReadOnly) return
     const id = window.setInterval(() => {
       if (controlReadOnly) return
@@ -932,11 +1057,63 @@ export default function WorkOrderLaminacionControlPanel({
       persistLaminacionFormCb(form)
     }, 60000)
     return () => window.clearInterval(id)
-  }, [timerRunning, controlReadOnly, saving, persistLaminacionFormCb, form])
+  }, [timerRunning, arranqueRunning, demountRunning, controlReadOnly, saving, persistLaminacionFormCb, form])
 
-  function startProductionTimer() {
-    if (!hasActiveTurno || controlReadOnly) return
-    setStartTimerConfirmOpen(true)
+  function patchAndPersistTimer(
+    updater: (timer: LaminacionTurnTimer) => LaminacionTurnTimer,
+    successMessage?: string,
+  ) {
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: LaminacionTurnoEntry = { ...cur, timer: updater(cur.timer) }
+    patchActiveTurn(() => nextTurn)
+    void persistLaminacionForm(
+      {
+        ...form,
+        [LAM_ACTUAL_KEY]: nextTurn,
+        ...laminacionTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage,
+      },
+    )
+  }
+
+  function requestTimerConfirm(key: MesTimerConfirmKey) {
+    if (controlReadOnly) return
+    setTimerConfirm(key)
+  }
+
+  function executeTimerConfirm(key: MesTimerConfirmKey) {
+    if (!mesTimerConfirmNeedsActiveTurno(key)) {
+      requestFinalizarAreaLaminacion()
+      return
+    }
+    const cur = activeTurno
+    if (!cur) return
+    const phase = applyMesPhaseConfirmToTimer(key, cur.timer)
+    if (phase) {
+      patchAndPersistTimer(() => phase.timer, phase.message)
+      return
+    }
+    switch (key) {
+      case "startProduction":
+        confirmStartProductionTimer()
+        break
+      case "startDeadTime":
+        executePauseProductionTimer()
+        break
+      case "endDeadTime":
+        confirmResumeProductionAfterDeadTime()
+        break
+      case "cerrarTurno":
+        requestCerrarTurnoActual()
+        break
+      default:
+        break
+    }
   }
 
   function confirmStartProductionTimer() {
@@ -950,12 +1127,12 @@ export default function WorkOrderLaminacionControlPanel({
         ...cur.timer,
         state: "running",
         startedAtMs: cur.timer.startedAtMs || now,
+        deadAccSec: deadAccSecAfterResume(cur.timer, now),
         lastResumeAtMs: now,
         pauseAtMs: 0,
       },
     }
     patchActiveTurn(() => nextTurn)
-    setStartTimerConfirmOpen(false)
     void persistLaminacionForm(
       {
         ...form,
@@ -970,14 +1147,34 @@ export default function WorkOrderLaminacionControlPanel({
     )
   }
 
-  function requestPauseProductionTimer() {
-    if (!timerRunning || controlReadOnly) return
-    setPauseConfirmOpen(true)
-  }
-
-  function confirmPauseProductionTimer() {
-    setPauseConfirmOpen(false)
-    executePauseProductionTimer()
+  function confirmResumeProductionAfterDeadTime() {
+    if (!hasActiveTurno || controlReadOnly || !timerPaused) return
+    const now = Date.now()
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: LaminacionTurnoEntry = {
+      ...cur,
+      timer: {
+        ...cur.timer,
+        state: "running",
+        deadAccSec: deadAccSecAfterResume(cur.timer, now),
+        lastResumeAtMs: now,
+        pauseAtMs: 0,
+      },
+    }
+    patchActiveTurn(() => nextTurn)
+    void persistLaminacionForm(
+      {
+        ...form,
+        [LAM_ACTUAL_KEY]: nextTurn,
+        ...laminacionTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage: "Producción reanudada.",
+      },
+    )
   }
 
   /** Pausa atómica: un solo setForm + persist con el mismo snapshot (evita desincronía mirror / turno anidado). */
@@ -1245,7 +1442,7 @@ export default function WorkOrderLaminacionControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      purgeLegacyLaminacionBrowserDrafts(workOrderId)
+      clearLaminacionBrowserCache(workOrderId)
       mesLaminacionToastSuccess(
         "Área de laminación finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
       )
@@ -1264,7 +1461,7 @@ export default function WorkOrderLaminacionControlPanel({
           : salidaBobinasMeta[idx]
     setLabelEditorMode(mode)
     setLabelEditorIndex(idx)
-    setLabelEditorDraft(meta ? { ...meta } : emptyBobinaLabelMeta())
+    setLabelEditorDraft(labelEditorDraftFromMeta(meta, mode))
     setLabelEditorError("")
     setLabelEditorOpen(true)
   }
@@ -1275,18 +1472,24 @@ export default function WorkOrderLaminacionControlPanel({
   }
 
   function clearLabelEditor() {
-    setLabelEditorDraft(emptyBobinaLabelMeta())
+    if (labelEditorMode === "salida") {
+      setLabelEditorDraft({ ...normalizeSalidaBobinaLabelMeta({}), fecha: todayBobinaLabelFecha() })
+    } else {
+      setLabelEditorDraft({ ...emptyBobinaLabelMeta(), fecha: todayBobinaLabelFecha() })
+    }
     setLabelEditorError("")
   }
 
   function saveLabelEditor() {
-    const err = validateBobinaLabelSave(labelEditorDraft)
+    const normalized =
+      labelEditorMode === "salida"
+        ? normalizeSalidaBobinaLabelMeta(labelEditorDraft)
+        : normalizeBobinaLabelMeta(labelEditorDraft)
+    const err = validateBobinaLabelSave(normalized)
     if (err) {
       setLabelEditorError(err)
       return
     }
-    const normalized = normalizeBobinaLabelMeta(labelEditorDraft)
-    const key = metaKeyForLabelMode(labelEditorMode)
     patchActiveTurn((t) => {
       const next = { ...t }
       if (labelEditorMode === "impresa") {
@@ -1301,6 +1504,13 @@ export default function WorkOrderLaminacionControlPanel({
         const meta = [...t.salidaBobinasMeta]
         meta[labelEditorIndex] = normalized
         next.salidaBobinasMeta = meta
+        const nextSalidaKg = [...t.salidaBobinasKg]
+        while (nextSalidaKg.length < LAM_BOBINAS_SLOTS) nextSalidaKg.push("")
+        const pesoLabel = readNumber(normalized.peso)
+        if (pesoLabel > 0.005 && readNumber(nextSalidaKg[labelEditorIndex]) < 0.005) {
+          nextSalidaKg[labelEditorIndex] = normalizeNumericString(pesoLabel)
+          next.salidaBobinasKg = nextSalidaKg.slice(0, LAM_BOBINAS_SLOTS)
+        }
       }
       return next
     })
@@ -1378,7 +1588,7 @@ export default function WorkOrderLaminacionControlPanel({
       if (k.startsWith("lamBlockDone.")) delete cleared[k]
     }
 
-    purgeLegacyLaminacionBrowserDrafts(workOrderId)
+    clearLaminacionBrowserCache(workOrderId)
     setForm(bootstrapLaminacionFormState(cleared))
     mesLaminacionToastSuccess("Laminación reiniciado localmente. Guardando en el servidor…")
     await persistLaminacionForm(cleared, { skipProductionSaveGuard: true })
@@ -1443,7 +1653,7 @@ export default function WorkOrderLaminacionControlPanel({
               </div>
               <div className="ot-field">
                 <label className="ot-label">Gramaje adhesivo (g/m2)</label>
-                <input className="ot-input" value={readString(form.gramajeAdhesivo)} placeholder="1,5 a 2,0" readOnly />
+                <input className="ot-input" value={readString(form.gramajeAdhesivo)} placeholder="1,5 A 2,2" readOnly />
               </div>
               <div className="ot-field">
                 <label className="ot-label">Relacion mezcla</label>
@@ -1452,6 +1662,86 @@ export default function WorkOrderLaminacionControlPanel({
               <div className="ot-field">
                 <label className="ot-label">Observaciones</label>
                 <input className="ot-input" value={readString(form.obsLaminacion)} readOnly />
+              </div>
+            </div>
+
+            <div className="ot-lam-materiales-block">
+              <div className="ot-lam-materiales-table">
+                <span className="ot-lam-materiales-head">Materiales</span>
+                <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric">Kilos (kg)</span>
+                <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric">Metros (m)</span>
+
+                <span className="ot-lam-materiales-label">Lámina impresa</span>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={formatDecimalTwoDisplay(readNumberString(form.kgLaminaImpresaLaminacion))}
+                    placeholder="420,00"
+                  />
+                </div>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={lamMaterialMetrosDisplay(form.metrosLaminaImpresaLaminacion, "metrosLaminaImpresaLaminacion", null)}
+                    placeholder="N/A"
+                  />
+                </div>
+
+                <span className="ot-lam-materiales-label">Lámina virgen</span>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={formatDecimalTwoDisplay(readNumberString(form.kgLaminaVirgenLaminacion))}
+                    placeholder="420,00"
+                  />
+                </div>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={lamMaterialMetrosDisplay(form.metrosLaminaVirgenLaminacion, "metrosLaminaVirgenLaminacion", null)}
+                    placeholder="N/A"
+                  />
+                </div>
+
+                <span className="ot-lam-materiales-label">Adhesivo para laminación</span>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={formatDecimalTwoDisplay(readNumberString(form.kgAdhesivoLaminacion))}
+                    placeholder="33,00"
+                  />
+                </div>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={lamMaterialMetrosDisplay(form.metrosAdhesivoLaminacion, "metrosAdhesivoLaminacion", null)}
+                    placeholder="N/A"
+                  />
+                </div>
+
+                <span className="ot-lam-materiales-label">Catalizador para laminación</span>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={formatDecimalTwoDisplay(readNumberString(form.kgCatalizadorLaminacion))}
+                    placeholder="23,00"
+                  />
+                </div>
+                <div className="ot-lam-materiales-cell">
+                  <input
+                    className="ot-input ot-lam-materiales-value-input"
+                    readOnly
+                    value={lamMaterialMetrosDisplay(form.metrosCatalizadorLaminacion, "metrosCatalizadorLaminacion", null)}
+                    placeholder="N/A"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1569,6 +1859,34 @@ export default function WorkOrderLaminacionControlPanel({
           <div>
             <span className="text-muted-foreground">Relación mezcla:</span> {readString(form.relacionMezcla) || "—"}
           </div>
+          <div>
+            <span className="text-muted-foreground">Lámina impresa (kg):</span>{" "}
+            {formatDecimalTwoDisplay(readNumberString(form.kgLaminaImpresaLaminacion)) || "—"}{" "}
+            <span className="text-muted-foreground">
+              · Metros: {lamMaterialMetrosDisplay(form.metrosLaminaImpresaLaminacion, "metrosLaminaImpresaLaminacion", null)}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Lámina virgen (kg):</span>{" "}
+            {formatDecimalTwoDisplay(readNumberString(form.kgLaminaVirgenLaminacion)) || "—"}{" "}
+            <span className="text-muted-foreground">
+              · Metros: {lamMaterialMetrosDisplay(form.metrosLaminaVirgenLaminacion, "metrosLaminaVirgenLaminacion", null)}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Adhesivo (kg):</span>{" "}
+            {formatDecimalTwoDisplay(readNumberString(form.kgAdhesivoLaminacion)) || "—"}{" "}
+            <span className="text-muted-foreground">
+              · Metros: {lamMaterialMetrosDisplay(form.metrosAdhesivoLaminacion, "metrosAdhesivoLaminacion", null)}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Catalizador (kg):</span>{" "}
+            {formatDecimalTwoDisplay(readNumberString(form.kgCatalizadorLaminacion)) || "—"}{" "}
+            <span className="text-muted-foreground">
+              · Metros: {lamMaterialMetrosDisplay(form.metrosCatalizadorLaminacion, "metrosCatalizadorLaminacion", null)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1599,8 +1917,14 @@ export default function WorkOrderLaminacionControlPanel({
         effectiveSec={displayEffectiveSec}
         timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
+        horaArranque={displayHoraArranque}
+        demountSec={displayDemountSec}
+        arranqueRunning={arranqueRunning}
+        demountRunning={demountRunning}
         timerRunning={timerRunning}
         timerPaused={timerPaused}
+        timerActionFlags={timerActionFlags}
+        onRequestTimerConfirm={requestTimerConfirm}
         pauseReasons={pauseReasons}
         pauseReason={pauseReason}
         pauseObs={pauseObs}
@@ -1636,7 +1960,10 @@ export default function WorkOrderLaminacionControlPanel({
         virgenRechazadasRaw={readNumberString(form.lamEntradaVirgenRechazadasKg)}
         virgenMaterialesBuenosRaw={readNumberString(form.lamEntradaVirgenMaterialesBuenosKg)}
         devolucionBuenaRaw={readNumberString(form.lamDevolucionBuenaKg)}
-        devolucionRechazadaRaw={readNumberString(form.lamDevolucionRechazadaKg)}
+        devolucionRechazadaRaw={readNumberString(form.lamDevolucionRechazadaBobinas)}
+        devolucionRechazadaMotivoRaw={readString(form.lamDevolucionRechazadaMotivo)}
+        devolucionesPendienteAlmacen={lamWarehouseReturn.devolucionesPendienteAlmacen}
+        warehouseReturn={lamWarehouseReturn.warehouseReturnPanelProps}
         checklistOpen={checklistOpen}
         checklistCheckedIds={checklistCheckedIds}
         checklistEstado={(readString(form.lamChecklistEstado) as LamChecklistEstado) || ""}
@@ -1679,7 +2006,19 @@ export default function WorkOrderLaminacionControlPanel({
           patchActiveTurn((t) => ({ ...t, entradaVirgenMaterialesBuenosKg: v }))
         }
         onSetDevolucionBuena={(v) => setForm((prev) => ({ ...prev, lamDevolucionBuenaKg: v }))}
-        onSetDevolucionRechazada={(v) => setForm((prev) => ({ ...prev, lamDevolucionRechazadaKg: v }))}
+        onSetDevolucionRechazada={(v) => {
+          const raw = String(v ?? "").trim().replace(",", ".")
+          const n = raw === "" ? 0 : Number(raw)
+          const rechZero = !Number.isFinite(n) || n <= 0
+          const bobinas = rechZero ? "" : String(Math.max(0, Math.floor(n)))
+          setForm((prev) => ({
+            ...prev,
+            lamDevolucionRechazadaKg: "",
+            lamDevolucionRechazadaBobinas: bobinas,
+            lamDevolucionRechazadaMotivo: rechZero ? "" : readString(prev.lamDevolucionRechazadaMotivo),
+          }))
+        }}
+        devolucionRechazada={devolucionRechazadaBobinas}
         onSetScrapTransparente={(v) => patchActiveTurn((t) => ({ ...t, scrapTransparenteKg: v }))}
         onSetScrapImpreso={(v) => patchActiveTurn((t) => ({ ...t, scrapImpresoKg: v }))}
         onSetScrapLaminado={(v) => patchActiveTurn((t) => ({ ...t, scrapLaminadoKg: v }))}
@@ -1698,8 +2037,6 @@ export default function WorkOrderLaminacionControlPanel({
         formatTimerHms={formatTimerHms}
         setPauseReason={setPauseReason}
         setPauseObs={setPauseObs}
-        startProductionTimer={startProductionTimer}
-        pauseProductionTimer={requestPauseProductionTimer}
         confirmPauseAndResume={confirmPauseAndResume}
         hasActiveTurno={hasActiveTurno}
         areaFinalizada={areaFinalizada}
@@ -1799,27 +2136,27 @@ export default function WorkOrderLaminacionControlPanel({
         </div>
       </div>
 
-      <MesLaminacionConfirmDialog
-        tone="emerald"
-        open={startTimerConfirmOpen}
-        onOpenChange={setStartTimerConfirmOpen}
-        icon={<CirclePlay className="h-5 w-5" aria-hidden />}
-        title="Iniciar cronómetro (Laminación)"
-        description="¿Está seguro? Una vez iniciado, el cronómetro de máquina corre (tiempo efectivo); las paradas registran motivo. El turno de planta ya debe estar abierto."
-        confirmLabel="Confirmar e iniciar"
-        onConfirm={() => confirmStartProductionTimer()}
-      />
-
-      <MesLaminacionConfirmDialog
-        tone="sky"
-        open={pauseConfirmOpen}
-        onOpenChange={setPauseConfirmOpen}
-        icon={<CirclePause className="h-5 w-5" aria-hidden />}
-        title="Pausar cronómetro (parada)"
-        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada (tiempo muerto). No cierra el turno de planta; use «Cerrar turno» para eso. Tras registrar el motivo, el cronómetro seguirá en pausa hasta que pulse play. ¿Desea pausar ahora?"
-        confirmLabel="Sí, pausar"
-        onConfirm={() => confirmPauseProductionTimer()}
-      />
+      {timerConfirm ? (
+        <MesLaminacionConfirmDialog
+          tone={getMesTimerConfirm("laminacion")[timerConfirm].tone}
+          open
+          onOpenChange={(open) => {
+            if (!open) setTimerConfirm(null)
+          }}
+          icon={<CirclePlay className="h-5 w-5" aria-hidden />}
+          title={getMesTimerConfirm("laminacion")[timerConfirm].title}
+          description={getMesTimerConfirm("laminacion")[timerConfirm].description}
+          confirmLabel={getMesTimerConfirm("laminacion")[timerConfirm].confirmLabel}
+          confirmVariant={
+            getMesTimerConfirm("laminacion")[timerConfirm].destructive ? "destructive" : "default"
+          }
+          onConfirm={() => {
+            const key = timerConfirm
+            setTimerConfirm(null)
+            executeTimerConfirm(key)
+          }}
+        />
+      ) : null}
 
       <MesLaminacionConfirmDialog
         tone="violet"
@@ -1841,7 +2178,7 @@ export default function WorkOrderLaminacionControlPanel({
         description={
           <>
             Esto borrará turnos, cronómetro, producción, merma y metraje registrados en Laminación para esta OT.
-            También limpia el respaldo local del navegador. ¿Desea continuar?
+            ¿Desea continuar?
           </>
         }
         confirmLabel="Confirmar reinicio"

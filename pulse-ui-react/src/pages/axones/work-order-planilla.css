@@ -343,6 +343,89 @@
   color: var(--ax-ot-lam-sublam-fore);
 }
 
+/* Adhesivo / catalizador laminación: tabla Kilos (kg) + Metros (m) como planilla impresa */
+.ax-ot .ot-lam-materiales-block {
+  margin: 12px 0 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ax-ot-border) 68%, var(--ax-ot-lam-fab) 32%);
+  background: color-mix(in srgb, var(--ax-ot-lam-sublam-from) 30%, #fff 70%);
+}
+
+.ax-ot .ot-lam-materiales-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7.5rem 7.5rem;
+  column-gap: 12px;
+  row-gap: 10px;
+  align-items: center;
+}
+
+.ax-ot .ot-lam-materiales-head {
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ax-ot-border) 75%, var(--ax-ot-lam-fab) 25%);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ax-ot-lam-sublam-fore) 88%, #000 12%);
+}
+
+.ax-ot .ot-lam-materiales-head--numeric {
+  text-align: center;
+}
+
+.ax-ot .ot-lam-materiales-label {
+  align-self: center;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ax-ot-text);
+}
+
+.ax-ot .ot-lam-materiales-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ax-ot .ot-lam-materiales-value-input {
+  width: 100%;
+  min-height: 36px;
+  max-height: 36px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ax-ot .ot-lam-materiales-cell .ot-field-error,
+.ax-ot .ot-lam-materiales-cell .text-destructive {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.ax-ot .ot-lam-materiales-na {
+  align-self: center;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--ax-ot-text) 55%, #fff 45%);
+}
+
+.ax-ot .ot-lam-materiales-table .ot-field {
+  margin: 0;
+}
+
 .ax-ot button.ot-fab-laminacion {
   background-color: var(--ax-ot-lam-fab);
   color: #fff;
@@ -517,6 +600,18 @@
 /* Línea sustrato laminación: mismo 2/1; margen bajo en listas */
 .ax-ot .ot-grid.ot-sustrato-lam {
   margin-bottom: 0.3rem;
+}
+
+/* Impresión: 4 campos compactos + figura embobinado en fila aparte */
+.ax-ot .ot-imp-params {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin-bottom: 0.25rem;
+}
+
+.ax-ot .ot-imp-params .ot-imp-figura-field {
+  min-width: 0;
 }
 
 /*
@@ -1141,8 +1236,24 @@
 }
 
 @media (min-width: 640px) {
-  .ax-mes .mes-timer-metrics {
+  .ax-mes .mes-timer-metrics:not(:has(.mes-timer-metric:nth-child(4))) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .ax-mes .mes-timer-metrics:has(.mes-timer-metric:nth-child(4)):not(.mes-timer-metrics--with-demount) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ax-mes .mes-timer-metrics.mes-timer-metrics--with-demount {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .ax-mes .mes-timer-metrics.mes-timer-metrics--with-demount {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
@@ -1185,6 +1296,19 @@
 
 .ax-mes .mes-timer-metric__value--neutral {
   color: #e2e8f0;
+}
+
+.ax-mes .mes-timer-metric__value--arranque {
+  color: #fcd34d;
+  font-size: clamp(0.95rem, 2.1vw, 1.2rem);
+}
+
+.ax-mes .mes-timer-metric__value--demount {
+  color: #5eead4;
+}
+
+.ax-mes .mes-timer-metric__value--demount-live {
+  color: #2dd4bf;
 }
 
 .ax-mes .mes-toggle-row.mes-toggle-turno button,
@@ -1398,6 +1522,14 @@
   align-items: center;
 }
 
+.ax-mes .mes-timer-action-stack--scroll {
+  max-height: min(28rem, 70vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
+}
+
 .ax-mes .mes-timer-action-labeled {
   display: flex;
   width: 100%;
@@ -1442,6 +1574,76 @@
 
 .ax-mes .mes-timer-actions .mes-btn-primary:hover:not(:disabled) {
   background: #065f46 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-arranque {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  border: 1px solid #d97706 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-arranque:hover:not(:disabled) {
+  background: #fde68a !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-arranque-stop {
+  background: #fff7ed !important;
+  color: #9a3412 !important;
+  border: 1px solid #ea580c !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-arranque-stop:hover:not(:disabled) {
+  background: #ffedd5 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-montaje-op {
+  background: #eef2ff !important;
+  color: #3730a3 !important;
+  border: 1px solid #6366f1 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-montaje-op:hover:not(:disabled) {
+  background: #e0e7ff !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-montaje-op-stop {
+  background: #f5f3ff !important;
+  color: #5b21b6 !important;
+  border: 1px solid #7c3aed !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-montaje-op-stop:hover:not(:disabled) {
+  background: #ede9fe !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-demount {
+  background: #ecfeff !important;
+  color: #0e7490 !important;
+  border: 1px solid #0891b2 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-demount:hover:not(:disabled) {
+  background: #cffafe !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-demount-stop {
+  background: #f0fdfa !important;
+  color: #115e59 !important;
+  border: 1px solid #0d9488 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-demount-stop:hover:not(:disabled) {
+  background: #ccfbf1 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-production-stop {
+  background: #ecfdf5 !important;
+  color: #047857 !important;
+  border: 1px solid #059669 !important;
+}
+
+.ax-mes .mes-timer-actions .mes-btn-production-stop:hover:not(:disabled) {
+  background: #d1fae5 !important;
 }
 
 .ax-mes .mes-timer-actions .mes-btn-secondary {

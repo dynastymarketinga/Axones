@@ -16,8 +16,6 @@ import {
   ListOrdered,
   Package,
   Settings2,
-  TrendingDown,
-  TrendingUp,
   Users,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -106,8 +104,6 @@ function buildScrapTabQuery(
   return { ...q, ...SCRAP_AGGREGATE_TAB_QUERY }
 }
 
-const PIVOT_AREA_KEYS = ["printing", "corte", "laminacion", "montaje"] as const
-
 function scrapAreaLabel(area: string): string {
   if (area === "printing") return "Impresión"
   if (area === "corte") return "Corte"
@@ -139,13 +135,6 @@ function workOrderStatusBadgeClass(status?: string | null): string {
   return "gap-1 rounded-md border px-2 py-0 text-[11px] font-medium leading-tight text-amber-950 dark:text-amber-100 border-amber-500/30 bg-amber-500/10"
 }
 
-function pivotTableroLabel(row: Record<string, unknown>): string {
-  const parts = PIVOT_AREA_KEYS.filter(
-    (a) => row[`${a}_scrap_percent`] != null && row[`${a}_scrap_percent`] !== "",
-  ).map((a) => scrapAreaLabel(a))
-  return parts.length ? parts.join(", ") : "—"
-}
-
 function cellStr(v: unknown): string {
   if (v == null || v === "") return "—"
   return String(v)
@@ -170,9 +159,9 @@ const HISTORY_KG_SUM_KEYS = [
 
 type HistoryKgTotalsShape = Record<(typeof HISTORY_KG_SUM_KEYS)[number], number>
 
-/** El backend enmascara kg transparentes salvo en la pestaña Poliestireno. */
+/** El backend enmascara kg transparentes salvo en la pestaña Transparente. */
 function historyKgHideTransparentColumns(tab: ScrapTab): boolean {
-  return tab !== "poliestireno" && tab !== "por-ot" && tab !== "por-areas"
+  return tab !== "transparente" && tab !== "por-ot" && tab !== "por-areas"
 }
 
 const HISTORY_KG_COL_COUNT_FULL = 18
@@ -466,6 +455,7 @@ export default function ReportsScrapPage() {
   }
 
   function renderPivotTable(rows: Record<string, unknown>[]) {
+    const kgHeadClass = "min-w-[4.5rem] text-right text-xs font-medium tabular-nums"
     return (
       <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
         <Table>
@@ -478,20 +468,24 @@ export default function ReportsScrapPage() {
               <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
               <CatalogTableHead icon={Package}>Producto</CatalogTableHead>
               <CatalogTableHead icon={CircleDot}>Estatus</CatalogTableHead>
-              <CatalogTableHead icon={Columns3}>Tablero</CatalogTableHead>
+              <TableHead className={kgHeadClass}>Imp. impreso (kg)</TableHead>
+              <TableHead className={kgHeadClass}>Imp. transparente (kg)</TableHead>
+              <TableHead className={kgHeadClass}>Laminación (kg)</TableHead>
+              <TableHead className={kgHeadClass}>Corte (kg)</TableHead>
+              <TableHead className={kgHeadClass}>Total (kg)</TableHead>
               <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
             </TableRow>
           </TableHeader>
           <TableBody>
             {listLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={11} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows.length ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={11} className="text-muted-foreground">
                   Sin registros de desperdicio en este período.
                 </TableCell>
               </TableRow>
@@ -527,8 +521,20 @@ export default function ReportsScrapPage() {
                         {workOrderStatusLabel(st)}
                       </Badge>
                     </TableCell>
-                    <TableCell className={catalogTableBodyCellClass}>
-                      {pivotTableroLabel(r)}
+                    <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                      {cellStr(r.imp_scrap_impreso_kg)}
+                    </TableCell>
+                    <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                      {cellStr(r.imp_scrap_transparente_kg)}
+                    </TableCell>
+                    <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                      {cellStr(r.laminacion_scrap_kg)}
+                    </TableCell>
+                    <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                      {cellStr(r.corte_scrap_kg)}
+                    </TableCell>
+                    <TableCell className={cn("text-right font-semibold tabular-nums", catalogTableBodyCellClass)}>
+                      {cellStr(r.total_scrap_kg)}
                     </TableCell>
                     <TableCell className={cn("text-right", catalogTableBodyCellClass)}>
                       <div className="flex flex-wrap justify-end gap-2">
@@ -589,7 +595,7 @@ export default function ReportsScrapPage() {
               <>
                 {historyKgHeadKg(
                   "Imp. transp.",
-                  "Kg de desperdicio transparente registrados en impresión (planilla técnica). En la pestaña Poliestireno concentra este concepto.",
+                  "Kg de desperdicio transparente registrados en impresión (planilla técnica). En la pestaña Transparente concentra este concepto.",
                   kgHeadClass,
                 )}
                 {historyKgHeadKg(
@@ -854,22 +860,20 @@ export default function ReportsScrapPage() {
                 N.º
               </CatalogTableHead>
               <CatalogTableHead icon={Columns3}>Área</CatalogTableHead>
-              <CatalogTableHead icon={CircleDot}>Registros</CatalogTableHead>
-              <CatalogTableHead icon={Activity}>Promedio %</CatalogTableHead>
-              <CatalogTableHead icon={TrendingUp}>Máx.</CatalogTableHead>
-              <CatalogTableHead icon={TrendingDown}>Mín.</CatalogTableHead>
+              <CatalogTableHead icon={CircleDot}>OTs con kg</CatalogTableHead>
+              <CatalogTableHead icon={Activity}>Total kg</CatalogTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {listLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={4} className="text-muted-foreground">
                   Cargando…
                 </TableCell>
               </TableRow>
             ) : !rows.length ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={4} className="text-muted-foreground">
                   Sin registros de desperdicio en este período.
                 </TableCell>
               </TableRow>
@@ -893,14 +897,8 @@ export default function ReportsScrapPage() {
                   <TableCell className={catalogTableBodyCellClass}>
                     {String(r.row_count ?? "—")}
                   </TableCell>
-                  <TableCell className={catalogTableBodyCellClass}>
-                    {String(r.avg_scrap_percent ?? "—")}
-                  </TableCell>
-                  <TableCell className={catalogTableBodyCellClass}>
-                    {String(r.max_scrap_percent ?? "—")}
-                  </TableCell>
-                  <TableCell className={catalogTableBodyCellClass}>
-                    {String(r.min_scrap_percent ?? "—")}
+                  <TableCell className={cn("font-medium tabular-nums", catalogTableBodyCellClass)}>
+                    {cellStr(r.total_scrap_kg)}
                   </TableCell>
                 </TableRow>
               ))
@@ -987,16 +985,16 @@ export default function ReportsScrapPage() {
         </TabsList>
 
         {substrateGroups.map((group) => {
-          const hideTransparent = group.id !== "poliestireno"
+          const hideTransparent = group.id !== "transparente"
           return (
             <TabsContent key={group.id} value={group.id} className="space-y-3">
               <p className="text-muted-foreground text-sm">
                 Desperdicio en kg de OTs clasificadas como <strong>{group.label}</strong>. Los datos salen de la planilla
-                técnica; cargue primero los kg en producción y, si hace falta, el sustrato en Corte.
+                técnica (incluye turnos guardados en Impresión y Laminación); cargue primero los kg en producción y, si hace falta, el sustrato en Corte.
                 {hideTransparent ? (
-                  <> Los kg de film transparente en impresión/laminación se ven en la pestaña Poliestireno.</>
+                  <> Los kg de film transparente en impresión/laminación se ven en la pestaña Transparente.</>
                 ) : (
-                  <> Aquí se listan también los kg transparentes registrados en impresión y laminación.</>
+                  <> Aquí se listan los kg transparentes registrados en impresión y laminación.</>
                 )}
               </p>
               <div className="flex flex-wrap gap-2">
@@ -1036,8 +1034,8 @@ export default function ReportsScrapPage() {
 
         <TabsContent value="por-ot" className="space-y-3">
           <p className="text-muted-foreground text-sm">
-            Rendimiento de merma por OT: % en Impresión, Corte, Laminación y Montaje. No separa BOPP, polietileno ni
-            poliestireno.
+            Total de desperdicio por OT: impreso y transparente en impresión, más laminación y corte desde la planilla.
+            El total es la suma de todas las columnas de kg (todos los tipos de film).
           </p>
           <Button
             type="button"
@@ -1058,8 +1056,8 @@ export default function ReportsScrapPage() {
 
         <TabsContent value="por-areas" className="space-y-3">
           <p className="text-muted-foreground text-sm">
-            Vista agregada por área de planta (promedio, máximo y mínimo de % merma). Sirve para comparar procesos, no
-            para clasificar por tipo de film.
+            Suma de kg de desperdicio por área de planta (Impresión, Laminación, Corte) en el período. No separa por tipo
+            de film.
           </p>
           <Button
             type="button"

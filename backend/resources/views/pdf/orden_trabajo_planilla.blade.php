@@ -206,7 +206,7 @@
             <td class="lab">PIÑON (DIENTES)</td>
             <td>{{ $val('pinonImp') }}</td>
             <td class="lab">UBICACIÓN DE LA FOTOCELDA</td>
-            <td>{{ $val('ubicFotoceldaImp') }}</td>
+            <td>{{ ($val('ubicFotoceldaImp') !== '—') ? $val('ubicFotoceldaImp') : 'N/A' }}</td>
             <td class="lab">Kg INGRESADO</td>
             <td>{{ $val('kgIngresadoImp') }}</td>
             <td rowspan="3" class="fig-box">FIGURA EMB.:<br>{{ $val('figEmbImpDisplay') }}</td>
@@ -288,14 +288,26 @@
             <td class="paper-value">{{ $val('gramajeAdhesivo') }}</td>
             <td colspan="2" class="paper-label">ADHESIVO PARA LAMINACION</td>
             <td class="paper-value">{{ $val('kgAdhesivoLaminacion') }}</td>
-            <td class="paper-value">N/A</td>
+            <td class="paper-value">{{ ($val('metrosAdhesivoLaminacion') !== '—') ? $val('metrosAdhesivoLaminacion') : 'N/A' }}</td>
         </tr>
         <tr>
             <td class="paper-label">RELACIÓN DE MEZCLA ADH.:</td>
             <td class="paper-value">{{ $val('relacionMezcla') }}</td>
             <td colspan="2" class="paper-label">CATALIZADOR PARA LAMINACION</td>
             <td class="paper-value">{{ $val('kgCatalizadorLaminacion') }}</td>
-            <td class="paper-value">N/A</td>
+            <td class="paper-value">{{ ($val('metrosCatalizadorLaminacion') !== '—') ? $val('metrosCatalizadorLaminacion') : 'N/A' }}</td>
+        </tr>
+        <tr>
+            <td colspan="2"></td>
+            <td colspan="2" class="paper-label">LAMINA IMPRESA</td>
+            <td class="paper-value">{{ $val('kgLaminaImpresaLaminacion') }}</td>
+            <td class="paper-value">{{ ($val('metrosLaminaImpresaLaminacion') !== '—') ? $val('metrosLaminaImpresaLaminacion') : 'N/A' }}</td>
+        </tr>
+        <tr>
+            <td colspan="2"></td>
+            <td colspan="2" class="paper-label">LAMINA VIRGEN</td>
+            <td class="paper-value">{{ $val('kgLaminaVirgenLaminacion') }}</td>
+            <td class="paper-value">{{ ($val('metrosLaminaVirgenLaminacion') !== '—') ? $val('metrosLaminaVirgenLaminacion') : 'N/A' }}</td>
         </tr>
         <tr>
             <td class="paper-label">Kg INGRESADO:</td>

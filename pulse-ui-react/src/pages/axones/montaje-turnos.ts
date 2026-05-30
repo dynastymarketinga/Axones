@@ -19,6 +19,16 @@ export type MontajeTurnTimerState =
   | "stopped"
   | "completed"
 
+export type MontajeArranqueState = "idle" | "running" | "stopped"
+export type MontajePhaseSlotState = MontajeArranqueState
+
+export type MontajePhaseSlot = {
+  state: MontajePhaseSlotState
+  accSec: number
+  startedAtMs: number
+  lastResumeAtMs: number
+}
+
 export type MontajeTurnTimer = {
   state: MontajeTurnTimerState
   startedAtMs: number
@@ -27,6 +37,21 @@ export type MontajeTurnTimer = {
   effectiveAccSec: number
   deadAccSec: number
   pauses: MontajePauseEntry[]
+  /** Preparación: cliché, colores, relleno. */
+  arranqueState: MontajePhaseSlotState
+  arranqueAccSec: number
+  arranqueStartedAtMs: number
+  arranqueLastResumeAtMs: number
+  /** Operación montaje máquina (limpieza / recorridos); no es el área OT. */
+  montajeOpState: MontajePhaseSlotState
+  montajeOpAccSec: number
+  montajeOpStartedAtMs: number
+  montajeOpLastResumeAtMs: number
+  /** Desmontaje en máquina. */
+  demountState: MontajePhaseSlotState
+  demountAccSec: number
+  demountStartedAtMs: number
+  demountLastResumeAtMs: number
 }
 
 export type MontajeTurnoEntry = {
@@ -75,6 +100,105 @@ export function emptyMontajeTurnTimer(): MontajeTurnTimer {
     effectiveAccSec: 0,
     deadAccSec: 0,
     pauses: [],
+    arranqueState: "idle",
+    arranqueAccSec: 0,
+    arranqueStartedAtMs: 0,
+    arranqueLastResumeAtMs: 0,
+    montajeOpState: "idle",
+    montajeOpAccSec: 0,
+    montajeOpStartedAtMs: 0,
+    montajeOpLastResumeAtMs: 0,
+    demountState: "idle",
+    demountAccSec: 0,
+    demountStartedAtMs: 0,
+    demountLastResumeAtMs: 0,
+  }
+}
+
+function parsePhaseSlotState(raw: unknown): MontajePhaseSlotState {
+  const s = readString(raw) as MontajePhaseSlotState
+  return s === "running" || s === "stopped" ? s : "idle"
+}
+
+export function shiftPhaseSlotSeconds(
+  accSec: number,
+  state: MontajePhaseSlotState,
+  lastResumeAtMs: number,
+  nowMs: number,
+): number {
+  let sec = accSec
+  if (state === "running" && lastResumeAtMs > 0) {
+    sec += (nowMs - lastResumeAtMs) / 1000
+  }
+  return sec
+}
+
+export function shiftArranqueSeconds(timer: MontajeTurnTimer, nowMs: number): number {
+  return shiftPhaseSlotSeconds(
+    timer.arranqueAccSec,
+    timer.arranqueState,
+    timer.arranqueLastResumeAtMs,
+    nowMs,
+  )
+}
+
+export function shiftMontajeOpSeconds(timer: MontajeTurnTimer, nowMs: number): number {
+  return shiftPhaseSlotSeconds(
+    timer.montajeOpAccSec,
+    timer.montajeOpState,
+    timer.montajeOpLastResumeAtMs,
+    nowMs,
+  )
+}
+
+export function shiftDemountSeconds(timer: MontajeTurnTimer, nowMs: number): number {
+  return shiftPhaseSlotSeconds(
+    timer.demountAccSec,
+    timer.demountState,
+    timer.demountLastResumeAtMs,
+    nowMs,
+  )
+}
+
+/** Desmontaje acumulado (turnos cerrados + turno actual, con tramo en curso). */
+export function cumulativeDemountSeconds(
+  cerrados: MontajeTurnoEntry[],
+  actual: MontajeTurnoEntry | null,
+  nowMs: number,
+): number {
+  let sum = 0
+  for (const t of cerrados) {
+    sum += t.timer.demountAccSec
+  }
+  if (!actual) return sum
+  return sum + shiftDemountSeconds(actual.timer, nowMs)
+}
+
+export function montajeAnyTimedPhaseRunning(timer: MontajeTurnTimer): boolean {
+  return (
+    timer.arranqueState === "running" ||
+    timer.montajeOpState === "running" ||
+    timer.demountState === "running" ||
+    timer.state === "running"
+  )
+}
+
+export function startPhaseSlot(nowMs: number, slot: MontajePhaseSlot): MontajePhaseSlot {
+  return {
+    state: "running",
+    accSec: slot.accSec,
+    startedAtMs: slot.startedAtMs || nowMs,
+    lastResumeAtMs: nowMs,
+  }
+}
+
+export function stopPhaseSlot(slot: MontajePhaseSlot, nowMs: number): MontajePhaseSlot {
+  const last = slot.lastResumeAtMs
+  return {
+    state: "stopped",
+    accSec: slot.accSec + (last > 0 ? (nowMs - last) / 1000 : 0),
+    startedAtMs: slot.startedAtMs,
+    lastResumeAtMs: 0,
   }
 }
 
@@ -129,6 +253,18 @@ function parseTimer(raw: unknown): MontajeTurnTimer {
     effectiveAccSec: readNumber(o.effectiveAccSec),
     deadAccSec: readNumber(o.deadAccSec),
     pauses: parsePauseEntries(o.pauses),
+    arranqueState: parsePhaseSlotState(o.arranqueState),
+    arranqueAccSec: readNumber(o.arranqueAccSec),
+    arranqueStartedAtMs: readNumber(o.arranqueStartedAtMs),
+    arranqueLastResumeAtMs: readNumber(o.arranqueLastResumeAtMs),
+    montajeOpState: parsePhaseSlotState(o.montajeOpState),
+    montajeOpAccSec: readNumber(o.montajeOpAccSec),
+    montajeOpStartedAtMs: readNumber(o.montajeOpStartedAtMs),
+    montajeOpLastResumeAtMs: readNumber(o.montajeOpLastResumeAtMs),
+    demountState: parsePhaseSlotState(o.demountState),
+    demountAccSec: readNumber(o.demountAccSec),
+    demountStartedAtMs: readNumber(o.demountStartedAtMs),
+    demountLastResumeAtMs: readNumber(o.demountLastResumeAtMs),
   }
 }
 
@@ -143,6 +279,18 @@ export function timerFromLegacyFlatForm(form: Record<string, unknown>): MontajeT
     effectiveAccSec: readNumber(form.montTimerEffectiveAccSec),
     deadAccSec: readNumber(form.montTimerDeadAccSec),
     pauses: parsePauseEntries(form.montTimerPauses),
+    arranqueState: parsePhaseSlotState(form.montTimerArranqueState),
+    arranqueAccSec: readNumber(form.montTimerArranqueAccSec),
+    arranqueStartedAtMs: readNumber(form.montTimerArranqueStartedAtMs),
+    arranqueLastResumeAtMs: readNumber(form.montTimerArranqueLastResumeAtMs),
+    montajeOpState: parsePhaseSlotState(form.montTimerMontajeOpState),
+    montajeOpAccSec: readNumber(form.montTimerMontajeOpAccSec),
+    montajeOpStartedAtMs: readNumber(form.montTimerMontajeOpStartedAtMs),
+    montajeOpLastResumeAtMs: readNumber(form.montTimerMontajeOpLastResumeAtMs),
+    demountState: parsePhaseSlotState(form.montTimerDemountState),
+    demountAccSec: readNumber(form.montTimerDemountAccSec),
+    demountStartedAtMs: readNumber(form.montTimerDemountStartedAtMs),
+    demountLastResumeAtMs: readNumber(form.montTimerDemountLastResumeAtMs),
   }
 }
 
@@ -155,6 +303,18 @@ export function timerToLegacyFlat(timer: MontajeTurnTimer): Record<string, unkno
     montTimerEffectiveAccSec: timer.effectiveAccSec,
     montTimerDeadAccSec: timer.deadAccSec,
     montTimerPauses: timer.pauses,
+    montTimerArranqueState: timer.arranqueState,
+    montTimerArranqueAccSec: timer.arranqueAccSec,
+    montTimerArranqueStartedAtMs: timer.arranqueStartedAtMs,
+    montTimerArranqueLastResumeAtMs: timer.arranqueLastResumeAtMs,
+    montTimerMontajeOpState: timer.montajeOpState,
+    montTimerMontajeOpAccSec: timer.montajeOpAccSec,
+    montTimerMontajeOpStartedAtMs: timer.montajeOpStartedAtMs,
+    montTimerMontajeOpLastResumeAtMs: timer.montajeOpLastResumeAtMs,
+    montTimerDemountState: timer.demountState,
+    montTimerDemountAccSec: timer.demountAccSec,
+    montTimerDemountStartedAtMs: timer.demountStartedAtMs,
+    montTimerDemountLastResumeAtMs: timer.demountLastResumeAtMs,
   }
 }
 
@@ -407,6 +567,9 @@ export function finalizeTurnTimerNow(timer: MontajeTurnTimer): MontajeTurnTimer 
   const now = Date.now()
   let effective = timer.effectiveAccSec
   let dead = timer.deadAccSec
+  const arranqueAcc = shiftArranqueSeconds(timer, now)
+  const montajeOpAcc = shiftMontajeOpSeconds(timer, now)
+  const demountAcc = shiftDemountSeconds(timer, now)
   if (timer.state === "running" && timer.lastResumeAtMs > 0) {
     effective += (now - timer.lastResumeAtMs) / 1000
   }
@@ -420,5 +583,14 @@ export function finalizeTurnTimerNow(timer: MontajeTurnTimer): MontajeTurnTimer 
     deadAccSec: dead,
     pauseAtMs: 0,
     lastResumeAtMs: 0,
+    arranqueState: timer.arranqueState === "running" ? "stopped" : timer.arranqueState,
+    arranqueAccSec: arranqueAcc,
+    arranqueLastResumeAtMs: 0,
+    montajeOpState: timer.montajeOpState === "running" ? "stopped" : timer.montajeOpState,
+    montajeOpAccSec: montajeOpAcc,
+    montajeOpLastResumeAtMs: 0,
+    demountState: timer.demountState === "running" ? "stopped" : timer.demountState,
+    demountAccSec: demountAcc,
+    demountLastResumeAtMs: 0,
   }
 }

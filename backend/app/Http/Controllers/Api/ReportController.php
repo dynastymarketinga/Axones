@@ -532,15 +532,15 @@ class ReportController extends Controller
             'history_kg' => match (ScrapSubstrateCatalog::normalizeGroupId($substrateGroup)) {
                 'bopp' => 'desperdicio-historial-kg-bopp',
                 'polietileno' => 'desperdicio-historial-kg-polietileno',
+                'transparente' => 'desperdicio-historial-kg-transparente',
                 'poliestireno' => 'desperdicio-historial-kg-poliestireno',
-                'transparente' => 'desperdicio-historial-kg-poliestireno',
                 default => 'desperdicio-historial-kg',
             },
             default => match (ScrapSubstrateCatalog::normalizeGroupId($substrateGroup)) {
                 'bopp' => 'desperdicio-bopp',
                 'polietileno' => 'desperdicio-polietileno',
+                'transparente' => 'desperdicio-transparente',
                 'poliestireno' => 'desperdicio-poliestireno',
-                'transparente' => 'desperdicio-poliestireno',
                 default => 'desperdicio-detalle',
             },
         };

@@ -49,19 +49,29 @@ class InventoryReturnController extends Controller
     public function store(StoreInventoryReturnRequest $request): JsonResponse
     {
         $data = $request->validated();
-        /** @var Material $material */
-        $material = Material::query()->findOrFail($data['material_id']);
+        $material = isset($data['material_id'])
+            ? Material::query()->find($data['material_id'])
+            : null;
 
-        if ($material->inventory_area !== $data['destination_area']) {
+        if ($material !== null && $material->inventory_area !== $data['destination_area']) {
             throw ValidationException::withMessages([
                 'destination_area' => ['El área de destino debe coincidir con el área del material seleccionado.'],
+            ]);
+        }
+
+        if (
+            ($data['destination_area'] ?? null) !== 'bobinas_rechazadas' &&
+            $material === null
+        ) {
+            throw ValidationException::withMessages([
+                'material_id' => ['Seleccione un material para esta devolución.'],
             ]);
         }
 
         $return = DB::transaction(function () use ($data, $material) {
             /** @var InventoryReturn $return */
             $return = InventoryReturn::query()->create([
-                'material_id' => $material->getKey(),
+                'material_id' => $material?->getKey(),
                 'work_order_id' => $data['work_order_id'] ?? null,
                 'destination_area' => $data['destination_area'],
                 'quantity' => $data['quantity'],
@@ -72,6 +82,7 @@ class InventoryReturnController extends Controller
             // Si la devolución es hacia bobinas rechazadas, crear automáticamente la bobina rechazada
             // para que aparezca en /axones/bobinas sin un paso manual adicional.
             if (
+                $material !== null &&
                 ($data['destination_area'] ?? null) === 'bobinas_rechazadas' &&
                 ($data['work_order_id'] ?? null) &&
                 ! Bobina::query()->where('inventory_return_id', $return->getKey())->exists()

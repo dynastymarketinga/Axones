@@ -1,5 +1,15 @@
 /** Turnos de planta y métricas del área Corte (OT). */
 
+import {
+  emptyMesPhaseTimerFields,
+  finalizeMesPhaseSlotsOnTimer,
+  mesPhaseFieldsFromLegacyForm,
+  mesPhaseFieldsToLegacyFlat,
+  parseMesPhaseFieldsFromRecord,
+  type MesPhaseTimerFields,
+} from "@/lib/mes-phase-timer-fields"
+import { deadAccSecAfterResume } from "@/lib/mes-timer-band-shared"
+
 export const COR_TURNOS_KEY = "cor_turnos"
 export const COR_ACTUAL_KEY = "corTurnoActual"
 export const COR_LEGACY_ACTUAL_KEY = "cor_turno_actual"
@@ -28,7 +38,7 @@ export type CorteTurnTimer = {
   effectiveAccSec: number
   deadAccSec: number
   pauses: CortePauseEntry[]
-}
+} & MesPhaseTimerFields
 
 export type CorPaletaStatus = "en_progreso" | "cerrada" | "cerrada_opcional"
 
@@ -243,6 +253,7 @@ export function emptyCorteTurnTimer(): CorteTurnTimer {
     effectiveAccSec: 0,
     deadAccSec: 0,
     pauses: [],
+    ...emptyMesPhaseTimerFields(),
   }
 }
 
@@ -272,6 +283,7 @@ function parseTimer(raw: unknown): CorteTurnTimer {
     effectiveAccSec: readNumber(o.effectiveAccSec),
     deadAccSec: readNumber(o.deadAccSec),
     pauses: parsePauseEntries(o.pauses),
+    ...parseMesPhaseFieldsFromRecord(o),
   }
 }
 
@@ -286,6 +298,7 @@ export function timerFromLegacyFlatForm(form: Record<string, unknown>): CorteTur
     effectiveAccSec: readNumber(form.corTimerEffectiveAccSec),
     deadAccSec: readNumber(form.corTimerDeadAccSec),
     pauses: parsePauseEntries(form.corTimerPauses),
+    ...mesPhaseFieldsFromLegacyForm(form, "corTimer"),
   }
 }
 
@@ -298,6 +311,7 @@ export function timerToLegacyFlat(timer: CorteTurnTimer): Record<string, unknown
     corTimerEffectiveAccSec: timer.effectiveAccSec,
     corTimerDeadAccSec: timer.deadAccSec,
     corTimerPauses: timer.pauses,
+    ...mesPhaseFieldsToLegacyFlat(timer, "corTimer"),
   }
 }
 
@@ -457,6 +471,7 @@ export function startCorteProductionTimerOnForm(
       ? {
           ...display,
           state: "running",
+          deadAccSec: deadAccSecAfterResume(display, now),
           lastResumeAtMs: now,
           pauseAtMs: 0,
         }
@@ -812,14 +827,14 @@ export function finalizeTurnTimerNow(timer: CorteTurnTimer): CorteTurnTimer {
   if (timer.state === "paused" && timer.pauseAtMs > 0) {
     dead += (now - timer.pauseAtMs) / 1000
   }
-  return {
+  return finalizeMesPhaseSlotsOnTimer({
     ...timer,
     state: "stopped",
     effectiveAccSec: effective,
     deadAccSec: dead,
     pauseAtMs: 0,
     lastResumeAtMs: 0,
-  }
+  })
 }
 
 export function createNewCorteTurno(params: {

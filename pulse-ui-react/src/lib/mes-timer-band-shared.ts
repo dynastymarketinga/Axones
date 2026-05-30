@@ -47,6 +47,31 @@ export function formatHmsFromSeconds(totalSec: number): string {
   return `${pad2(h)}:${pad2(m)}:${pad2(sec)}`
 }
 
+/** Marca de tiempo del último arranque del cronómetro (play / reanudar). */
+export function horaArranqueMsFromTimer(timer: {
+  lastResumeAtMs?: number
+  startedAtMs?: number
+}): number {
+  const last = timer.lastResumeAtMs ?? 0
+  if (last > 0) return last
+  return timer.startedAtMs ?? 0
+}
+
+/** Hora local de arranque para la cara del cronómetro MES. */
+export function formatHoraArranqueFromMs(ms: number): string {
+  if (!ms || ms <= 0) return "—"
+  try {
+    return new Date(ms).toLocaleTimeString("es-VE", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    })
+  } catch {
+    return "—"
+  }
+}
+
 export function cumulativeEffectiveSeconds(
   cerrados: MesTurnoEntryLike[],
   actual: MesTurnoEntryLike | null,
@@ -65,23 +90,53 @@ export function cumulativeEffectiveSeconds(
   return sum + cur
 }
 
-export function cumulativeDeadSeconds(
+/** Tiempo muerto ya persistido (paradas registradas), sin el tramo abierto de la parada actual. */
+export function cumulativePersistedDeadSeconds(
   cerrados: MesTurnoEntryLike[],
   actual: MesTurnoEntryLike | null,
-  nowMs: number,
 ): number {
   let sum = 0
   for (const t of cerrados) {
     sum += t.timer.deadAccSec
   }
   if (!actual) return sum
+  return sum + actual.timer.deadAccSec
+}
+
+export function cumulativeDeadSeconds(
+  cerrados: MesTurnoEntryLike[],
+  actual: MesTurnoEntryLike | null,
+  nowMs: number,
+): number {
+  let sum = cumulativePersistedDeadSeconds(cerrados, actual)
+  if (!actual) return sum
   const tim = actual.timer
-  let d = tim.deadAccSec
   // Parada en curso: sumar desde pauseAtMs (se reinicia al registrar motivo para no duplicar).
   if (tim.state === "paused" && tim.pauseAtMs > 0) {
-    d += (nowMs - tim.pauseAtMs) / 1000
+    sum += (nowMs - tim.pauseAtMs) / 1000
   }
-  return sum + d
+  return sum
+}
+
+/** Total acumulado visible: efectivo + paradas registradas (la parada en curso solo va a tiempo muerto). */
+export function cumulativeTotalPersistedSeconds(
+  cerrados: MesTurnoEntryLike[],
+  actual: MesTurnoEntryLike | null,
+  nowMs: number,
+): number {
+  return (
+    cumulativeEffectiveSeconds(cerrados, actual, nowMs) +
+    cumulativePersistedDeadSeconds(cerrados, actual)
+  )
+}
+
+/** Al reanudar desde pausa, cerrar el tramo muerto abierto en deadAccSec. */
+export function deadAccSecAfterResume(timer: MesTurnTimerLike, nowMs: number): number {
+  let dead = timer.deadAccSec
+  if (timer.state === "paused" && timer.pauseAtMs > 0) {
+    dead += (nowMs - timer.pauseAtMs) / 1000
+  }
+  return dead
 }
 
 export function turnoShortFromEntry(actual: MesTurnoEntryLike): string {
@@ -145,7 +200,7 @@ export function buildMesBandFromTurnos(params: {
   const { areaLabel, estado, cerrados, actual, nowMs, form } = params
   const effSec = form ? cumulativeEffectiveSeconds(cerrados, actual, nowMs) : 0
   const deadSec = form ? cumulativeDeadSeconds(cerrados, actual, nowMs) : 0
-  const totalSec = effSec + deadSec
+  const totalSec = form ? cumulativeTotalPersistedSeconds(cerrados, actual, nowMs) : 0
   const effHms = formatHmsFromSeconds(effSec)
   const deadHms = formatHmsFromSeconds(deadSec)
   const totalHms = formatHmsFromSeconds(totalSec)
@@ -338,6 +393,7 @@ export function mesBandFromAreaTimeSummary(
   if (!summary) return null
   let effSec = summary.effective_seconds
   let deadSec = summary.dead_seconds
+  let totalSec = summary.effective_seconds + summary.dead_seconds
   if (summary.open_segment_type && summary.open_started_at) {
     const startMs = new Date(summary.open_started_at).getTime()
     if (Number.isFinite(startMs)) {
@@ -346,6 +402,7 @@ export function mesBandFromAreaTimeSummary(
         deadSec += elapsed
       } else {
         effSec += elapsed
+        totalSec += elapsed
       }
     }
   }
@@ -367,7 +424,7 @@ export function mesBandFromAreaTimeSummary(
       : "Sin segmento abierto.",
     effectiveHms: formatHmsFromSeconds(effSec),
     deadHms: formatHmsFromSeconds(deadSec),
-    totalHms: formatHmsFromSeconds(effSec + deadSec),
+    totalHms: formatHmsFromSeconds(totalSec),
     showTimes: effSec > 0.01 || deadSec > 0.01 || Boolean(summary.open_segment_type),
     showDeadBreakdown: deadSec > 0.5,
   }

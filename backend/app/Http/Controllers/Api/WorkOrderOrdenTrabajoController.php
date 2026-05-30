@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateWorkOrderOrdenTrabajoRequest;
 use App\Models\WorkOrder;
 use App\Enums\WorkOrderPriority;
 use App\Services\CortePlanillaDispatchSyncService;
+use App\Services\PlanillaSustratoMaterialRequestSyncService;
 use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderOrdenTrabajoService;
 use App\Support\MesProductionSaveGuard;
@@ -21,6 +22,7 @@ class WorkOrderOrdenTrabajoController extends Controller
         private readonly WorkOrderOrdenTrabajoService $ordenTrabajo,
         private readonly ProductionNotificationService $productionNotifications,
         private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
+        private readonly PlanillaSustratoMaterialRequestSyncService $planillaSustratoMaterialRequests,
     ) {}
 
     /**
@@ -68,6 +70,11 @@ class WorkOrderOrdenTrabajoController extends Controller
         }
 
         $doc = $this->ordenTrabajo->syncForm($work_order->fresh(), $form, $request->user());
+        $sustratoMaterialSummary = $this->planillaSustratoMaterialRequests->syncFromPlanillaForm(
+            $work_order->fresh(),
+            $form,
+            $request->user(),
+        );
         $saveFingerprint = $doc->updated_at?->toIso8601String() ?? (string) time();
         $broadcastSummary = $this->productionNotifications->notifyOnWorkOrderSavedBroadcast(
             $work_order->fresh(),
@@ -119,6 +126,7 @@ class WorkOrderOrdenTrabajoController extends Controller
                 'broadcast' => $broadcastSummary,
                 'production' => $productionSummary,
                 'assignment' => $assignmentSummary,
+                'planilla_sustratos_material' => $sustratoMaterialSummary,
             ],
         ]);
     }

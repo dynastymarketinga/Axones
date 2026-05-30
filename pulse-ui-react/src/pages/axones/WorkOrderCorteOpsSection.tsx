@@ -1,15 +1,16 @@
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  AlarmClock,
   BarChart3,
   Check,
   ChevronDown,
   ChevronsUpDown,
-  CirclePause,
   CirclePlay,
   ClipboardList,
   Clock,
   Factory,
+  Hash,
   History,
   Hourglass,
   IdCard,
@@ -29,6 +30,7 @@ import {
   Timer,
   Trash2,
   TrendingDown,
+  Weight,
   UserPlus,
   UserRound,
   Users,
@@ -38,12 +40,16 @@ import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
 
 import {
+  CortePaletasSectionFooter,
+  CortePaletasSectionToolbar,
+} from "@/components/axones/CortePaletasSectionFooter"
+import { CortePaletaRollosPaginatedGrid } from "@/components/axones/CortePaletaRollosPaginatedGrid"
+import {
   fieldLegend,
   MesSectionHeaderExtras,
   MesSectionShell,
   MesStatTile,
   mesSectionTitle,
-  MesTimerFace,
 } from "@/components/axones/mes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -86,8 +92,22 @@ import {
   explainCannotAddPaleta,
 } from "@/lib/corte-paleta-flow"
 import { normalizeScrapSubstrate, SCRAP_POLIETILENO } from "@/lib/scrap-substrate"
+import { formatHoraArranqueFromMs, horaArranqueMsFromTimer } from "@/lib/mes-timer-band-shared"
 import { cn } from "@/lib/utils"
 
+import { MES_TIMER_HELP_TEXT, MesProductionTimerOpsBlock } from "./mes-production-timer-ops-block"
+import type { MesTimerActionFlags, MesTimerConfirmKey } from "./mes-timer-actions"
+
+import {
+  CORTE_PALETAS_CONTAINER_GRID,
+  cortePaletaCardClass,
+  getCortePaletaTheme,
+} from "@/pages/axones/corte-paleta-rollos-ui"
+import {
+  clampCortePaletaPage,
+  cortePaletaTotalPages,
+  useCortePaletaPageSize,
+} from "@/pages/axones/use-corte-paleta-page-size"
 import {
   COR_ACTUAL_KEY,
   COR_ENTRADA_SLOTS,
@@ -189,6 +209,28 @@ type Props = {
   onRequestCerrarTurno?: () => void
   /** Turno abierto y cronómetro iniciado al menos una vez (operación en planta activa). */
   canOperateProduction?: boolean
+  hasActiveTurno?: boolean
+  areaFinalizada?: boolean
+  canFinalizeOrder?: boolean
+  turnosRegistrados?: number
+  ultimoTurnoLabel?: string
+  closedTurnos?: CorteTurnoEntry[]
+  timerState?: string
+  totalSec?: number
+  deadSec?: number
+  effectiveSec?: number
+  demountSec?: number
+  timerShowsOtAccumulated?: boolean
+  kgHora?: string
+  horaArranque?: string
+  arranqueRunning?: boolean
+  demountRunning?: boolean
+  timerRunning?: boolean
+  timerPaused?: boolean
+  timerActionFlags?: MesTimerActionFlags
+  onRequestTimerConfirm?: (key: MesTimerConfirmKey) => void
+  onPreviewTimerReport?: () => void
+  formatTimerHms?: (s: number) => string
   /** Espejo planilla (paridad impresión: impTurno / impGrupo). */
   corTurno?: string
   corGrupo?: string
@@ -211,6 +253,7 @@ type Props = {
   setPauseObs?: (v: string) => void
   pauseMotivoDialogOpen?: boolean
   onPauseMotivoDialogOpenChange?: (open: boolean) => void
+  pauseEntries?: CortePauseEntry[]
 }
 
 const MIN_PALETAS = 1
@@ -276,6 +319,28 @@ export default function WorkOrderCorteOpsSection({
   onApplyCerrarTurno,
   onRequestCerrarTurno,
   canOperateProduction = false,
+  hasActiveTurno: hasActiveTurnoProp,
+  areaFinalizada = false,
+  canFinalizeOrder = false,
+  turnosRegistrados: turnosRegistradosProp,
+  ultimoTurnoLabel: ultimoTurnoLabelProp,
+  closedTurnos: closedTurnosProp,
+  timerState: timerStateProp,
+  totalSec: totalSecProp,
+  deadSec: deadSecProp,
+  effectiveSec: effectiveSecProp,
+  demountSec: demountSecProp,
+  timerShowsOtAccumulated,
+  kgHora: kgHoraProp,
+  horaArranque: horaArranqueProp,
+  arranqueRunning = false,
+  demountRunning = false,
+  timerRunning: timerRunningProp,
+  timerPaused: timerPausedProp,
+  timerActionFlags,
+  onRequestTimerConfirm,
+  onPreviewTimerReport,
+  formatTimerHms: formatTimerHmsProp,
   corTurno: corTurnoProp = "",
   corGrupo: corGrupoProp = "",
   corOperador: corOperadorProp = "",
@@ -294,8 +359,10 @@ export default function WorkOrderCorteOpsSection({
   setPauseObs: setPauseObsProp,
   pauseMotivoDialogOpen: pauseMotivoDialogOpenProp,
   onPauseMotivoDialogOpenChange: onPauseMotivoDialogOpenChangeProp,
+  pauseEntries: pauseEntriesProp,
 }: Props) {
   const opsReadOnly = readOnlyOps ?? readOnly
+  const multiPhaseTimer = Boolean(timerActionFlags && onRequestTimerConfirm)
   const formFieldId = useId().replace(/:/g, "")
   const mk = (suffix: string) => `${formFieldId}-${suffix}`
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -310,6 +377,7 @@ export default function WorkOrderCorteOpsSection({
   const setPauseMotivoDialogOpen =
     onPauseMotivoDialogOpenChangeProp ?? setPauseMotivoDialogOpenLocal
   const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
+  const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
   const [draftTurno, setDraftTurno] = useState<"diurno" | "nocturno">("diurno")
   const [draftGrupo, setDraftGrupo] = useState<"A" | "B" | "C">("A")
   const [draftPeople, setDraftPeople] = useState<DraftPerson[]>([])
@@ -318,9 +386,10 @@ export default function WorkOrderCorteOpsSection({
     role: "operador",
   })
 
-  const closedTurnos = useMemo(() => parseCorteTurnos(form[COR_TURNOS_KEY], form), [form])
+  const closedTurnosLocal = useMemo(() => parseCorteTurnos(form[COR_TURNOS_KEY], form), [form])
+  const closedTurnos = closedTurnosProp ?? closedTurnosLocal
   const activeTurno = useMemo(() => materializeOpenCorteTurnoActual(form), [form])
-  const hasActiveTurno = activeTurno !== null
+  const hasActiveTurno = hasActiveTurnoProp ?? activeTurno !== null
   const turnoUi =
     coerceTurnoUi(activeTurno?.turno ?? "") ||
     coerceTurnoUi(readString(form.corTurno)) ||
@@ -335,6 +404,16 @@ export default function WorkOrderCorteOpsSection({
   const entradaBobinasCount = useMemo(() => entradaBobinas.filter((v) => Number(v) > 0).length, [entradaBobinas])
   const entradaBobinasTotal = useMemo(() => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaBobinas])
   const corPaletas = useMemo(() => getCorPaletas(form), [form])
+  const paletaPageSize = useCortePaletaPageSize()
+  const [paletaPage, setPaletaPage] = useState(1)
+  const paletaTotalPages = useMemo(
+    () => cortePaletaTotalPages(corPaletas.length, paletaPageSize),
+    [corPaletas.length, paletaPageSize],
+  )
+  const visiblePaletaIndices = useMemo(() => {
+    const start = (paletaPage - 1) * paletaPageSize
+    return Array.from({ length: Math.min(paletaPageSize, Math.max(0, corPaletas.length - start)) }, (_, i) => start + i)
+  }, [corPaletas.length, paletaPage, paletaPageSize])
   const salidaPaletas = useMemo(() => corPaletas.map((p) => p.rollosKg), [corPaletas])
   const salidaPaletasTotales = useMemo(
     () => salidaPaletas.map((p) => p.reduce((acc, v) => acc + readNumber(v), 0)),
@@ -376,17 +455,23 @@ export default function WorkOrderCorteOpsSection({
   const scrapTotal = scrapRefile + scrapImpreso + scrapMalCorte
   const producidoAcumuladoKg = jsonAccum.producidoKg
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
-  const turnosRegistrados = jsonAccum.turnosRegistrados
-  const ultimoTurnoLabel = hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel
+  const turnosRegistrados = turnosRegistradosProp ?? jsonAccum.turnosRegistrados
+  const ultimoTurnoLabel = ultimoTurnoLabelProp ?? (hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel)
   const kgDespachoAcum = useMemo(() => sumSalidaKgFromClosedPaletas(corPaletas), [corPaletas])
   const kgProvisionalDespacho = useMemo(() => sumSalidaKgFromOpenPaletas(corPaletas), [corPaletas])
   const corteOp = useMemo(() => corteOperabilityFromForm(form), [form])
   const inputDisabled = opsReadOnly || !hasActiveTurno
+  /** Ingreso de bobinas impresa: editable sin turno de planta (alimenta kg ingresados). */
+  const entradaInputDisabled = opsReadOnly
   const paletaInputsDisabled = (p: CorPaleta) => inputDisabled || isCorPaletaCerrada(p)
   const canAddPaletaNow = corteOp.canAddPaleta && !opsReadOnly
 
   const draftOperadorName = draftPeople.find((p) => p.role === "operador")?.name.trim() ?? ""
   const draftOperadorMissing = draftPeople.every((p) => p.role !== "operador")
+
+  useEffect(() => {
+    setPaletaPage((p) => clampCortePaletaPage(p, corPaletas.length, paletaPageSize))
+  }, [corPaletas.length, paletaPageSize])
 
   useEffect(() => {
     const salidaStr = salidaTotalKg.toFixed(2)
@@ -399,24 +484,32 @@ export default function WorkOrderCorteOpsSection({
   }, [salidaTotalKg, entradaBobinasTotal, form.kgSalidaCorte, form.corAcumuladoProducidoKg, form.kgIngresadosCorte, setForm])
 
   const activeTimer = resolveCorteDisplayTimer(activeTurno, form)
-  const timerState = activeTimer.state || "pending"
-  const timerRunning = timerState === "running"
-  const timerPaused = timerState === "paused"
+  const timerState = (timerStateProp ?? activeTimer.state) || "pending"
+  const timerRunning = timerRunningProp ?? timerState === "running"
+  const timerPaused = timerPausedProp ?? timerState === "paused"
   const timerStopped = timerState === "stopped" || timerState === "completed"
   const effectiveAcc = activeTimer.effectiveAccSec
   const deadAcc = activeTimer.deadAccSec
   const lastResumeAt = activeTimer.lastResumeAtMs
   const pauseAt = activeTimer.pauseAtMs
-  const effectiveSec = effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
-  const deadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
-  const totalSec = effectiveSec + deadSec
-  const kgHora = effectiveSec > 0 ? (kgSalida / (effectiveSec / 3600)).toFixed(2) : "0.00"
+  const localEffectiveSec =
+    effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
+  const localDeadSec = deadAcc + (timerPaused && pauseAt > 0 ? (nowMs - pauseAt) / 1000 : 0)
+  const localTotalSec = localEffectiveSec + deadAcc
+  const effectiveSec = effectiveSecProp ?? localEffectiveSec
+  const deadSec = deadSecProp ?? localDeadSec
+  const totalSec = totalSecProp ?? localTotalSec
+  const demountSec = demountSecProp ?? 0
+  const formatTimerHmsFn = formatTimerHmsProp ?? formatTimerHms
+  const kgHora = kgHoraProp ?? (effectiveSec > 0 ? (kgSalida / (effectiveSec / 3600)).toFixed(2) : "0.00")
+  const displayHoraArranque =
+    horaArranqueProp ?? formatHoraArranqueFromMs(horaArranqueMsFromTimer(activeTimer))
   const mermaPct = kgIngresados > 0 ? ((kgMerma / kgIngresados) * 100).toFixed(2) : "0.00"
   const refilPct = kgIngresados > 0 ? ((scrapTotal / kgIngresados) * 100).toFixed(2) : "0.00"
 
   const pauseEntries = useMemo<CortePauseEntry[]>(() => {
-    const raw =
-      activeTimer.pauses.length > 0 ? activeTimer.pauses : form.corTimerPauses
+    if (pauseEntriesProp) return pauseEntriesProp
+    const raw = activeTimer.pauses.length > 0 ? activeTimer.pauses : form.corTimerPauses
     if (!Array.isArray(raw)) return []
     return raw
       .map((x) => x as Partial<CortePauseEntry>)
@@ -427,15 +520,16 @@ export default function WorkOrderCorteOpsSection({
         duration_sec: readNumber(x.duration_sec),
       }))
       .filter((x) => x.reason)
-  }, [activeTimer.pauses, form.corTimerPauses])
+  }, [pauseEntriesProp, activeTimer.pauses, form.corTimerPauses])
 
   useEffect(() => {
+    if (multiPhaseTimer) return
     if (!timerRunning && !timerPaused) return
     const id = window.setInterval(() => {
       setNowMs(Date.now())
     }, 1000)
     return () => window.clearInterval(id)
-  }, [timerPaused, timerRunning])
+  }, [multiPhaseTimer, timerPaused, timerRunning])
 
   function setKey(key: string, value: unknown) {
     if (opsReadOnly) return
@@ -511,15 +605,17 @@ export default function WorkOrderCorteOpsSection({
       return
     }
     const nextIndex = corPaletas.length + 1
-    writePaletas([
+    const nextPaletas = [
       ...corPaletas,
       {
         id: `p-${String(nextIndex).padStart(2, "0")}`,
         label: `Paleta #${String(nextIndex).padStart(2, "0")}`,
         rollosKg: emptyPaletaRollos(),
-        status: "en_progreso",
+        status: "en_progreso" as const,
       },
-    ])
+    ]
+    writePaletas(nextPaletas)
+    setPaletaPage(cortePaletaTotalPages(nextPaletas.length, paletaPageSize))
   }
 
   function cerrarPaleta(index: number) {
@@ -1214,110 +1310,99 @@ export default function WorkOrderCorteOpsSection({
         title={mesSectionTitle(Timer, "Cronómetro de producción")}
         headerRight={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <MesSectionHeaderExtras isDone={timerState === "completed" || timerState === "stopped"} />
+            {multiPhaseTimer ? (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 shrink-0 gap-1.5 border-slate-300 bg-white px-2 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                      aria-label="Ver turnos acumulativos y personal"
+                      onClick={() => setCumulativeTurnosDialogOpen(true)}
+                    >
+                      <AlarmClock className="h-4 w-4 shrink-0 text-current" aria-hidden />
+                      <span className="leading-none">Turnos</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Turnos acumulativos y personal</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
+              <MesSectionHeaderExtras isDone={timerState === "completed" || timerState === "stopped"} />
+            )}
             <Badge variant="secondary" className="max-w-[14rem] text-xs leading-snug">
-              {timerState === "running"
-                ? "Cronómetro en marcha"
-                : timerState === "paused"
-                  ? "Cronómetro en pausa"
-                  : timerState === "completed"
-                    ? "Orden finalizada"
-                    : timerState === "stopped"
-                      ? "Turno cerrado"
-                      : "Cronómetro listo (sin iniciar)"}
+              {areaFinalizada
+                ? "Área finalizada"
+                : !hasActiveTurno
+                  ? timerShowsOtAccumulated
+                    ? "Entre turnos · tiempo acumulado"
+                    : "Sin turno de planta abierto"
+                  : demountRunning
+                    ? "Desmontaje en marcha"
+                    : arranqueRunning
+                      ? "Arranque en marcha"
+                      : timerState === "running"
+                        ? multiPhaseTimer
+                          ? "Producción en marcha"
+                          : "Cronómetro en marcha"
+                        : timerState === "paused"
+                          ? multiPhaseTimer
+                            ? "Producción en pausa"
+                            : "Cronómetro en pausa"
+                          : timerState === "completed"
+                            ? "Orden finalizada"
+                            : timerState === "stopped"
+                              ? "Turno cerrado"
+                              : "Cronómetro listo (sin iniciar)"}
             </Badge>
           </div>
         }
       >
         {hasActiveTurno ? (
           <div className="mb-3 rounded-md border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs leading-snug text-foreground">
-            <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
-            <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
-            <span className="font-semibold">no</span> cierra el turno de planta. Use{" "}
-            <span className="font-semibold">Cerrar turno</span> para terminar la sesión.
+            {multiPhaseTimer ? (
+              MES_TIMER_HELP_TEXT
+            ) : (
+              <>
+                <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
+                <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
+                <span className="font-semibold">no</span> cierra el turno de planta. Use{" "}
+                <span className="font-semibold">Cerrar turno</span> para terminar la sesión.
+              </>
+            )}
           </div>
         ) : (
           <div className="mb-3 rounded-md border border-dashed border-slate-400 bg-white px-3 py-2 text-xs text-slate-600">
             Primero abra un <span className="font-semibold text-foreground">turno de planta</span> con{" "}
-            <span className="font-semibold text-foreground">Iniciar turno</span> arriba. Después use play aquí para el
-            cronómetro.
+            <span className="font-semibold text-foreground">Iniciar turno</span> arriba. Después use el cronómetro
+            multi-fase (arranque, producción, desmontaje y paradas con motivo).
           </div>
         )}
-        <div className="mes-timer-grid">
-          <MesTimerFace
-            elapsedLabel={formatTimerHms(effectiveSec)}
-            elapsedCaption="Tiempo efectivo (se detiene al registrar parada)"
-            deadHms={formatTimerHms(deadSec)}
-            effectiveHms={formatTimerHms(totalSec)}
-            productiveMetricLabel="Total (efectivo + paradas)"
+        {multiPhaseTimer && onRequestTimerConfirm && onPreviewTimerReport ? (
+          <MesProductionTimerOpsBlock
+            formatTimerHms={formatTimerHmsFn}
+            effectiveSec={effectiveSec}
+            deadSec={deadSec}
+            demountSec={demountSec}
+            totalSec={totalSec}
             kgHora={kgHora}
+            horaArranque={displayHoraArranque}
+            timerShowsOtAccumulated={timerShowsOtAccumulated}
+            timerRunning={timerRunning}
+            demountRunning={demountRunning}
+            timerActionFlags={timerActionFlags!}
+            onRequestTimerConfirm={onRequestTimerConfirm}
+            onPreviewTimerReport={onPreviewTimerReport}
+            canFinalizeOrder={canFinalizeOrder}
+            areaFinalizada={areaFinalizada}
+            areaLabel="corte"
           />
-          <div className="mes-timer-actions w-full min-w-0">
-            <TooltipProvider delayDuration={200}>
-              <div className="mes-timer-action-stack">
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="mes-timer-fab-btn mes-btn-primary shrink-0"
-                        aria-label="Iniciar cronómetro de producción"
-                        onClick={startProductionTimer}
-                        disabled={opsReadOnly || !hasActiveTurno || timerRunning}
-                      >
-                        <CirclePlay className="shrink-0" aria-hidden />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Iniciar cronómetro (tiempo efectivo)</TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="mes-timer-action-labeled">
-                  <span className="mes-timer-action-label flex flex-col items-center gap-0 leading-tight">
-                    <span>Parada</span>
-                    <span className="text-[10px] font-normal text-muted-foreground">motivo</span>
-                  </span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="mes-timer-fab-btn mes-btn-secondary shrink-0"
-                        aria-label="Pausar cronómetro y registrar motivo de parada"
-                        onClick={pauseProductionTimer}
-                        disabled={opsReadOnly || !timerRunning}
-                      >
-                        <CirclePause className="shrink-0" aria-hidden />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Pausar cronómetro (parada)</TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="mes-timer-action-labeled">
-                  <span className="mes-timer-action-label">Cerrar turno</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="mes-timer-fab-btn mes-btn-danger-outline shrink-0"
-                        aria-label="Fin turno"
-                        onClick={cerrarTurnoActual}
-                        disabled={opsReadOnly || !hasActiveTurno}
-                      >
-                        <LogOut className="shrink-0" aria-hidden />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Cerrar turno sin finalizar la orden</TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-            </TooltipProvider>
-          </div>
-        </div>
+        ) : hasActiveTurno ? (
+          <p className="text-muted-foreground text-xs">
+            Cronómetro multi-fase disponible en la vista de producción del área de corte.
+          </p>
+        ) : null}
         {timerPaused && !pauseMotivoDialogOpen ? (
           <div className="mt-2 flex justify-center md:justify-end">
             <Button
@@ -1336,7 +1421,7 @@ export default function WorkOrderCorteOpsSection({
             {pauseEntries.map((entry, idx) => (
               <div key={`${entry.at}-${idx}`} className="text-xs">
                 <span className="font-medium">{idx + 1}. {entry.reason}</span>
-                <span className="text-muted-foreground"> · {formatTimerHms(entry.duration_sec)}</span>
+                <span className="text-muted-foreground"> · {formatTimerHmsFn(entry.duration_sec)}</span>
                 {entry.obs ? <span className="text-muted-foreground"> · {entry.obs}</span> : null}
               </div>
             ))}
@@ -1344,34 +1429,31 @@ export default function WorkOrderCorteOpsSection({
         ) : null}
       </MesSectionShell>
 
-      {!hasActiveTurno ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
-          Inicie un <span className="font-semibold text-foreground">turno de planta</span> para registrar ingreso, paletas, scrap y resúmenes.
-        </div>
-      ) : null}
-
-      {hasActiveTurno ? (
-      <>
       <MesSectionShell
         title={mesSectionTitle(Package, "Ingreso de bobinas impresa — Kg")}
         subtle
         bodyClassName="mes-section__body--flush"
       >
-        <p className="text-muted-foreground mb-2 text-xs leading-snug">
+        <p className="text-muted-foreground mb-2 px-3 pt-3 text-xs leading-snug">
           Registre hasta {COR_ENTRADA_SLOTS} bobinas de material impreso que entran al corte. El total alimenta automáticamente{" "}
           <span className="font-medium text-foreground">Kg ingresados</span> en proceso de corte. La salida por paleta ({COR_ROLLOS_PER_PALETA}{" "}
           rollos/paleta) es independiente.
         </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10">
+        <div className="grid grid-cols-2 gap-2 px-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10">
           {entradaBobinas.map((val, idx) => (
             <div key={`ent-cor-${idx}`} className="space-y-1">
-              <Label htmlFor={mk(`entrada-bobina-${idx}`)} className="ot-label">
-                {idx + 1}
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor={mk(`entrada-bobina-${idx}`)} className="ot-label">
+                  <span className="inline-flex items-center gap-1">
+                    <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                    {idx + 1}
+                  </span>
+                </Label>
+              </div>
               <Input
                 id={mk(`entrada-bobina-${idx}`)}
                 name={`corEntradaBobinaKg_${idx + 1}`}
-                className="ot-input-unified h-9"
+                className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                 inputMode="decimal"
                 value={val}
                 onChange={(e) => {
@@ -1380,13 +1462,18 @@ export default function WorkOrderCorteOpsSection({
                   writeEntradaBobinasKg(next)
                 }}
                 placeholder="0"
+                disabled={entradaInputDisabled}
               />
             </div>
           ))}
         </div>
-        <div className="mt-2 mes-stat-grid sm:grid-cols-3">
+        <div className="mt-2 px-3 pb-3 mes-stat-grid sm:grid-cols-3">
           <MesStatTile label="N° bobinas" value={entradaBobinasCount} />
-          <MesStatTile label="Total" value={`${entradaBobinasTotal.toFixed(2)} Kg`} />
+          <MesStatTile
+            label="Total"
+            value={`${entradaBobinasTotal.toFixed(2)} Kg`}
+            icon={<Weight className="h-3.5 w-3.5" />}
+          />
           <div className="mes-stat-tile">
             <span className="mes-stat-tile__label">Paletas (300 Kg)</span>
             <div className="mes-stat-tile__value">{paletasEquivalentesEntrada.toFixed(2)}</div>
@@ -1395,31 +1482,27 @@ export default function WorkOrderCorteOpsSection({
         </div>
       </MesSectionShell>
 
+      {!hasActiveTurno ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
+          Inicie un <span className="font-semibold text-foreground">turno de planta</span> para registrar paletas de salida, scrap y resúmenes del turno.
+        </div>
+      ) : null}
+
+      {hasActiveTurno ? (
+      <>
       <MesSectionShell
         title={mesSectionTitle(Scissors, "Bobinas de salida por paleta — Peso neto (Kg)")}
         subtle
         bodyClassName="mes-section__body--flush"
-        headerRight={
-          <Button
-            type="button"
-            size="sm"
-            className="h-8"
-            disabled={!canAddPaletaNow}
-            onClick={addPaleta}
-          >
-            <PlusCircle className="mr-1 h-4 w-4" />
-            Agregar paleta
-          </Button>
-        }
       >
-        <p className="text-muted-foreground mb-2 text-xs leading-snug">
+        <p className="text-muted-foreground mb-2 px-3 pt-2 text-xs leading-snug">
           Registre peso en al menos un rollo de la paleta (con todo en 0 no hay saldo en Despacho). Cierre cada paleta al
           terminar el lote: los kg pasan a Despacho · producto terminado sin finalizar el área. Requiere turno abierto y
           cronómetro iniciado (play).
         </p>
         {entradaBobinasTotal > 0 && salidaTotalKg <= 0 ? (
           <div
-            className="mb-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-950 dark:text-amber-100"
+            className="mx-3 mb-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-950 dark:text-amber-100"
             role="status"
           >
             <span className="font-semibold">Ingreso registrado ({entradaBobinasTotal.toFixed(2)} Kg)</span> no genera
@@ -1428,21 +1511,34 @@ export default function WorkOrderCorteOpsSection({
             <span className="font-semibold">Cerrar paleta</span>.
           </div>
         ) : null}
-        <div className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
-          {salidaPaletas.map((paleta, paletaIdx) => {
+
+        <CortePaletasSectionToolbar
+          totalPaletas={corPaletas.length}
+          onAddPaleta={addPaleta}
+          canAddPaleta={canAddPaletaNow}
+        />
+
+        <div className={cn("px-3 py-3", CORTE_PALETAS_CONTAINER_GRID)}>
+          {visiblePaletaIndices.map((paletaIdx) => {
+            const paleta = salidaPaletas[paletaIdx]
+            if (!paleta) return null
             const meta = corPaletas[paletaIdx]
+            const theme = getCortePaletaTheme(paletaIdx)
+            const cerrada = Boolean(meta && isCorPaletaCerrada(meta))
             return (
             <div
               key={`paleta-${paletaIdx}`}
-              className={cn(
-                "rounded-lg border bg-background",
-                corPaletas[paletaIdx] &&
-                  isCorPaletaCerrada(corPaletas[paletaIdx]) &&
-                  "border-emerald-500/35 bg-emerald-500/[0.04]",
-              )}
+              className={cortePaletaCardClass(paletaIdx, cerrada)}
             >
-              <div className="flex items-center justify-between border-b px-2 py-1.5">
-                <strong className="text-sm">{corPaletas[paletaIdx]?.label ?? `Paleta #${String(paletaIdx + 1).padStart(2, "0")}`}</strong>
+              <div
+                className={cn(
+                  "flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5 shadow-sm",
+                  theme.header,
+                )}
+              >
+                <strong className={cn("text-sm", theme.title)}>
+                  {corPaletas[paletaIdx]?.label ?? `Paleta #${String(paletaIdx + 1).padStart(2, "0")}`}
+                </strong>
                 <div className="inline-flex flex-wrap items-center justify-end gap-1">
                   {corPaletas[paletaIdx] && isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
                     <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-950">En despacho</Badge>
@@ -1472,8 +1568,8 @@ export default function WorkOrderCorteOpsSection({
                 </div>
               </div>
 
-              <div className="space-y-2 p-2">
-                <div className="grid grid-cols-2 gap-1">
+              <div className="space-y-3 p-3">
+                <div className="grid grid-cols-2 gap-2 sm:max-w-md">
                   <div>
                     <Label htmlFor={mk(`paleta-${paletaIdx}-rollos-count`)} className="ot-label">
                       Rollos
@@ -1481,7 +1577,7 @@ export default function WorkOrderCorteOpsSection({
                     <Input
                       id={mk(`paleta-${paletaIdx}-rollos-count`)}
                       name={`corPaleta${paletaIdx + 1}RollosCount`}
-                      className="ot-input-unified h-8"
+                      className={cn("ot-input-unified h-9", theme.summaryInput)}
                       value={String(salidaPaletasRollos[paletaIdx] ?? 0)}
                       readOnly
                     />
@@ -1493,49 +1589,41 @@ export default function WorkOrderCorteOpsSection({
                     <Input
                       id={mk(`paleta-${paletaIdx}-total-kg`)}
                       name={`corPaleta${paletaIdx + 1}TotalKg`}
-                      className="ot-input-unified h-8 font-semibold"
+                      className={cn("ot-input-unified h-9 font-semibold", theme.summaryInput)}
                       value={(salidaPaletasTotales[paletaIdx] ?? 0).toFixed(2)}
                       readOnly
                     />
                   </div>
                 </div>
 
-                <div
-                  className="grid max-h-[22rem] grid-cols-8 gap-1 overflow-y-auto"
-                  role="group"
-                  aria-label={`Rollos 1 a ${COR_ROLLOS_PER_PALETA}`}
-                >
-                  {paleta.map((valor, rolloIdx) => (
-                    <div key={`p-${paletaIdx}-r-${rolloIdx}`} className="space-y-1">
-                      <Label
-                        htmlFor={mk(`paleta-${paletaIdx}-rollo-${rolloIdx}`)}
-                        className="ot-label text-[10px]"
-                      >
-                        {rolloIdx + 1}
-                      </Label>
-                      <Input
-                        id={mk(`paleta-${paletaIdx}-rollo-${rolloIdx}`)}
-                        name={`corPaleta${paletaIdx + 1}RolloKg_${rolloIdx + 1}`}
-                        className="ot-input-unified h-7 px-2 text-xs"
-                        inputMode="decimal"
-                        value={valor}
-                        disabled={meta ? paletaInputsDisabled(meta) : inputDisabled}
-                        onChange={(e) => {
-                          const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
-                          if (!next[paletaIdx]) return
-                          next[paletaIdx].rollosKg[rolloIdx] = e.target.value
-                          writePaletas(next)
-                        }}
-                        placeholder="0"
-                      />
-                    </div>
-                  ))}
-                </div>
+                <CortePaletaRollosPaginatedGrid
+                  paletaIdx={paletaIdx}
+                  rollosKg={paleta}
+                  theme={theme}
+                  inputsDisabled={meta ? paletaInputsDisabled(meta) : inputDisabled}
+                  idFor={mk}
+                  onRolloChange={(rolloIdx, value) => {
+                    const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
+                    if (!next[paletaIdx]) return
+                    next[paletaIdx].rollosKg[rolloIdx] = value
+                    writePaletas(next)
+                  }}
+                />
               </div>
             </div>
             )
           })}
         </div>
+
+        <CortePaletasSectionFooter
+          totalPaletas={corPaletas.length}
+          page={paletaPage}
+          totalPages={paletaTotalPages}
+          pageSize={paletaPageSize}
+          onPageChange={setPaletaPage}
+          onAddPaleta={addPaleta}
+          canAddPaleta={canAddPaletaNow}
+        />
       </MesSectionShell>
 
       <MesSectionShell
@@ -1958,6 +2046,89 @@ export default function WorkOrderCorteOpsSection({
             </Button>
             <Button type="button" onClick={confirmPauseAndResume}>
               Registrar parada
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cumulativeTurnosDialogOpen} onOpenChange={setCumulativeTurnosDialogOpen}>
+        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Turnos acumulativos</DialogTitle>
+            <DialogDescription>
+              Turnos de planta cerrados y turno en curso, con tiempos del cronómetro y personal involucrado. El
+              contador en vivo sigue en la sección «Cronómetro de producción».
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="rounded-md border bg-muted/25 p-3 text-xs leading-relaxed">
+              <p>
+                <span className="font-semibold text-foreground">Registros / turnos:</span> {turnosRegistrados}
+              </p>
+              <p className="mt-1">
+                <span className="font-semibold text-foreground">Turnos cerrados:</span> {closedTurnos.length}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                Último estado: <strong className="text-foreground">{ultimoTurnoLabel}</strong>
+              </p>
+            </div>
+
+            {hasActiveTurno ? (
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Turno en curso</p>
+                <p className="mt-2 text-xs">{turnoGrupoLabel(corTurnoProp || readString(form.corTurno), corGrupoProp || readString(form.corGrupo))}</p>
+                <p className="mt-2 text-xs font-medium text-foreground">Personal</p>
+                {activeSaved.length === 0 ? (
+                  <p className="text-muted-foreground mt-1 text-xs">Sin personal guardado en este turno.</p>
+                ) : (
+                  <ul className="mt-1 space-y-1 text-xs">
+                    {activeSaved.map((p) => (
+                      <li key={p.id}>
+                        <span className="font-medium">{p.name}</span>
+                        <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
+                  Efectivo {formatTimerHmsFn(effectiveSec)} · Muerto {formatTimerHmsFn(deadSec)} · Total{" "}
+                  {formatTimerHmsFn(totalSec)}
+                </p>
+              </div>
+            ) : null}
+
+            {closedTurnos.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Turnos cerrados ({closedTurnos.length})
+                </p>
+                <ul className="max-h-[40vh] space-y-3 overflow-y-auto pr-1">
+                  {closedTurnos.map((t) => (
+                    <li key={t.id} className="rounded-md border bg-background p-3 text-xs">
+                      <p className="font-medium text-foreground">
+                        {t.closed_at
+                          ? new Date(t.closed_at).toLocaleString("es-VE")
+                          : "Sin fecha de cierre"}{" "}
+                        · {turnoGrupoLabel(t.turno, t.grupo)}
+                      </p>
+                      <p className="text-muted-foreground mt-1">
+                        Salida {readNumber(t.metrics?.salida_total_kg).toFixed(2)} Kg · Efectivo{" "}
+                        {formatTimerHmsFn(t.timer.effectiveAccSec)} · Muerto {formatTimerHmsFn(t.timer.deadAccSec)}
+                      </p>
+                      <p className="text-muted-foreground mt-1">
+                        {t.operador.trim() ? `Op. ${t.operador.trim()}` : "—"}
+                        {t.ayudante.trim() ? ` · Ay. ${t.ayudante.trim()}` : ""}
+                        {t.supervisor.trim() ? ` · Sup. ${t.supervisor.trim()}` : ""}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCumulativeTurnosDialogOpen(false)}>
+              Cerrar
             </Button>
           </DialogFooter>
         </DialogContent>

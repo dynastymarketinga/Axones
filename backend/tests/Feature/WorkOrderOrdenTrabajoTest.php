@@ -248,7 +248,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
                 'numRepeticion' => '2',
                 'numColores' => '4',
                 'pinonImp' => '108',
-                'gramajeAdhesivo' => '1,25',
+                'gramajeAdhesivo' => '1,5 A 2,2',
                 'relacionMezcla' => '100/80',
                 'anchoCorteFinal' => '320±0',
                 'pesoBobina' => '19-20',

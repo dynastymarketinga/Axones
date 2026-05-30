@@ -13,6 +13,7 @@ use App\Models\MontajeMaterialUsage;
 use App\Models\PrintingBobinaUsage;
 use App\Models\Product;
 use App\Models\WorkOrder;
+use App\Support\PlanillaScrapAggregator;
 use App\Support\ScrapSubstrateCatalog;
 use App\Support\ScrapSubstrateGroup;
 use Carbon\Carbon;
@@ -1090,6 +1091,32 @@ class InventoryReportService
             ];
         }
 
+        if ($layout === 'by_work_order') {
+            $historyRows = $this->scrapHistoryKgRows($from, $to, $clientId, $productId, 'all', $workOrderId);
+            $rows = $this->scrapRowsPivotByWorkOrderKg($historyRows);
+
+            return [
+                'from' => $from->toIso8601String(),
+                'to' => $to->toIso8601String(),
+                'substrate_group' => 'all',
+                'layout' => 'by_work_order',
+                'rows' => $rows,
+            ];
+        }
+
+        if ($layout === 'by_area') {
+            $historyRows = $this->scrapHistoryKgRows($from, $to, $clientId, $productId, 'all', $workOrderId);
+            $rows = $this->scrapRowsAggregateByAreaKg($historyRows);
+
+            return [
+                'from' => $from->toIso8601String(),
+                'to' => $to->toIso8601String(),
+                'substrate_group' => 'all',
+                'layout' => 'by_area',
+                'rows' => $rows,
+            ];
+        }
+
         $defs = [
             ['area' => 'printing', 'table' => 'work_order_printing_summaries'],
             ['area' => 'corte', 'table' => 'work_order_corte_summaries'],
@@ -1155,6 +1182,111 @@ class InventoryReportService
             'layout' => $layout,
             'rows' => $rows,
         ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $historyRows
+     * @return list<array<string, mixed>>
+     */
+    private function scrapRowsPivotByWorkOrderKg(array $historyRows): array
+    {
+        $list = [];
+        foreach ($historyRows as $r) {
+            $impImpreso = (float) ($r['imp_scrap_impreso_kg'] ?? 0);
+            $impTransparente = (float) ($r['imp_scrap_transparente_kg'] ?? 0);
+            $lamKg = (float) ($r['lam_scrap_transparente_kg'] ?? 0)
+                + (float) ($r['lam_scrap_impreso_kg'] ?? 0)
+                + (float) ($r['lam_scrap_laminado_kg'] ?? 0);
+            $corKg = (float) ($r['cor_scrap_refile_kg'] ?? 0)
+                + (float) ($r['cor_scrap_impreso_kg'] ?? 0)
+                + (float) ($r['cor_scrap_mal_corte_kg'] ?? 0);
+            $totalKg = $impImpreso + $impTransparente + $lamKg + $corKg;
+
+            if ($totalKg < 0.0005) {
+                continue;
+            }
+
+            $list[] = [
+                'work_order_id' => $r['work_order_id'],
+                'work_order_code' => $r['work_order_code'],
+                'work_order_status' => $r['work_order_status'] ?? null,
+                'client_id' => $r['client_id'],
+                'client_name' => $r['client_name'],
+                'product_id' => $r['product_id'],
+                'product_name' => $r['product_name'] ?? null,
+                'imp_scrap_impreso_kg' => number_format($impImpreso, 3, '.', ''),
+                'imp_scrap_transparente_kg' => number_format($impTransparente, 3, '.', ''),
+                'laminacion_scrap_kg' => number_format($lamKg, 3, '.', ''),
+                'corte_scrap_kg' => number_format($corKg, 3, '.', ''),
+                'total_scrap_kg' => number_format($totalKg, 3, '.', ''),
+                'printing_scrap_percent' => $r['printing_scrap_percent'] ?? null,
+                'laminacion_scrap_percent' => $r['laminacion_scrap_percent'] ?? null,
+                'corte_scrap_percent' => $r['corte_scrap_percent'] ?? null,
+                'montaje_scrap_percent' => $r['montaje_scrap_percent'] ?? null,
+            ];
+        }
+
+        usort($list, fn (array $a, array $b): int => $a['work_order_id'] <=> $b['work_order_id']);
+
+        return $list;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $historyRows
+     * @return list<array<string, mixed>>
+     */
+    private function scrapRowsAggregateByAreaKg(array $historyRows): array
+    {
+        $totals = [
+            'printing' => 0.0,
+            'laminacion' => 0.0,
+            'corte' => 0.0,
+        ];
+        $counts = [
+            'printing' => 0,
+            'laminacion' => 0,
+            'corte' => 0,
+        ];
+
+        foreach ($historyRows as $r) {
+            $impKg = (float) ($r['imp_scrap_transparente_kg'] ?? 0)
+                + (float) ($r['imp_scrap_impreso_kg'] ?? 0);
+            $lamKg = (float) ($r['lam_scrap_transparente_kg'] ?? 0)
+                + (float) ($r['lam_scrap_impreso_kg'] ?? 0)
+                + (float) ($r['lam_scrap_laminado_kg'] ?? 0);
+            $corKg = (float) ($r['cor_scrap_refile_kg'] ?? 0)
+                + (float) ($r['cor_scrap_impreso_kg'] ?? 0)
+                + (float) ($r['cor_scrap_mal_corte_kg'] ?? 0);
+
+            if ($impKg > 0.0005) {
+                $totals['printing'] += $impKg;
+                $counts['printing']++;
+            }
+            if ($lamKg > 0.0005) {
+                $totals['laminacion'] += $lamKg;
+                $counts['laminacion']++;
+            }
+            if ($corKg > 0.0005) {
+                $totals['corte'] += $corKg;
+                $counts['corte']++;
+            }
+        }
+
+        $out = [];
+        foreach ($totals as $area => $total) {
+            if ($total < 0.0005) {
+                continue;
+            }
+            $out[] = [
+                'area' => $area,
+                'row_count' => $counts[$area],
+                'total_scrap_kg' => number_format($total, 3, '.', ''),
+            ];
+        }
+
+        usort($out, fn (array $a, array $b): int => strcmp((string) $a['area'], (string) $b['area']));
+
+        return $out;
     }
 
     /**
@@ -1253,11 +1385,12 @@ class InventoryReportService
                 $explicit = strtolower(trim((string) $form['corDesperdicioSustrato']));
             }
 
-            $impT = $parseKg($form, 'impScrapTransparenteKg');
-            $impI = $parseKg($form, 'impScrapImpresoKg');
-            $lamT = $parseKg($form, 'lamScrapTransparenteKg');
-            $lamI = $parseKg($form, 'lamScrapImpresoKg');
-            $lamL = $parseKg($form, 'lamScrapLaminadoKg');
+            $scrapResolved = PlanillaScrapAggregator::resolvePrintingLaminacionScrap($form, $parseKg);
+            $impT = $scrapResolved['imp_transparente'];
+            $impI = $scrapResolved['imp_impreso'];
+            $lamT = $scrapResolved['lam_transparente'];
+            $lamI = $scrapResolved['lam_impreso'];
+            $lamL = $scrapResolved['lam_laminado'];
             $corR = $parseKg($form, 'corScrapRefileKg');
             $corIkg = $parseKg($form, 'corScrapImpresoKg');
             $corM = $parseKg($form, 'corScrapMalCorteKg');
@@ -1268,10 +1401,19 @@ class InventoryReportService
             $corImpresoResolved = $this->resolvedCorteBucketDestino($form, $r->product_structure, 'corScrapImpresoDestino');
             $globalSub = $this->resolvedGlobalCorteSubstrate($form, $r->product_structure);
 
-            if ($substrateGroup === 'poliestireno') {
+            if ($substrateGroup === 'transparente') {
                 $impT_out = $impT;
-                $impI_out = $impDest === 'poliestireno' ? $impI : 0.0;
+                $impI_out = 0.0;
                 $lamT_out = $lamT;
+                $lamI_out = 0.0;
+                $lamL_out = 0.0;
+                $corR_out = 0.0;
+                $corI_out = 0.0;
+                $corM_out = $globalSub === 'transparente' ? $corM : 0.0;
+            } elseif ($substrateGroup === 'poliestireno') {
+                $impT_out = 0.0;
+                $impI_out = $impDest === 'poliestireno' ? $impI : 0.0;
+                $lamT_out = 0.0;
                 $lamI_out = 0.0;
                 $lamL_out = 0.0;
                 $corR_out = 0.0;
@@ -1366,6 +1508,22 @@ class InventoryReportService
 
         $resolvedImpDest = $this->resolveImpScrapImpresoDestino($form, $productStructure);
 
+        $scrapResolved = PlanillaScrapAggregator::resolvePrintingLaminacionScrap($form, $parseKg);
+
+        if ($substrateGroup === 'transparente') {
+            if ($explicit === 'transparente') {
+                return true;
+            }
+            if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
+                return true;
+            }
+            if ($scrapResolved['imp_transparente'] > 0 || $scrapResolved['lam_transparente'] > 0) {
+                return true;
+            }
+
+            return false;
+        }
+
         if ($substrateGroup === 'poliestireno') {
             if ($explicit === 'poliestireno') {
                 return true;
@@ -1373,10 +1531,7 @@ class InventoryReportService
             if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'poliestireno')) {
                 return true;
             }
-            if ($resolvedImpDest === 'poliestireno' && $parseKg($form, 'impScrapImpresoKg') > 0) {
-                return true;
-            }
-            if ($parseKg($form, 'impScrapTransparenteKg') > 0 || $parseKg($form, 'lamScrapTransparenteKg') > 0) {
+            if ($resolvedImpDest === 'poliestireno' && $scrapResolved['imp_impreso'] > 0) {
                 return true;
             }
 
@@ -1390,7 +1545,7 @@ class InventoryReportService
             if ($explicit === '' && ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'bopp')) {
                 return true;
             }
-            if ($resolvedImpDest === 'bopp' && $parseKg($form, 'impScrapImpresoKg') > 0) {
+            if ($resolvedImpDest === 'bopp' && $scrapResolved['imp_impreso'] > 0) {
                 return true;
             }
             if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino') === 'bopp') {
@@ -1467,7 +1622,7 @@ class InventoryReportService
     private function resolvedGlobalCorteSubstrate(?array $form, ?string $productStructure): ?string
     {
         $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
-        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'poliestireno') {
+        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'poliestireno' || $explicit === 'transparente') {
             return $explicit;
         }
 
@@ -1482,6 +1637,9 @@ class InventoryReportService
         }
         if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'poliestireno')) {
             return 'poliestireno';
+        }
+        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
+            return 'transparente';
         }
 
         return null;

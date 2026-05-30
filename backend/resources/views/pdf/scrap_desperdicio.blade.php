@@ -29,7 +29,7 @@
         'polietileno' => 'Polietileno (PE)',
         'politerlero' => 'Polietileno (PE)',
         'poliestireno' => 'Poliestireno',
-        'transparente' => 'Poliestireno',
+        'transparente' => 'Transparente',
         'all' => 'Todos los sustratos',
         default => 'Todos los sustratos',
       };
@@ -72,10 +72,8 @@
         <thead>
           <tr>
             <th>Área</th>
-            <th class="num">Registros</th>
-            <th class="num">Promedio %</th>
-            <th class="num">Máx. %</th>
-            <th class="num">Mín. %</th>
+            <th class="num">OTs con kg</th>
+            <th class="num">Total kg</th>
           </tr>
         </thead>
         <tbody>
@@ -83,12 +81,10 @@
             <tr>
               <td>{{ $areaLabel[(string) ($r['area'] ?? '')] ?? ($r['area'] ?? '—') }}</td>
               <td class="num">{{ $r['row_count'] ?? '—' }}</td>
-              <td class="num">{{ $r['avg_scrap_percent'] ?? '—' }}</td>
-              <td class="num">{{ $r['max_scrap_percent'] ?? '—' }}</td>
-              <td class="num">{{ $r['min_scrap_percent'] ?? '—' }}</td>
+              <td class="num">{{ $r['total_scrap_kg'] ?? '—' }}</td>
             </tr>
           @empty
-            <tr><td colspan="5" class="muted">Sin datos.</td></tr>
+            <tr><td colspan="3" class="muted">Sin datos.</td></tr>
           @endforelse
         </tbody>
       </table>
@@ -100,10 +96,11 @@
             <th>Cliente</th>
             <th>Producto</th>
             <th>Estatus</th>
-            <th class="num">% Impresión</th>
-            <th class="num">% Corte</th>
-            <th class="num">% Laminación</th>
-            <th class="num">% Montaje</th>
+            <th class="num">Imp. impreso (kg)</th>
+            <th class="num">Imp. transparente (kg)</th>
+            <th class="num">Laminación (kg)</th>
+            <th class="num">Corte (kg)</th>
+            <th class="num">Total (kg)</th>
           </tr>
         </thead>
         <tbody>
@@ -113,13 +110,14 @@
               <td>{{ $r['client_name'] ?? '—' }}</td>
               <td>{{ $r['product_name'] ?? '—' }}</td>
               <td>{{ $statusLabel($r['work_order_status'] ?? null) }}</td>
-              <td class="num">{{ $r['printing_scrap_percent'] ?? '—' }}</td>
-              <td class="num">{{ $r['corte_scrap_percent'] ?? '—' }}</td>
-              <td class="num">{{ $r['laminacion_scrap_percent'] ?? '—' }}</td>
-              <td class="num">{{ $r['montaje_scrap_percent'] ?? '—' }}</td>
+              <td class="num">{{ $r['imp_scrap_impreso_kg'] ?? '—' }}</td>
+              <td class="num">{{ $r['imp_scrap_transparente_kg'] ?? '—' }}</td>
+              <td class="num">{{ $r['laminacion_scrap_kg'] ?? '—' }}</td>
+              <td class="num">{{ $r['corte_scrap_kg'] ?? '—' }}</td>
+              <td class="num">{{ $r['total_scrap_kg'] ?? '—' }}</td>
             </tr>
           @empty
-            <tr><td colspan="8" class="muted">Sin datos.</td></tr>
+            <tr><td colspan="9" class="muted">Sin datos.</td></tr>
           @endforelse
         </tbody>
       </table>

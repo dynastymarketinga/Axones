@@ -9,7 +9,7 @@ class MontajePlanillaMetricsTest extends TestCase
 {
     public function test_compute_desarrollo_from_frecuencia_and_repeticion(): void
     {
-        $this->assertSame('836±4', MontajePlanillaMetrics::computeDesarrollo('209±1', '4'));
+        $this->assertSame('836mm', MontajePlanillaMetrics::computeDesarrollo('209±1', '4'));
     }
 
     public function test_compute_ancho_montaje_from_ancho_corte_and_bandas(): void
@@ -48,7 +48,7 @@ class MontajePlanillaMetricsTest extends TestCase
 
         $out = MontajePlanillaMetrics::applyAutoFields($form);
 
-        $this->assertSame('836±4', $out['desarrollo']);
+        $this->assertSame('836mm', $out['desarrollo']);
         $this->assertSame('714±4', $out['anchoMontaje']);
     }
 }

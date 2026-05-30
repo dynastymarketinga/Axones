@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   BarChart3,
   Beaker,
+  CalendarDays,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -25,6 +26,7 @@ import {
   Hourglass,
   IdCard,
   Layers,
+  Link2,
   LogOut,
   Moon,
   Package,
@@ -35,7 +37,6 @@ import {
   Printer,
   Recycle,
   ListChecks,
-  Undo2,
   RotateCcw,
   Ruler,
   Sun,
@@ -53,8 +54,21 @@ import {
   MesSectionShell,
   MesStatTile,
   mesSectionTitle,
-  MesTimerFace,
 } from "@/components/axones/mes"
+
+import { MES_TIMER_HELP_TEXT, MesProductionTimerOpsBlock } from "./mes-production-timer-ops-block"
+import {
+  MesWarehouseReturnSection,
+  type MesWarehouseReturnPanelProps,
+} from "./mes-warehouse-return-section"
+import {
+  allRejectedEntriesHaveMotivo,
+  countDevolucionRechazadaBobinas,
+  hasSalidaBobinaMeta,
+  normalizeSalidaBobinaLabelMeta,
+  salidaBobinaLabelTooltipText,
+  sumRejectedEntryBobinas,
+} from "./printing-turnos"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -80,9 +94,11 @@ import {
 } from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Calendar as UiCalendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import {
   Select,
   SelectContent,
@@ -90,7 +106,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cn } from "@/lib/utils"
 
 import {
   LAM_PAUSE_REASONS,
@@ -181,6 +196,8 @@ export function stringsFromActivePersonnel(people: DraftPerson[]): {
   return { operador, ayudante, supervisor }
 }
 
+export type { MesWarehouseReturnPanelProps } from "./mes-warehouse-return-section"
+
 type Props = {
   pedidoTotalKg: number
   producidoAcumuladoKg: number
@@ -196,8 +213,14 @@ type Props = {
   /** Si true, effectiveSec/deadSec/totalSec son acumulado OT (todos los turnos). */
   timerShowsOtAccumulated?: boolean
   kgHora: string
+  horaArranque: string
+  demountSec: number
+  arranqueRunning?: boolean
+  demountRunning?: boolean
   timerRunning: boolean
   timerPaused: boolean
+  timerActionFlags?: import("./mes-timer-actions").MesTimerActionFlags
+  onRequestTimerConfirm?: (key: import("./mes-timer-actions").MesTimerConfirmKey) => void
   pauseReasons: string[]
   pauseReason: string
   pauseObs: string
@@ -234,6 +257,10 @@ type Props = {
   virgenMaterialesBuenosRaw?: string
   devolucionBuenaRaw?: string
   devolucionRechazadaRaw?: string
+  devolucionRechazadaMotivoRaw?: string
+  devolucionesPendienteAlmacen: boolean
+  devolucionRechazada?: number
+  warehouseReturn: MesWarehouseReturnPanelProps
   checklistOpen?: boolean
   checklistCheckedIds?: string[]
   checklistEstado?: LamChecklistEstado
@@ -284,8 +311,8 @@ type Props = {
   formatTimerHms: (s: number) => string
   setPauseReason: (v: string) => void
   setPauseObs: (v: string) => void
-  startProductionTimer: () => void
-  pauseProductionTimer: () => void
+  startProductionTimer?: () => void
+  pauseProductionTimer?: () => void
   confirmPauseAndResume: () => void
   onSetTurno: (v: "diurno" | "nocturno") => void
   onSetGrupo: (v: "A" | "B" | "C") => void
@@ -351,6 +378,74 @@ function lamLabelModeTitle(mode: LamLabelEditorMode): string {
   return "Salida"
 }
 
+const BOBINA_LABEL_INPUT_CLASS = "ot-input-unified h-10 bg-background shadow-sm"
+
+function parseBobinaLabelFecha(value: string): Date | undefined {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim())
+  if (!match) return undefined
+  const [, day, month, year] = match
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+  if (
+    parsed.getFullYear() !== Number(year) ||
+    parsed.getMonth() !== Number(month) - 1 ||
+    parsed.getDate() !== Number(day)
+  ) {
+    return undefined
+  }
+  return parsed
+}
+
+function formatBobinaLabelFecha(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, "0")
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const yyyy = String(date.getFullYear())
+  return `${dd}/${mm}/${yyyy}`
+}
+
+function bobinaLabelFechaDisplay(value: string): string {
+  const trimmed = value.trim()
+  return parseBobinaLabelFecha(trimmed) ? trimmed : "Seleccionar fecha"
+}
+
+function BobinaLabelSection({
+  title,
+  children,
+}: {
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-xl border border-primary/10 bg-gradient-to-b from-muted/30 to-muted/10 p-4 shadow-sm">
+      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-primary/75">{title}</p>
+      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+    </section>
+  )
+}
+
+function BobinaLabelField({
+  id,
+  label,
+  icon: Icon,
+  className,
+  children,
+}: {
+  id: string
+  label: string
+  icon: LucideIcon
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      <Label htmlFor={id} className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground/90">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-primary/70" aria-hidden />
+        {label}
+      </Label>
+      {children}
+    </div>
+  )
+}
+
 function fmtKg(n: unknown, decimals = 2): string {
   if (typeof n === "number" && Number.isFinite(n)) return n.toFixed(decimals)
   const parsed = Number(String(n ?? "").trim().replace(",", "."))
@@ -365,8 +460,13 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
   const [activeStageRole, setActiveStageRole] = useState<DraftPersonRole>("operador")
   const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
   const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
+  const [labelFechaPickerOpen, setLabelFechaPickerOpen] = useState(false)
   const formFieldId = useId().replace(/:/g, "")
   const mk = (suffix: string) => `${formFieldId}-${suffix}`
+
+  useEffect(() => {
+    if (!props.labelEditorOpen) setLabelFechaPickerOpen(false)
+  }, [props.labelEditorOpen])
 
   const pauseParadaComboLabel = useMemo(() => {
     const r = props.pauseReason.trim()
@@ -437,8 +537,20 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
     num(props.acetatoEntradaRaw) > 0
   const doneSalida =
     props.salidaBobinas.some((v) => num(v) > 0) ||
-    props.salidaMeta.some((m) => hasMeta(m)) ||
+    props.salidaMeta.some((m) => hasSalidaBobinaMeta(m)) ||
     num(props.metrajeRaw) > 0
+
+  const rechBobinasFromEntries = sumRejectedEntryBobinas(props.warehouseReturn.draft.rechazadaEntries)
+  const rechBobinas =
+    rechBobinasFromEntries > 0
+      ? rechBobinasFromEntries
+      : countDevolucionRechazadaBobinas(props.devolucionRechazadaRaw, undefined)
+  const buenaDev = num(props.devolucionBuenaRaw)
+  const autoDevoluciones =
+    (buenaDev > 0.01 || rechBobinas > 0) &&
+    (rechBobinas <= 0 || allRejectedEntriesHaveMotivo(props.warehouseReturn.draft.rechazadaEntries))
+  const doneDevoluciones = autoDevoluciones
+
   const doneScrap =
     num(props.scrapTransparenteRaw) > 0 ||
     num(props.scrapImpresoRaw) > 0 ||
@@ -446,6 +558,20 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
   const doneResumen =
     props.totalSalida > 0.01 || props.totalEntradaImpresa + props.totalEntradaVirgen > 0.01
   const numBobinasSalida = props.salidaBobinas.filter((v) => num(v) > 0).length
+
+  const consumidoImpresasKg = Math.max(
+    0,
+    (props.totalEntradaImpresa ?? 0) - num(props.devolucionBuenaRaw),
+  )
+  const consumidoVirgenKg = Math.max(
+    0,
+    (props.totalEntradaVirgen ?? 0) - num(props.virgenMaterialesBuenosRaw),
+  )
+  const devolucionRechazadaCount = props.devolucionRechazada ?? rechBobinas
+  const devolucionRechazadaLabel =
+    devolucionRechazadaCount > 0
+      ? `${devolucionRechazadaCount} bobina${devolucionRechazadaCount === 1 ? "" : "s"}`
+      : "0 bobinas"
 
 
   const showPersonalTurnoSetup = !props.hasActiveTurno && !props.areaFinalizada
@@ -1190,14 +1316,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
             <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
             <span className="font-semibold">no</span> cierra el turno de planta.
-            {simplifiedTimer ? (
-              <>
-                {" "}
-                Use <span className="font-semibold">Guardar</span> o{" "}
-                <span className="font-semibold">Terminar turno de planta</span> (mismo efecto): cierran el turno y lo
-                dejan en el historial.
-              </>
-            ) : (
+            {simplifiedTimer && props.timerActionFlags ? MES_TIMER_HELP_TEXT : (
               <>
                 {" "}
                 Para cerrar la sesión use <span className="font-semibold">Cerrar turno</span>.
@@ -1213,163 +1332,26 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             registrar tiempos y paradas con motivo.
           </div>
         ) : null}
-        <div className="mes-timer-grid">
-          <MesTimerFace
-            elapsedLabel={props.formatTimerHms(props.effectiveSec)}
-            elapsedCaption={
-              props.timerShowsOtAccumulated
-                ? "Tiempo efectivo acumulado (todos los turnos de la OT)"
-                : "Tiempo efectivo (se detiene al registrar parada)"
-            }
-            deadHms={props.formatTimerHms(props.deadSec)}
-            effectiveHms={props.formatTimerHms(props.totalSec)}
-            productiveMetricLabel={
-              props.timerShowsOtAccumulated
-                ? "Total acumulado (efectivo + paradas)"
-                : "Total (efectivo + paradas)"
-            }
+        {simplifiedTimer && props.timerActionFlags && props.onRequestTimerConfirm ? (
+          <MesProductionTimerOpsBlock
+            formatTimerHms={props.formatTimerHms}
+            effectiveSec={props.effectiveSec}
+            deadSec={props.deadSec}
+            demountSec={props.demountSec}
+            totalSec={props.totalSec}
             kgHora={props.kgHora}
+            horaArranque={props.horaArranque}
+            timerShowsOtAccumulated={props.timerShowsOtAccumulated}
+            timerRunning={props.timerRunning}
+            demountRunning={props.demountRunning}
+            timerActionFlags={props.timerActionFlags}
+            onRequestTimerConfirm={props.onRequestTimerConfirm}
+            onPreviewTimerReport={props.onPreviewTimerReport}
+            canFinalizeOrder={props.canFinalizeOrder}
+            areaFinalizada={props.areaFinalizada}
+            areaLabel="laminacion"
           />
-          <div className="mes-timer-actions w-full min-w-0">
-            <TooltipProvider delayDuration={200}>
-              <div className="mes-timer-action-stack">
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-primary"
-                        aria-label="Iniciar cronómetro de producción"
-                        onClick={props.startProductionTimer}
-                        disabled={
-                          props.readOnlyOps ||
-                          !props.hasActiveTurno ||
-                          props.timerRunning ||
-                          props.areaFinalizada ||
-                          props.timerState === "completed"
-                        }
-                      >
-                        <CirclePlay className="shrink-0" aria-hidden />
-                        <span>Iniciar</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Iniciar cronómetro (tiempo efectivo)</TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-secondary"
-                        aria-label="Pausar cronómetro y registrar motivo de parada"
-                        onClick={props.pauseProductionTimer}
-                        disabled={props.readOnlyOps || !props.timerRunning}
-                      >
-                        <CirclePause className="shrink-0" aria-hidden />
-                        <span>Parada</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-xs">
-                      Detiene el tiempo efectivo y solicita motivo de parada (tiempo muerto). No cierra el turno de
-                      planta.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="mes-timer-action-labeled">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mes-timer-action-btn mes-btn-muted"
-                        aria-label="Vista previa"
-                        onClick={props.onPreviewTimerReport}
-                        disabled={props.readOnlyOps || !props.canPreviewTimerReport}
-                      >
-                        <FileSearch className="shrink-0" aria-hidden />
-                        <span>Vista previa</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {props.canPreviewTimerReport
-                        ? "Vista previa del reporte del cronómetro"
-                        : "Inicie el cronómetro para habilitar la vista previa"}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                {props.hasActiveTurno ? (
-                  <div className="mes-timer-action-labeled mt-2 border-t border-border/60 pt-2">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mes-timer-action-btn mes-btn-danger-outline"
-                          aria-label="Terminar turno de planta"
-                          onClick={props.onCerrarTurnoActual}
-                          disabled={props.readOnlyOps || props.areaFinalizada}
-                        >
-                          <LogOut className="shrink-0" aria-hidden />
-                          <span>Terminar turno de planta</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-xs">
-                        Mismo efecto que Guardar: cierra el turno, guarda en historial y deja las rejillas en cero.
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : null}
-                {props.canFinalizeOrder && !props.areaFinalizada ? (
-                  <div className="mes-timer-action-labeled">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mes-timer-action-btn mes-btn-destructive-solid"
-                          aria-label="Finalizar área de laminación"
-                          onClick={() => void props.onFinalizarAreaLaminacion()}
-                          disabled={props.readOnlyOps && !props.canFinalizeOrder}
-                        >
-                          <Flag className="shrink-0" aria-hidden />
-                          <span>Finalizar área de laminación</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-xs">
-                        Marca el área de laminación como finalizada en la OT (historial en bandeja).
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : null}
-                {!simplifiedTimer ? (
-                  <div className="mes-timer-action-labeled">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mes-timer-action-btn mes-btn-warn-outline"
-                          aria-label="Reiniciar (desde cero)"
-                          onClick={props.onResetAll}
-                          disabled={!props.canResetAll}
-                        >
-                          <RotateCcw className="shrink-0" aria-hidden />
-                          <span>Reiniciar</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">
-                        Borra turnos, cronómetro y checks para esta OT (Laminación)
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : null}
-              </div>
-            </TooltipProvider>
-          </div>
-        </div>
+        ) : null}
         {props.timerPaused && !props.pauseMotivoDialogOpen ? (
           <div className="mt-2 flex justify-center md:justify-end">
             <Button
@@ -1456,16 +1438,12 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       </MesSectionShell>
 
       <MesSectionShell
-        title={mesSectionTitle(Package, "Ingreso bobinas virgen")}
+        title={mesSectionTitle(Package, "Ingreso de material virgen")}
         subtle
         headerRight={<MesSectionHeaderExtras isDone={doneEntradaVirgen} />}
         bodyClassName="mes-section__body--flush"
       >
-        <p className="mb-2 text-[11px] leading-snug text-muted-foreground">
-          Registre el peso por bobina virgen utilizada en laminación. Use la flecha para capturar datos de etiqueta
-          (inventario / lote).
-        </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
           {props.entradaVirgenBobinas.map((val, idx) => (
             <div key={`lam-vir-${idx}`} className="space-y-1">
               <div className="flex items-center justify-between">
@@ -1485,7 +1463,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
                         className="h-5 w-5"
                         onClick={() => props.onOpenVirgenLabel(idx)}
                         disabled={inputDisabled}
-                        title={`Etiqueta bobina virgen #${idx + 1}`}
+                        title={`Etiqueta bobina de entrada #${idx + 1}`}
                       >
                         <ArrowUpRight className="h-3 w-3" />
                       </Button>
@@ -1507,12 +1485,21 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             </div>
           ))}
         </div>
-        <div className="mt-2 mes-stat-grid sm:grid-cols-3">
+        <div className="mt-2">
           <MesStatTile
-            label="Total virgen (Kg)"
-            value={`${fmtKg(props.totalEntradaVirgen)} Kg`}
+            label="Total entrada"
+            value={`${props.totalEntradaVirgen.toFixed(2)} Kg`}
             icon={<Weight className="h-3.5 w-3.5" />}
           />
+        </div>
+      </MesSectionShell>
+
+      <MesSectionShell
+        title={mesSectionTitle(PackageCheck, "Ajustes virgen del turno")}
+        subtle
+        headerRight={<MesSectionHeaderExtras isDone={doneEntradaVirgen} />}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
             {fieldLabel(mk("virgen-rech"), PackageX, "Virgen rechazada (Kg)")}
             <Input
@@ -1670,16 +1657,18 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
                       <Button
                         type="button"
                         size="icon"
-                        variant={hasMeta(props.salidaMeta[idx]) ? "default" : "outline"}
+                        variant={hasSalidaBobinaMeta(props.salidaMeta[idx]) ? "default" : "outline"}
                         className="h-5 w-5"
                         onClick={() => props.onOpenSalidaLabel(idx)}
                         disabled={inputDisabled}
-                        title={`Etiqueta bobina laminada #${idx + 1}`}
+                        title={`Etiqueta bobina de salida #${idx + 1}`}
                       >
                         <ArrowUpRight className="h-3 w-3" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="top">{labelTooltipText(props.salidaMeta[idx])}</TooltipContent>
+                    <TooltipContent side="top">
+                      {salidaBobinaLabelTooltipText(props.salidaMeta[idx])}
+                    </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
@@ -1724,51 +1713,19 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         </div>
       </MesSectionShell>
 
-      <MesSectionShell
-        title={mesSectionTitle(Undo2, "Devolución del turno")}
-        subtle
-        headerRight={
-          <MesSectionHeaderExtras
-            isDone={num(props.devolucionBuenaRaw) > 0 || num(props.devolucionRechazadaRaw) > 0}
-          />
-        }
-      >
-        <p className="mb-2 text-[11px] leading-snug text-muted-foreground">
-          Registre devolución buena (repone inventario al guardar producción) y rechazada (reclamo proveedor), como en
-          el formulario de planta legacy.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3">
-            {fieldLabel(mk("dev-buena"), PackageCheck, "Devolución buena (Kg)")}
-            <Input
-              id={mk("dev-buena")}
-              name="lamDevolucionBuenaKg"
-              className="ot-input-unified mt-1 h-9 bg-white"
-              inputMode="decimal"
-              value={props.devolucionBuenaRaw ?? ""}
-              onChange={(e) => props.onSetDevolucionBuena?.(e.target.value)}
-              disabled={inputDisabled}
-              placeholder="0"
-            />
-          </div>
-          <div className="rounded-md border border-red-200 bg-red-50/80 p-3">
-            {fieldLabel(mk("dev-rech"), PackageX, "Devolución rechazada (Kg)")}
-            <Input
-              id={mk("dev-rech")}
-              name="lamDevolucionRechazadaKg"
-              className="ot-input-unified mt-1 h-9 bg-white"
-              inputMode="decimal"
-              value={props.devolucionRechazadaRaw ?? ""}
-              onChange={(e) => props.onSetDevolucionRechazada?.(e.target.value)}
-              disabled={inputDisabled}
-              placeholder="0"
-            />
-          </div>
-        </div>
-      </MesSectionShell>
+      <MesWarehouseReturnSection
+        inputDisabled={inputDisabled}
+        doneDevoluciones={doneDevoluciones}
+        devolucionesPendienteAlmacen={props.devolucionesPendienteAlmacen}
+        devolucionBuenaRaw={props.devolucionBuenaRaw ?? ""}
+        onSetDevolucionBuena={(v) => props.onSetDevolucionBuena?.(v)}
+        areaFlowLabel="Laminación → Almacén"
+        fieldPrefix="lam"
+        warehouseReturn={props.warehouseReturn}
+      />
 
       <MesSectionShell
-        title={mesSectionTitle(Recycle, "Scrap / refil del turno (Kg)")}
+        title={mesSectionTitle(Recycle, "Desperdicio / refil del turno (Kg)")}
         subtle
         headerRight={<MesSectionHeaderExtras isDone={doneScrap} />}
       >
@@ -1813,14 +1770,14 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             />
           </div>
           <MesStatTile
-            label="Total scrap"
+            label="Total desperdicio"
             value={`${fmtKg(props.totalScrap)} Kg`}
             icon={<Trash2 className="h-3.5 w-3.5" />}
           />
         </div>
         <div className="mt-2 mes-stat-grid sm:grid-cols-2">
           <MesStatTile
-            label="% refil (scrap / salida)"
+            label="% refil (desperdicio / salida)"
             value={`${fmtKg(props.refilPct)} %`}
             icon={<PieChart className="h-3.5 w-3.5" />}
           />
@@ -1832,46 +1789,72 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         subtle
         headerRight={<MesSectionHeaderExtras isDone={doneResumen} />}
       >
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
-            <tbody>
-              {[
-                ["Bobinas impresas (entrada)", `${fmtKg(props.totalEntradaImpresa)} Kg`],
-                ["Devolución buena", `${fmtKg(num(props.devolucionBuenaRaw))} Kg`],
-                ["Devolución rechazada", `${fmtKg(num(props.devolucionRechazadaRaw))} Kg`],
-                [
-                  "Consumido impresas (aprox.)",
-                  `${fmtKg(
-                    Math.max(
-                      0,
-                      (props.totalEntradaImpresa ?? 0) -
-                        num(props.devolucionBuenaRaw) -
-                        num(props.devolucionRechazadaRaw),
-                    ),
-                  )} Kg`,
-                ],
-                ["Bobinas virgen (entrada)", `${fmtKg(props.totalEntradaVirgen)} Kg`],
-                ["Virgen rechazada", `${fmtKg(num(props.virgenRechazadasRaw))} Kg`],
-                ["Material bueno devuelto", `${fmtKg(num(props.virgenMaterialesBuenosRaw))} Kg`],
-                [
-                  "Consumido virgen (aprox.)",
-                  `${fmtKg(
-                    Math.max(0, (props.totalEntradaVirgen ?? 0) - num(props.virgenMaterialesBuenosRaw)),
-                  )} Kg`,
-                ],
-                ["Total salida laminada", `${fmtKg(props.totalSalida)} Kg`],
-                ["Total scrap", `${fmtKg(props.totalScrap)} Kg`],
-                ["Adhesivo consumido", `${fmtKg(props.adhesivoConsumido)} Kg`],
-                ["Merma calculada", `${fmtKg(props.mermaCalc)} Kg`],
-                ["% refil (scrap / salida)", `${fmtKg(props.refilPct)} %`],
-              ].map(([label, value]) => (
-                <tr key={label} className="border-b last:border-b-0">
-                  <td className="bg-muted/30 px-3 py-2 font-medium">{label}</td>
-                  <td className="px-3 py-2 text-end tabular-nums">{value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mes-stat-grid sm:grid-cols-2">
+          <MesStatTile
+            label="Bobinas impresas (entrada)"
+            value={`${fmtKg(props.totalEntradaImpresa)} Kg`}
+            icon={<Printer className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Devolución buena"
+            value={`${fmtKg(num(props.devolucionBuenaRaw))} Kg`}
+            icon={<PackageCheck className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Devolución rechazada"
+            value={devolucionRechazadaLabel}
+            icon={<PackageX className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Consumido impresas (aprox.)"
+            value={`${fmtKg(consumidoImpresasKg)} Kg`}
+            icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Bobinas virgen (entrada)"
+            value={`${fmtKg(props.totalEntradaVirgen)} Kg`}
+            icon={<Package className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Virgen rechazada"
+            value={`${fmtKg(num(props.virgenRechazadasRaw))} Kg`}
+            icon={<PackageX className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Material bueno devuelto"
+            value={`${fmtKg(num(props.virgenMaterialesBuenosRaw))} Kg`}
+            icon={<PackageCheck className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Consumido virgen (aprox.)"
+            value={`${fmtKg(consumidoVirgenKg)} Kg`}
+            icon={<Weight className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Total salida laminada"
+            value={`${fmtKg(props.totalSalida)} Kg`}
+            icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Total desperdicio"
+            value={`${fmtKg(props.totalScrap)} Kg`}
+            icon={<Trash2 className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Adhesivo consumido"
+            value={`${fmtKg(props.adhesivoConsumido)} Kg`}
+            icon={<Beaker className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="Merma calculada"
+            value={`${fmtKg(props.mermaCalc)} Kg`}
+            icon={<Recycle className="h-3.5 w-3.5" />}
+          />
+          <MesStatTile
+            label="% refil (desperdicio / salida)"
+            value={`${fmtKg(props.refilPct)} %`}
+            icon={<PieChart className="h-3.5 w-3.5" />}
+          />
         </div>
       </MesSectionShell>
 
@@ -1898,128 +1881,331 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       ) : null}
 
       <Dialog open={props.labelEditorOpen} onOpenChange={props.onLabelOpenChange}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              Etiqueta bobina {lamLabelModeTitle(props.labelEditorMode)} #{props.labelEditorIndex + 1}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-fecha")}>Fecha bobina</Label>
-              <Input
-                id={mk("label-fecha")}
-                name="lamLabelFecha"
-                value={props.labelEditorDraft.fecha}
-                onChange={(e) => props.onLabelDraftChange("fecha", e.target.value)}
-                placeholder="dd/mm/aaaa"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-hora")}>Hora</Label>
-              <Input
-                id={mk("label-hora")}
-                name="lamLabelHora"
-                value={props.labelEditorDraft.hora}
-                onChange={(e) => props.onLabelDraftChange("hora", e.target.value)}
-                placeholder="--:--"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-referencia")}>Referencia bobina</Label>
-              <Input
-                id={mk("label-referencia")}
-                name="lamLabelReferencia"
-                value={props.labelEditorDraft.referencia}
-                onChange={(e) => props.onLabelDraftChange("referencia", e.target.value)}
-                placeholder="Ref. o lote"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-pedido-lote")}>Pedido / Lote</Label>
-              <Input
-                id={mk("label-pedido-lote")}
-                name="lamLabelPedidoLote"
-                value={props.labelEditorDraft.pedido_lote}
-                onChange={(e) => props.onLabelDraftChange("pedido_lote", e.target.value)}
-                placeholder="N° pedido o lote"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-proveedor")}>Proveedor</Label>
-              <Input
-                id={mk("label-proveedor")}
-                name="lamLabelProveedor"
-                value={props.labelEditorDraft.proveedor}
-                onChange={(e) => props.onLabelDraftChange("proveedor", e.target.value)}
-                placeholder="Nombre proveedor"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-operador")}>Operador</Label>
-              <Input
-                id={mk("label-operador")}
-                name="lamLabelOperador"
-                value={props.labelEditorDraft.operador}
-                onChange={(e) => props.onLabelDraftChange("operador", e.target.value)}
-                placeholder="Nombre operador"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-peso")}>Peso (Kg)</Label>
-              <Input
-                id={mk("label-peso")}
-                name="lamLabelPeso"
-                value={props.labelEditorDraft.peso}
-                onChange={(e) => props.onLabelDraftChange("peso", e.target.value)}
-                placeholder="Ej: 120"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-metraje")}>Metraje</Label>
-              <Input
-                id={mk("label-metraje")}
-                name="lamLabelMetraje"
-                value={props.labelEditorDraft.metraje}
-                onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)}
-                placeholder="Metros"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-medida-ancho")}>Medida / Ancho (mm)</Label>
-              <Input
-                id={mk("label-medida-ancho")}
-                name="lamLabelMedidaAncho"
-                value={props.labelEditorDraft.medida_ancho}
-                onChange={(e) => props.onLabelDraftChange("medida_ancho", e.target.value)}
-                placeholder="Ej: 610"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={mk("label-maquina-origen")}>Máquina origen</Label>
-              <Input
-                id={mk("label-maquina-origen")}
-                name="lamLabelMaquinaOrigen"
-                value={props.labelEditorDraft.maquina_origen}
-                onChange={(e) => props.onLabelDraftChange("maquina_origen", e.target.value)}
-                placeholder="Máquina"
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor={mk("label-lote")}>Lote</Label>
-              <Input
-                id={mk("label-lote")}
-                name="lamLabelLote"
-                value={props.labelEditorDraft.lote}
-                onChange={(e) => props.onLabelDraftChange("lote", e.target.value)}
-                placeholder="Lote"
-              />
-            </div>
-          </div>
+        <DialogContent
+          className={cn(
+            "gap-0 overflow-hidden p-0",
+            props.labelEditorMode === "salida" ? "max-w-md" : "max-w-3xl",
+          )}
+        >
+          {props.labelEditorMode === "salida" ? (
+            <>
+              <DialogHeader className="space-y-2 border-b border-primary/10 bg-gradient-to-r from-primary/5 via-background to-primary/5 px-6 py-5">
+                <DialogTitle className="flex items-center gap-2 text-left">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <PackageSearch className="h-4 w-4" aria-hidden />
+                  </span>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span>Bobina de salida</span>
+                    <Badge variant="secondary" className="font-mono text-xs font-semibold">
+                      #{props.labelEditorIndex + 1}
+                    </Badge>
+                  </span>
+                </DialogTitle>
+                <DialogDescription className="text-left">
+                  Registre los datos de salida. Todos los campos son opcionales.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="px-6 py-5">
+                <section className="rounded-xl border border-primary/10 bg-gradient-to-b from-muted/30 to-muted/10 p-4 shadow-sm">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-primary/75">
+                    Planilla de salida
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <BobinaLabelField id={mk("label-peso")} label="Peso (Kg)" icon={Weight}>
+                      <Input
+                        id={mk("label-peso")}
+                        name="lamLabelPeso"
+                        value={props.labelEditorDraft.peso}
+                        onChange={(e) => props.onLabelDraftChange("peso", e.target.value)}
+                        placeholder="Ej: 120"
+                        inputMode="decimal"
+                        className={BOBINA_LABEL_INPUT_CLASS}
+                      />
+                    </BobinaLabelField>
+
+                    <BobinaLabelField id={mk("label-fecha")} label="Fecha" icon={CalendarDays}>
+                      <Popover open={labelFechaPickerOpen} onOpenChange={setLabelFechaPickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            id={mk("label-fecha")}
+                            type="button"
+                            variant="outline"
+                            name="lamLabelFecha"
+                            className={cn(
+                              BOBINA_LABEL_INPUT_CLASS,
+                              "w-full justify-between px-3 font-normal",
+                              !props.labelEditorDraft.fecha.trim() && "text-muted-foreground",
+                            )}
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <CalendarDays className="h-4 w-4 text-primary/70" aria-hidden />
+                              {bobinaLabelFechaDisplay(props.labelEditorDraft.fecha)}
+                            </span>
+                            <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <UiCalendar
+                            mode="single"
+                            selected={parseBobinaLabelFecha(props.labelEditorDraft.fecha)}
+                            defaultMonth={parseBobinaLabelFecha(props.labelEditorDraft.fecha) ?? new Date()}
+                            onSelect={(date) => {
+                              if (!date) return
+                              props.onLabelDraftChange("fecha", formatBobinaLabelFecha(date))
+                              setLabelFechaPickerOpen(false)
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </BobinaLabelField>
+
+                    <BobinaLabelField id={mk("label-metraje")} label="Metraje (m)" icon={ArrowUpFromLine}>
+                      <Input
+                        id={mk("label-metraje")}
+                        name="lamLabelMetraje"
+                        value={props.labelEditorDraft.metraje}
+                        onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)}
+                        placeholder="Metros"
+                        inputMode="decimal"
+                        className={BOBINA_LABEL_INPUT_CLASS}
+                      />
+                    </BobinaLabelField>
+
+                    <BobinaLabelField id={mk("label-hora")} label="Hora" icon={Clock}>
+                      <Input
+                        id={mk("label-hora")}
+                        name="lamLabelHora"
+                        type="time"
+                        value={props.labelEditorDraft.hora}
+                        onChange={(e) => props.onLabelDraftChange("hora", e.target.value)}
+                        className={BOBINA_LABEL_INPUT_CLASS}
+                      />
+                    </BobinaLabelField>
+
+                    <BobinaLabelField
+                      id={mk("label-empalmes")}
+                      label="Empalmes"
+                      icon={Link2}
+                      className="sm:col-span-2"
+                    >
+                      <Input
+                        id={mk("label-empalmes")}
+                        name="lamLabelEmpalmes"
+                        value={props.labelEditorDraft.empalmes}
+                        onChange={(e) => props.onLabelDraftChange("empalmes", e.target.value)}
+                        placeholder="Cantidad de empalmes"
+                        inputMode="numeric"
+                        className={BOBINA_LABEL_INPUT_CLASS}
+                      />
+                    </BobinaLabelField>
+                  </div>
+                </section>
+              </div>
+            </>
+          ) : (
+            <>
+              <DialogHeader className="space-y-2 border-b border-primary/10 bg-gradient-to-r from-primary/5 via-background to-primary/5 px-6 py-5">
+                <DialogTitle className="flex items-center gap-2 text-left">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Package className="h-4 w-4" aria-hidden />
+                  </span>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span>
+                      Etiqueta bobina {lamLabelModeTitle(props.labelEditorMode).toLowerCase()} de entrada
+                    </span>
+                    <Badge variant="secondary" className="font-mono text-xs font-semibold">
+                      #{props.labelEditorIndex + 1}
+                    </Badge>
+                  </span>
+                </DialogTitle>
+                <DialogDescription className="text-left">
+                  Registre los datos de la bobina. Todos los campos son opcionales.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="max-h-[min(70vh,680px)] space-y-4 overflow-y-auto px-6 py-5">
+                <BobinaLabelSection title="Fecha y hora">
+                  <BobinaLabelField id={mk("label-fecha")} label="Fecha bobina" icon={CalendarDays}>
+                    <Popover open={labelFechaPickerOpen} onOpenChange={setLabelFechaPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          id={mk("label-fecha")}
+                          type="button"
+                          variant="outline"
+                          name="lamLabelFecha"
+                          className={cn(
+                            BOBINA_LABEL_INPUT_CLASS,
+                            "w-full justify-between px-3 font-normal",
+                            !props.labelEditorDraft.fecha.trim() && "text-muted-foreground",
+                          )}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <CalendarDays className="h-4 w-4 text-primary/70" aria-hidden />
+                            {bobinaLabelFechaDisplay(props.labelEditorDraft.fecha)}
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <UiCalendar
+                          mode="single"
+                          selected={parseBobinaLabelFecha(props.labelEditorDraft.fecha)}
+                          defaultMonth={parseBobinaLabelFecha(props.labelEditorDraft.fecha) ?? new Date()}
+                          onSelect={(date) => {
+                            if (!date) return
+                            props.onLabelDraftChange("fecha", formatBobinaLabelFecha(date))
+                            setLabelFechaPickerOpen(false)
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-hora")} label="Hora" icon={Clock}>
+                    <Input
+                      id={mk("label-hora")}
+                      name="lamLabelHora"
+                      type="time"
+                      value={props.labelEditorDraft.hora}
+                      onChange={(e) => props.onLabelDraftChange("hora", e.target.value)}
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                </BobinaLabelSection>
+
+                <BobinaLabelSection title="Identificación">
+                  <BobinaLabelField id={mk("label-referencia")} label="Referencia bobina" icon={Hash}>
+                    <Input
+                      id={mk("label-referencia")}
+                      name="lamLabelReferencia"
+                      value={props.labelEditorDraft.referencia}
+                      onChange={(e) => props.onLabelDraftChange("referencia", e.target.value)}
+                      placeholder="Ref. o lote"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-pedido-lote")} label="Pedido / Lote" icon={ClipboardList}>
+                    <Input
+                      id={mk("label-pedido-lote")}
+                      name="lamLabelPedidoLote"
+                      value={props.labelEditorDraft.pedido_lote}
+                      onChange={(e) => props.onLabelDraftChange("pedido_lote", e.target.value)}
+                      placeholder="N° pedido o lote"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-lote")} label="Lote" icon={Layers} className="sm:col-span-2">
+                    <Input
+                      id={mk("label-lote")}
+                      name="lamLabelLote"
+                      value={props.labelEditorDraft.lote}
+                      onChange={(e) => props.onLabelDraftChange("lote", e.target.value)}
+                      placeholder="Lote"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                </BobinaLabelSection>
+
+                <BobinaLabelSection title="Origen y personal">
+                  <BobinaLabelField id={mk("label-proveedor")} label="Proveedor" icon={Factory}>
+                    <Input
+                      id={mk("label-proveedor")}
+                      name="lamLabelProveedor"
+                      value={props.labelEditorDraft.proveedor}
+                      onChange={(e) => props.onLabelDraftChange("proveedor", e.target.value)}
+                      placeholder="Nombre proveedor"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-operador")} label="Operador" icon={UserRound}>
+                    <Input
+                      id={mk("label-operador")}
+                      name="lamLabelOperador"
+                      value={props.labelEditorDraft.operador}
+                      onChange={(e) => props.onLabelDraftChange("operador", e.target.value)}
+                      placeholder="Nombre operador"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-maquina-origen")} label="Máquina origen" icon={Printer} className="sm:col-span-2">
+                    <Input
+                      id={mk("label-maquina-origen")}
+                      name="lamLabelMaquinaOrigen"
+                      value={props.labelEditorDraft.maquina_origen}
+                      onChange={(e) => props.onLabelDraftChange("maquina_origen", e.target.value)}
+                      placeholder="Máquina"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                </BobinaLabelSection>
+
+                <BobinaLabelSection title="Medidas">
+                  <BobinaLabelField id={mk("label-peso")} label="Peso (Kg)" icon={Weight}>
+                    <Input
+                      id={mk("label-peso")}
+                      name="lamLabelPeso"
+                      value={props.labelEditorDraft.peso}
+                      onChange={(e) => props.onLabelDraftChange("peso", e.target.value)}
+                      placeholder="Ej: 120"
+                      inputMode="decimal"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-metraje")} label="Metraje" icon={ArrowUpFromLine}>
+                    <Input
+                      id={mk("label-metraje")}
+                      name="lamLabelMetraje"
+                      value={props.labelEditorDraft.metraje}
+                      onChange={(e) => props.onLabelDraftChange("metraje", e.target.value)}
+                      placeholder="Metros"
+                      inputMode="decimal"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-medida-ancho")} label="Medida / Ancho (mm)" icon={Layers} className="sm:col-span-2">
+                    <Input
+                      id={mk("label-medida-ancho")}
+                      name="lamLabelMedidaAncho"
+                      value={props.labelEditorDraft.medida_ancho}
+                      onChange={(e) => props.onLabelDraftChange("medida_ancho", e.target.value)}
+                      placeholder="Ej: 610"
+                      inputMode="decimal"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                </BobinaLabelSection>
+
+                <BobinaLabelSection title="Tratamiento">
+                  <BobinaLabelField id={mk("label-trat-int")} label="Tratamiento interno" icon={Layers}>
+                    <Input
+                      id={mk("label-trat-int")}
+                      name="lamLabelTratamientoInterno"
+                      value={props.labelEditorDraft.tratamiento_interno}
+                      onChange={(e) => props.onLabelDraftChange("tratamiento_interno", e.target.value)}
+                      placeholder="Dinas"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                  <BobinaLabelField id={mk("label-trat-ext")} label="Tratamiento externo" icon={Layers}>
+                    <Input
+                      id={mk("label-trat-ext")}
+                      name="lamLabelTratamientoExterno"
+                      value={props.labelEditorDraft.tratamiento_externo}
+                      onChange={(e) => props.onLabelDraftChange("tratamiento_externo", e.target.value)}
+                      placeholder="Dinas"
+                      className={BOBINA_LABEL_INPUT_CLASS}
+                    />
+                  </BobinaLabelField>
+                </BobinaLabelSection>
+              </div>
+            </>
+          )}
+
           {props.labelEditorError ? (
-            <p className="text-sm text-destructive">{props.labelEditorError}</p>
+            <p className="px-6 pb-2 text-sm text-destructive">{props.labelEditorError}</p>
           ) : null}
-          <DialogFooter>
+
+          <DialogFooter className="gap-2 border-t border-primary/10 bg-muted/20 px-6 py-4 sm:justify-end">
             <Button type="button" variant="outline" onClick={props.onLabelClear}>
               Limpiar
             </Button>

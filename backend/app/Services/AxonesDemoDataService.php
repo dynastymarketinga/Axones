@@ -1431,6 +1431,8 @@ class AxonesDemoDataService
                         'kgSalidaImp' => (string) (20 + $i),
                         'mermaImp' => (string) (2),
                         'metrosImp' => (string) (900 + $i * 10),
+                        'ubicFotoceldaImp' => 'N/A',
+                        'gramajeTintaGm2' => number_format(1.2 + ($i % 5) * 0.15, 2, ',', ''),
                         'tintaColor1' => 'AMARILLO · BF-1564',
                         'tintaAnilox1' => '3.00',
                         'tintaVisc1' => '18',

@@ -21,8 +21,15 @@ class StoreInventoryReturnRequest extends FormRequest
      */
     public function rules(): array
     {
+        $toRejectedBobinas = $this->input('destination_area') === InventoryArea::BobinasRechazadas->value;
+
         return [
-            'material_id' => ['required', 'integer', 'exists:materials,id'],
+            'material_id' => [
+                Rule::requiredIf(fn () => ! $toRejectedBobinas),
+                'nullable',
+                'integer',
+                'exists:materials,id',
+            ],
             'work_order_id' => [
                 Rule::requiredIf(fn () => $this->input('destination_area') === InventoryArea::BobinasRechazadas->value),
                 'nullable',

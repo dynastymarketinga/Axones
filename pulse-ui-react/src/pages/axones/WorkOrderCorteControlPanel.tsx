@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Flag, LogOut, RotateCcw, Save, Scissors } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { FileSearch, RotateCcw, Save, Scissors } from "lucide-react"
 import { toast } from "sonner"
 
 import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
@@ -78,6 +78,22 @@ function warnCorteDispatchSync(dispatchSync?: CorteDispatchSyncStatus): void {
     toast.message("Saldo provisional visible en Despacho · producto terminado.")
   }
 }
+import { applyMesPhaseConfirmToTimer } from "@/lib/mes-multi-phase-timer-exec"
+import { cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
+import {
+  cumulativeDeadSeconds,
+  cumulativeEffectiveSeconds,
+  cumulativeTotalPersistedSeconds,
+  deadAccSecAfterResume,
+  formatHoraArranqueFromMs,
+  horaArranqueMsFromTimer,
+} from "@/lib/mes-timer-band-shared"
+import {
+  buildMesTimerActionFlags,
+  getMesTimerConfirm,
+  mesTimerConfirmNeedsActiveTurno,
+  type MesTimerConfirmKey,
+} from "@/pages/axones/mes-timer-actions"
 import { getStoredUser } from "@/lib/auth-storage"
 import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
 import { filterCorteControlForm } from "@/lib/corte-control-keys"
@@ -105,8 +121,10 @@ import {
   resolveCorteDisplayTimer,
   snapshotCorteTurnMetrics,
   accumulateCorteFromJson,
+  formatTimerHms,
   pauseCorteProductionTimerOnForm,
-  startCorteProductionTimerOnForm,
+  type CortePauseEntry,
+  type CorteTurnTimer,
   getCorPaletas,
   sanitizeCorEntradaBobinasKg,
   sanitizeCorPaletasForPersistence,
@@ -177,6 +195,10 @@ export default function WorkOrderCorteControlPanel({
   const [pauseMotivoModalOpen, setPauseMotivoModalOpen] = useState(false)
   const [pauseReason, setPauseReason] = useState("")
   const [pauseObs, setPauseObs] = useState("")
+  const [timerConfirm, setTimerConfirm] = useState<MesTimerConfirmKey | null>(null)
+  const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
+  const [timerTick, setTimerTick] = useState(0)
+  const wasTimerPausedRef = useRef(false)
   const [dispatchSyncAlert, setDispatchSyncAlert] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -208,16 +230,120 @@ export default function WorkOrderCorteControlPanel({
   const areaFinalizada = areaEstado === "finalizada"
   const controlReadOnly = areaFinalizada && !canFinalizeOrder
   const activeTurno = useMemo(() => materializeOpenCorteTurnoActual(form), [form])
+  const closedTurnos = useMemo(() => parseCorteTurnos(form[COR_TURNOS_KEY], form), [form])
   const activeTimer = useMemo(() => resolveCorteDisplayTimer(activeTurno, form), [activeTurno, form])
   const timerState = activeTimer.state || "pending"
+  const arranqueState = readString(form.corTimerArranqueState) || "idle"
+  const demountState = readString(form.corTimerDemountState) || "idle"
+  const arranqueRunning = arranqueState === "running"
+  const demountRunning = demountState === "running"
   const timerRunning = timerState === "running"
   const timerPaused = timerState === "paused"
   const hasActiveTurno = activeTurno !== null
+  const nowMs = Date.now() + timerTick * 0
+  const jsonAccum = useMemo(
+    () => accumulateCorteFromJson(closedTurnos, activeTurno, sumSalidaKgFromForm(form)),
+    [closedTurnos, activeTurno, form],
+  )
+  const otEffectiveAccSec = useMemo(
+    () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otDeadAccSec = useMemo(
+    () => cumulativeDeadSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otTotalAccSec = useMemo(
+    () => cumulativeTotalPersistedSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otDemountAccSec = useMemo(
+    () => cumulativeDemountSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const displayEffectiveSec = otEffectiveAccSec
+  const displayDeadSec = otDeadAccSec
+  const displayTotalSec = otTotalAccSec
+  const displayDemountSec = otDemountAccSec
+  const producidoAcumuladoKg = jsonAccum.producidoKg
+  const kgHora =
+    displayEffectiveSec > 0.01
+      ? (producidoAcumuladoKg / (displayEffectiveSec / 3600)).toFixed(2)
+      : "0.00"
+  const displayHoraArranque = useMemo(() => {
+    if (!activeTurno) return "—"
+    const t = activeTurno.timer
+    if (t.arranqueStartedAtMs > 0) {
+      return formatHoraArranqueFromMs(t.arranqueStartedAtMs)
+    }
+    return formatHoraArranqueFromMs(horaArranqueMsFromTimer(t))
+  }, [activeTurno])
+  const pauseEntries = useMemo<CortePauseEntry[]>(() => {
+    const raw = form.corTimerPauses
+    if (!Array.isArray(raw)) return []
+    return raw
+      .map((x) => x as Partial<CortePauseEntry>)
+      .map((x) => ({
+        at: readString(x.at),
+        reason: readString(x.reason),
+        obs: readString(x.obs),
+        duration_sec: readNumber(x.duration_sec),
+      }))
+      .filter((x) => x.reason)
+  }, [form.corTimerPauses])
 
   const timerEverStarted = useMemo(
     () => hasProductionTimerStarted(mesTimerFieldsFromForm(form, "cor")),
     [form],
   )
+
+  const canPreviewTimerReport = useMemo(() => {
+    if (!hasActiveTurno) return false
+    if (controlReadOnly) return false
+    if (areaFinalizada) return false
+    return timerEverStarted
+  }, [hasActiveTurno, controlReadOnly, areaFinalizada, timerEverStarted])
+
+  const timerActionFlags = useMemo(
+    () =>
+      buildMesTimerActionFlags({
+        base: !controlReadOnly && hasActiveTurno && !areaFinalizada,
+        arranqueRunning,
+        demountRunning,
+        timerRunning,
+        timerPaused,
+        canFinalizeOrder,
+        areaFinalizada,
+        controlReadOnly,
+        timerState,
+        canPreview: canPreviewTimerReport,
+      }),
+    [
+      areaFinalizada,
+      arranqueRunning,
+      canFinalizeOrder,
+      canPreviewTimerReport,
+      controlReadOnly,
+      demountRunning,
+      hasActiveTurno,
+      timerPaused,
+      timerRunning,
+      timerState,
+    ],
+  )
+
+  useEffect(() => {
+    if (wasTimerPausedRef.current && !timerPaused) {
+      setPauseMotivoModalOpen(false)
+    }
+    wasTimerPausedRef.current = timerPaused
+  }, [timerPaused])
+
+  useEffect(() => {
+    if (!timerRunning && !timerPaused && !arranqueRunning && !demountRunning) return
+    const id = window.setInterval(() => setTimerTick((t) => t + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [timerPaused, timerRunning, arranqueRunning, demountRunning])
 
   const canSaveProduction = useMemo(() => {
     if (controlReadOnly) return false
@@ -548,21 +674,180 @@ export default function WorkOrderCorteControlPanel({
     await persistCorteForm(cleared, { skipProductionSaveGuard: true, notifyProductionSave: false })
   }
 
-  const startProductionTimer = useCallback(() => {
-    if (controlReadOnly || !hasActiveTurno) return
-    setForm((prev) => {
-      const next = startCorteProductionTimerOnForm(prev)
-      if (!next) return prev
-      queueMicrotask(() => {
-        void persistCorteForm(next, {
-          skipProductionSaveGuard: true,
-          notifyProductionSave: false,
-          successMessage: "Cronómetro iniciado y guardado en el sistema.",
-        })
-      })
-      return next
-    })
-  }, [controlReadOnly, hasActiveTurno, persistCorteForm])
+  function patchAndPersistTimer(
+    updater: (timer: CorteTurnTimer) => CorteTurnTimer,
+    successMessage?: string,
+  ) {
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: CorteTurnoEntry = { ...cur, timer: updater(cur.timer) }
+    patchActiveTurn(() => nextTurn)
+    void persistCorteForm(
+      {
+        ...form,
+        [COR_ACTUAL_KEY]: nextTurn,
+        ...corteTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage,
+      },
+    )
+  }
+
+  function requestTimerConfirm(key: MesTimerConfirmKey) {
+    if (controlReadOnly) return
+    setTimerConfirm(key)
+  }
+
+  function executeTimerConfirm(key: MesTimerConfirmKey) {
+    if (!mesTimerConfirmNeedsActiveTurno(key)) {
+      setFinalizeAreaConfirmOpen(true)
+      return
+    }
+    const cur = activeTurno
+    if (!cur) return
+    const phase = applyMesPhaseConfirmToTimer(key, cur.timer)
+    if (phase) {
+      patchAndPersistTimer(() => phase.timer, phase.message)
+      return
+    }
+    switch (key) {
+      case "startProduction":
+        confirmStartProductionTimer()
+        break
+      case "startDeadTime":
+        executePauseProductionTimer()
+        break
+      case "endDeadTime":
+        confirmResumeProductionAfterDeadTime()
+        break
+      case "cerrarTurno":
+        setCloseTurnConfirmOpen(true)
+        break
+      default:
+        break
+    }
+  }
+
+  function confirmStartProductionTimer() {
+    if (!hasActiveTurno || controlReadOnly) return
+    const now = Date.now()
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: CorteTurnoEntry = {
+      ...cur,
+      timer: {
+        ...cur.timer,
+        state: "running",
+        startedAtMs: cur.timer.startedAtMs || now,
+        deadAccSec: deadAccSecAfterResume(cur.timer, now),
+        lastResumeAtMs: now,
+        pauseAtMs: 0,
+      },
+    }
+    patchActiveTurn(() => nextTurn)
+    void persistCorteForm(
+      {
+        ...form,
+        [COR_ACTUAL_KEY]: nextTurn,
+        ...corteTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        suppressSuccessToast: true,
+      },
+    )
+  }
+
+  function confirmResumeProductionAfterDeadTime() {
+    if (!hasActiveTurno || controlReadOnly || !timerPaused) return
+    const now = Date.now()
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: CorteTurnoEntry = {
+      ...cur,
+      timer: {
+        ...cur.timer,
+        state: "running",
+        deadAccSec: deadAccSecAfterResume(cur.timer, now),
+        lastResumeAtMs: now,
+        pauseAtMs: 0,
+      },
+    }
+    patchActiveTurn(() => nextTurn)
+    void persistCorteForm(
+      {
+        ...form,
+        [COR_ACTUAL_KEY]: nextTurn,
+        ...corteTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage: "Producción reanudada.",
+      },
+    )
+  }
+
+  function runOpenTimerReportPreview() {
+    const payload = {
+      generated_at: new Date().toISOString(),
+      work_order_id: workOrderId,
+      work_order_code: readString(prefill.code) || `OT-${workOrderId}`,
+      turno: {
+        turno: readString(form.corTurno),
+        grupo: readString(form.corGrupo),
+        operador: readString(form.corOperador),
+        ayudante: readString(form.corAyudante),
+        supervisor: readString(form.corSupervisor),
+      },
+      timer: {
+        state: timerState,
+        total_hms: formatTimerHms(displayTotalSec),
+        dead_hms: formatTimerHms(displayDeadSec),
+        effective_hms: formatTimerHms(displayEffectiveSec),
+        kg_hora: kgHora,
+      },
+      pauses: pauseEntries.map((p) => ({
+        at: p.at,
+        reason: p.reason,
+        obs: p.obs,
+        duration_hms: formatTimerHms(p.duration_sec),
+      })),
+    }
+    const previewHash = (() => {
+      try {
+        const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+        return `#p=${encodeURIComponent(encoded)}`
+      } catch {
+        return ""
+      }
+    })()
+    if (!previewHash) {
+      toast.error("No se pudo preparar la vista previa.")
+      return
+    }
+    const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
+      String(workOrderId),
+    )}/corte/temporizador/vista-previa${previewHash}`
+    window.open(url, "_blank", "noopener,noreferrer")
+  }
+
+  function requestOpenTimerReportPreview() {
+    if (!canPreviewTimerReport) {
+      toast.error("Inicie el cronómetro para habilitar la vista previa.")
+      return
+    }
+    setPreviewTimerConfirmOpen(true)
+  }
+
+  function confirmOpenTimerReportPreview() {
+    setPreviewTimerConfirmOpen(false)
+    runOpenTimerReportPreview()
+  }
 
   function executePauseProductionTimer() {
     if (controlReadOnly) return
@@ -637,11 +922,13 @@ export default function WorkOrderCorteControlPanel({
     setPauseReason("")
     setPauseObs("")
     setPauseMotivoModalOpen(false)
-    toast.message("Parada registrada. Use play para reanudar el tiempo efectivo.")
+    toast.message(
+      "Parada registrada. El cronómetro sigue en pausa; use «Fin de parada» para reanudar el tiempo efectivo.",
+    )
   }
 
   useEffect(() => {
-    if (!timerRunning) return
+    if (!timerRunning && !arranqueRunning && !demountRunning) return
     const id = window.setInterval(() => {
       if (saving) return
       persistCorteFormCb(form, {
@@ -653,6 +940,8 @@ export default function WorkOrderCorteControlPanel({
     return () => window.clearInterval(id)
   }, [
     timerRunning,
+    arranqueRunning,
+    demountRunning,
     saving,
     persistCorteFormCb,
     form,
@@ -738,11 +1027,11 @@ export default function WorkOrderCorteControlPanel({
                 <input className="ot-input" value={readString(form.distFotoceldaBorde)} readOnly />
               </div>
               <div className="ot-field">
-                <label className="ot-label">Dist. figura lado contrario (mm)</label>
+                <label className="ot-label">Distancia figura lado contrario (mm)</label>
                 <input className="ot-input" value={readString(form.distFiguraLadoContrario)} readOnly />
               </div>
               <div className="ot-field">
-                <label className="ot-label">Dist. figura lado fotocelda (mm)</label>
+                <label className="ot-label">Distancia figura lado fotocelda (mm)</label>
                 <input className="ot-input" value={readString(form.distFiguraLadoFotocelda)} readOnly />
               </div>
               <div className="ot-field">
@@ -845,6 +1134,28 @@ export default function WorkOrderCorteControlPanel({
         readOnly={controlReadOnly}
         readOnlyOps={controlReadOnly}
         canOperateProduction={canSaveProduction}
+        areaFinalizada={areaFinalizada}
+        canFinalizeOrder={canFinalizeOrder}
+        hasActiveTurno={hasActiveTurno}
+        turnosRegistrados={jsonAccum.turnosRegistrados}
+        ultimoTurnoLabel={hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel}
+        closedTurnos={closedTurnos}
+        timerState={timerState}
+        totalSec={displayTotalSec}
+        deadSec={displayDeadSec}
+        effectiveSec={displayEffectiveSec}
+        demountSec={displayDemountSec}
+        timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
+        kgHora={kgHora}
+        horaArranque={displayHoraArranque}
+        arranqueRunning={arranqueRunning}
+        demountRunning={demountRunning}
+        timerRunning={timerRunning}
+        timerPaused={timerPaused}
+        timerActionFlags={timerActionFlags}
+        onRequestTimerConfirm={requestTimerConfirm}
+        onPreviewTimerReport={requestOpenTimerReportPreview}
+        formatTimerHms={formatTimerHms}
         corTurno={readString(form.corTurno)}
         corGrupo={readString(form.corGrupo)}
         corOperador={readString(form.corOperador)}
@@ -860,8 +1171,6 @@ export default function WorkOrderCorteControlPanel({
         onRequestSave={persistCorteFormCb}
         onApplyCerrarTurno={applyCerrarTurno}
         onRequestCerrarTurno={() => setCloseTurnConfirmOpen(true)}
-        startProductionTimer={startProductionTimer}
-        pauseProductionTimer={executePauseProductionTimer}
         confirmPauseAndResume={confirmPauseAndResume}
         pauseReason={pauseReason}
         pauseObs={pauseObs}
@@ -869,9 +1178,13 @@ export default function WorkOrderCorteControlPanel({
         setPauseObs={setPauseObs}
         pauseMotivoDialogOpen={pauseMotivoModalOpen}
         onPauseMotivoDialogOpenChange={setPauseMotivoModalOpen}
+        pauseEntries={pauseEntries}
       />
 
       <div className="no-print mb-12 flex flex-col items-center gap-2">
+        {guardarHint ? (
+          <p className="max-w-md text-center text-xs text-muted-foreground">{guardarHint}</p>
+        ) : null}
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
             type="button"
@@ -892,29 +1205,6 @@ export default function WorkOrderCorteControlPanel({
             >
               <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
               Empezar de cero
-            </Button>
-          ) : null}
-          {hasActiveTurno && !areaFinalizada && !controlReadOnly ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-orange-300 text-orange-950 hover:bg-orange-50"
-              disabled={saving}
-              onClick={() => setCloseTurnConfirmOpen(true)}
-            >
-              <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Terminar turno de planta
-            </Button>
-          ) : null}
-          {canFinalizeOrder && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving}
-              onClick={() => setFinalizeAreaConfirmOpen(true)}
-            >
-              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Finalizar área de corte
             </Button>
           ) : null}
         </div>
@@ -985,6 +1275,56 @@ export default function WorkOrderCorteControlPanel({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmResetAll()}>Confirmar reinicio</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {timerConfirm ? (
+        <AlertDialog open onOpenChange={(open) => !open && setTimerConfirm(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{getMesTimerConfirm("corte")[timerConfirm].title}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {getMesTimerConfirm("corte")[timerConfirm].description}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                className={
+                  getMesTimerConfirm("corte")[timerConfirm].destructive
+                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    : undefined
+                }
+                onClick={() => {
+                  const key = timerConfirm
+                  setTimerConfirm(null)
+                  executeTimerConfirm(key)
+                }}
+              >
+                {getMesTimerConfirm("corte")[timerConfirm].confirmLabel}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+
+      <AlertDialog open={previewTimerConfirmOpen} onOpenChange={setPreviewTimerConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="inline-flex items-center gap-2">
+              <FileSearch className="h-5 w-5 shrink-0 opacity-80" aria-hidden />
+              Vista previa del cronómetro
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Se abrirá una pestaña nueva con el reporte de tiempos y pausas registrados hasta este momento.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmOpenTimerReportPreview()}>
+              Abrir vista previa
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

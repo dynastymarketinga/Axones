@@ -317,9 +317,10 @@ export default function WorkOrderMontajeClicheMaterialSection({
       subtle
     >
       <p className="text-muted-foreground mb-4 text-xs leading-relaxed">
-        Datos del montaje de cliché y cilindro. El registro de sticky back, código y color se
-        guarda con la OT al pulsar{" "}
-        <span className="font-medium text-foreground">Guardar</span> en el pie de página.
+        Datos del montaje de cliché y cilindro. El registro de sticky back, código y color se envía al sistema al pulsar{" "}
+        <span className="font-medium text-foreground">Guardar</span> al pie de página (cierre de turno o finalización
+        del área). Al abrir un <span className="font-medium text-foreground">turno nuevo</span>, estos campos se
+        limpian; lo guardado queda en el historial del turno cerrado.
       </p>
 
       <ClicheCilindroPair

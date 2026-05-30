@@ -24,6 +24,7 @@ import WorkOrderMontajeOpsSection, {
 import WorkOrderMontajeClicheMaterialSection from "./WorkOrderMontajeClicheMaterialSection"
 import {
   clearMontajeClicheMaterialKeys,
+  clearMontajeTurnCaptureFormKeys,
   MON_CILINDRO_KEY,
   MON_CLICHE_KEY,
   MON_CODIGO_KEY,
@@ -46,7 +47,11 @@ import {
 import {
   cumulativeDeadSeconds,
   cumulativeEffectiveSeconds,
+  cumulativeTotalPersistedSeconds,
+  deadAccSecAfterResume,
   formatHmsFromSeconds,
+  formatHoraArranqueFromMs,
+  horaArranqueMsFromTimer,
   mesBandejaStatePillClass,
 } from "@/lib/mes-timer-band-shared"
 import {
@@ -69,21 +74,26 @@ import {
   timerToLegacyFlat,
   finalizeTurnTimerNow,
   formatTimerHms,
-  legacyMirrorIndicatesOpenMontajeShift,
   montajeTurnoToMirror,
   parseMontajeTurnoActual,
   parseMontajeTurnos,
   resolveMontajeTurnoActual,
+  cumulativeDemountSeconds,
   readEstadoArea,
   sumProduccionKg,
   type MontajeTurnoEntry,
   type MontajeTurnTimer,
 } from "./montaje-turnos"
+import {
+  MONTAJE_TIMER_CONFIRM,
+  mesTimerConfirmNeedsActiveTurno,
+  type MontajeTimerActionFlags,
+  type MontajeTimerConfirmKey,
+} from "./montaje-timer-actions"
 import "./work-order-planilla.css"
 import {
   AlertCircle,
   CheckCircle2,
-  CirclePause,
   CirclePlay,
   FileSearch,
   Flag,
@@ -193,8 +203,8 @@ function parseLastClosedSnapshot(raw: unknown): MontajeLastClosedSnapshot | null
   }
 }
 
-const LOCAL_MONTAJE_DRAFT_PREFIX = "axones.montaje.control.draft."
 const MON_LAST_CLOSED_SNAPSHOT_KEY = "montLastClosedSnapshot"
+const LEGACY_MONTAJE_DRAFT_KEY = "axones.montaje.control.draft."
 
 /** Tonos visuales para confirmaciones del panel de montaje (alineados a cada acción). */
 type MesMontajeConfirmTone =
@@ -297,6 +307,81 @@ function MesMontajeConfirmDialog(props: MesMontajeConfirmDialogProps) {
   )
 }
 
+type MesMontajeGuardarChoiceDialogProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  canFinalizeArea: boolean
+  hasActiveTurno: boolean
+  onFinalizarTurno: () => void
+  onFinalizarArea: () => void
+}
+
+function MesMontajeGuardarChoiceDialog(props: MesMontajeGuardarChoiceDialogProps) {
+  const skin = MES_MONTAJE_CONFIRM.violet
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className={skin.panel}>
+        <DialogHeader className="space-y-4 text-left">
+          <div className="flex items-start gap-3">
+            <div className={skin.iconBox}>
+              <Save className="h-5 w-5" aria-hidden />
+            </div>
+            <div className="min-w-0 space-y-2">
+              <DialogTitle className="text-xl font-semibold tracking-tight">Guardar en el sistema</DialogTitle>
+              <DialogDescription className="text-sm leading-relaxed">
+                <span className="font-semibold text-foreground">Guardar</span> envía cliché, material, tiempos y
+                observaciones al servidor. Elija cómo desea cerrar el registro:
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <DialogFooter className="flex flex-col gap-2 sm:flex-col sm:items-stretch">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto min-h-10 justify-start gap-2 whitespace-normal border-sky-200 bg-sky-50/80 px-4 py-3 text-left text-sky-950 hover:bg-sky-100"
+            disabled={!props.hasActiveTurno}
+            onClick={() => {
+              props.onOpenChange(false)
+              props.onFinalizarTurno()
+            }}
+          >
+            <LogOut className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>
+              <span className="block font-semibold">Finalizar turno de producción</span>
+              <span className="block text-xs font-normal opacity-90">
+                Cierra el turno de planta en curso y guarda arranque, producción, cliché y material.
+              </span>
+            </span>
+          </Button>
+          {props.canFinalizeArea ? (
+            <Button
+              type="button"
+              variant="destructive"
+              className="h-auto min-h-10 justify-start gap-2 whitespace-normal px-4 py-3 text-left"
+              onClick={() => {
+                props.onOpenChange(false)
+                props.onFinalizarArea()
+              }}
+            >
+              <Flag className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>
+                <span className="block font-semibold">Finalizar área Montaje</span>
+                <span className="block text-xs font-normal opacity-90">
+                  Marca el área como finalizada en la OT y mueve la orden a Historial.
+                </span>
+              </span>
+            </Button>
+          ) : null}
+          <Button type="button" variant="ghost" className="sm:mt-1" onClick={() => props.onOpenChange(false)}>
+            Cancelar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 const MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES = {
   toast:
     "!border !border-slate-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
@@ -332,41 +417,18 @@ function mesMontajeToastWarning(message: string) {
   })
 }
 
-type LocalMontajeDraft = {
-  work_order_id: number
-  saved_at_ms: number
-  // Guardamos lo mínimo para rehidratar el temporizador + turno actual.
-  active_turno: unknown
-  mirror: Record<string, unknown>
-}
-
-function clearLocalMontajeDrafts(workOrderId: number) {
+function purgeLegacyMontajeDraft(workOrderId: number) {
   try {
-    localStorage.removeItem(`${LOCAL_MONTAJE_DRAFT_PREFIX}${workOrderId}`)
+    localStorage.removeItem(`${LEGACY_MONTAJE_DRAFT_KEY}${workOrderId}`)
   } catch {
     // ignore
   }
+}
+
+function clearMontajeBrowserCache(workOrderId: number) {
+  purgeLegacyMontajeDraft(workOrderId)
   try {
     localStorage.removeItem(`axones.montaje.timer-preview.${workOrderId}`)
-  } catch {
-    // ignore
-  }
-}
-
-function syncLocalMontajeDraftAfterSave(workOrderId: number, savedForm: Record<string, unknown>) {
-  const actual = resolveMontajeTurnoActual(savedForm)
-  if (!actual) {
-    clearLocalMontajeDrafts(workOrderId)
-    return
-  }
-  try {
-    const draft: LocalMontajeDraft = {
-      work_order_id: workOrderId,
-      saved_at_ms: Date.now(),
-      active_turno: actual,
-      mirror: montajeTurnoToMirror(actual),
-    }
-    localStorage.setItem(`${LOCAL_MONTAJE_DRAFT_PREFIX}${workOrderId}`, JSON.stringify(draft))
   } catch {
     // ignore
   }
@@ -457,70 +519,14 @@ export default function WorkOrderMontajeControlPanel({
       const mergedForm = mergePrefill(payload.prefill ?? {}, payload.form)
       const boot = bootstrapMontajeFormState(mergedForm)
       const areaEstado = readEstadoArea(boot[MON_ESTADO_KEY])
-
+      purgeLegacyMontajeDraft(workOrderId)
+      setForm(boot)
       if (areaEstado === "finalizada") {
-        clearLocalMontajeDrafts(workOrderId)
-        pendingDraftSyncRef.current = null
-        setForm(boot)
-        return
-      }
-
-      try {
-        const raw = localStorage.getItem(`${LOCAL_MONTAJE_DRAFT_PREFIX}${workOrderId}`)
-        if (!raw) {
-          setForm(boot)
-          return
+        try {
+          localStorage.removeItem(`axones.montaje.timer-preview.${workOrderId}`)
+        } catch {
+          // ignore
         }
-
-        const draft = JSON.parse(raw) as Partial<LocalMontajeDraft>
-        const serverOpen =
-          resolveMontajeTurnoActual(boot) !== null || legacyMirrorIndicatesOpenMontajeShift(boot)
-        const draftMirror =
-          draft.mirror && typeof draft.mirror === "object"
-            ? (draft.mirror as Record<string, unknown>)
-            : null
-        const draftOpen =
-          draft.active_turno != null ||
-          (draftMirror !== null && legacyMirrorIndicatesOpenMontajeShift(draftMirror))
-
-        if (!serverOpen && draftOpen) {
-          clearLocalMontajeDrafts(workOrderId)
-          mesMontajeToastWarning(
-            "Se descartó un respaldo local antiguo (no coincide con el sistema). Los datos oficiales son los del servidor.",
-          )
-          setForm(boot)
-          return
-        }
-
-        if (!draftOpen) {
-          clearLocalMontajeDrafts(workOrderId)
-          setForm(boot)
-          return
-        }
-
-        const serverLastResume = readNumber(boot.montTimerLastResumeAtMs)
-        const serverPauseAt = readNumber(boot.montTimerPauseAtMs)
-        const serverTimerAny = Math.max(serverLastResume, serverPauseAt)
-        const draftLastResume = readNumber(draftMirror?.montTimerLastResumeAtMs)
-        const draftPauseAt = readNumber(draftMirror?.montTimerPauseAtMs)
-        const draftTimerAny = Math.max(draftLastResume, draftPauseAt)
-
-        if (draftTimerAny > serverTimerAny + 500 && draft.active_turno && serverOpen) {
-          setForm(
-            bootstrapMontajeFormState({
-              ...boot,
-              [MON_ACTUAL_KEY]: draft.active_turno,
-              ...(draftMirror ?? {}),
-            }),
-          )
-          mesMontajeToastWarning(
-            "Hay cambios solo en este navegador (respaldo local). Pulse Guardar para enviarlos al sistema.",
-          )
-        } else {
-          setForm(boot)
-        }
-      } catch {
-        setForm(boot)
       }
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -625,11 +631,11 @@ export default function WorkOrderMontajeControlPanel({
   const [pauseReason, setPauseReason] = useState("")
   const [pauseObs, setPauseObs] = useState("")
   const [startTurnConfirmOpen, setStartTurnConfirmOpen] = useState(false)
-  const [startTimerConfirmOpen, setStartTimerConfirmOpen] = useState(false)
+  const [timerConfirm, setTimerConfirm] = useState<MontajeTimerConfirmKey | null>(null)
   const [takeoverConfirmOpen, setTakeoverConfirmOpen] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
-  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
   const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
+  const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false)
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
   const [finalizeOtConfirmOpen, setFinalizeOtConfirmOpen] = useState(false)
   const [emptyShiftCloseDialogOpen, setEmptyShiftCloseDialogOpen] = useState(false)
@@ -654,6 +660,12 @@ export default function WorkOrderMontajeControlPanel({
   }, [form.montTimerPauses])
 
   const timerState = readString(form.montTimerState) || "pending"
+  const arranqueState = readString(form.montTimerArranqueState) || "idle"
+  const montajeOpState = readString(form.montTimerMontajeOpState) || "idle"
+  const demountState = readString(form.montTimerDemountState) || "idle"
+  const arranqueRunning = arranqueState === "running"
+  const montajeOpRunning = montajeOpState === "running"
+  const demountRunning = demountState === "running"
   const timerRunning = timerState === "running"
   const timerPaused = timerState === "paused"
   const effectiveAcc = readNumber(form.montTimerEffectiveAccSec)
@@ -674,12 +686,28 @@ export default function WorkOrderMontajeControlPanel({
     () => cumulativeDeadSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
   )
-  const otTotalAccSec = otEffectiveAccSec + otDeadAccSec
+  const otTotalAccSec = useMemo(
+    () => cumulativeTotalPersistedSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
+  const otDemountAccSec = useMemo(
+    () => cumulativeDemountSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
   /** Cronómetro visible: acumulado OT (todos los turnos), alineado con la bandeja Montaje. */
   const displayEffectiveSec = otEffectiveAccSec
   const displayDeadSec = otDeadAccSec
   const displayTotalSec = otTotalAccSec
+  const displayDemountSec = otDemountAccSec
   const kgHora = "0.00"
+  const displayHoraArranque = useMemo(() => {
+    if (!activeTurno) return "—"
+    const t = activeTurno.timer
+    if (t.arranqueStartedAtMs > 0) {
+      return formatHoraArranqueFromMs(t.arranqueStartedAtMs)
+    }
+    return formatHoraArranqueFromMs(horaArranqueMsFromTimer(t))
+  }, [activeTurno])
 
   const sessionUser = useMemo(() => getStoredUser(), [])
   const canDevResetMontaje = useMemo(
@@ -700,7 +728,6 @@ export default function WorkOrderMontajeControlPanel({
 
   const [pauseMotivoModalOpen, setPauseMotivoModalOpen] = useState(false)
   const wasTimerPausedRef = useRef(false)
-  const pendingDraftSyncRef = useRef<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     if (wasTimerPausedRef.current && !timerPaused) {
@@ -709,31 +736,67 @@ export default function WorkOrderMontajeControlPanel({
     wasTimerPausedRef.current = timerPaused
   }, [timerPaused])
 
-  // Respaldo local del turno abierto (evita pérdida al navegar atrás/recargar antes del play).
-  useEffect(() => {
-    if (!Number.isFinite(workOrderId) || workOrderId < 1) return
-    if (areaFinalizada) return
-    if (!hasActiveTurno) return
-    try {
-      const cur = parseMontajeTurnoActual(form[MON_ACTUAL_KEY])
-      if (!cur) return
-      const mirror = montajeTurnoToMirror(cur)
-      const draft: LocalMontajeDraft = {
-        work_order_id: workOrderId,
-        saved_at_ms: Date.now(),
-        active_turno: cur,
-        mirror,
-      }
-      localStorage.setItem(`${LOCAL_MONTAJE_DRAFT_PREFIX}${workOrderId}`, JSON.stringify(draft))
-    } catch {
-      // no-op
+  const timerEverStarted = useMemo(() => {
+    if (hasProductionTimerStarted(mesTimerFieldsFromForm(form, "mont"))) return true
+    const t = activeTurno?.timer
+    if (!t) {
+      return (
+        readNumber(form.montTimerArranqueAccSec) > 0 ||
+        readNumber(form.montTimerMontajeOpAccSec) > 0 ||
+        readNumber(form.montTimerDemountAccSec) > 0
+      )
     }
-  }, [areaFinalizada, form, hasActiveTurno, workOrderId])
+    return (
+      t.arranqueAccSec > 0.01 ||
+      t.arranqueState !== "idle" ||
+      t.montajeOpAccSec > 0.01 ||
+      t.montajeOpState !== "idle" ||
+      t.demountAccSec > 0.01 ||
+      t.demountState !== "idle"
+    )
+  }, [form, activeTurno])
 
-  const timerEverStarted = useMemo(
-    () => hasProductionTimerStarted(mesTimerFieldsFromForm(form, "mont")),
-    [form],
-  )
+  const canPreviewTimerReport = useMemo(() => {
+    if (!hasActiveTurno) return false
+    if (controlReadOnly) return false
+    if (areaFinalizada) return false
+    return timerEverStarted
+  }, [hasActiveTurno, controlReadOnly, areaFinalizada, timerEverStarted])
+
+  const timerActionFlags = useMemo((): MontajeTimerActionFlags => {
+    const base = !controlReadOnly && hasActiveTurno && !areaFinalizada && timerState !== "completed"
+    return {
+      canStartArranque:
+        base && !arranqueRunning && !montajeOpRunning && !demountRunning && !timerRunning && !timerPaused,
+      canStopArranque: base && arranqueRunning,
+      canStartMontajeOp:
+        base && !montajeOpRunning && !arranqueRunning && !demountRunning && !timerRunning && !timerPaused,
+      canStopMontajeOp: base && montajeOpRunning,
+      canStartDemount:
+        base && !demountRunning && !arranqueRunning && !montajeOpRunning && !timerRunning && !timerPaused,
+      canStopDemount: base && demountRunning,
+      canStartProduction:
+        base && !timerRunning && !timerPaused && !arranqueRunning && !montajeOpRunning && !demountRunning,
+      canStopProduction: base && timerRunning,
+      canStartDeadTime: base && timerRunning,
+      canEndDeadTime: base && timerPaused,
+      canCerrarTurno: base,
+      canFinalizarOrden: canFinalizeOrder && !areaFinalizada && (!controlReadOnly || canFinalizeOrder),
+      canPreview: canPreviewTimerReport,
+    }
+  }, [
+    areaFinalizada,
+    arranqueRunning,
+    canFinalizeOrder,
+    canPreviewTimerReport,
+    controlReadOnly,
+    demountRunning,
+    hasActiveTurno,
+    montajeOpRunning,
+    timerPaused,
+    timerRunning,
+    timerState,
+  ])
 
   const canSaveProduction = useMemo(() => {
     if (controlReadOnly) return false
@@ -749,19 +812,11 @@ export default function WorkOrderMontajeControlPanel({
 
   const guardarHint = useMemo(() => {
     if (controlReadOnly) return ""
-    if (canSaveProduction) return ""
-    if (canPersistShiftOpen) {
-      return "Turno abierto: puede guardar el registro. Para avisar a otras áreas, inicie el cronómetro (play) y vuelva a guardar."
+    if (canClickGuardar) {
+      return "Al pulsar Guardar elija si cierra el turno de planta o finaliza el área Montaje en el sistema."
     }
     return MES_SAVE_BLOCKED_MESSAGE
-  }, [canPersistShiftOpen, canSaveProduction, controlReadOnly])
-
-  const canPreviewTimerReport = useMemo(() => {
-    if (!hasActiveTurno) return false
-    if (controlReadOnly) return false
-    if (areaFinalizada) return false
-    return timerEverStarted
-  }, [hasActiveTurno, controlReadOnly, areaFinalizada, timerEverStarted])
+  }, [canClickGuardar, controlReadOnly])
 
   function requestTakeover() {
     if (readOnlyOps) return
@@ -999,7 +1054,6 @@ export default function WorkOrderMontajeControlPanel({
           }),
         })
         setForm(bootstrapMontajeFormState(normalizedForm))
-        syncLocalMontajeDraftAfterSave(workOrderId, normalizedForm)
         if (res?.updated_at) {
           setLastServerSaveAt(res.updated_at)
         }
@@ -1028,36 +1082,184 @@ export default function WorkOrderMontajeControlPanel({
     [form, outlierWarnings.length, workOrderId],
   )
 
-  // Wrapper estable para intervalos.
-  const persistMontajeFormCb = useCallback((srcBase?: Record<string, unknown>) => {
-    void persistMontajeForm(srcBase)
-  }, [persistMontajeForm])
+  const formRef = useRef(form)
+  formRef.current = form
 
   useEffect(() => {
     if (areaFinalizada) return
-    if (!timerRunning && !timerPaused) return
+    if (!timerRunning && !timerPaused && !arranqueRunning && !montajeOpRunning && !demountRunning) return
     const id = window.setInterval(() => setTimerTick((n) => n + 1), 1000)
     return () => window.clearInterval(id)
-  }, [areaFinalizada, timerPaused, timerRunning])
+  }, [areaFinalizada, timerPaused, timerRunning, arranqueRunning, montajeOpRunning, demountRunning])
 
   // Auto-guardado cada 60s mientras corre el temporizador (si tengo control).
   useEffect(() => {
-    if (!timerRunning) return
+    if (!timerRunning && !arranqueRunning && !montajeOpRunning && !demountRunning) return
     if (controlReadOnly) return
     const id = window.setInterval(() => {
       if (controlReadOnly) return
       if (saving) return
-      void persistMontajeForm(form, {
+      void persistMontajeForm(formRef.current, {
         skipProductionSaveGuard: true,
         notifyProductionSave: false,
+        suppressSuccessToast: true,
       })
     }, 60000)
     return () => window.clearInterval(id)
-  }, [timerRunning, controlReadOnly, saving, persistMontajeFormCb, form])
+  }, [timerRunning, arranqueRunning, montajeOpRunning, demountRunning, controlReadOnly, saving, persistMontajeForm])
 
-  function startProductionTimer() {
-    if (!hasActiveTurno || controlReadOnly) return
-    setStartTimerConfirmOpen(true)
+  function persistActiveTurnSnapshot(nextTurn: MontajeTurnoEntry, successMessage?: string) {
+    void persistMontajeForm(
+      {
+        ...form,
+        [MON_ACTUAL_KEY]: nextTurn,
+        ...montajeTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage,
+      },
+    )
+  }
+
+  function patchAndPersistTimer(
+    updater: (timer: MontajeTurnTimer) => MontajeTurnTimer,
+    successMessage?: string,
+  ) {
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: MontajeTurnoEntry = { ...cur, timer: updater(cur.timer) }
+    patchActiveTurn(() => nextTurn)
+    persistActiveTurnSnapshot(nextTurn, successMessage)
+  }
+
+  function requestTimerConfirm(key: MontajeTimerConfirmKey) {
+    if (controlReadOnly) return
+    setTimerConfirm(key)
+  }
+
+  function executeTimerConfirm(key: MontajeTimerConfirmKey) {
+    if (!mesTimerConfirmNeedsActiveTurno(key)) {
+      if (!canFinalizeOrder) return
+      requestFinalizarAreaMontaje()
+      return
+    }
+    switch (key) {
+      case "startArranque": {
+        const now = Date.now()
+        patchAndPersistTimer(
+          (t) => ({
+            ...t,
+            arranqueState: "running",
+            arranqueStartedAtMs: t.arranqueStartedAtMs || now,
+            arranqueLastResumeAtMs: now,
+          }),
+          "Arranque iniciado.",
+        )
+        break
+      }
+      case "stopArranque": {
+        const now = Date.now()
+        patchAndPersistTimer((t) => {
+          const last = t.arranqueLastResumeAtMs
+          return {
+            ...t,
+            arranqueState: "stopped",
+            arranqueAccSec: t.arranqueAccSec + (last > 0 ? (now - last) / 1000 : 0),
+            arranqueLastResumeAtMs: 0,
+          }
+        }, "Arranque detenido.")
+        break
+      }
+      case "startMontajeOp": {
+        const now = Date.now()
+        patchAndPersistTimer(
+          (t) => ({
+            ...t,
+            montajeOpState: "running",
+            montajeOpStartedAtMs: t.montajeOpStartedAtMs || now,
+            montajeOpLastResumeAtMs: now,
+          }),
+          "Montaje (operación) iniciado.",
+        )
+        break
+      }
+      case "stopMontajeOp": {
+        const now = Date.now()
+        patchAndPersistTimer((t) => {
+          const last = t.montajeOpLastResumeAtMs
+          return {
+            ...t,
+            montajeOpState: "stopped",
+            montajeOpAccSec: t.montajeOpAccSec + (last > 0 ? (now - last) / 1000 : 0),
+            montajeOpLastResumeAtMs: 0,
+          }
+        }, "Montaje (operación) finalizado.")
+        break
+      }
+      case "startDemount": {
+        const now = Date.now()
+        patchAndPersistTimer(
+          (t) => ({
+            ...t,
+            demountState: "running",
+            demountStartedAtMs: t.demountStartedAtMs || now,
+            demountLastResumeAtMs: now,
+          }),
+          "Desmontaje iniciado.",
+        )
+        break
+      }
+      case "stopDemount": {
+        const now = Date.now()
+        patchAndPersistTimer((t) => {
+          const last = t.demountLastResumeAtMs
+          return {
+            ...t,
+            demountState: "stopped",
+            demountAccSec: t.demountAccSec + (last > 0 ? (now - last) / 1000 : 0),
+            demountLastResumeAtMs: 0,
+          }
+        }, "Desmontaje finalizado.")
+        break
+      }
+      case "startProduction":
+        confirmStartProductionTimer()
+        break
+      case "stopProduction": {
+        const now = Date.now()
+        patchAndPersistTimer((t) => {
+          if (t.state !== "running") return t
+          const last = t.lastResumeAtMs
+          return {
+            ...t,
+            state: "pending",
+            effectiveAccSec: t.effectiveAccSec + (last > 0 ? (now - last) / 1000 : 0),
+            lastResumeAtMs: 0,
+            pauseAtMs: 0,
+          }
+        }, "Producción detenida.")
+        break
+      }
+      case "startDeadTime":
+        executePauseProductionTimer()
+        break
+      case "endDeadTime":
+        confirmResumeProductionAfterDeadTime()
+        break
+      case "cerrarTurno": {
+        const cur = activeTurno
+        if (!cur?.operador.trim() || !cur.turno || !cur.grupo) {
+          toast.error("Complete turno, grupo y operador.")
+          return
+        }
+        cerrarTurnoActual()
+        break
+      }
+      default:
+        break
+    }
   }
 
   function confirmStartProductionTimer() {
@@ -1071,12 +1273,12 @@ export default function WorkOrderMontajeControlPanel({
         ...cur.timer,
         state: "running",
         startedAtMs: cur.timer.startedAtMs || now,
+        deadAccSec: deadAccSecAfterResume(cur.timer, now),
         lastResumeAtMs: now,
         pauseAtMs: 0,
       },
     }
     patchActiveTurn(() => nextTurn)
-    setStartTimerConfirmOpen(false)
     void persistMontajeForm(
       {
         ...form,
@@ -1086,19 +1288,39 @@ export default function WorkOrderMontajeControlPanel({
       {
         skipProductionSaveGuard: true,
         notifyProductionSave: false,
-        successMessage: "Cronómetro iniciado y guardado en el sistema.",
+        successMessage: "Producción iniciada y guardada.",
       },
     ).then(() => tryAdvanceBoardStageToMontaje())
   }
 
-  function requestPauseProductionTimer() {
-    if (!timerRunning || controlReadOnly) return
-    setPauseConfirmOpen(true)
-  }
-
-  function confirmPauseProductionTimer() {
-    setPauseConfirmOpen(false)
-    executePauseProductionTimer()
+  function confirmResumeProductionAfterDeadTime() {
+    if (!hasActiveTurno || controlReadOnly || !timerPaused) return
+    const now = Date.now()
+    const cur = activeTurno
+    if (!cur) return
+    const nextTurn: MontajeTurnoEntry = {
+      ...cur,
+      timer: {
+        ...cur.timer,
+        state: "running",
+        deadAccSec: deadAccSecAfterResume(cur.timer, now),
+        lastResumeAtMs: now,
+        pauseAtMs: 0,
+      },
+    }
+    patchActiveTurn(() => nextTurn)
+    void persistMontajeForm(
+      {
+        ...form,
+        [MON_ACTUAL_KEY]: nextTurn,
+        ...montajeTurnoToMirror(nextTurn),
+      },
+      {
+        skipProductionSaveGuard: true,
+        notifyProductionSave: false,
+        successMessage: "Producción reanudada.",
+      },
+    )
   }
 
   /** Pausa atómica: un solo setForm + persist con el mismo snapshot (evita desincronía mirror / turno anidado). */
@@ -1128,6 +1350,7 @@ export default function WorkOrderMontajeControlPanel({
         void persistMontajeForm(nextForm, {
           skipProductionSaveGuard: true,
           notifyProductionSave: false,
+          suppressSuccessToast: true,
         })
       })
       return nextForm
@@ -1230,8 +1453,8 @@ export default function WorkOrderMontajeControlPanel({
       ...form,
       [MON_ACTUAL_KEY]: turnoWithPeople,
       ...montajeTurnoToMirror(turnoWithPeople),
+      ...clearMontajeTurnCaptureFormKeys(),
       [MON_TURNOS_KEY]: parseMontajeTurnos(form[MON_TURNOS_KEY]),
-      [MON_MATERIALES_KEY]: [],
     }
     setForm(nextForm)
     setDraftPeople([])
@@ -1279,6 +1502,7 @@ export default function WorkOrderMontajeControlPanel({
       [MON_TURNOS_KEY]: [...parseMontajeTurnos(form[MON_TURNOS_KEY]), closed],
       [MON_ACTUAL_KEY]: null,
       ...clearMontajeShiftMirrorKeysOnly(),
+      ...clearMontajeTurnCaptureFormKeys(),
       ...timerToLegacyFlat(finalizedTimer),
       [MON_LAST_CLOSED_SNAPSHOT_KEY]: closedSnapshot,
     }
@@ -1342,8 +1566,7 @@ export default function WorkOrderMontajeControlPanel({
       ...clearMontajeMirrorKeys(),
       [MON_LAST_CLOSED_SNAPSHOT_KEY]: null,
     }
-    clearLocalMontajeDrafts(workOrderId)
-    pendingDraftSyncRef.current = null
+    clearMontajeBrowserCache(workOrderId)
     setForm(bootstrapMontajeFormState(nextForm))
     const ok = await persistMontajeForm(nextForm, {
       skipProductionSaveGuard: true,
@@ -1382,27 +1605,23 @@ export default function WorkOrderMontajeControlPanel({
     }
   }
 
-  async function guardar() {
-    if (canSaveProduction) {
-      const ok = await persistMontajeForm()
-      if (ok) {
-        await tryAdvanceBoardStageToMontaje()
-        await load()
-      }
+  function requestGuardar() {
+    if (saving || !canClickGuardar) {
+      if (!canClickGuardar) toast.error(MES_SAVE_BLOCKED_MESSAGE)
       return
     }
-    if (canPersistShiftOpen) {
-      const ok = await persistMontajeForm(undefined, {
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-      })
-      if (ok) {
-        await tryAdvanceBoardStageToMontaje()
-        await load()
+    if (hasActiveTurno) {
+      const cur = resolveMontajeTurnoActual(form)
+      if (cur && (!cur.operador.trim() || !cur.turno || !cur.grupo)) {
+        toast.error("Complete turno, grupo y operador antes de guardar.")
+        return
       }
+    }
+    if (!hasActiveTurno && !canFinalizeOrder) {
+      toast.error(MES_SAVE_BLOCKED_MESSAGE)
       return
     }
-    toast.error(MES_SAVE_BLOCKED_MESSAGE)
+    setGuardarChoiceOpen(true)
   }
 
   function requestResetAll() {
@@ -1431,8 +1650,7 @@ export default function WorkOrderMontajeControlPanel({
       if (k.startsWith("montBlockDone.")) delete cleared[k]
     }
 
-    clearLocalMontajeDrafts(workOrderId)
-    pendingDraftSyncRef.current = null
+    clearMontajeBrowserCache(workOrderId)
     setDraftPeople([])
     setDraftStaging({ name: "", role: "operador" })
     setPauseReason("")
@@ -1528,11 +1746,18 @@ export default function WorkOrderMontajeControlPanel({
         timerState={timerState}
         totalSec={displayTotalSec}
         deadSec={displayDeadSec}
+        demountSec={displayDemountSec}
         effectiveSec={displayEffectiveSec}
         timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
+        horaArranque={displayHoraArranque}
+        arranqueRunning={arranqueRunning}
+        montajeOpRunning={montajeOpRunning}
+        demountRunning={demountRunning}
         timerRunning={timerRunning}
         timerPaused={timerPaused}
+        timerActionFlags={timerActionFlags}
+        onRequestTimerConfirm={requestTimerConfirm}
         pauseReasons={pauseReasons}
         pauseReason={pauseReason}
         pauseObs={pauseObs}
@@ -1547,8 +1772,6 @@ export default function WorkOrderMontajeControlPanel({
         formatTimerHms={formatTimerHms}
         setPauseReason={setPauseReason}
         setPauseObs={setPauseObs}
-        startProductionTimer={startProductionTimer}
-        pauseProductionTimer={requestPauseProductionTimer}
         confirmPauseAndResume={confirmPauseAndResume}
         hasActiveTurno={hasActiveTurno}
         areaFinalizada={areaFinalizada}
@@ -1645,7 +1868,7 @@ export default function WorkOrderMontajeControlPanel({
           <p className="max-w-md text-center text-xs text-muted-foreground">{guardarHint}</p>
         ) : null}
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button type="button" onClick={() => void guardar()} disabled={saving || !canClickGuardar}>
+          <Button type="button" onClick={requestGuardar} disabled={saving || !canClickGuardar}>
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
@@ -1664,27 +1887,36 @@ export default function WorkOrderMontajeControlPanel({
         </div>
       </div>
 
-      <MesMontajeConfirmDialog
-        tone="emerald"
-        open={startTimerConfirmOpen}
-        onOpenChange={setStartTimerConfirmOpen}
-        icon={<CirclePlay className="h-5 w-5" aria-hidden />}
-        title="Iniciar cronómetro (Montaje)"
-        description="¿Está seguro? Una vez iniciado, el cronómetro de máquina corre (tiempo efectivo); las paradas registran motivo. El turno de planta ya debe estar abierto."
-        confirmLabel="Confirmar e iniciar"
-        onConfirm={() => confirmStartProductionTimer()}
+      <MesMontajeGuardarChoiceDialog
+        open={guardarChoiceOpen}
+        onOpenChange={setGuardarChoiceOpen}
+        canFinalizeArea={canFinalizeOrder}
+        hasActiveTurno={hasActiveTurno}
+        onFinalizarTurno={requestCerrarTurnoActual}
+        onFinalizarArea={requestFinalizarAreaMontaje}
       />
 
-      <MesMontajeConfirmDialog
-        tone="sky"
-        open={pauseConfirmOpen}
-        onOpenChange={setPauseConfirmOpen}
-        icon={<CirclePause className="h-5 w-5" aria-hidden />}
-        title="Pausar cronómetro (parada)"
-        description="Se detendrá el tiempo efectivo y deberá registrar el motivo de la parada (tiempo muerto). No finaliza el turno de planta; use «Finalizar turno» para eso. Tras registrar el motivo, el cronómetro seguirá en pausa hasta que pulse play. ¿Desea pausar ahora?"
-        confirmLabel="Sí, pausar"
-        onConfirm={() => confirmPauseProductionTimer()}
-      />
+      {timerConfirm ? (
+        <MesMontajeConfirmDialog
+          tone={MONTAJE_TIMER_CONFIRM[timerConfirm].tone}
+          open
+          onOpenChange={(open) => {
+            if (!open) setTimerConfirm(null)
+          }}
+          icon={<CirclePlay className="h-5 w-5" aria-hidden />}
+          title={MONTAJE_TIMER_CONFIRM[timerConfirm].title}
+          description={MONTAJE_TIMER_CONFIRM[timerConfirm].description}
+          confirmLabel={MONTAJE_TIMER_CONFIRM[timerConfirm].confirmLabel}
+          confirmVariant={
+            MONTAJE_TIMER_CONFIRM[timerConfirm].destructive ? "destructive" : "default"
+          }
+          onConfirm={() => {
+            const key = timerConfirm
+            setTimerConfirm(null)
+            executeTimerConfirm(key)
+          }}
+        />
+      ) : null}
 
       <MesMontajeConfirmDialog
         tone="violet"

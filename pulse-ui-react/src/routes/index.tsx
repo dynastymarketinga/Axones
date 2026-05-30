@@ -33,7 +33,9 @@ import WorkOrderDetailPage from "@/pages/axones/WorkOrderDetailPage"
 import WorkOrderPlanillaPage from "@/pages/axones/WorkOrderPlanillaPage"
 import WorkOrderProductionPreviewPage from "@/pages/axones/WorkOrderProductionPreviewPage"
 import WorkOrderPrintingTimerPreviewPage from "@/pages/axones/WorkOrderPrintingTimerPreviewPage"
+import { WorkOrderMesTimerPreviewPage } from "@/pages/axones/WorkOrderMesTimerPreviewPage"
 import WorkOrderPrintingDesperdicioPreviewPage from "@/pages/axones/WorkOrderPrintingDesperdicioPreviewPage"
+import WorkOrderPrintingPlanillaPreviewPage from "@/pages/axones/WorkOrderPrintingPlanillaPreviewPage"
 import CorteDispatchPage from "@/pages/axones/CorteDispatchPage"
 import DeliveryNotesPage from "@/pages/axones/DeliveryNotesPage"
 import DeliveryNotePreviewPage from "@/pages/axones/DeliveryNotePreviewPage"
@@ -238,10 +240,38 @@ export const router = createBrowserRouter(
           }),
         },
         {
+          path: "ordenes-trabajo/:woId/montaje/temporizador/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderMesTimerPreviewPage area="montaje" />,
+          }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/laminacion/temporizador/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderMesTimerPreviewPage area="laminacion" />,
+          }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/corte/temporizador/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderMesTimerPreviewPage area="corte" />,
+          }),
+        },
+        {
           path: "ordenes-trabajo/:woId/impresion/desperdicio/vista-previa",
           element: guardAxonesRoute({
             routeKey: "ordenes-trabajo",
             element: <WorkOrderPrintingDesperdicioPreviewPage />,
+          }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/impresion/planilla/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderPrintingPlanillaPreviewPage />,
           }),
         },
         {

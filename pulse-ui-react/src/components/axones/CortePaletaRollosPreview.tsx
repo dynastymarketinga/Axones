@@ -1,8 +1,14 @@
 "use client"
 
+import { CortePaletaRolloCell } from "@/components/axones/CortePaletaRolloCell"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import {
+  cortePaletaRolloKgInputClass,
+  cortePaletaRolloKgLabelClass,
+  cortePaletaRollosGridClass,
+} from "@/pages/axones/corte-paleta-rollos-ui"
 import { COR_ROLLOS_PER_PALETA } from "@/pages/axones/corte-turnos"
 
 type Props = {
@@ -40,46 +46,43 @@ export function CortePaletaRollosPreview({
 
   return (
     <div
-      className={cn(
-        "grid max-h-[22rem] grid-cols-8 gap-1 overflow-y-auto",
-        compact && "max-h-[14rem]",
-        className,
-      )}
+      className={cn(cortePaletaRollosGridClass(compact), className)}
       role="group"
       aria-label={`Rollos 1 a ${COR_ROLLOS_PER_PALETA} (solo lectura)`}
     >
       {slots.map((valor, rolloIdx) => (
-        <div key={`rollo-preview-${rolloIdx}`} className="space-y-1">
-          <Label className="ot-label text-[10px]">{rolloIdx + 1}</Label>
+        <CortePaletaRolloCell key={`rollo-preview-${rolloIdx}`} rolloNumber={rolloIdx + 1} compact={compact}>
           {useInputs ? (
-            <Input
-              className={cn(
-                "ot-input-unified h-7 px-2 text-xs tabular-nums",
-                compact && "h-6 text-[10px]",
-              )}
-              inputMode="decimal"
-              readOnly
-              disabled
-              placeholder="0"
-              value={valor === "0" || valor === "" ? "" : valor}
-            />
+            <div>
+              <Label className={cortePaletaRolloKgLabelClass(compact)}>Kg neto</Label>
+              <Input
+                className={cortePaletaRolloKgInputClass(compact)}
+                inputMode="decimal"
+                readOnly
+                disabled
+                placeholder="0"
+                value={valor === "0" || valor === "" ? "" : valor}
+              />
+            </div>
           ) : (
-            <div
-              className={cn(
-                "ot-input-unified flex h-7 items-center justify-center px-2 text-xs tabular-nums",
-                compact && "h-6 text-[10px]",
-                readDisplayKg(valor) !== "0"
-                  ? "bg-muted/50 font-medium text-foreground"
-                  : "text-muted-foreground",
-              )}
-              aria-readonly
-            >
-              {valor === "0" ? "" : valor}
+            <div>
+              <span className={cortePaletaRolloKgLabelClass(compact)}>Kg neto</span>
+              <div
+                className={cn(
+                  cortePaletaRolloKgInputClass(compact),
+                  "flex items-center",
+                  readDisplayKg(valor) !== "0"
+                    ? "bg-muted/50 font-medium text-foreground"
+                    : "text-muted-foreground",
+                )}
+                aria-readonly
+              >
+                {valor === "0" ? "" : valor}
+              </div>
             </div>
           )}
-        </div>
+        </CortePaletaRolloCell>
       ))}
     </div>
   )
 }
-

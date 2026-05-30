@@ -259,4 +259,35 @@ class RejectedBobinaRuleTest extends TestCase
             'material_id' => $mat->id,
         ]);
     }
+
+    public function test_inventory_return_to_rejected_bobinas_allows_null_material(): void
+    {
+        $user = User::factory()->create();
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-TEST-00099',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->getKey(),
+        ]);
+
+        $response = $this->postJson('/api/inventory-returns', [
+            'material_id' => null,
+            'work_order_id' => $wo->id,
+            'destination_area' => 'bobinas_rechazadas',
+            'quantity' => 3,
+            'reason' => '3 bobina(s) rechazada(s) · Motivo: Manchas · Proveedor: ACME',
+        ], $this->authHeaders($user));
+
+        $response->assertCreated();
+        $retId = (int) $response->json('id');
+
+        $this->assertDatabaseHas('inventory_returns', [
+            'id' => $retId,
+            'material_id' => null,
+            'work_order_id' => $wo->id,
+            'destination_area' => 'bobinas_rechazadas',
+        ]);
+        $this->assertDatabaseMissing('bobinas', [
+            'inventory_return_id' => $retId,
+        ]);
+    }
 }

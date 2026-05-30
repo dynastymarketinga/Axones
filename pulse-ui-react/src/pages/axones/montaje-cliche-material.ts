@@ -214,3 +214,11 @@ export function clearMontajeClicheMaterialKeys(): Record<string, unknown> {
     [MON_MATERIALES_KEY]: [],
   }
 }
+
+/** Limpia captura del turno (cliché, material, observaciones) para un turno nuevo. */
+export function clearMontajeTurnCaptureFormKeys(): Record<string, unknown> {
+  return {
+    ...clearMontajeClicheMaterialKeys(),
+    montObservaciones: "",
+  }
+}

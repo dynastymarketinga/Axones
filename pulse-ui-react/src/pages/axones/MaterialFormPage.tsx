@@ -170,7 +170,6 @@ export default function MaterialFormPage() {
   const [skuError, setSkuError] = useState(false)
   const [nameError, setNameError] = useState(false)
   const [tintaSubareaError, setTintaSubareaError] = useState(false)
-  const [receivedOnError, setReceivedOnError] = useState(false)
   const [supplierIdError, setSupplierIdError] = useState(false)
   const [noSupplier, setNoSupplier] = useState(false)
   const [noSupplierReason, setNoSupplierReason] = useState("")
@@ -514,7 +513,6 @@ export default function MaterialFormPage() {
     const skuOk = sku.trim().length > 0
     const nameOk = name.trim().length > 0
     const tintaSubareaOk = tab !== "tintas" || Boolean(tintaSubarea)
-    const receivedOnOk = receivedOn.trim().length > 0
     const supplierOk = noSupplier
       ? canOmitNoSupplierReason || noSupplierReason.trim().length >= 5
       : supplierId != null && supplierId > 0
@@ -522,7 +520,6 @@ export default function MaterialFormPage() {
     setSkuError(!skuOk)
     setNameError(!nameOk)
     setTintaSubareaError(!tintaSubareaOk)
-    setReceivedOnError(!receivedOnOk)
     setSupplierIdError(!supplierOk && !noSupplier)
     setNoSupplierReasonError(noSupplier && !canOmitNoSupplierReason && !supplierOk)
 
@@ -543,11 +540,6 @@ export default function MaterialFormPage() {
     if (!tintaSubareaOk) {
       document.getElementById("material-tinta-subarea")?.scrollIntoView({ behavior: "smooth", block: "center" })
       toast.error("La subárea es obligatoria para tintas.")
-      return
-    }
-    if (!receivedOnOk) {
-      document.getElementById("material-received-on")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("La fecha de ingreso es obligatoria.")
       return
     }
     if (!supplierOk) {
@@ -1156,18 +1148,14 @@ export default function MaterialFormPage() {
 
           <div className="space-y-4 rounded-xl border border-primary/15 bg-background/60 p-4">
             <div className="grid gap-2 md:grid-cols-1">
-              <Label htmlFor="material-received-on">Fecha de ingreso *</Label>
+              <Label htmlFor="material-received-on">Fecha de ingreso</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
                     id="material-received-on"
                     type="button"
                     variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      FILTER_INPUT_CLASS,
-                      receivedOnError ? "border-red-500 focus-visible:ring-red-500" : "",
-                    )}
+                    className={cn("w-full justify-start text-left font-normal", FILTER_INPUT_CLASS)}
                   >
                     <CalendarDays className="mr-2 h-4 w-4 text-primary" />
                     {formatApiDateToDisplay(receivedOn)}
@@ -1177,10 +1165,7 @@ export default function MaterialFormPage() {
                   <UiCalendar
                     mode="single"
                     selected={parseApiDate(receivedOn)}
-                    onSelect={(date) => {
-                      setReceivedOn(date ? formatDateToApi(date) : "")
-                      if (receivedOnError) setReceivedOnError(false)
-                    }}
+                    onSelect={(date) => setReceivedOn(date ? formatDateToApi(date) : "")}
                   />
                 </PopoverContent>
               </Popover>

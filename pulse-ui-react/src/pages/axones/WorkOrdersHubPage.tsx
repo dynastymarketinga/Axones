@@ -98,6 +98,7 @@ const WO_SEARCH_DEBOUNCE_MS = 320
 type MachineValue =
   | ""
   | "COMEXI 1"
+  | "COMEXI 2"
   | "COMEXI 3"
   | "Cortadora China"
   | "Cortadora Permaco"
@@ -110,7 +111,7 @@ const MACHINE_OPTIONS: Array<{
     group: "Impresión",
     options: [
       { value: "COMEXI 1", label: "COMEXI 1" },
-      { value: "COMEXI 3", label: "COMEXI 3" },
+      { value: "COMEXI 2", label: "COMEXI 2" },
     ],
   },
   {
@@ -275,6 +276,10 @@ function buildSummarySlides(row: WorkOrderListRow): SummarySlide[] {
   const laminacion: SummaryItem[] = []
   pushIf(laminacion, "Gramaje adhesivo (g/m²)", form?.gramajeAdhesivo)
   pushIf(laminacion, "Relación mezcla", form?.relacionMezcla)
+  pushIf(laminacion, "Lámina impresa (Kg)", form?.kgLaminaImpresaLaminacion)
+  pushIf(laminacion, "Lámina virgen (Kg)", form?.kgLaminaVirgenLaminacion)
+  pushIf(laminacion, "Adhesivo (Kg)", form?.kgAdhesivoLaminacion)
+  pushIf(laminacion, "Catalizador (Kg)", form?.kgCatalizadorLaminacion)
   const kgEntrada = readText(form?.kgEntradaLam)
   const kgSalida = readText(form?.kgSalidaLam)
   if (kgEntrada || kgSalida) {

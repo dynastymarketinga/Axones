@@ -17,6 +17,7 @@ use App\Models\TintaMixture;
 use App\Models\WorkOrder;
 use App\Services\InventoryReportService;
 use App\Support\DashboardMonthlyCorteProduction;
+use App\Support\DashboardMonthlyProductionByArea;
 use App\Support\DashboardRecentOtScrapChart;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -94,6 +95,7 @@ class DashboardController extends Controller
         $corteProductionMonthKg = DashboardMonthlyCorteProduction::totalKgBetween($monthStart, $monthEnd);
         $scrapMonth = $this->inventoryReports->scrapKgTotalsForPeriod($monthStart, $monthEnd);
         $recentFinalizedOtScrap = DashboardRecentOtScrapChart::rows(10);
+        $productionByAreaMonth = DashboardMonthlyProductionByArea::rows(5);
         $rejectedReturnsBobinasMonth = Bobina::query()
             ->where('status', 'rejected')
             ->whereBetween('created_at', [$monthStart, $monthEnd->copy()->endOfDay()])
@@ -113,6 +115,7 @@ class DashboardController extends Controller
                 'corte' => $scrapMonth['corte_kg'],
             ],
             'recent_finalized_ot_scrap' => $recentFinalizedOtScrap,
+            'production_by_area_month' => $productionByAreaMonth,
             'rejected_returns_bobinas_month' => $rejectedReturnsBobinasMonth,
             'materials_total' => $materialsTotal,
             'materials_by_area' => $byArea,

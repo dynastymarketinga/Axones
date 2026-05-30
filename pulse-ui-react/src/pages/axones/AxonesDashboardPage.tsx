@@ -22,7 +22,7 @@ import {
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { DashboardSummary, MaterialRow } from "@/types/api"
+import type { DashboardSummary } from "@/types/api"
  
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -33,28 +33,15 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
-const AREA_LABELS: Record<string, string> = {
-  material: "Material",
-  tintas: "Tintas",
-  cementerio_tintas: "Cementerio de tintas",
-  quimicos: "Químicos",
-  miscelaneos: "Misceláneos",
-  bobinas_rechazadas: "Bobinas rechazadas",
-}
-
-function areaLabel(key: string): string {
-  return AREA_LABELS[key] ?? key.replace(/_/g, " ")
-}
+const productionByAreaChartConfig = {
+  montaje_kg: { label: "Montaje", color: "hsl(var(--chart-4))" },
+  impresion_kg: { label: "Impresión", color: "hsl(var(--chart-1))" },
+  laminacion_kg: { label: "Laminación", color: "hsl(var(--chart-2))" },
+  corte_kg: { label: "Corte", color: "hsl(var(--chart-3))" },
+  tintas_kg: { label: "Tintas", color: "hsl(var(--chart-5))" },
+} satisfies ChartConfig
 
 const otScrapChartConfig = {
   impresion_kg: { label: "Impresión", color: "hsl(var(--chart-1))" },
@@ -161,9 +148,22 @@ export default function AxonesDashboardPage() {
     }))
   }, [data?.recent_finalized_ot_scrap])
 
-  const lowStockRows = useMemo(
-    () => (Array.isArray(data?.materials_low_stock) ? data!.materials_low_stock : []),
-    [data?.materials_low_stock],
+  const productionByAreaChart = useMemo(() => {
+    const rows = data?.production_by_area_month ?? []
+    return rows.map((row) => ({
+      ...row,
+      montaje_kg: parseKgNumber(row.montaje_kg),
+      impresion_kg: parseKgNumber(row.impresion_kg),
+      laminacion_kg: parseKgNumber(row.laminacion_kg),
+      corte_kg: parseKgNumber(row.corte_kg),
+      tintas_kg: parseKgNumber(row.tintas_kg),
+      total_kg: parseKgNumber(row.total_kg),
+    }))
+  }, [data?.production_by_area_month])
+
+  const productionChartHasData = useMemo(
+    () => productionByAreaChart.some((row) => row.total_kg > 0.0005),
+    [productionByAreaChart],
   )
 
   const kpiItems: KpiItem[] = useMemo(() => {
@@ -373,49 +373,105 @@ export default function AxonesDashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Materiales con existencia baja</CardTitle>
+              <CardTitle className="text-base">Producción por área (kg)</CardTitle>
               <CardDescription>
-                Listado donde el stock actual está por debajo del mínimo definido. Valide
-                reabastecimiento o ajuste de mínimos.
+                Últimos 5 meses. Kg de salida en turnos cerrados (impresión, laminación y corte) y
+                mezclas registradas en tintas. Montaje aún no acumula kg por turno en planilla.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {lowStockRows.length === 0 ? (
-                <p className="text-muted-foreground text-sm">Ningún material bajo el mínimo ahora.</p>
-              ) : (
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>SKU</TableHead>
-                        <TableHead>Nombre</TableHead>
-                        <TableHead>Área</TableHead>
-                        <TableHead className="text-right">Stock</TableHead>
-                        <TableHead className="text-right">Mínimo</TableHead>
-                        <TableHead>Unidad</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {lowStockRows.map((m: MaterialRow) => (
-                        <TableRow key={m.id}>
-                          <TableCell className="font-mono text-xs">{m.sku}</TableCell>
-                          <TableCell className="max-w-[200px] truncate">{m.name}</TableCell>
-                          <TableCell className="text-sm">
-                            {areaLabel(m.inventory_area)}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {m.quantity_on_hand}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {m.min_stock}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">{m.unit}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+              <div className="relative">
+                <ChartContainer
+                  config={productionByAreaChartConfig}
+                  className="h-[min(360px,55vh)] w-full"
+                >
+                  <BarChart
+                    data={productionByAreaChart}
+                    margin={{ top: 12, right: 12, left: 4, bottom: 8 }}
+                  >
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/50" />
+                    <XAxis
+                      dataKey="label"
+                      type="category"
+                      tickLine={false}
+                      axisLine={false}
+                      interval={0}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis
+                      allowDecimals
+                      width={52}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={productionChartHasData ? [0, "auto"] : [0, 100]}
+                      tickFormatter={(v) => `${v} kg`}
+                    />
+                    <ChartTooltip
+                      cursor={{ fill: "hsl(var(--muted))", opacity: 0.35 }}
+                      content={
+                        <ChartTooltipContent
+                          indicator="dot"
+                          formatter={(value, name) => {
+                            const n = typeof value === "number" ? value : parseKgNumber(String(value))
+                            const label =
+                              productionByAreaChartConfig[
+                                name as keyof typeof productionByAreaChartConfig
+                              ]?.label ?? String(name)
+                            return (
+                              <span className="font-mono tabular-nums">
+                                {label}: {n.toLocaleString("es-VE", { maximumFractionDigits: 3 })} kg
+                              </span>
+                            )
+                          }}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar
+                      dataKey="montaje_kg"
+                      stackId="prod"
+                      fill="var(--color-montaje_kg)"
+                      maxBarSize={56}
+                    />
+                    <Bar
+                      dataKey="impresion_kg"
+                      stackId="prod"
+                      fill="var(--color-impresion_kg)"
+                      maxBarSize={56}
+                    />
+                    <Bar
+                      dataKey="laminacion_kg"
+                      stackId="prod"
+                      fill="var(--color-laminacion_kg)"
+                      maxBarSize={56}
+                    />
+                    <Bar
+                      dataKey="corte_kg"
+                      stackId="prod"
+                      fill="var(--color-corte_kg)"
+                      maxBarSize={56}
+                    />
+                    <Bar
+                      dataKey="tintas_kg"
+                      stackId="prod"
+                      fill="var(--color-tintas_kg)"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={56}
+                    />
+                  </BarChart>
+                </ChartContainer>
+                {!productionChartHasData ? (
+                  <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 text-center text-sm text-muted-foreground">
+                    Sin kg registrados en los últimos 5 meses. La gráfica se llena al cerrar turnos
+                    en planta.
+                  </p>
+                ) : null}
+              </div>
+              <p className="text-muted-foreground mt-2 text-center text-sm">
+                <Link to="/reportes/produccion" className="text-primary font-medium hover:underline">
+                  Ver reporte de producción y tiempos
+                </Link>
+              </p>
             </CardContent>
           </Card>
         </>

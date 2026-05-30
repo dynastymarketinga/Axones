@@ -52,6 +52,7 @@ class DashboardApiTest extends TestCase
                     'corte',
                 ],
                 'recent_finalized_ot_scrap',
+                'production_by_area_month',
                 'rejected_returns_bobinas_month',
                 'materials_total',
                 'materials_by_area',
@@ -69,6 +70,8 @@ class DashboardApiTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $response->json('materials_total'));
         $this->assertCount(1, $response->json('materials_low_stock'));
         $this->assertIsArray($response->json('recent_finalized_ot_scrap'));
+        $this->assertIsArray($response->json('production_by_area_month'));
+        $this->assertCount(5, $response->json('production_by_area_month'));
     }
 
     public function test_summary_includes_recent_finalized_ot_scrap(): void
@@ -284,6 +287,53 @@ class DashboardApiTest extends TestCase
 
         $response->assertOk();
         $this->assertSame(1, $response->json('rejected_returns_bobinas_month'));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_summary_production_by_area_month_includes_closed_turn_kg(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-05-20 12:00:00'));
+
+        $user = User::factory()->create();
+        $client = Client::query()->create(['name' => 'Prod client', 'rif' => 'J-PROD']);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Prod product',
+            'cpe' => 'CPE-P',
+            'structure' => 'BOPP 20',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-2026-PROD',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'impTurnosImpresion' => [[
+                    'id' => 't1',
+                    'closed_at' => '2026-05-10T10:00:00.000Z',
+                    'resumenCierre' => ['pesoSalidaKg' => 1500],
+                ]],
+                'cor_turnos' => [[
+                    'closed_at' => '2026-05-12T10:00:00.000Z',
+                    'metrics' => ['salida_total_kg' => '800'],
+                ]],
+            ],
+        ]);
+
+        $token = $user->createToken('t')->plainTextToken;
+        $response = $this->getJson('/api/dashboard/summary', [
+            'Authorization' => 'Bearer '.$token,
+        ]);
+
+        $response->assertOk();
+        $rows = $response->json('production_by_area_month');
+        $may = collect($rows)->firstWhere('month_key', '2026-05');
+        $this->assertNotNull($may);
+        $this->assertSame('1500.000', $may['impresion_kg']);
+        $this->assertSame('800.000', $may['corte_kg']);
 
         Carbon::setTestNow();
     }

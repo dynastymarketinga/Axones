@@ -265,6 +265,17 @@ export type DashboardSummary = {
     corte_kg: string
     total_kg: string
   }>
+  /** Kg de salida por área en los últimos meses (turnos cerrados + mezclas tintas). */
+  production_by_area_month?: Array<{
+    label: string
+    month_key: string
+    montaje_kg: string
+    impresion_kg: string
+    laminacion_kg: string
+    corte_kg: string
+    tintas_kg: string
+    total_kg: string
+  }>
   materials_total: number
   materials_by_area: Record<string, number>
   /** Bobinas rechazadas registradas en el mes (devolución a bobinas rechazadas). */

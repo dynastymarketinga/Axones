@@ -267,6 +267,8 @@ export type DashboardSummary = {
   }>
   materials_total: number
   materials_by_area: Record<string, number>
+  /** Bobinas rechazadas registradas en el mes (devolución a bobinas rechazadas). */
+  rejected_returns_bobinas_month?: number
   inventory_returns_pending: number
   material_requests_pending: number
   /** Conteo por estado: pending | partial | dispatched | cancelled */

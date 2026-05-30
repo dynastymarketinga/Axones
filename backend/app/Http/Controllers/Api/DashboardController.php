@@ -7,6 +7,7 @@ use App\Enums\WorkOrderBoardStage;
 use App\Enums\WorkOrderSchedulingStatus;
 use App\Enums\WorkOrderStatus;
 use App\Http\Controllers\Controller;
+use App\Models\Bobina;
 use App\Models\InventoryMovement;
 use App\Models\InventoryReturn;
 use App\Models\Material;
@@ -93,6 +94,13 @@ class DashboardController extends Controller
         $corteProductionMonthKg = DashboardMonthlyCorteProduction::totalKgBetween($monthStart, $monthEnd);
         $scrapMonth = $this->inventoryReports->scrapKgTotalsForPeriod($monthStart, $monthEnd);
         $recentFinalizedOtScrap = DashboardRecentOtScrapChart::rows(10);
+        $rejectedReturnsBobinasMonth = Bobina::query()
+            ->where('status', 'rejected')
+            ->whereBetween('created_at', [$monthStart, $monthEnd->copy()->endOfDay()])
+            ->whereHas('inventoryReturn', function ($query): void {
+                $query->where('destination_area', 'bobinas_rechazadas');
+            })
+            ->count();
 
         return response()->json([
             'generated_at' => now()->toIso8601String(),
@@ -105,6 +113,7 @@ class DashboardController extends Controller
                 'corte' => $scrapMonth['corte_kg'],
             ],
             'recent_finalized_ot_scrap' => $recentFinalizedOtScrap,
+            'rejected_returns_bobinas_month' => $rejectedReturnsBobinasMonth,
             'materials_total' => $materialsTotal,
             'materials_by_area' => $byArea,
             'inventory_returns_pending' => $returnsPending,

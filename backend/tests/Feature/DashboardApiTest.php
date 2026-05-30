@@ -2,12 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Models\Bobina;
 use App\Models\Client;
+use App\Models\InventoryReturn;
 use App\Models\Material;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderTechnicalDocument;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -49,6 +52,7 @@ class DashboardApiTest extends TestCase
                     'corte',
                 ],
                 'recent_finalized_ot_scrap',
+                'rejected_returns_bobinas_month',
                 'materials_total',
                 'materials_by_area',
                 'inventory_returns_pending',
@@ -210,5 +214,77 @@ class DashboardApiTest extends TestCase
         $this->assertSame('OT-2026-CERRADA', $rows[0]['code']);
         $this->assertSame('3.500', $rows[0]['corte_kg']);
         $this->assertSame('closed', $rows[0]['closure']);
+    }
+
+    public function test_summary_counts_rejected_returns_bobinas_in_current_month(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-05-15 12:00:00'));
+
+        $user = User::factory()->create();
+        $client = Client::query()->create(['name' => 'Cliente bobinas', 'rif' => 'J-BOB']);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Producto bobinas',
+            'cpe' => 'CPE-B',
+            'structure' => 'BOPP 20',
+        ]);
+        $material = Material::query()->create([
+            'sku' => 'BR-1',
+            'name' => 'Bobina rechazada mat',
+            'inventory_area' => 'bobinas_rechazadas',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-2026-BOB',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+        ]);
+
+        $ret = InventoryReturn::query()->create([
+            'material_id' => $material->id,
+            'work_order_id' => $wo->id,
+            'destination_area' => 'bobinas_rechazadas',
+            'quantity' => '12.5',
+            'status' => 'pending',
+        ]);
+        Bobina::query()->create([
+            'material_id' => $material->id,
+            'inventory_return_id' => $ret->id,
+            'code' => 'REJ-TEST-1',
+            'weight_kg' => '12.5',
+            'status' => 'rejected',
+        ]);
+
+        $oldRet = InventoryReturn::query()->create([
+            'material_id' => $material->id,
+            'work_order_id' => $wo->id,
+            'destination_area' => 'bobinas_rechazadas',
+            'quantity' => '5',
+            'status' => 'accepted',
+            'created_at' => Carbon::parse('2026-04-01'),
+            'updated_at' => Carbon::parse('2026-04-01'),
+        ]);
+        $oldBobina = Bobina::query()->create([
+            'material_id' => $material->id,
+            'inventory_return_id' => $oldRet->id,
+            'code' => 'REJ-TEST-OLD',
+            'weight_kg' => '5',
+            'status' => 'rejected',
+        ]);
+        $oldBobina->forceFill([
+            'created_at' => Carbon::parse('2026-04-01'),
+            'updated_at' => Carbon::parse('2026-04-01'),
+        ])->save();
+
+        $token = $user->createToken('t')->plainTextToken;
+        $response = $this->getJson('/api/dashboard/summary', [
+            'Authorization' => 'Bearer '.$token,
+        ]);
+
+        $response->assertOk();
+        $this->assertSame(1, $response->json('rejected_returns_bobinas_month'));
+
+        Carbon::setTestNow();
     }
 }

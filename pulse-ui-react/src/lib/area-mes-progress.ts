@@ -45,7 +45,7 @@ export function processStateForAreaBandeja(
     return "Hecho en área"
   }
 
-  if (mesWorkflow && mesWorkflow !== "pendiente") {
+  if (mesWorkflow && mesWorkflow !== "sin_iniciar") {
     return "En proceso"
   }
 

@@ -892,7 +892,7 @@ export default function DeliveryNoteCreatePage() {
                     <Layers className="h-4 w-4 shrink-0" aria-hidden />
                     {agregarPaletasTarget.label}
                   </Button>
-                  {agregarPaletasTarget.reason ? (
+                  {agregarPaletasTarget.kind === "despacho" && agregarPaletasTarget.reason ? (
                     <p className="text-muted-foreground text-right text-xs leading-snug">
                       {agregarPaletasTarget.reason}
                     </p>

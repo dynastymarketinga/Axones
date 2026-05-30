@@ -86,7 +86,7 @@ import {
 } from "./montaje-turnos"
 import {
   MONTAJE_TIMER_CONFIRM,
-  mesTimerConfirmNeedsActiveTurno,
+  montajeTimerConfirmNeedsActiveTurno,
   type MontajeTimerActionFlags,
   type MontajeTimerConfirmKey,
 } from "./montaje-timer-actions"
@@ -1140,7 +1140,7 @@ export default function WorkOrderMontajeControlPanel({
   }
 
   function executeTimerConfirm(key: MontajeTimerConfirmKey) {
-    if (!mesTimerConfirmNeedsActiveTurno(key)) {
+    if (!montajeTimerConfirmNeedsActiveTurno(key)) {
       if (!canFinalizeOrder) return
       requestFinalizarAreaMontaje()
       return

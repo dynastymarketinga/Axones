@@ -451,6 +451,7 @@ export function lamStopTimerPatch(
       [LAM_TURNOS_HISTORIAL_KEY]: historial,
       lamRegistrosTurnos: registros,
       ...timerToLegacyFlat({
+        ...emptyLaminacionTurnTimer(),
         state: "pending",
         startedAtMs: 0,
         lastResumeAtMs: 0,
@@ -467,6 +468,7 @@ export function lamStopTimerPatch(
     [LAM_TURNOS_HISTORIAL_KEY]: historial,
     lamRegistrosTurnos: registros,
     ...timerToLegacyFlat({
+      ...emptyLaminacionTurnTimer(),
       state: "completed",
       startedAtMs: timer.startedAtMs,
       lastResumeAtMs: 0,
@@ -1081,10 +1083,8 @@ function historialToClosedTurnos(hist: LamArchivedTurnEntry[]): LaminacionTurnoE
     scrapLaminadoKg: "0",
     observaciones: "",
     timer: {
+      ...emptyLaminacionTurnTimer(),
       state: "stopped",
-      startedAtMs: 0,
-      lastResumeAtMs: 0,
-      pauseAtMs: 0,
       effectiveAccSec: h.effective_sec,
       deadAccSec: h.dead_sec,
       pauses: h.pauses,

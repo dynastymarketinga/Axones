@@ -19,6 +19,8 @@ const DEFAULT_OPTS: Required<MetricPlusMinusOptions> = {
   maxNominalDigits: 4,
   maxToleranceDigits: 2,
   allowRange: false,
+  defaultTolerance: "",
+  unlimited: false,
 }
 
 /** Presets alineados con placeholders de la planilla OT. */

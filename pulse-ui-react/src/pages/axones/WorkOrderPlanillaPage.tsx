@@ -2992,10 +2992,12 @@ export default function WorkOrderPlanillaPage() {
                                         value={`${g.group} ${o.label} ${o.value}`}
                                         onSelect={() => {
                                           setForm((prev) => {
-                                            const next = { ...prev, maquina: o.value }
                                             const ref = planchasReferenciaForMaquina(o.value)
-                                            if (ref !== undefined) next.planchasReferencia = ref
-                                            return next
+                                            return {
+                                              ...prev,
+                                              maquina: o.value,
+                                              ...(ref !== undefined ? { planchasReferencia: ref } : {}),
+                                            }
                                           })
                                           setMaquinaPickerOpen(false)
                                         }}

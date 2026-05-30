@@ -27,6 +27,8 @@ import type { DashboardSummary, MaterialRow } from "@/types/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -54,9 +56,16 @@ function areaLabel(key: string): string {
   return AREA_LABELS[key] ?? key.replace(/_/g, " ")
 }
 
-const workOrderChartConfig = {
-  cantidad: { label: "Cantidad" },
+const otScrapChartConfig = {
+  impresion_kg: { label: "Impresión", color: "hsl(var(--chart-1))" },
+  laminacion_kg: { label: "Laminación", color: "hsl(var(--chart-2))" },
+  corte_kg: { label: "Corte", color: "hsl(var(--chart-3))" },
 } satisfies ChartConfig
+
+function parseKgNumber(raw?: string | null): number {
+  const n = Number.parseFloat(String(raw ?? "0").replace(",", "."))
+  return Number.isFinite(n) ? n : 0
+}
 
 type KpiItem = {
   title: string
@@ -141,13 +150,16 @@ export default function AxonesDashboardPage() {
     void load()
   }, [load])
 
-  const workOrderBars = useMemo(() => {
-    if (!data) return []
-    return [
-      { etapa: "En espera de programación", cantidad: data.work_orders_pending_programming },
-      { etapa: "En programación", cantidad: data.work_orders_in_programming },
-    ]
-  }, [data])
+  const scrapByOtChart = useMemo(() => {
+    const rows = data?.recent_finalized_ot_scrap ?? []
+    return rows.map((row) => ({
+      ...row,
+      impresion_kg: parseKgNumber(row.impresion_kg),
+      laminacion_kg: parseKgNumber(row.laminacion_kg),
+      corte_kg: parseKgNumber(row.corte_kg),
+      total_kg: parseKgNumber(row.total_kg),
+    }))
+  }, [data?.recent_finalized_ot_scrap])
 
   const lowStockRows = useMemo(
     () => (Array.isArray(data?.materials_low_stock) ? data!.materials_low_stock : []),
@@ -258,52 +270,101 @@ export default function AxonesDashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Órdenes de trabajo y programación</CardTitle>
+              <CardTitle className="text-base">Desperdicio por órdenes finalizadas</CardTitle>
               <CardDescription>
-                Comparación rápida entre las que aún no tienen programa asignado y las que ya están
-                en el calendario.
+                Últimas 10 OT con corte cerrado o producción completa (4 áreas). Solo suma kg del área
+                cuando está finalizada en planilla: impresión, laminación y corte.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ChartContainer config={workOrderChartConfig} className="h-[min(300px,50vh)] w-full">
-                <BarChart
-                  data={workOrderBars}
-                  margin={{ top: 12, right: 12, left: 8, bottom: 64 }}
-                >
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/50" />
-                  <XAxis
-                    dataKey="etapa"
-                    type="category"
-                    tickLine={false}
-                    axisLine={false}
-                    interval={0}
-                    tick={{ fontSize: 11 }}
-                    angle={-12}
-                    textAnchor="end"
-                    height={60}
-                  />
-                  <YAxis
-                    allowDecimals={false}
-                    width={40}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <ChartTooltip
-                    content={<ChartTooltipContent indicator="dashed" />}
-                    cursor={false}
-                  />
-                  <Bar
-                    dataKey="cantidad"
-                    name="Órdenes"
-                    fill="hsl(var(--primary))"
-                    radius={[8, 8, 0, 0]}
-                    maxBarSize={56}
-                  />
-                </BarChart>
-              </ChartContainer>
+              <div className="relative">
+                <ChartContainer config={otScrapChartConfig} className="h-[min(340px,55vh)] w-full">
+                  <BarChart
+                    data={scrapByOtChart}
+                    margin={{ top: 12, right: 12, left: 4, bottom: 8 }}
+                  >
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/50" />
+                    <XAxis
+                      dataKey="label"
+                      type="category"
+                      tickLine={false}
+                      axisLine={false}
+                      interval={0}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis
+                      allowDecimals
+                      width={48}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={scrapByOtChart.length > 0 ? [0, "auto"] : [0, 10]}
+                      tickFormatter={(v) => `${v} kg`}
+                    />
+                    <ChartTooltip
+                      cursor={{ fill: "hsl(var(--muted))", opacity: 0.35 }}
+                      content={
+                        <ChartTooltipContent
+                          indicator="dot"
+                          labelFormatter={(_, payload) => {
+                            const row = payload?.[0]?.payload as
+                              | { code?: string; closure?: string }
+                              | undefined
+                            if (!row?.code) return "OT"
+                            const hint =
+                              row.closure === "closed_complete"
+                                ? " · 4 áreas listas"
+                                : row.closure === "closed"
+                                  ? " · Corte cerrado"
+                                  : ""
+                            return `${row.code}${hint}`
+                          }}
+                          formatter={(value, name) => {
+                            const n = typeof value === "number" ? value : parseKgNumber(String(value))
+                            const label =
+                              otScrapChartConfig[name as keyof typeof otScrapChartConfig]?.label ??
+                              String(name)
+                            return (
+                              <span className="font-mono tabular-nums">
+                                {label}: {n.toLocaleString("es-VE", { maximumFractionDigits: 3 })} kg
+                              </span>
+                            )
+                          }}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar
+                      dataKey="impresion_kg"
+                      stackId="scrap"
+                      fill="var(--color-impresion_kg)"
+                      radius={[0, 0, 0, 0]}
+                      maxBarSize={48}
+                    />
+                    <Bar
+                      dataKey="laminacion_kg"
+                      stackId="scrap"
+                      fill="var(--color-laminacion_kg)"
+                      radius={[0, 0, 0, 0]}
+                      maxBarSize={48}
+                    />
+                    <Bar
+                      dataKey="corte_kg"
+                      stackId="scrap"
+                      fill="var(--color-corte_kg)"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={48}
+                    />
+                  </BarChart>
+                </ChartContainer>
+                {scrapByOtChart.length === 0 ? (
+                  <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 text-center text-sm text-muted-foreground">
+                    Sin OT finalizadas aún. La gráfica se actualiza al cerrar corte o completar las 4 áreas.
+                  </p>
+                ) : null}
+              </div>
               <p className="text-muted-foreground mt-2 text-center text-sm">
-                <Link to="/programacion" className="text-primary font-medium hover:underline">
-                  Ir al tablero de programación
+                <Link to="/reportes/mermas" className="text-primary font-medium hover:underline">
+                  Ver reporte completo de mermas
                 </Link>
               </p>
             </CardContent>

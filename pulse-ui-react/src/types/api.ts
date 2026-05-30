@@ -248,6 +248,23 @@ export type DashboardSummary = {
     laminacion: string
     corte: string
   }
+  /** Últimas OT finalizadas: desperdicio por área (kg) cuando el área está finalizada. */
+  recent_finalized_ot_scrap?: Array<{
+    work_order_id: number
+    code: string
+    label: string
+    closure: "closed" | "closed_complete"
+    areas_finalized: {
+      montaje: boolean
+      impresion: boolean
+      laminacion: boolean
+      corte: boolean
+    }
+    impresion_kg: string
+    laminacion_kg: string
+    corte_kg: string
+    total_kg: string
+  }>
   materials_total: number
   materials_by_area: Record<string, number>
   inventory_returns_pending: number

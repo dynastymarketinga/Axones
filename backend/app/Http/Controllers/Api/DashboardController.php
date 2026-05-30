@@ -16,6 +16,7 @@ use App\Models\TintaMixture;
 use App\Models\WorkOrder;
 use App\Services\InventoryReportService;
 use App\Support\DashboardMonthlyCorteProduction;
+use App\Support\DashboardRecentOtScrapChart;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -91,6 +92,7 @@ class DashboardController extends Controller
 
         $corteProductionMonthKg = DashboardMonthlyCorteProduction::totalKgBetween($monthStart, $monthEnd);
         $scrapMonth = $this->inventoryReports->scrapKgTotalsForPeriod($monthStart, $monthEnd);
+        $recentFinalizedOtScrap = DashboardRecentOtScrapChart::rows(10);
 
         return response()->json([
             'generated_at' => now()->toIso8601String(),
@@ -102,6 +104,7 @@ class DashboardController extends Controller
                 'laminacion' => $scrapMonth['laminacion_kg'],
                 'corte' => $scrapMonth['corte_kg'],
             ],
+            'recent_finalized_ot_scrap' => $recentFinalizedOtScrap,
             'materials_total' => $materialsTotal,
             'materials_by_area' => $byArea,
             'inventory_returns_pending' => $returnsPending,

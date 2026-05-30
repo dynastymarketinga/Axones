@@ -2161,15 +2161,6 @@ export default function WorkOrderPlanillaPage() {
               )
               break
             }
-            if (decimalKgExceedsStock(kg, mat.quantity_on_hand)) {
-              const stockNum = parseDecimalKgString(mat.quantity_on_hand)
-              const disp = stockNum !== null ? formatKgForOtHint(stockNum) : readString(mat.quantity_on_hand)
-              addError(
-                "sustratosImp",
-                `Impresión: Kg a utilizar del sustrato ${i + 1} supera el stock disponible (${disp} kg).`,
-              )
-              break
-            }
           }
         }
       }
@@ -2258,15 +2249,6 @@ export default function WorkOrderPlanillaPage() {
               addError(
                 "sustratosLam",
                 `Laminación: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
-              )
-              break
-            }
-            if (decimalKgExceedsStock(kg, mat.quantity_on_hand)) {
-              const stockNum = parseDecimalKgString(mat.quantity_on_hand)
-              const disp = stockNum !== null ? formatKgForOtHint(stockNum) : readString(mat.quantity_on_hand)
-              addError(
-                "sustratosLam",
-                `Laminación: Kg a utilizar del sustrato ${i + 1} supera el stock disponible (${disp} kg).`,
               )
               break
             }

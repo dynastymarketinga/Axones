@@ -347,6 +347,56 @@ class OperationalAlertsTest extends TestCase
         $this->assertStringContainsString('8.333', (string) $msg);
     }
 
+    public function test_planilla_sustrato_shortage_creates_alert_for_boss(): void
+    {
+        $user = User::factory()->create(['role' => 'calidad']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-SUS-AL',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        $mat = Material::query()->create([
+            'sku' => 'SUB-420',
+            'name' => 'BOPP transparente',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 100])->save();
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", [
+            'form' => [
+                'pedidoKg' => '100',
+                'maquina' => 'COMEXI 1',
+                'tipoImpresionEstructura' => 'reverso',
+                'sustratosVirgenImp' => [
+                    [
+                        'material_id' => (string) $mat->id,
+                        'kg' => '420.50',
+                        'material_free_text' => '',
+                    ],
+                ],
+            ],
+        ], $h)->assertOk();
+
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::OtMaterialShortage->value,
+            'work_order_id' => $wo->id,
+            'material_id' => $mat->id,
+        ]);
+
+        $msg = OperationalAlert::query()->where('work_order_id', $wo->id)->latest('id')->value('message');
+        $this->assertStringContainsString('420.50', (string) $msg);
+        $this->assertStringContainsString('Impresión', (string) $msg);
+
+        $list = $this->getJson('/api/alerts', $this->auth(User::factory()->create(['role' => 'boss'])))->assertOk();
+        $ids = collect($list->json('data'))->pluck('id')->all();
+        $alertId = OperationalAlert::query()->where('work_order_id', $wo->id)->value('id');
+        $this->assertContains($alertId, $ids);
+    }
+
     public function test_mount_segment_exceeding_threshold_creates_alert(): void
     {
         config(['axones.alerts.mount_seconds_threshold' => 120]);

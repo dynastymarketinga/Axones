@@ -12,6 +12,7 @@ use App\Enums\WorkOrderPriority;
 use App\Services\CortePlanillaDispatchSyncService;
 use App\Services\PlanillaScrapAlertService;
 use App\Services\PlanillaSustratoMaterialRequestSyncService;
+use App\Services\PlanillaSustratoShortageAlertService;
 use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderOrdenTrabajoService;
 use App\Support\MesProductionSaveGuard;
@@ -25,6 +26,7 @@ class WorkOrderOrdenTrabajoController extends Controller
         private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
         private readonly PlanillaSustratoMaterialRequestSyncService $planillaSustratoMaterialRequests,
         private readonly PlanillaScrapAlertService $planillaScrapAlerts,
+        private readonly PlanillaSustratoShortageAlertService $planillaSustratoShortageAlerts,
     ) {}
 
     /**
@@ -73,6 +75,11 @@ class WorkOrderOrdenTrabajoController extends Controller
 
         $doc = $this->ordenTrabajo->syncForm($work_order->fresh(), $form, $request->user());
         $sustratoMaterialSummary = $this->planillaSustratoMaterialRequests->syncFromPlanillaForm(
+            $work_order->fresh(),
+            $form,
+            $request->user(),
+        );
+        $this->planillaSustratoShortageAlerts->evaluateFromPlanillaForm(
             $work_order->fresh(),
             $form,
             $request->user(),

@@ -26,38 +26,94 @@ class OperationalAlertService
         foreach ($linesInput as $line) {
             $materialId = (int) $line['material_id'];
             $qtyRequested = (string) $line['quantity'];
-            /** @var Material|null $material */
-            $material = Material::query()->find($materialId);
-            if (! $material) {
-                continue;
-            }
-            $qoh = (string) $material->quantity_on_hand;
-            if (bccomp($qoh, $qtyRequested, 3) >= 0) {
-                continue;
-            }
-
-            OperationalAlert::query()->create([
-                'alert_type' => OperationalAlertType::OtMaterialShortage->value,
-                'severity' => AlertSeverity::Critical->value,
-                'message' => sprintf(
-                    'Stock insuficiente para %s (%s) en OT %s: hay %s %s, la línea pide %s %s.',
-                    $material->sku,
-                    $material->name,
-                    $workOrder->code,
-                    $qoh,
-                    $material->unit,
-                    $qtyRequested,
-                    $material->unit,
-                ),
-                'work_order_id' => $workOrder->getKey(),
-                'material_id' => $material->getKey(),
-                'metadata' => [
-                    'quantity_on_hand' => $qoh,
-                    'quantity_requested' => $qtyRequested,
-                ],
-                'created_by' => $user?->getKey(),
-            ]);
+            $this->recordOtMaterialShortageLine(
+                $workOrder,
+                $user,
+                $materialId,
+                $qtyRequested,
+                null,
+                null,
+                'ot_lines',
+            );
         }
+    }
+
+    /**
+     * Escasez de material en OT (líneas de consumo o sustratos virgen en planilla).
+     */
+    public function recordOtMaterialShortageLine(
+        WorkOrder $workOrder,
+        ?User $user,
+        int $materialId,
+        string $qtyRequested,
+        ?string $areaLabel = null,
+        ?string $originatingArea = null,
+        string $source = 'ot_lines',
+    ): void {
+        /** @var Material|null $material */
+        $material = Material::query()->find($materialId);
+        if (! $material) {
+            return;
+        }
+
+        $qoh = (string) $material->quantity_on_hand;
+        if (bccomp($qoh, $qtyRequested, 3) >= 0) {
+            return;
+        }
+
+        $areaSuffix = $areaLabel !== null && $areaLabel !== ''
+            ? sprintf(' (%s)', $areaLabel)
+            : '';
+
+        $message = sprintf(
+            'Stock insuficiente para %s (%s) en OT %s%s: hay %s %s, se piden %s %s.',
+            $material->sku,
+            $material->name,
+            $workOrder->code,
+            $areaSuffix,
+            $qoh,
+            $material->unit,
+            $qtyRequested,
+            $material->unit,
+        );
+
+        $metadata = [
+            'quantity_on_hand' => $qoh,
+            'quantity_requested' => $qtyRequested,
+            'source' => $source,
+        ];
+        if ($areaLabel !== null && $areaLabel !== '') {
+            $metadata['area_label'] = $areaLabel;
+        }
+        if ($originatingArea !== null && $originatingArea !== '') {
+            $metadata['target_area'] = $originatingArea;
+        }
+
+        $existingUnread = OperationalAlert::query()
+            ->where('work_order_id', $workOrder->getKey())
+            ->where('alert_type', OperationalAlertType::OtMaterialShortage->value)
+            ->where('material_id', $material->getKey())
+            ->whereNull('acknowledged_at')
+            ->first();
+
+        if ($existingUnread !== null) {
+            $existingUnread->update([
+                'message' => $message,
+                'metadata' => $metadata,
+            ]);
+
+            return;
+        }
+
+        OperationalAlert::query()->create([
+            'alert_type' => OperationalAlertType::OtMaterialShortage->value,
+            'severity' => AlertSeverity::Critical->value,
+            'message' => $message,
+            'work_order_id' => $workOrder->getKey(),
+            'material_id' => $material->getKey(),
+            'metadata' => $metadata,
+            'created_by' => $user?->getKey(),
+        ]);
     }
 
     /**

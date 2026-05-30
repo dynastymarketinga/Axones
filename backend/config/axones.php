@@ -12,7 +12,7 @@ return [
     */
 
     'alerts' => [
-        'scrap_percent_threshold' => (float) env('AXONES_SCRAP_ALERT_PERCENT', 10),
+        'scrap_percent_threshold' => (float) env('AXONES_SCRAP_ALERT_PERCENT', 5),
         'mount_seconds_threshold' => (int) env('AXONES_MOUNT_ALERT_SECONDS', 3600),
         'downtime_seconds_threshold' => (int) env('AXONES_DOWNTIME_ALERT_SECONDS', 1800),
     ],

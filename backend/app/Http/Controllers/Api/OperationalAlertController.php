@@ -32,6 +32,8 @@ class OperationalAlertController extends Controller
 
         if ($request->query('alert_type')) {
             $query->where('alert_type', $request->query('alert_type'));
+        } elseif (! filter_var($request->query('include_all'), FILTER_VALIDATE_BOOLEAN)) {
+            $query->materialOperational();
         }
 
         return response()->json($query->paginate(min((int) $request->query('per_page', 30), 100)));
@@ -74,6 +76,7 @@ class OperationalAlertController extends Controller
         $user = $request->user();
         $updated = OperationalAlert::query()
             ->visibleTo($user)
+            ->materialOperational()
             ->unread()
             ->update([
                 'acknowledged_at' => now(),

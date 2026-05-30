@@ -64,16 +64,9 @@ function streamPayloadToRow(row: StreamAlertPayload): AlertApiRow {
 }
 
 const ALERT_TITLE_ES: Record<string, string> = {
-  work_order_saved_broadcast: "Orden de trabajo guardada",
-  work_order_created: "Orden de trabajo creada",
-  work_order_area_assignment: "OT asignada a área",
-  production_handoff: "Producción actualizada entre áreas",
-  production_saved: "Producción guardada",
-  ot_material_shortage: "Falta de material",
-  scrap_threshold_exceeded: "Merma por encima del umbral",
-  mount_time_exceeded: "Tiempo de montaje excedido",
-  password_reset_requested: "Solicitud de restablecimiento de clave",
-  inventory_return_pending: "Devolución a inventario pendiente",
+  ot_material_shortage: "Escasez de material (OT)",
+  scrap_threshold_exceeded: "Desperdicio ≥ 5%",
+  material_low_stock: "Stock bajo",
 }
 
 function alertTitleInSpanish(alertType: string): string {
@@ -100,19 +93,13 @@ function routeForAlertType(
   if (key === "inventory_return_pending") {
     return "/devoluciones"
   }
+  if (key === "material_low_stock" || key === "low_stock") {
+    return "/materiales"
+  }
   const areaRoute = routeForAreaTarget(targetArea)
   if (areaRoute) return areaRoute
   if (
-    [
-      "work_order_saved_broadcast",
-      "work_order_created",
-      "work_order_area_assignment",
-      "production_handoff",
-      "production_saved",
-      "ot_material_shortage",
-      "scrap_threshold_exceeded",
-      "mount_time_exceeded",
-    ].includes(key)
+    ["ot_material_shortage", "scrap_threshold_exceeded"].includes(key)
   ) {
     return Number.isFinite(workOrderId) && Number(workOrderId) > 0
       ? `/ordenes-trabajo/${workOrderId}`

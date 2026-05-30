@@ -34,21 +34,17 @@ type AlertRow = {
 }
 
 const ALERT_TYPE_LABEL: Record<string, string> = {
-  work_order_saved_broadcast: "Orden de trabajo guardada",
-  work_order_created: "Orden de trabajo creada",
-  work_order_area_assignment: "OT asignada a área",
-  production_handoff: "Producción actualizada entre áreas",
-  production_saved: "Producción guardada",
-  ot_material_shortage: "Falta de material",
-  scrap_threshold_exceeded: "Merma por encima del umbral",
-  mount_time_exceeded: "Tiempo de montaje excedido",
-  downtime_exceeded: "Parada prolongada",
+  ot_material_shortage: "Escasez de material (OT)",
+  scrap_threshold_exceeded: "Desperdicio ≥ 5%",
+  material_low_stock: "Stock bajo",
   low_stock: "Stock bajo",
-  dispatch_delay: "Retraso en despacho",
-  quality_hold: "Retención de calidad",
-  machine_idle: "Máquina inactiva",
-  password_reset_requested: "Solicitud de restablecimiento de clave",
 }
+
+const MATERIAL_OPERATIONAL_TYPES = new Set([
+  "ot_material_shortage",
+  "scrap_threshold_exceeded",
+  "material_low_stock",
+])
 
 function alertTypeLabel(alertType?: string | null): string {
   const key = (alertType ?? "").toLowerCase().trim()
@@ -112,6 +108,9 @@ export default function AxonesOperationalAlertsPage() {
   }, [load])
 
   const onStreamRow = useCallback((row: StreamAlertPayload) => {
+    if (!MATERIAL_OPERATIONAL_TYPES.has(row.alert_type.toLowerCase().trim())) {
+      return
+    }
     setRows((prev) => {
       if (!prev) return prev
       if (prev.data.some((x) => x.id === row.id)) return prev
@@ -165,7 +164,7 @@ export default function AxonesOperationalAlertsPage() {
             Alertas operativas
           </h1>
           <p className="text-muted-foreground text-sm">
-            Incidencias y avisos que requieren atención.
+            Desperdicio de material (≥ 5%) y escasez de stock por OT o inventario.
           </p>
           <div className="mt-2">
             <Badge variant="outline">Área actual: {areaLabel}</Badge>
@@ -199,7 +198,7 @@ export default function AxonesOperationalAlertsPage() {
             ) : !rows?.data.length ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-muted-foreground">
-                  Sin alertas.
+                  Sin alertas de desperdicio o escasez de material.
                 </TableCell>
               </TableRow>
             ) : (

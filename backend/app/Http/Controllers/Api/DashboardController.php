@@ -86,7 +86,10 @@ class DashboardController extends Controller
             ->where('board_stage', '!=', WorkOrderBoardStage::Completada->value)
             ->count();
 
-        $operationalAlertsUnread = OperationalAlert::query()->unread()->count();
+        $operationalAlertsUnread = OperationalAlert::query()
+            ->materialOperational()
+            ->unread()
+            ->count();
 
         $monthStart = now()->startOfMonth();
         $monthEnd = now();

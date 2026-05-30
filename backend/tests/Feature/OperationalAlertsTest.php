@@ -74,24 +74,69 @@ class OperationalAlertsTest extends TestCase
         $printingUser = User::factory()->create(['role' => 'impresion']);
 
         $aPrinting = OperationalAlert::query()->create([
-            'alert_type' => 'work_order_saved_broadcast',
-            'severity' => 'info',
+            'alert_type' => OperationalAlertType::OtMaterialShortage->value,
+            'severity' => 'critical',
             'message' => 'Impresión',
             'metadata' => ['target_area' => 'impresion'],
         ]);
         $aLaminacion = OperationalAlert::query()->create([
-            'alert_type' => 'work_order_saved_broadcast',
-            'severity' => 'info',
+            'alert_type' => OperationalAlertType::OtMaterialShortage->value,
+            'severity' => 'critical',
             'message' => 'Laminación',
             'metadata' => ['target_area' => 'laminacion'],
         ]);
 
         $this->postJson('/api/alerts/acknowledge-all', [], $this->auth($printingUser))
             ->assertOk()
-            ->assertJsonPath('updated_count', 1);
+            ->assertJsonPath('updated_count', 2);
 
         $this->assertNotNull($aPrinting->fresh()->acknowledged_at);
-        $this->assertNull($aLaminacion->fresh()->acknowledged_at);
+        $this->assertNotNull($aLaminacion->fresh()->acknowledged_at);
+    }
+
+    public function test_index_excludes_workflow_alerts_by_default(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+
+        OperationalAlert::query()->create([
+            'alert_type' => 'production_saved',
+            'severity' => 'info',
+            'message' => 'Ruido',
+        ]);
+        $materialAlert = OperationalAlert::query()->create([
+            'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
+            'severity' => 'warning',
+            'message' => 'Desperdicio',
+        ]);
+
+        $list = $this->getJson('/api/alerts', $this->auth($user))->assertOk();
+        $ids = collect($list->json('data'))->pluck('id')->all();
+
+        $this->assertContains($materialAlert->id, $ids);
+        $this->assertSame(1, $list->json('total'));
+    }
+
+    public function test_low_stock_alert_after_inventory_out(): void
+    {
+        $user = User::factory()->create(['role' => 'boss']);
+        $mat = Material::query()->create([
+            'sku' => 'LOW-1',
+            'name' => 'Material bajo',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 10,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 12])->save();
+
+        $this->postJson("/api/materials/{$mat->id}/movements", [
+            'movement_type' => 'out',
+            'quantity' => 5,
+        ], $this->auth($user))->assertCreated();
+
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::MaterialLowStock->value,
+            'material_id' => $mat->id,
+        ]);
     }
 
     public function test_scrap_percent_triggers_alert_above_threshold(): void
@@ -136,7 +181,7 @@ class OperationalAlertsTest extends TestCase
         ]);
 
         $msg = OperationalAlert::query()->where('work_order_id', $wo->id)->latest('id')->value('message');
-        $this->assertStringContainsString('corte', (string) $msg);
+        $this->assertStringContainsString('Desperdicio', (string) $msg);
     }
 
     public function test_laminacion_scrap_percent_triggers_alert_above_threshold(): void

@@ -376,23 +376,6 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             'area' => 'tintas',
         ]);
 
-        $this->assertDatabaseHas('operational_alerts', [
-            'work_order_id' => $wo->id,
-            'alert_type' => 'production_handoff',
-        ]);
-        $this->assertDatabaseHas('operational_alerts', [
-            'work_order_id' => $wo->id,
-            'alert_type' => 'production_saved',
-        ]);
-
-        $savedAlert = OperationalAlert::query()
-            ->where('work_order_id', $wo->id)
-            ->where('alert_type', 'production_saved')
-            ->latest('id')
-            ->first();
-        $this->assertNotNull($savedAlert);
-        $this->assertSame('impresion', data_get($savedAlert?->metadata, 'target_area'));
-
         $this->assertSame(
             WorkOrderBoardStage::Impresion->value,
             $wo->fresh()->board_stage?->value ?? (string) $wo->fresh()->board_stage
@@ -1172,7 +1155,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
 
         $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
 
-        $this->assertSame(5, OperationalAlert::query()
+        $this->assertSame(0, OperationalAlert::query()
             ->where('work_order_id', $wo->id)
             ->where('alert_type', 'work_order_saved_broadcast')
             ->count());

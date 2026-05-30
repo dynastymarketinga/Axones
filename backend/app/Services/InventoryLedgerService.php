@@ -11,6 +11,10 @@ use Illuminate\Validation\ValidationException;
 
 class InventoryLedgerService
 {
+    public function __construct(
+        private readonly OperationalAlertService $alerts,
+    ) {}
+
     /**
      * Registra un movimiento y actualiza quantity_on_hand en una transacción con bloqueo de fila.
      *
@@ -48,7 +52,7 @@ class InventoryLedgerService
             $locked->quantity_on_hand = $newBalance;
             $locked->save();
 
-            return InventoryMovement::query()->create([
+            $movement = InventoryMovement::query()->create([
                 'material_id' => $locked->getKey(),
                 'movement_type' => $type->value,
                 'quantity' => $quantity,
@@ -58,6 +62,12 @@ class InventoryLedgerService
                 'metadata' => $metadata,
                 'occurred_at' => $occurredAt ?? now(),
             ]);
+
+            if (in_array($type, [InventoryMovementType::Out, InventoryMovementType::AdjustmentSub], true)) {
+                $this->alerts->evaluateMaterialLowStock($locked->fresh(), $user);
+            }
+
+            return $movement;
         });
     }
 

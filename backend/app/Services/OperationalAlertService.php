@@ -61,8 +61,56 @@ class OperationalAlertService
     }
 
     /**
-     * Tras cerrar un segmento de tiempo (montaje o tiempo muerto): umbrales configurables.
+     * Tras movimiento de inventario: avisar si la existencia queda bajo el mínimo.
      */
+    public function evaluateMaterialLowStock(Material $material, ?User $user = null): void
+    {
+        $qoh = (string) $material->quantity_on_hand;
+        $min = (string) $material->min_stock;
+
+        if (bccomp($min, '0', 3) <= 0) {
+            return;
+        }
+
+        if (bccomp($qoh, $min, 3) >= 0) {
+            return;
+        }
+
+        $alreadyUnread = OperationalAlert::query()
+            ->where('alert_type', OperationalAlertType::MaterialLowStock->value)
+            ->where('material_id', $material->getKey())
+            ->whereNull('acknowledged_at')
+            ->exists();
+
+        if ($alreadyUnread) {
+            return;
+        }
+
+        OperationalAlert::query()->create([
+            'alert_type' => OperationalAlertType::MaterialLowStock->value,
+            'severity' => bccomp($qoh, '0', 3) <= 0
+                ? AlertSeverity::Critical->value
+                : AlertSeverity::Warning->value,
+            'message' => sprintf(
+                'Stock bajo: %s (%s) tiene %s %s; mínimo %s %s.',
+                $material->sku,
+                $material->name,
+                $qoh,
+                $material->unit,
+                $min,
+                $material->unit,
+            ),
+            'work_order_id' => null,
+            'material_id' => $material->getKey(),
+            'metadata' => [
+                'quantity_on_hand' => $qoh,
+                'min_stock' => $min,
+                'inventory_area' => $material->inventory_area,
+            ],
+            'created_by' => $user?->getKey(),
+        ]);
+    }
+
     public function evaluateClosedTimeSegment(PrintingTimeSegment $segment): void
     {
         if ($segment->ended_at === null || $segment->started_at === null) {
@@ -230,10 +278,21 @@ class OperationalAlertService
             return;
         }
 
-        $threshold = (string) config('axones.alerts.scrap_percent_threshold', 10);
+        $threshold = (string) config('axones.alerts.scrap_percent_threshold', 5);
         $scrap = is_string($scrapPercent) ? $scrapPercent : (string) $scrapPercent;
 
         if (bccomp($scrap, $threshold, 3) < 0) {
+            return;
+        }
+
+        $alreadyUnread = OperationalAlert::query()
+            ->where('work_order_id', $workOrder->getKey())
+            ->where('alert_type', OperationalAlertType::ScrapThresholdExceeded->value)
+            ->where('metadata->area', $areaLabel)
+            ->whereNull('acknowledged_at')
+            ->exists();
+
+        if ($alreadyUnread) {
             return;
         }
 
@@ -241,7 +300,7 @@ class OperationalAlertService
             'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
             'severity' => AlertSeverity::Warning->value,
             'message' => sprintf(
-                'Merma elevada en %s (OT %s): %s%% (umbral %s%%).',
+                'Desperdicio elevado en %s (OT %s): %s%% (umbral %s%%).',
                 $areaLabel,
                 $workOrder->code,
                 $scrap,

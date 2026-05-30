@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OperationalAlertType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,7 +32,10 @@ class OperationalAlert extends Model
         };
 
         if (! $hasFull && $targetArea !== null) {
-            $query->where('metadata->target_area', $targetArea);
+            $query->where(function (Builder $q) use ($targetArea): void {
+                $q->where('metadata->target_area', $targetArea)
+                    ->orWhereIn('alert_type', OperationalAlertType::materialOperationalValues());
+            });
         }
 
         if (! $hasFull) {
@@ -84,5 +88,16 @@ class OperationalAlert extends Model
     public function scopeUnread($query)
     {
         return $query->whereNull('acknowledged_at');
+    }
+
+    /**
+     * Desperdicio, escasez en OT y stock bajo (pantalla /alertas).
+     *
+     * @param  Builder<OperationalAlert>  $query
+     * @return Builder<OperationalAlert>
+     */
+    public function scopeMaterialOperational(Builder $query): Builder
+    {
+        return $query->whereIn('alert_type', OperationalAlertType::materialOperationalValues());
     }
 }

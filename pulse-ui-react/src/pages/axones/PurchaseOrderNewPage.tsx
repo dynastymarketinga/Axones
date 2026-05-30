@@ -29,7 +29,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Table,
   TableBody,
@@ -47,12 +46,11 @@ type PoLineDraft = {
   ancho_mm: string
   quantity_ordered: string
   unit: string
-  unit_price: string
 }
 
 const ADD_ARTICLE_TOOLTIP_LINES = [
   "Las filas vacías se omiten si hay al menos una válida.",
-  "Si completa material, descripción o precio en una fila, indique cantidad ≥ 0,001.",
+  "Si completa material o descripción en una fila, indique cantidad ≥ 0,001.",
   "Este botón añade otra fila al pedido.",
 ] as const
 
@@ -104,13 +102,6 @@ function sanitizePositiveDecimalInput(raw: string, maxFracDigits: number): strin
   return out
 }
 
-function formatMoneyUsdEs(value: number): string {
-  return `${new Intl.NumberFormat("es-VE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)} $`
-}
-
 const emptyLine = (): PoLineDraft => ({
   description: "",
   material_id: "",
@@ -119,18 +110,17 @@ const emptyLine = (): PoLineDraft => ({
   ancho_mm: "",
   quantity_ordered: "",
   unit: "kg" satisfies PoLineUnit,
-  unit_price: "",
 })
 
-const PO_ITEM_TYPES: { value: PoLineDraft["item_type"]; label: string; hideDims: boolean }[] = [
-  { value: "sustrato", label: "Sustrato", hideDims: false },
-  { value: "tinta", label: "Tinta", hideDims: true },
-  { value: "quimico", label: "Químico", hideDims: true },
-  { value: "otros", label: "Otros", hideDims: false },
+const PO_ITEM_TYPES: { value: PoLineDraft["item_type"]; label: string }[] = [
+  { value: "sustrato", label: "Sustrato" },
+  { value: "tinta", label: "Tinta" },
+  { value: "quimico", label: "Químico" },
+  { value: "otros", label: "Otros" },
 ] as const
 
-function shouldHideDims(itemType: PoLineDraft["item_type"]) {
-  return itemType === "tinta" || itemType === "quimico"
+function shouldShowDims(itemType: PoLineDraft["item_type"]) {
+  return itemType === "sustrato"
 }
 
 function buildLineDescription(line: PoLineDraft): string | null {
@@ -141,7 +131,7 @@ function buildLineDescription(line: PoLineDraft): string | null {
   if (base) parts.push(base)
   // Guardar tipo y dimensiones como referencia para Recepción (sin tocar esquema BD).
   parts.push(`Tipo: ${line.item_type}`)
-  if (!shouldHideDims(line.item_type)) {
+  if (shouldShowDims(line.item_type)) {
     if (micras) parts.push(`Micras: ${micras}`)
     if (ancho) parts.push(`Ancho(mm): ${ancho}`)
   }
@@ -163,17 +153,13 @@ type PurchaseOrderNewDraftV1 = {
   codeTouched: boolean
   orderedAt: string
   notes: string
-  taxApplies: boolean
   lines: PoLineDraft[]
 }
 
 /** Alinea micras/ancho si el tipo oculta dimensiones (mismo criterio que al editar en UI). */
 function normalizeLineByBusinessRules(line: PoLineDraft): PoLineDraft {
-  const hide = shouldHideDims(line.item_type)
-  return {
-    ...line,
-    ...(hide ? { micras: "", ancho_mm: "" } : {}),
-  }
+  if (shouldShowDims(line.item_type)) return line
+  return { ...line, micras: "", ancho_mm: "" }
 }
 
 function normalizePoLineDraftFromStorage(raw: unknown): PoLineDraft {
@@ -192,7 +178,6 @@ function normalizePoLineDraftFromStorage(raw: unknown): PoLineDraft {
     ancho_mm: typeof r.ancho_mm === "string" ? r.ancho_mm : "",
     quantity_ordered: typeof r.quantity_ordered === "string" ? r.quantity_ordered : "",
     unit,
-    unit_price: typeof r.unit_price === "string" ? r.unit_price : "",
   })
 }
 
@@ -204,7 +189,6 @@ type PoFieldErrors = {
 
 type PoLineFieldErrors = {
   quantity?: string
-  unit_price?: string
   unit?: string
 }
 
@@ -219,27 +203,14 @@ function buildAutoPoCode(): string {
 }
 
 function lineHasAnyValue(line: PoLineDraft): boolean {
-  const price = parseDecimalInput(line.unit_price, true)
   return Boolean(
     line.description.trim() ||
       line.material_id.trim() ||
       line.micras.trim() ||
       line.ancho_mm.trim() ||
       line.quantity_ordered.trim() ||
-      line.unit.trim() !== "kg" ||
-      (Number.isFinite(price) && price > 0),
+      line.unit.trim() !== "kg",
   )
-}
-
-function roundMoney2(n: number): number {
-  return Math.round(n * 100) / 100
-}
-
-function lineDraftTotal(line: PoLineDraft): number {
-  const q = parseDecimalInput(line.quantity_ordered)
-  const p = parseDecimalInput(line.unit_price, true)
-  if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p) || p < 0) return 0
-  return roundMoney2(q * p)
 }
 
 export default function PurchaseOrderNewPage() {
@@ -258,7 +229,6 @@ export default function PurchaseOrderNewPage() {
   const [codeTouched, setCodeTouched] = useState(false)
   const [orderedAt, setOrderedAt] = useState(() => toDateInputValue(new Date()))
   const [notes, setNotes] = useState("")
-  const [taxApplies, setTaxApplies] = useState(true)
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()])
   const [fieldErrors, setFieldErrors] = useState<PoFieldErrors>({})
   const [lineErrors, setLineErrors] = useState<Record<number, PoLineFieldErrors>>({})
@@ -268,15 +238,10 @@ export default function PurchaseOrderNewPage() {
     [suppliers, supplierId],
   )
 
-  const monetaryTotals = useMemo(() => {
-    let subtotal = 0
-    for (const line of lines) {
-      subtotal += lineDraftTotal(line)
-    }
-    subtotal = roundMoney2(subtotal)
-    const tax = taxApplies ? roundMoney2(subtotal * 0.16) : 0
-    return { subtotal, tax, total: roundMoney2(subtotal + tax) }
-  }, [lines, taxApplies])
+  const showDimensionColumns = useMemo(
+    () => lines.some((line) => shouldShowDims(line.item_type)),
+    [lines],
+  )
 
   const supplierTriggerDisplay = useMemo(() => {
     if (!supplierId.trim()) return { text: "Seleccione…", muted: true }
@@ -316,7 +281,6 @@ export default function PurchaseOrderNewPage() {
       codeTouched,
       orderedAt,
       notes,
-      taxApplies,
       lines,
     }
     try {
@@ -402,7 +366,6 @@ export default function PurchaseOrderNewPage() {
           : toDateInputValue(new Date()),
       )
       setNotes(typeof parsed.notes === "string" ? parsed.notes : "")
-      setTaxApplies(typeof parsed.taxApplies === "boolean" ? parsed.taxApplies : true)
       if (Array.isArray(parsed.lines) && parsed.lines.length > 0) {
         setLines(parsed.lines.map((row) => normalizePoLineDraftFromStorage(row)))
       } else {
@@ -541,13 +504,6 @@ export default function PurchaseOrderNewPage() {
         errs.quantity =
           "Use un número mayor o igual a 0,001 (coma o punto decimal). Ej.: 10 o 10,5."
       }
-      const priceRaw = L.unit_price.trim()
-      if (priceRaw !== "") {
-        const pr = parseDecimalInput(priceRaw)
-        if (!Number.isFinite(pr) || pr < 0) {
-          errs.unit_price = "Precio inválido. Indique un número ≥ 0."
-        }
-      }
       const unitTrim = L.unit.trim() || "kg"
       if (!isPoLineUnit(unitTrim)) {
         errs.unit = "Seleccione una unidad válida."
@@ -558,21 +514,18 @@ export default function PurchaseOrderNewPage() {
     const payloadCandidate = lines
       .map((L) => ({
         quantity_ordered: parseDecimalInput(L.quantity_ordered),
-        unit_price: parseDecimalInput(L.unit_price, true),
         unit: L.unit.trim() || "kg",
       }))
       .filter(
         (L) =>
           Number.isFinite(L.quantity_ordered) &&
           L.quantity_ordered >= 0.001 &&
-          Number.isFinite(L.unit_price) &&
-          L.unit_price >= 0 &&
           isPoLineUnit(L.unit.trim() || "kg"),
       )
 
     if (!nextField.linesGeneral && payloadCandidate.length === 0) {
       nextField.linesGeneral =
-        "Ninguna línea tiene cantidad válida. Revise cantidad (≥ 0,001), precio y unidad."
+        "Ninguna línea tiene cantidad válida. Revise cantidad (≥ 0,001) y unidad."
     }
 
     const ok =
@@ -600,7 +553,6 @@ export default function PurchaseOrderNewPage() {
       const row = lineErrs[i]
       const n = i + 1
       if (row.quantity) toast.error(`Ítem ${n} · Cantidad: ${row.quantity}`)
-      if (row.unit_price) toast.error(`Ítem ${n} · Precio: ${row.unit_price}`)
       if (row.unit) toast.error(`Ítem ${n} · Unidad: ${row.unit}`)
     }
   }
@@ -624,14 +576,12 @@ export default function PurchaseOrderNewPage() {
         material_id: null,
         quantity_ordered: parseDecimalInput(L.quantity_ordered),
         unit: L.unit.trim() || "kg",
-        unit_price: parseDecimalInput(L.unit_price, true),
+        unit_price: 0,
       }))
       .filter(
         (L) =>
           Number.isFinite(L.quantity_ordered) &&
           L.quantity_ordered >= 0.001 &&
-          Number.isFinite(L.unit_price) &&
-          L.unit_price >= 0 &&
           isPoLineUnit(L.unit.trim() || "kg"),
       )
 
@@ -644,7 +594,7 @@ export default function PurchaseOrderNewPage() {
           code: code.trim(),
           ordered_at: orderedAt || null,
           notes: notes.trim() || null,
-          tax_applies: taxApplies,
+          tax_applies: false,
           lines: payloadLines,
         }),
       })
@@ -808,27 +758,15 @@ export default function PurchaseOrderNewPage() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="grid w-full max-w-full gap-2 sm:w-auto sm:max-w-[11rem]">
-            <Label htmlFor="po-date">Fecha pedido</Label>
-            <Input
-              id="po-date"
-              type="date"
-              value={orderedAt}
-              onChange={(ev) => setOrderedAt(ev.target.value)}
-              className="min-w-0"
-            />
-          </div>
-          <div className="flex items-center gap-2 pb-0.5 sm:pb-[2px]">
-            <Checkbox
-              id="po-tax-applies"
-              checked={taxApplies}
-              onCheckedChange={(v) => setTaxApplies(v === true)}
-            />
-            <Label htmlFor="po-tax-applies" className="cursor-pointer font-normal leading-snug">
-              Aplicar IVA (16&nbsp;%)
-            </Label>
-          </div>
+        <div className="grid w-full max-w-full gap-2 sm:w-auto sm:max-w-[11rem]">
+          <Label htmlFor="po-date">Fecha pedido</Label>
+          <Input
+            id="po-date"
+            type="date"
+            value={orderedAt}
+            onChange={(ev) => setOrderedAt(ev.target.value)}
+            className="min-w-0"
+          />
         </div>
 
         {supplierId && selectedSupplier ? (
@@ -885,12 +823,14 @@ export default function PurchaseOrderNewPage() {
                   <TableHead className="w-14">N°</TableHead>
                   <TableHead className="min-w-[260px]">Material solicitado</TableHead>
                   <TableHead className="w-36">Tipo</TableHead>
-                  <TableHead className="w-24">Micras</TableHead>
-                  <TableHead className="w-24">Ancho</TableHead>
+                  {showDimensionColumns ? (
+                    <>
+                      <TableHead className="w-24">Micras</TableHead>
+                      <TableHead className="w-24">Ancho</TableHead>
+                    </>
+                  ) : null}
                   <TableHead className="w-32">Cantidad pedida *</TableHead>
                   <TableHead className="w-36">Unidad</TableHead>
-                  <TableHead className="w-36">Precio unitario (USD)</TableHead>
-                  <TableHead className="w-32">Total línea</TableHead>
                   <TableHead className="w-20 text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -928,10 +868,11 @@ export default function PurchaseOrderNewPage() {
                             disabled={saving}
                             onValueChange={(v) => {
                               const next = v as PoLineDraft["item_type"]
-                              const hide = shouldHideDims(next)
                               updateLine(i, {
                                 item_type: next,
-                                ...(hide ? { micras: "", ancho_mm: "" } : {}),
+                                ...(shouldShowDims(next)
+                                  ? {}
+                                  : { micras: "", ancho_mm: "" }),
                               })
                             }}
                           >
@@ -947,24 +888,51 @@ export default function PurchaseOrderNewPage() {
                             </SelectContent>
                           </Select>
                         </TableCell>
-                        <TableCell className="align-top">
-                          <Input
-                            inputMode="numeric"
-                            value={line.micras}
-                            onChange={(ev) => updateLine(i, { micras: sanitizePositiveDecimalInput(ev.target.value, 3) })}
-                            placeholder="µ"
-                            disabled={saving || shouldHideDims(line.item_type)}
-                          />
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <Input
-                            inputMode="numeric"
-                            value={line.ancho_mm}
-                            onChange={(ev) => updateLine(i, { ancho_mm: sanitizePositiveDecimalInput(ev.target.value, 3) })}
-                            placeholder="mm"
-                            disabled={saving || shouldHideDims(line.item_type)}
-                          />
-                        </TableCell>
+                        {showDimensionColumns ? (
+                          shouldShowDims(line.item_type) ? (
+                            <>
+                              <TableCell className="align-top">
+                                <Input
+                                  inputMode="numeric"
+                                  value={line.micras}
+                                  onChange={(ev) =>
+                                    updateLine(i, {
+                                      micras: sanitizePositiveDecimalInput(
+                                        ev.target.value,
+                                        3,
+                                      ),
+                                    })
+                                  }
+                                  placeholder="µ"
+                                  disabled={saving}
+                                  aria-label={`Micras, fila ${i + 1}`}
+                                />
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Input
+                                  inputMode="numeric"
+                                  value={line.ancho_mm}
+                                  onChange={(ev) =>
+                                    updateLine(i, {
+                                      ancho_mm: sanitizePositiveDecimalInput(
+                                        ev.target.value,
+                                        3,
+                                      ),
+                                    })
+                                  }
+                                  placeholder="mm"
+                                  disabled={saving}
+                                  aria-label={`Ancho mm, fila ${i + 1}`}
+                                />
+                              </TableCell>
+                            </>
+                          ) : (
+                            <>
+                              <TableCell className="align-top" aria-hidden />
+                              <TableCell className="align-top" aria-hidden />
+                            </>
+                          )
+                        ) : null}
                         <TableCell className="align-top">
                           <div className="grid gap-1">
                             <Input
@@ -1034,41 +1002,6 @@ export default function PurchaseOrderNewPage() {
                           </div>
                         </TableCell>
                         <TableCell className="align-top">
-                          <div className="grid gap-1">
-                            <Input
-                              id={`po-line-${i}-price`}
-                              inputMode="decimal"
-                              placeholder="0"
-                              autoComplete="off"
-                              aria-label={`Precio unitario USD, fila ${i + 1}`}
-                              aria-invalid={Boolean(lineErrors[i]?.unit_price)}
-                              aria-describedby={
-                                lineErrors[i]?.unit_price ? `po-line-${i}-price-err` : undefined
-                              }
-                              value={line.unit_price}
-                              onChange={(ev) =>
-                                updateLine(i, {
-                                  unit_price: sanitizePositiveDecimalInput(
-                                    ev.target.value,
-                                    6,
-                                  ),
-                                })
-                              }
-                              className={cn(lineErrors[i]?.unit_price && "border-destructive")}
-                            />
-                            {lineErrors[i]?.unit_price ? (
-                              <p id={`po-line-${i}-price-err`} className="text-destructive text-xs">
-                                {lineErrors[i].unit_price}
-                              </p>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <div className="flex h-9 items-center rounded-md border bg-muted/50 px-3 text-sm tabular-nums">
-                            {formatMoneyUsdEs(lineDraftTotal(line))}
-                          </div>
-                        </TableCell>
-                        <TableCell className="align-top">
                           <div className="flex items-start justify-end">
                             <Button
                               type="button"
@@ -1091,26 +1024,6 @@ export default function PurchaseOrderNewPage() {
               </TableBody>
             </Table>
           </div>
-        </div>
-
-        <div className="rounded-xl border bg-muted/20 p-4">
-          <h3 className="text-sm font-medium">Resumen</h3>
-          <dl className="mt-3 space-y-2 text-sm tabular-nums">
-            <div className="flex justify-between gap-6 border-b border-border/60 pb-2">
-              <dt className="text-muted-foreground">Subtotal</dt>
-              <dd>{formatMoneyUsdEs(monetaryTotals.subtotal)}</dd>
-            </div>
-            <div className="flex justify-between gap-6 border-b border-border/60 pb-2">
-              <dt className="text-muted-foreground">
-                {taxApplies ? "IVA (16 %)" : "Sin IVA"}
-              </dt>
-              <dd>{formatMoneyUsdEs(monetaryTotals.tax)}</dd>
-            </div>
-            <div className="flex justify-between gap-6 pt-1 font-semibold">
-              <dt>Total</dt>
-              <dd>{formatMoneyUsdEs(monetaryTotals.total)}</dd>
-            </div>
-          </dl>
         </div>
 
         <div className="flex w-full justify-center pt-1">

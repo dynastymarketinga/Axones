@@ -285,34 +285,43 @@ class OperationalAlertService
             return;
         }
 
-        $alreadyUnread = OperationalAlert::query()
+        $message = sprintf(
+            'Desperdicio elevado en %s (OT %s): %s%% (umbral %s%%).',
+            $areaLabel,
+            $workOrder->code,
+            $scrap,
+            $threshold,
+        );
+
+        $metadata = [
+            'scrap_percent' => $scrap,
+            'threshold_percent' => $threshold,
+            'area' => $areaLabel,
+        ];
+
+        $existingUnread = OperationalAlert::query()
             ->where('work_order_id', $workOrder->getKey())
             ->where('alert_type', OperationalAlertType::ScrapThresholdExceeded->value)
             ->where('metadata->area', $areaLabel)
             ->whereNull('acknowledged_at')
-            ->exists();
+            ->first();
 
-        if ($alreadyUnread) {
+        if ($existingUnread !== null) {
+            $existingUnread->update([
+                'message' => $message,
+                'metadata' => $metadata,
+            ]);
+
             return;
         }
 
         OperationalAlert::query()->create([
             'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
             'severity' => AlertSeverity::Warning->value,
-            'message' => sprintf(
-                'Desperdicio elevado en %s (OT %s): %s%% (umbral %s%%).',
-                $areaLabel,
-                $workOrder->code,
-                $scrap,
-                $threshold,
-            ),
+            'message' => $message,
             'work_order_id' => $workOrder->getKey(),
             'material_id' => null,
-            'metadata' => [
-                'scrap_percent' => $scrap,
-                'threshold_percent' => $threshold,
-                'area' => $areaLabel,
-            ],
+            'metadata' => $metadata,
             'created_by' => null,
         ]);
     }

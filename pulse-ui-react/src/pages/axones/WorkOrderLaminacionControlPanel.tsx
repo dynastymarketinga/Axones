@@ -1024,6 +1024,7 @@ export default function WorkOrderLaminacionControlPanel({
         window.dispatchEvent(
           new CustomEvent(LAMINACION_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
+        window.dispatchEvent(new Event("alerts:refresh"))
         return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)

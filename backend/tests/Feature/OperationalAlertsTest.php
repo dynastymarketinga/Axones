@@ -8,6 +8,7 @@ use App\Models\Material;
 use App\Models\OperationalAlert;
 use App\Models\User;
 use App\Models\WorkOrder;
+use App\Services\WorkOrderOrdenTrabajoService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -206,6 +207,144 @@ class OperationalAlertsTest extends TestCase
 
         $msg = OperationalAlert::query()->where('work_order_id', $wo->id)->latest('id')->value('message');
         $this->assertStringContainsString('laminación', mb_strtolower((string) $msg));
+    }
+
+    public function test_corte_planilla_scrap_triggers_alert_above_threshold(): void
+    {
+        config(['axones.alerts.scrap_percent_threshold' => 5]);
+
+        $user = User::factory()->create(['role' => 'corte']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PL-CORTE',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'kgIngresadosCorte' => '300',
+                'corScrapImpresoKg' => '20',
+            ],
+        ], $this->auth($user))->assertOk();
+
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
+            'work_order_id' => $wo->id,
+        ]);
+
+        $msg = OperationalAlert::query()->where('work_order_id', $wo->id)->latest('id')->value('message');
+        $this->assertStringContainsString('corte', mb_strtolower((string) $msg));
+        $this->assertStringContainsString('6.667', (string) $msg);
+    }
+
+    public function test_corte_planilla_scrap_below_threshold_does_not_alert(): void
+    {
+        config(['axones.alerts.scrap_percent_threshold' => 5]);
+
+        $user = User::factory()->create(['role' => 'corte']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PL-CORTE-LOW',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'kgIngresadosCorte' => '300',
+                'corScrapImpresoKg' => '10',
+            ],
+        ], $this->auth($user))->assertOk();
+
+        $this->assertDatabaseMissing('operational_alerts', [
+            'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
+            'work_order_id' => $wo->id,
+        ]);
+    }
+
+    public function test_impresion_planilla_scrap_triggers_alert_above_threshold(): void
+    {
+        config(['axones.alerts.scrap_percent_threshold' => 5]);
+
+        $user = User::factory()->create(['role' => 'impresion']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PL-IMP',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impScrapTransparenteKg' => '10000',
+                'impScrapImpresoKg' => '100000',
+                'impEntradaBobinasKg' => ['1000000'],
+            ],
+        ], $this->auth($user))->assertOk();
+
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
+            'work_order_id' => $wo->id,
+        ]);
+    }
+
+    public function test_impresion_planilla_scrap_triggers_alert_with_pedido_fallback(): void
+    {
+        config(['axones.alerts.scrap_percent_threshold' => 5]);
+
+        $user = User::factory()->create(['role' => 'impresion']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PL-IMP-PED',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        app(WorkOrderOrdenTrabajoService::class)->syncForm($wo, ['pedidoKg' => '93680'], $user);
+
+        $h = $this->auth($user);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/printing-control", [
+            'form' => [
+                'impScrapTransparenteKg' => '2342',
+                'impScrapImpresoKg' => '2342',
+            ],
+        ], $h)->assertOk();
+
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::ScrapThresholdExceeded->value,
+            'work_order_id' => $wo->id,
+        ]);
+
+        $msg = OperationalAlert::query()->where('work_order_id', $wo->id)->latest('id')->value('message');
+        $this->assertStringContainsString('5.000', (string) $msg);
+    }
+
+    public function test_scrap_alert_updates_existing_unread_row(): void
+    {
+        config(['axones.alerts.scrap_percent_threshold' => 5]);
+
+        $user = User::factory()->create(['role' => 'corte']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-PL-UPD',
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        $h = $this->auth($user);
+        $payload = [
+            'form' => [
+                'kgIngresadosCorte' => '300',
+                'corScrapImpresoKg' => '20',
+            ],
+        ];
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", $payload, $h)->assertOk();
+        $this->assertSame(1, OperationalAlert::query()->where('work_order_id', $wo->id)->count());
+
+        $payload['form']['corScrapImpresoKg'] = '25';
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", $payload, $h)->assertOk();
+        $this->assertSame(1, OperationalAlert::query()->where('work_order_id', $wo->id)->count());
+
+        $msg = OperationalAlert::query()->where('work_order_id', $wo->id)->value('message');
+        $this->assertStringContainsString('8.333', (string) $msg);
     }
 
     public function test_mount_segment_exceeding_threshold_creates_alert(): void

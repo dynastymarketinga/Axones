@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateWorkOrderOrdenTrabajoRequest;
 use App\Models\WorkOrder;
 use App\Enums\WorkOrderPriority;
 use App\Services\CortePlanillaDispatchSyncService;
+use App\Services\PlanillaScrapAlertService;
 use App\Services\PlanillaSustratoMaterialRequestSyncService;
 use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderOrdenTrabajoService;
@@ -23,6 +24,7 @@ class WorkOrderOrdenTrabajoController extends Controller
         private readonly ProductionNotificationService $productionNotifications,
         private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
         private readonly PlanillaSustratoMaterialRequestSyncService $planillaSustratoMaterialRequests,
+        private readonly PlanillaScrapAlertService $planillaScrapAlerts,
     ) {}
 
     /**
@@ -119,6 +121,13 @@ class WorkOrderOrdenTrabajoController extends Controller
             );
         }
 
+        $mergedForm = is_array($doc->form) ? $doc->form : [];
+        $this->planillaScrapAlerts->evaluateFromPlanillaForm(
+            $work_order->fresh(),
+            $mergedForm,
+            $originArea !== '' ? [$originArea] : null,
+        );
+
         return response()->json([
             'work_order_id' => $work_order->getKey(),
             'updated_at' => $doc->updated_at,
@@ -162,6 +171,9 @@ class WorkOrderOrdenTrabajoController extends Controller
             );
         }
 
+        $mergedForm = is_array($doc->form) ? $doc->form : [];
+        $this->planillaScrapAlerts->evaluateFromPlanillaForm($work_order->fresh(), $mergedForm, ['impresion']);
+
         return response()->json([
             'work_order_id' => $work_order->getKey(),
             'updated_at' => $doc->updated_at,
@@ -202,6 +214,9 @@ class WorkOrderOrdenTrabajoController extends Controller
                 $originArea,
             );
         }
+
+        $mergedForm = is_array($doc->form) ? $doc->form : [];
+        $this->planillaScrapAlerts->evaluateFromPlanillaForm($work_order->fresh(), $mergedForm, ['laminacion']);
 
         return response()->json([
             'work_order_id' => $work_order->getKey(),
@@ -245,6 +260,8 @@ class WorkOrderOrdenTrabajoController extends Controller
                 $originArea,
             );
         }
+
+        $this->planillaScrapAlerts->evaluateFromPlanillaForm($work_order->fresh(), $mergedForm, ['corte']);
 
         return response()->json([
             'work_order_id' => $work_order->getKey(),

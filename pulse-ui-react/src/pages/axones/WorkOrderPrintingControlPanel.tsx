@@ -1300,6 +1300,7 @@ export default function WorkOrderPrintingControlPanel({
         window.dispatchEvent(
           new CustomEvent(PRINTING_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
+        window.dispatchEvent(new Event("alerts:refresh"))
         return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)

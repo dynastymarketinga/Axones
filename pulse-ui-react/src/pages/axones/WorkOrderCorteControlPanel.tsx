@@ -501,6 +501,7 @@ export default function WorkOrderCorteControlPanel({
         window.dispatchEvent(
           new CustomEvent(CORTE_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
         )
+        window.dispatchEvent(new Event("alerts:refresh"))
         return true
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)

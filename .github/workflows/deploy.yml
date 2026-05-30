@@ -1,0 +1,14 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to SERVIDOR
+    runs-on: self-hosted
+    steps:
+      - name: Run deploy script
+        run: bash /var/www/axones/scripts/deploy.sh

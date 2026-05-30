@@ -240,6 +240,14 @@ export type MaterialRequestRow = {
 
 export type DashboardSummary = {
   generated_at: string
+  month_label?: string
+  corte_production_month_kg?: string
+  scrap_month_kg?: string
+  scrap_month_by_area_kg?: {
+    printing: string
+    laminacion: string
+    corte: string
+  }
   materials_total: number
   materials_by_area: Record<string, number>
   inventory_returns_pending: number

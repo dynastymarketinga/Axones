@@ -36,6 +36,14 @@ class DashboardApiTest extends TestCase
         $response->assertOk()
             ->assertJsonStructure([
                 'generated_at',
+                'month_label',
+                'corte_production_month_kg',
+                'scrap_month_kg',
+                'scrap_month_by_area_kg' => [
+                    'printing',
+                    'laminacion',
+                    'corte',
+                ],
                 'materials_total',
                 'materials_by_area',
                 'inventory_returns_pending',

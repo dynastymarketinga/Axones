@@ -1290,6 +1290,38 @@ class InventoryReportService
     }
 
     /**
+     * Desperdicio (kg) en impresión, laminación y corte para un período.
+     *
+     * @return array{total_kg: string, printing_kg: string, laminacion_kg: string, corte_kg: string}
+     */
+    public function scrapKgTotalsForPeriod(Carbon $from, Carbon $to): array
+    {
+        $historyRows = $this->scrapHistoryKgRows($from, $to, null, null, 'all', null);
+
+        $printing = 0.0;
+        $laminacion = 0.0;
+        $corte = 0.0;
+
+        foreach ($historyRows as $r) {
+            $printing += (float) ($r['imp_scrap_transparente_kg'] ?? 0)
+                + (float) ($r['imp_scrap_impreso_kg'] ?? 0);
+            $laminacion += (float) ($r['lam_scrap_transparente_kg'] ?? 0)
+                + (float) ($r['lam_scrap_impreso_kg'] ?? 0)
+                + (float) ($r['lam_scrap_laminado_kg'] ?? 0);
+            $corte += (float) ($r['cor_scrap_refile_kg'] ?? 0)
+                + (float) ($r['cor_scrap_impreso_kg'] ?? 0)
+                + (float) ($r['cor_scrap_mal_corte_kg'] ?? 0);
+        }
+
+        return [
+            'total_kg' => number_format($printing + $laminacion + $corte, 3, '.', ''),
+            'printing_kg' => number_format($printing, 3, '.', ''),
+            'laminacion_kg' => number_format($laminacion, 3, '.', ''),
+            'corte_kg' => number_format($corte, 3, '.', ''),
+        ];
+    }
+
+    /**
      * Historial de desperdicio en kg desde la planilla técnica (JSON) + % resumen por área.
      * El filtro de sustrato usa `corDesperdicioSustrato` en el formulario si está definido; si no, la estructura del producto.
      * Los kg se enmascaran por pestaña (BOPP / polietileno / transparente) según destinos de impreso y corte.

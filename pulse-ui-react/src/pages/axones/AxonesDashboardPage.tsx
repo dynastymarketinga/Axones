@@ -13,8 +13,10 @@ import {
   Bell,
   CalendarClock,
   CalendarDays,
+  Factory,
   Inbox,
   RotateCcw,
+  Trash2,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react"
@@ -61,14 +63,22 @@ type KpiItem = {
   title: string
   hint: string
   value: number
+  displayValue?: string
   href?: string
   icon: LucideIcon
   ringClass: string
   iconClass: string
 }
 
+function formatKgDisplay(raw?: string | null): string {
+  const n = Number.parseFloat(String(raw ?? "0").replace(",", "."))
+  if (!Number.isFinite(n)) return "0 kg"
+  return `${n.toLocaleString("es-VE", { minimumFractionDigits: 0, maximumFractionDigits: 3 })} kg`
+}
+
 function KpiCard({ item }: { item: KpiItem }) {
   const Icon = item.icon
+  const shownValue = item.displayValue ?? String(item.value)
   const body = (
     <div
       className={cn(
@@ -85,7 +95,7 @@ function KpiCard({ item }: { item: KpiItem }) {
           className="text-2xl font-semibold tabular-nums tracking-tight text-foreground"
           translate="no"
         >
-          {item.value}
+          {shownValue}
         </p>
         <p className="text-[11px] text-muted-foreground/90">{item.hint}</p>
       </div>
@@ -147,7 +157,35 @@ export default function AxonesDashboardPage() {
 
   const kpiItems: KpiItem[] = useMemo(() => {
     if (!data) return []
+    const monthHint = data.month_label
+      ? `Acumulado de ${data.month_label}.`
+      : "Acumulado del mes en curso."
+    const scrapByArea = data.scrap_month_by_area_kg
+    const scrapHint = scrapByArea
+      ? `${monthHint} Impresión, laminación y corte (kg).`
+      : `${monthHint} Desperdicio registrado en planilla.`
+
     return [
+      {
+        title: "Producción del mes",
+        hint: `${monthHint} Kg terminados en corte (turnos cerrados).`,
+        value: 0,
+        displayValue: formatKgDisplay(data.corte_production_month_kg),
+        href: "/corte",
+        icon: Factory,
+        ringClass: "border-l-emerald-500/80",
+        iconClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      },
+      {
+        title: "Desperdicio del mes",
+        hint: scrapHint,
+        value: 0,
+        displayValue: formatKgDisplay(data.scrap_month_kg),
+        href: "/reportes/mermas",
+        icon: Trash2,
+        ringClass: "border-l-orange-500/80",
+        iconClass: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+      },
       {
         title: "Solicitudes de insumos pendientes",
         hint: "Pendiente o con entrega parcial en inventario.",
@@ -210,8 +248,8 @@ export default function AxonesDashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Axones · Resumen</h1>
           <p className="text-muted-foreground text-sm max-w-2xl">
-            Vista de inventario, solicitudes, órdenes y alertas. Los valores se actualizan al
-            pulsar <span className="text-foreground/90">Actualizar</span> con lo último del sistema.
+            Vista de producción, inventario, solicitudes, órdenes y alertas. Los valores se
+            actualizan al recargar la página con lo último del sistema.
           </p>
         </div>
       </div>

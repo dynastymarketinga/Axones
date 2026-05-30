@@ -13,11 +13,17 @@ use App\Models\MaterialRequest;
 use App\Models\OperationalAlert;
 use App\Models\TintaMixture;
 use App\Models\WorkOrder;
+use App\Services\InventoryReportService;
+use App\Support\DashboardMonthlyCorteProduction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    public function __construct(
+        private readonly InventoryReportService $inventoryReports,
+    ) {}
+
     /**
      * KPIs mínimos para el panel MVP (§4 CONTEXTO): stock, pendientes, actividad reciente.
      */
@@ -70,8 +76,23 @@ class DashboardController extends Controller
 
         $operationalAlertsUnread = OperationalAlert::query()->unread()->count();
 
+        $monthStart = now()->startOfMonth();
+        $monthEnd = now();
+        $monthLabel = $monthStart->translatedFormat('F Y');
+
+        $corteProductionMonthKg = DashboardMonthlyCorteProduction::totalKgBetween($monthStart, $monthEnd);
+        $scrapMonth = $this->inventoryReports->scrapKgTotalsForPeriod($monthStart, $monthEnd);
+
         return response()->json([
             'generated_at' => now()->toIso8601String(),
+            'month_label' => $monthLabel,
+            'corte_production_month_kg' => $corteProductionMonthKg,
+            'scrap_month_kg' => $scrapMonth['total_kg'],
+            'scrap_month_by_area_kg' => [
+                'printing' => $scrapMonth['printing_kg'],
+                'laminacion' => $scrapMonth['laminacion_kg'],
+                'corte' => $scrapMonth['corte_kg'],
+            ],
             'materials_total' => $materialsTotal,
             'materials_by_area' => $byArea,
             'inventory_returns_pending' => $returnsPending,

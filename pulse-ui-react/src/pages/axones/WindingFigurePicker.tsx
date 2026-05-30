@@ -66,6 +66,7 @@ export function WindingFigurePicker({
       >
         <Input
           id={figureInputId}
+          name={figureInputId?.replace(/^ot-/, "")}
           className="ax-winding-figure-input h-9 min-h-9 w-full min-w-0 px-2 py-0 text-sm"
           value={v}
           inputMode="numeric"

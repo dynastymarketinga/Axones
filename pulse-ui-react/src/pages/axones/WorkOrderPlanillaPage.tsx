@@ -123,6 +123,7 @@ import {
 import { getStoredUser } from "@/lib/auth-storage"
 import { isAxonesDeveloperSession } from "@/lib/axones-roles"
 import { cn } from "@/lib/utils"
+import { otPlanillaFieldId, otPlanillaSustratoFieldId } from "@/lib/ot-planilla-field-a11y"
 import type {
   ClientOrderDetailRecord,
   LaravelPaginated,
@@ -693,6 +694,8 @@ function AreasMultiCheckbox({
         <label key={area} className="inline-flex items-center gap-2 text-sm">
           <input
             type="checkbox"
+            id={`ot-programacion-area-${area}`}
+            name="programacionAreas"
             className="size-4 rounded border"
             checked={value.includes(area)}
             disabled
@@ -2889,11 +2892,11 @@ export default function WorkOrderPlanillaPage() {
                     </p>
                     <div className="ot-grid ot-cols-3">
                       <div className="ot-field">
-                        <label className="ot-label required">Fecha</label>
+                        <label htmlFor="ot-fechaOrden" className="ot-label required">Fecha</label>
                         <OtPlanillaInputIcon icon={Calendar}>
                           <input
                             type="date"
-                            data-field="fechaOrden"
+                            data-field="fechaOrden" id="ot-fechaOrden" name="fechaOrden"
                             className="ot-input"
                             value={readString(form.fechaOrden) || readString(prefill.fechaOrden)}
                             onChange={(ev) => setKey(setForm, "fechaOrden", ev.target.value)}
@@ -2904,9 +2907,11 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("fechaOrden")}
                       </div>
                       <div className="ot-field">
-                        <label className="ot-label required">N° Orden</label>
+                        <label htmlFor="ot-numeroOrden" className="ot-label required">N° Orden</label>
                         <OtPlanillaInputIcon icon={Hash}>
                           <input
+                            id="ot-numeroOrden"
+                            name="numeroOrden"
                             className="ot-input"
                             readOnly
                             value={readString(form.numeroOrden) || readString(prefill.numeroOrden) || readString(form.document_number) || ""}
@@ -2915,11 +2920,11 @@ export default function WorkOrderPlanillaPage() {
                         </OtPlanillaInputIcon>
                       </div>
                       <div className="ot-field">
-                        <label className="ot-label required">Cantidad solicitada (Kg)</label>
+                        <label htmlFor="ot-pedidoKg" className="ot-label required">Cantidad solicitada (Kg)</label>
                         <OtPlanillaInputIcon icon={Scale}>
                           <input
                             type="number"
-                            data-field="pedidoKg"
+                            data-field="pedidoKg" id="ot-pedidoKg" name="pedidoKg"
                             className="ot-input"
                             step="0.01"
                             min="0"
@@ -2935,14 +2940,14 @@ export default function WorkOrderPlanillaPage() {
 
                     <div className="ot-grid ot-cols-2">
                       <div className="ot-field">
-                        <label className="ot-label required">Maquina</label>
+                        <label htmlFor="ot-maquina" id="ot-label-maquina" className="ot-label required">Maquina</label>
                         <Popover open={maquinaPickerOpen} onOpenChange={setMaquinaPickerOpen}>
                           <PopoverTrigger asChild>
                             <Button
                               type="button"
                               variant="outline"
                               role="combobox"
-                              data-field="maquina"
+                              data-field="maquina" id="ot-maquina" aria-labelledby="ot-label-maquina"
                               disabled={!canEditShared}
                               aria-expanded={maquinaPickerOpen}
                               aria-invalid={otInvalid("maquina")}
@@ -3018,12 +3023,12 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("maquina")}
                       </div>
                       <div className="ot-field">
-                        <label className="ot-label">Ref. planchas (opcional)</label>
+                        <label htmlFor="ot-planchasReferencia" className="ot-label">Ref. planchas (opcional)</label>
                         <OtPlanillaInputIcon icon={LayoutGrid}>
                           <input
                             className="ot-input"
                             data-skip-blur="1"
-                            data-field="planchasReferencia"
+                            data-field="planchasReferencia" id="ot-planchasReferencia" name="planchasReferencia"
                             inputMode="numeric"
                             pattern="[0-9]*"
                             value={readString(form.planchasReferencia)}
@@ -3041,10 +3046,10 @@ export default function WorkOrderPlanillaPage() {
 
                     <div className="ot-grid ot-cols-2">
                       <div className="ot-field md:col-span-2">
-                        <label className="ot-label required">Metros Est.</label>
+                        <label htmlFor="ot-metrosEstimados" className="ot-label required">Metros Est.</label>
                         <OtPlanillaInputIcon icon={Ruler}>
                           <input
-                            data-field="metrosEstimados"
+                            data-field="metrosEstimados" id="ot-metrosEstimados" name="metrosEstimados"
                             className="ot-input"
                             type="text"
                             inputMode="text"
@@ -3076,9 +3081,11 @@ export default function WorkOrderPlanillaPage() {
                   <div className="section-body">
                     <div className="ot-datos-producto-master">
                       <div className="ot-field ot-dpm-span-4">
-                        <Label className="ot-label !font-black required">Cliente</Label>
+                        <Label htmlFor="ot-cliente" className="ot-label !font-black required">Cliente</Label>
                         <OtPlanillaInputIcon icon={User}>
                           <Input
+                            id="ot-cliente"
+                            name="cliente"
                             readOnly
                             className="ot-input-unified h-9 bg-muted/50 text-sm"
                             value={readString(form.cliente) || readString(prefill.cliente)}
@@ -3086,9 +3093,11 @@ export default function WorkOrderPlanillaPage() {
                         </OtPlanillaInputIcon>
                       </div>
                       <div className="ot-field ot-dpm-span-2">
-                        <Label className="ot-label !font-black required">RIF</Label>
+                        <Label htmlFor="ot-clienteRif" className="ot-label !font-black required">RIF</Label>
                         <OtPlanillaInputIcon icon={IdCard}>
                           <Input
+                            id="ot-clienteRif"
+                            name="clienteRif"
                             readOnly
                             className="ot-input-unified h-9 bg-muted/50 text-sm"
                             value={readString(form.clienteRif) || readString(prefill.clienteRif)}
@@ -3097,10 +3106,12 @@ export default function WorkOrderPlanillaPage() {
                       </div>
 
                       <div className="ot-field ot-dpm-span-4">
-                        <Label className="ot-label !font-black required">Producto</Label>
+                        <Label htmlFor="ot-producto" id="ot-label-producto" className="ot-label !font-black required">Producto</Label>
                         {!woClientId ? (
                           <OtPlanillaInputIcon icon={LucidePackage}>
                             <Input
+                              id="ot-producto"
+                              name="producto"
                               readOnly
                               className="ot-input-unified h-9 bg-muted/50 text-sm"
                               value={readString(form.producto) || readString(prefill.producto)}
@@ -3114,6 +3125,8 @@ export default function WorkOrderPlanillaPage() {
                                   type="button"
                                   variant="outline"
                                   role="combobox"
+                                  id="ot-producto"
+                                  aria-labelledby="ot-label-producto"
                                   disabled={!canEditShared || updatingProduct || clientProducts.length === 0}
                                   className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
                                 >
@@ -3190,14 +3203,14 @@ export default function WorkOrderPlanillaPage() {
                         )}
                       </div>
                       <div className="ot-field ot-dpm-span-2">
-                        <label className="ot-label required">Tipo impresión (especificación)</label>
+                        <label htmlFor="ot-tipoImpresionEstructura" id="ot-label-tipoImpresionEstructura" className="ot-label required">Tipo impresión (especificación)</label>
                         <Popover open={tipoImpresionPickerOpen} onOpenChange={setTipoImpresionPickerOpen}>
                           <PopoverTrigger asChild>
                             <Button
                               type="button"
                               variant="outline"
                               role="combobox"
-                              data-field="tipoImpresionEstructura"
+                              data-field="tipoImpresionEstructura" id="ot-tipoImpresionEstructura" aria-labelledby="ot-label-tipoImpresionEstructura"
                               disabled={!canEditShared}
                               aria-expanded={tipoImpresionPickerOpen}
                               aria-invalid={otInvalid("tipoImpresionEstructura")}
@@ -3269,10 +3282,10 @@ export default function WorkOrderPlanillaPage() {
 
                       {tipoImpresion === "superficie" ? (
                         <div className="ot-field ot-dpm-span-6">
-                          <label className="ot-label required">Estructura (1 capa)</label>
+                          <label htmlFor="ot-estructuraCapa1" className="ot-label required">Estructura (1 capa)</label>
                           <OtPlanillaInputIcon icon={LucideLayers}>
                             <input
-                              data-field="estructuraCapa1"
+                              data-field="estructuraCapa1" id="ot-estructuraCapa1" name="estructuraCapa1"
                               className="ot-input"
                               value={readString(form.estructuraCapa1) || readString(prefill.estructuraMaterial)}
                               onChange={(ev) => setKey(setForm, "estructuraCapa1", ev.target.value)}
@@ -3288,11 +3301,11 @@ export default function WorkOrderPlanillaPage() {
                       {tipoImpresionCapas(tipoImpresion) >= 2 ? (
                         <div className="ot-dpm-estructura-capas">
                           <div className="ot-field">
-                            <label className="ot-label required">Capa 1</label>
+                            <label htmlFor="ot-estructuraCapa1Rev" className="ot-label required">Capa 1</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
-                                data-field="estructuraCapa1Rev"
+                                data-field="estructuraCapa1Rev" id="ot-estructuraCapa1Rev" name="estructuraCapa1Rev"
                                 value={readString(form.estructuraCapa1Rev)}
                                 onChange={(ev) => setKey(setForm, "estructuraCapa1Rev", ev.target.value)}
                                 placeholder="BOPP transparente 40 µm"
@@ -3303,11 +3316,11 @@ export default function WorkOrderPlanillaPage() {
                             {renderError("estructuraCapa1Rev")}
                           </div>
                           <div className="ot-field">
-                            <label className="ot-label required">Capa 2</label>
+                            <label htmlFor="ot-estructuraCapa2Rev" className="ot-label required">Capa 2</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
-                                data-field="estructuraCapa2Rev"
+                                data-field="estructuraCapa2Rev" id="ot-estructuraCapa2Rev" name="estructuraCapa2Rev"
                                 value={readString(form.estructuraCapa2Rev)}
                                 onChange={(ev) => setKey(setForm, "estructuraCapa2Rev", ev.target.value)}
                                 placeholder="CAST 20 µm"
@@ -3319,11 +3332,11 @@ export default function WorkOrderPlanillaPage() {
                           </div>
                           {tipoImpresionCapas(tipoImpresion) === 3 ? (
                             <div className="ot-field">
-                              <label className="ot-label required">Capa 3</label>
+                              <label htmlFor="ot-estructuraCapa3Rev" className="ot-label required">Capa 3</label>
                               <OtPlanillaInputIcon icon={LucideLayers}>
                                 <input
                                   className="ot-input"
-                                  data-field="estructuraCapa3Rev"
+                                  data-field="estructuraCapa3Rev" id="ot-estructuraCapa3Rev" name="estructuraCapa3Rev"
                                   value={readString(form.estructuraCapa3Rev)}
                                   onChange={(ev) => setKey(setForm, "estructuraCapa3Rev", ev.target.value)}
                                   placeholder="PEBD coextrusión 55 µm"
@@ -3338,9 +3351,11 @@ export default function WorkOrderPlanillaPage() {
                       ) : null}
 
                       <div className="ot-field ot-dpm-span-2">
-                        <Label className="ot-label !font-black required">C.P.E.</Label>
+                        <Label htmlFor="ot-cpe" className="ot-label !font-black required">C.P.E.</Label>
                         <OtPlanillaInputIcon icon={Tag}>
                           <Input
+                            id="ot-cpe"
+                            name="cpe"
                             data-field="cpe"
                             className="ot-input-unified h-9 text-sm"
                             value={readString(form.cpe)}
@@ -3353,9 +3368,11 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("cpe")}
                       </div>
                       <div className="ot-field ot-dpm-span-2">
-                        <Label className="ot-label !font-black required">M.P.P.S.</Label>
+                        <Label htmlFor="ot-mpps" className="ot-label !font-black required">M.P.P.S.</Label>
                         <OtPlanillaInputIcon icon={Tags}>
                           <Input
+                            id="ot-mpps"
+                            name="mpps"
                             data-field="mpps"
                             className="ot-input-unified h-9 text-sm"
                             value={readString(form.mpps)}
@@ -3368,9 +3385,11 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("mpps")}
                       </div>
                       <div className="ot-field ot-dpm-span-2">
-                        <Label className="ot-label !font-black required">Cod. Barra</Label>
+                        <Label htmlFor="ot-codigoBarra" className="ot-label !font-black required">Cod. Barra</Label>
                         <OtPlanillaInputIcon icon={Barcode}>
                           <Input
+                            id="ot-codigoBarra"
+                            name="codigoBarra"
                             data-field="codigoBarra"
                             className="ot-input-unified h-9 text-sm"
                             value={readString(form.codigoBarra)}
@@ -3398,12 +3417,13 @@ export default function WorkOrderPlanillaPage() {
                   </span>
                 </div>
                 <div className="section-body">
-                  <div className="ot-grid ot-cols-4">
+                  {/* 3×3 como planilla física: fila1 frec/bandas/tipo · fila2 ancho corte/repet/desarrollo · fila3 ancho mont/figura/colores */}
+                  <div className="ot-grid ot-cols-3 ot-grid-montaje">
                     <div className="ot-field">
-                      <label className="ot-label required">Frecuencia (mm)</label>
+                      <label htmlFor="ot-frecuencia" className="ot-label required">Frecuencia (mm)</label>
                       <OtPlanillaInputIcon icon={Activity}>
                         <input
-                          data-field="frecuencia"
+                          data-field="frecuencia" id="ot-frecuencia" name="frecuencia"
                           className="ot-input"
                           value={readString(form.frecuencia)}
                           onChange={(e) =>
@@ -3420,11 +3440,11 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("frecuencia")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">N° Bandas</label>
+                      <label htmlFor="ot-numBandas" className="ot-label required">N° Bandas</label>
                       <OtPlanillaInputIcon icon={GripHorizontal}>
                         <input
                           type="number"
-                          data-field="numBandas"
+                          data-field="numBandas" id="ot-numBandas" name="numBandas"
                           min="1"
                           step="1"
                           className="ot-input"
@@ -3438,7 +3458,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("numBandas")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Tipo impresión en montaje</label>
+                      <label htmlFor="ot-tipoImpresionMontaje" id="ot-label-tipoImpresionMontaje" className="ot-label required">Tipo impresión</label>
                       <Popover
                         open={tipoImpresionMontajePickerOpen}
                         onOpenChange={setTipoImpresionMontajePickerOpen}
@@ -3448,7 +3468,7 @@ export default function WorkOrderPlanillaPage() {
                             type="button"
                             variant="outline"
                             role="combobox"
-                            data-field="tipoImpresionMontaje"
+                            data-field="tipoImpresionMontaje" id="ot-tipoImpresionMontaje" aria-labelledby="ot-label-tipoImpresionMontaje"
                             aria-expanded={tipoImpresionMontajePickerOpen}
                             aria-invalid={otInvalid("tipoImpresionMontaje")}
                             className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
@@ -3517,10 +3537,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("tipoImpresionMontaje")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Ancho Corte (mm)</label>
+                      <label htmlFor="ot-anchoCorteMontaje" className="ot-label required">Ancho Corte (mm)</label>
                       <OtPlanillaInputIcon icon={ArrowLeftRight}>
                         <input
-                          data-field="anchoCorteMontaje"
+                          data-field="anchoCorteMontaje" id="ot-anchoCorteMontaje" name="anchoCorteMontaje"
                           className="ot-input"
                           value={readString(form.anchoCorteMontaje)}
                           onChange={(e) =>
@@ -3546,11 +3566,11 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("anchoCorteMontaje")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">N° Repeticion o Frecuencia</label>
+                      <label htmlFor="ot-numRepeticion" className="ot-label required">N° Repeticion o Frecuencia</label>
                       <OtPlanillaInputIcon icon={Repeat}>
                         <input
                           type="number"
-                          data-field="numRepeticion"
+                          data-field="numRepeticion" id="ot-numRepeticion" name="numRepeticion"
                           min="1"
                           step="1"
                           className="ot-input"
@@ -3564,10 +3584,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("numRepeticion")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Desarrollo (mm)</label>
+                      <label htmlFor="ot-desarrollo" className="ot-label required">Desarrollo (mm)</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="desarrollo"
+                          data-field="desarrollo" id="ot-desarrollo" name="desarrollo"
                           className="ot-input"
                           value={normalizeDesarrolloMmValue(form.desarrollo)}
                           onChange={(e) => setKey(setForm, "desarrollo", sanitizeDesarrolloMmInput(e.target.value))}
@@ -3579,10 +3599,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("desarrollo")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Ancho Montaje (mm)</label>
+                      <label htmlFor="ot-anchoMontaje" className="ot-label required">Ancho Montaje (mm)</label>
                       <OtPlanillaInputIcon icon={Columns}>
                         <input
-                          data-field="anchoMontaje"
+                          data-field="anchoMontaje" id="ot-anchoMontaje" name="anchoMontaje"
                           className="ot-input"
                           value={readString(form.anchoMontaje)}
                           onChange={(e) =>
@@ -3607,9 +3627,9 @@ export default function WorkOrderPlanillaPage() {
                       </OtPlanillaInputIcon>
                       {renderError("anchoMontaje")}
                     </div>
-                    <div className="ot-field ot-field-figure sm:col-span-2" data-field="figuraEmbobinadoMontaje">
+                    <div className="ot-field ot-field-figure ot-field-figure--montaje" data-field="figuraEmbobinadoMontaje">
                       <div className="ot-label-row">
-                        <label className="ot-label required">Figura embobinado (1-8 o libre)</label>
+                        <label htmlFor="ot-figuraEmbobinadoMontaje" className="ot-label required">Figura del embobinado impresión</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
@@ -3622,15 +3642,16 @@ export default function WorkOrderPlanillaPage() {
                         value={readString(form.figuraEmbobinadoMontaje)}
                         onChange={(v) => setKey(setForm, "figuraEmbobinadoMontaje", v)}
                         invalid={otInvalid("figuraEmbobinadoMontaje")}
+                        figureInputId={otPlanillaFieldId("figuraEmbobinadoMontaje")}
                       />
                       {renderError("figuraEmbobinadoMontaje")}
                     </div>
                     <div className="ot-field ot-field-align-figure">
-                      <label className="ot-label required">N° Colores</label>
+                      <label htmlFor="ot-numColores" className="ot-label required">N° Colores</label>
                       <OtPlanillaInputIcon icon={Palette}>
                         <input
                           type="number"
-                          data-field="numColores"
+                          data-field="numColores" id="ot-numColores" name="numColores"
                           min="1"
                           step="1"
                           className="ot-input"
@@ -3646,10 +3667,10 @@ export default function WorkOrderPlanillaPage() {
                   </div>
                   <div className="ot-grid ot-cols-1">
                     <div className="ot-field">
-                      <label className="ot-label required">Observaciones montaje</label>
+                      <label htmlFor="ot-obsMontaje" className="ot-label required">Observaciones montaje</label>
                       <OtPlanillaInputIcon icon={MessageSquare}>
                         <input
-                          data-field="obsMontaje"
+                          data-field="obsMontaje" id="ot-obsMontaje" name="obsMontaje"
                           className="ot-input"
                           value={readString(form.obsMontaje)}
                           onChange={(e) => setKey(setForm, "obsMontaje", e.target.value)}
@@ -3680,10 +3701,10 @@ export default function WorkOrderPlanillaPage() {
                       <div className="ot-imp-params">
                         <div className="ot-grid ot-cols-2 ot-imp-metrics-grid lg:ot-cols-4">
                         <div className="ot-field">
-                          <label className="ot-label required">Piñon (dientes)</label>
+                          <label htmlFor="ot-pinonImp" className="ot-label required">Piñon (dientes)</label>
                           <OtPlanillaInputIcon icon={Cog}>
                             <input
-                              data-field="pinonImp"
+                              data-field="pinonImp" id="ot-pinonImp" name="pinonImp"
                               className="ot-input"
                               inputMode="numeric"
                               pattern="[0-9]*"
@@ -3696,14 +3717,14 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("pinonImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label required">Linea de corte</label>
+                          <label id="ot-label-lineaCorte" htmlFor="ot-lineaCorte" className="ot-label required">Linea de corte</label>
                           <Popover open={lineaCortePickerOpen} onOpenChange={setLineaCortePickerOpen}>
                             <PopoverTrigger asChild>
                               <Button
                                 type="button"
                                 variant="outline"
                                 role="combobox"
-                                data-field="lineaCorte"
+                                data-field="lineaCorte" id="ot-lineaCorte" aria-labelledby="ot-label-lineaCorte"
                                 aria-expanded={lineaCortePickerOpen}
                                 aria-invalid={otInvalid("lineaCorte")}
                                 className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
@@ -3785,10 +3806,10 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("lineaCorte")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Ubic. fotocelda</label>
+                          <label htmlFor="ot-ubicFotoceldaImp" className="ot-label">Ubic. fotocelda</label>
                           <OtPlanillaInputIcon icon={MapPin}>
                             <input
-                              data-field="ubicFotoceldaImp"
+                              data-field="ubicFotoceldaImp" id="ot-ubicFotoceldaImp" name="ubicFotoceldaImp"
                               type="text"
                               autoComplete="off"
                               className="ot-input"
@@ -3812,10 +3833,10 @@ export default function WorkOrderPlanillaPage() {
                           </OtPlanillaInputIcon>
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label">Gramaje de tinta (g/m²)</label>
+                          <label htmlFor="ot-gramajeTintaGm2" className="ot-label">Gramaje de tinta (g/m²)</label>
                           <OtPlanillaInputIcon icon={Scale}>
                             <input
-                              data-field="gramajeTintaGm2"
+                              data-field="gramajeTintaGm2" id="ot-gramajeTintaGm2" name="gramajeTintaGm2"
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
@@ -3843,7 +3864,7 @@ export default function WorkOrderPlanillaPage() {
 
                         <div className="ot-field ot-imp-figura-field" data-field="figEmbImpDisplay">
                           <div className="flex flex-wrap items-center gap-2">
-                            <label className="ot-label required">Figura emb. (1-8)</label>
+                            <label htmlFor={otPlanillaFieldId("figEmbImpDisplay")} className="ot-label required">Figura emb. (1-8)</label>
                             <Badge
                               variant="outline"
                               className="text-[10px] font-normal"
@@ -3856,6 +3877,7 @@ export default function WorkOrderPlanillaPage() {
                             value={readString(form.figEmbImpDisplay)}
                             onChange={(v) => setKey(setForm, "figEmbImpDisplay", v)}
                             invalid={otInvalid("figEmbImpDisplay")}
+                            figureInputId={otPlanillaFieldId("figEmbImpDisplay")}
                           />
                           {renderError("figEmbImpDisplay")}
                         </div>
@@ -3881,7 +3903,7 @@ export default function WorkOrderPlanillaPage() {
                           {sustratosImp.map((r, idx) => (
                             <div key={idx} className="ot-grid ot-cols-2-asym">
                               <div className="ot-field">
-                                <label className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                                <label htmlFor={otPlanillaSustratoFieldId("Imp", idx, "material")} className="ot-label required">{`Sustrato ${idx + 1}`}</label>
                                 <div className="min-w-0 no-print">
                                   <Popover
                                     open={sustratoImpPickerIdx === idx}
@@ -3891,6 +3913,8 @@ export default function WorkOrderPlanillaPage() {
                                       <PopoverAnchor asChild>
                                         <Input
                                           role="combobox"
+                                          id={otPlanillaSustratoFieldId("Imp", idx, "material")}
+                                          name={`sustratosImp-${idx}-material`}
                                           data-field="sustratosImp"
                                           className="ot-input-unified h-9 min-w-0 pr-8 text-sm"
                                           value={sustratoVirgenDisplayValue(materials, r)}
@@ -4023,12 +4047,14 @@ export default function WorkOrderPlanillaPage() {
                                   sustratoRowUsesCatalogMaterial(r) && "ot-field-kg-stock--reserved",
                                 )}
                               >
-                                <label className="ot-label required">Kg a utilizar</label>
+                                <label htmlFor={otPlanillaSustratoFieldId("Imp", idx, "kg")} className="ot-label required">Kg a utilizar</label>
                                 <div className="ot-field-kg-stock-body">
                                   <div className="ot-field-kg-stock-input">
                                   <OtPlanillaInputIcon icon={Weight}>
                                     <input
                                       data-field="sustratosImp"
+                                      id={otPlanillaSustratoFieldId("Imp", idx, "kg")}
+                                      name={`sustratosImp-${idx}-kg`}
                                       type="number"
                                       inputMode="decimal"
                                       step="0.01"
@@ -4087,10 +4113,10 @@ export default function WorkOrderPlanillaPage() {
 
                       <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
                         <div className="ot-field">
-                          <label className="ot-label required">Kg ingresado</label>
+                          <label htmlFor="ot-kgIngresadoImp" className="ot-label required">Kg ingresado</label>
                           <OtPlanillaInputIcon icon={ArrowDownToLine}>
                             <input
-                              data-field="kgIngresadoImp"
+                              data-field="kgIngresadoImp" id="ot-kgIngresadoImp" name="kgIngresadoImp"
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
@@ -4111,10 +4137,10 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("kgIngresadoImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label required">Kg salida</label>
+                          <label htmlFor="ot-kgSalidaImp" className="ot-label required">Kg salida</label>
                           <OtPlanillaInputIcon icon={ArrowUpFromLine}>
                             <input
-                              data-field="kgSalidaImp"
+                              data-field="kgSalidaImp" id="ot-kgSalidaImp" name="kgSalidaImp"
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
@@ -4135,10 +4161,10 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("kgSalidaImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label required">Merma</label>
+                          <label htmlFor="ot-mermaImp" className="ot-label required">Merma</label>
                           <OtPlanillaInputIcon icon={TrendingDown}>
                             <input
-                              data-field="mermaImp"
+                              data-field="mermaImp" id="ot-mermaImp" name="mermaImp"
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
@@ -4159,10 +4185,10 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("mermaImp")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label required">Metros</label>
+                          <label htmlFor="ot-metrosImp" className="ot-label required">Metros</label>
                           <OtPlanillaInputIcon icon={Ruler}>
                             <input
-                              data-field="metrosImp"
+                              data-field="metrosImp" id="ot-metrosImp" name="metrosImp"
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
@@ -4218,7 +4244,7 @@ export default function WorkOrderPlanillaPage() {
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field sm:col-span-2 lg:col-span-1" data-field="figuraEmbobinadoLam">
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="ot-label required">Figura embobinado</label>
+                        <label htmlFor={otPlanillaFieldId("figuraEmbobinadoLam")} className="ot-label required">Figura embobinado</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
@@ -4231,14 +4257,15 @@ export default function WorkOrderPlanillaPage() {
                         value={readString(form.figuraEmbobinadoLam)}
                         onChange={(v) => setKey(setForm, "figuraEmbobinadoLam", v)}
                         invalid={otInvalid("figuraEmbobinadoLam")}
+                        figureInputId={otPlanillaFieldId("figuraEmbobinadoLam")}
                       />
                       {renderError("figuraEmbobinadoLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Gramaje adhesivo (g/m2)</label>
+                      <label htmlFor="ot-gramajeAdhesivo" className="ot-label required">Gramaje adhesivo (g/m2)</label>
                       <OtPlanillaInputIcon icon={FlaskConical}>
                         <input
-                          data-field="gramajeAdhesivo"
+                          data-field="gramajeAdhesivo" id="ot-gramajeAdhesivo" name="gramajeAdhesivo"
                           className="ot-input"
                           value={readString(form.gramajeAdhesivo)}
                           onChange={(e) =>
@@ -4252,10 +4279,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("gramajeAdhesivo")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Relacion mezcla</label>
+                      <label htmlFor="ot-relacionMezcla" className="ot-label required">Relacion mezcla</label>
                       <OtPlanillaInputIcon icon={Percent}>
                         <input
-                          data-field="relacionMezcla"
+                          data-field="relacionMezcla" id="ot-relacionMezcla" name="relacionMezcla"
                           className="ot-input"
                           value={readString(form.relacionMezcla)}
                           onChange={(e) =>
@@ -4269,10 +4296,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("relacionMezcla")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Observaciones</label>
+                      <label htmlFor="ot-obsLaminacion" className="ot-label required">Observaciones</label>
                       <OtPlanillaInputIcon icon={StickyNote}>
                         <input
-                          data-field="obsLaminacion"
+                          data-field="obsLaminacion" id="ot-obsLaminacion" name="obsLaminacion"
                           className="ot-input"
                           value={readString(form.obsLaminacion)}
                           onChange={(e) => setKey(setForm, "obsLaminacion", e.target.value)}
@@ -4290,10 +4317,10 @@ export default function WorkOrderPlanillaPage() {
                       <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric">Kilos (kg)</span>
                       <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric">Metros (m)</span>
 
-                      <span className="ot-lam-materiales-label">Lámina impresa</span>
+                      <label htmlFor="ot-kgLaminaImpresaLaminacion" className="ot-lam-materiales-label">Lámina impresa</label>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="kgLaminaImpresaLaminacion"
+                          data-field="kgLaminaImpresaLaminacion" id="ot-kgLaminaImpresaLaminacion" name="kgLaminaImpresaLaminacion"
                           type="text"
                           inputMode="decimal"
                           autoComplete="off"
@@ -4318,7 +4345,7 @@ export default function WorkOrderPlanillaPage() {
                       </div>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="metrosLaminaImpresaLaminacion"
+                          data-field="metrosLaminaImpresaLaminacion" id="ot-metrosLaminaImpresaLaminacion" name="metrosLaminaImpresaLaminacion"
                           type="text"
                           autoComplete="off"
                           className="ot-input ot-lam-materiales-value-input"
@@ -4338,13 +4365,14 @@ export default function WorkOrderPlanillaPage() {
                             )
                           }}
                           placeholder="N/A"
+                          aria-label="Metros (m) — Lámina impresa"
                         />
                       </div>
 
-                      <span className="ot-lam-materiales-label">Lámina virgen</span>
+                      <label htmlFor="ot-kgLaminaVirgenLaminacion" className="ot-lam-materiales-label">Lámina virgen</label>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="kgLaminaVirgenLaminacion"
+                          data-field="kgLaminaVirgenLaminacion" id="ot-kgLaminaVirgenLaminacion" name="kgLaminaVirgenLaminacion"
                           type="text"
                           inputMode="decimal"
                           autoComplete="off"
@@ -4369,7 +4397,7 @@ export default function WorkOrderPlanillaPage() {
                       </div>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="metrosLaminaVirgenLaminacion"
+                          data-field="metrosLaminaVirgenLaminacion" id="ot-metrosLaminaVirgenLaminacion" name="metrosLaminaVirgenLaminacion"
                           type="text"
                           autoComplete="off"
                           className="ot-input ot-lam-materiales-value-input"
@@ -4389,13 +4417,14 @@ export default function WorkOrderPlanillaPage() {
                             )
                           }}
                           placeholder="N/A"
+                          aria-label="Metros (m) — Lámina virgen"
                         />
                       </div>
 
-                      <span className="ot-lam-materiales-label">Adhesivo para laminación</span>
+                      <label htmlFor="ot-kgAdhesivoLaminacion" className="ot-lam-materiales-label">Adhesivo para laminación</label>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="kgAdhesivoLaminacion"
+                          data-field="kgAdhesivoLaminacion" id="ot-kgAdhesivoLaminacion" name="kgAdhesivoLaminacion"
                           type="text"
                           inputMode="decimal"
                           autoComplete="off"
@@ -4420,7 +4449,7 @@ export default function WorkOrderPlanillaPage() {
                       </div>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="metrosAdhesivoLaminacion"
+                          data-field="metrosAdhesivoLaminacion" id="ot-metrosAdhesivoLaminacion" name="metrosAdhesivoLaminacion"
                           type="text"
                           autoComplete="off"
                           className="ot-input ot-lam-materiales-value-input"
@@ -4436,13 +4465,14 @@ export default function WorkOrderPlanillaPage() {
                             setKey(setForm, "metrosAdhesivoLaminacion", normalizeLamMaterialMetrosOnBlur(e.target.value))
                           }}
                           placeholder="N/A"
+                          aria-label="Metros (m) — Adhesivo para laminación"
                         />
                       </div>
 
-                      <span className="ot-lam-materiales-label">Catalizador para laminación</span>
+                      <label htmlFor="ot-kgCatalizadorLaminacion" className="ot-lam-materiales-label">Catalizador para laminación</label>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="kgCatalizadorLaminacion"
+                          data-field="kgCatalizadorLaminacion" id="ot-kgCatalizadorLaminacion" name="kgCatalizadorLaminacion"
                           type="text"
                           inputMode="decimal"
                           autoComplete="off"
@@ -4467,7 +4497,7 @@ export default function WorkOrderPlanillaPage() {
                       </div>
                       <div className="ot-lam-materiales-cell">
                         <input
-                          data-field="metrosCatalizadorLaminacion"
+                          data-field="metrosCatalizadorLaminacion" id="ot-metrosCatalizadorLaminacion" name="metrosCatalizadorLaminacion"
                           type="text"
                           autoComplete="off"
                           className="ot-input ot-lam-materiales-value-input"
@@ -4487,6 +4517,7 @@ export default function WorkOrderPlanillaPage() {
                             )
                           }}
                           placeholder="N/A"
+                          aria-label="Metros (m) — Catalizador para laminación"
                         />
                       </div>
                     </div>
@@ -4515,7 +4546,7 @@ export default function WorkOrderPlanillaPage() {
                       {sustratosLam.map((r, idx) => (
                         <div key={idx} className="ot-grid ot-cols-2-asym">
                           <div className="ot-field">
-                            <label className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                            <label htmlFor={otPlanillaSustratoFieldId("Lam", idx, "material")} className="ot-label required">{`Sustrato ${idx + 1}`}</label>
                             <div className="min-w-0 no-print">
                               <Popover
                                 open={sustratoLamPickerIdx === idx}
@@ -4525,6 +4556,8 @@ export default function WorkOrderPlanillaPage() {
                                   <PopoverAnchor asChild>
                                     <Input
                                       role="combobox"
+                                      id={otPlanillaSustratoFieldId("Lam", idx, "material")}
+                                      name={`sustratosLam-${idx}-material`}
                                       data-field="sustratosLam"
                                       className="ot-input-unified h-9 min-w-0 pr-8 text-sm"
                                       value={sustratoVirgenDisplayValue(materials, r)}
@@ -4658,12 +4691,14 @@ export default function WorkOrderPlanillaPage() {
                               sustratoRowUsesCatalogMaterial(r) && "ot-field-kg-stock--reserved",
                             )}
                           >
-                            <label className="ot-label required">Kg a utilizar</label>
+                            <label htmlFor={otPlanillaSustratoFieldId("Lam", idx, "kg")} className="ot-label required">Kg a utilizar</label>
                             <div className="ot-field-kg-stock-body">
                               <div className="ot-field-kg-stock-input">
                               <OtPlanillaInputIcon icon={Weight}>
                                 <input
                                   data-field="sustratosLam"
+                                  id={otPlanillaSustratoFieldId("Lam", idx, "kg")}
+                                  name={`sustratosLam-${idx}-kg`}
                                   type="number"
                                   inputMode="decimal"
                                   step="0.01"
@@ -4722,10 +4757,10 @@ export default function WorkOrderPlanillaPage() {
 
                   <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Kg entrada</label>
+                      <label htmlFor="ot-kgEntradaLam" className="ot-label">Kg entrada</label>
                       <OtPlanillaInputIcon icon={ArrowDownToLine}>
                         <input
-                          data-field="kgEntradaLam"
+                          data-field="kgEntradaLam" id="ot-kgEntradaLam" name="kgEntradaLam"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4740,10 +4775,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgEntradaLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Kg salida</label>
+                      <label htmlFor="ot-kgSalidaLam" className="ot-label">Kg salida</label>
                       <OtPlanillaInputIcon icon={ArrowUpFromLine}>
                         <input
-                          data-field="kgSalidaLam"
+                          data-field="kgSalidaLam" id="ot-kgSalidaLam" name="kgSalidaLam"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4758,10 +4793,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgSalidaLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Metraje</label>
+                      <label htmlFor="ot-metrajeLam" className="ot-label">Metraje</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="metrajeLam"
+                          data-field="metrajeLam" id="ot-metrajeLam" name="metrajeLam"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4776,10 +4811,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("metrajeLam")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Merma</label>
+                      <label htmlFor="ot-mermaLam" className="ot-label">Merma</label>
                       <OtPlanillaInputIcon icon={TrendingDown}>
                         <input
-                          data-field="mermaLam"
+                          data-field="mermaLam" id="ot-mermaLam" name="mermaLam"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4797,10 +4832,10 @@ export default function WorkOrderPlanillaPage() {
 
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label">Kg entrada 2 (trilam.)</label>
+                      <label htmlFor="ot-kgEntradaLam2" className="ot-label">Kg entrada 2 (trilam.)</label>
                       <OtPlanillaInputIcon icon={LucideLayers}>
                         <input
-                          data-field="kgEntradaLam2"
+                          data-field="kgEntradaLam2" id="ot-kgEntradaLam2" name="kgEntradaLam2"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4815,10 +4850,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgEntradaLam2")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Kg salida 2 (trilam.)</label>
+                      <label htmlFor="ot-kgSalidaLam2" className="ot-label">Kg salida 2 (trilam.)</label>
                       <OtPlanillaInputIcon icon={LucideLayers}>
                         <input
-                          data-field="kgSalidaLam2"
+                          data-field="kgSalidaLam2" id="ot-kgSalidaLam2" name="kgSalidaLam2"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4833,10 +4868,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgSalidaLam2")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Metraje 2</label>
+                      <label htmlFor="ot-metrajeLam2" className="ot-label">Metraje 2</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="metrajeLam2"
+                          data-field="metrajeLam2" id="ot-metrajeLam2" name="metrajeLam2"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4851,10 +4886,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("metrajeLam2")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label">Merma 2</label>
+                      <label htmlFor="ot-mermaLam2" className="ot-label">Merma 2</label>
                       <OtPlanillaInputIcon icon={TrendingDown}>
                         <input
-                          data-field="mermaLam2"
+                          data-field="mermaLam2" id="ot-mermaLam2" name="mermaLam2"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -4885,10 +4920,10 @@ export default function WorkOrderPlanillaPage() {
                 <div className="section-body">
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label required">Ancho corte (mm)</label>
+                      <label htmlFor="ot-anchoCorteFinal" className="ot-label required">Ancho corte (mm)</label>
                       <OtPlanillaInputIcon icon={Crop}>
                         <input
-                          data-field="anchoCorteFinal"
+                          data-field="anchoCorteFinal" id="ot-anchoCorteFinal" name="anchoCorteFinal"
                           className="ot-input"
                           value={readString(form.anchoCorteFinal)}
                           placeholder="320±0"
@@ -4913,10 +4948,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("anchoCorteFinal")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Peso bobina (Kg)</label>
+                      <label htmlFor="ot-pesoBobina" className="ot-label required">Peso bobina (Kg)</label>
                       <OtPlanillaInputIcon icon={Weight}>
                         <input
-                          data-field="pesoBobina"
+                          data-field="pesoBobina" id="ot-pesoBobina" name="pesoBobina"
                           className="ot-input"
                           value={readString(form.pesoBobina)}
                           placeholder="19-20"
@@ -4929,10 +4964,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("pesoBobina")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Metros/Bobina (m)</label>
+                      <label htmlFor="ot-metrosBobina" className="ot-label required">Metros/Bobina (m)</label>
                       <OtPlanillaInputIcon icon={CircleDot}>
                         <input
-                          data-field="metrosBobina"
+                          data-field="metrosBobina" id="ot-metrosBobina" name="metrosBobina"
                           className="ot-input"
                           value={readString(form.metrosBobina)}
                           placeholder="1020 ± 20"
@@ -4958,7 +4993,7 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <div className="ot-field sm:col-span-2" data-field="orientacionEmbalaje">
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="ot-label required">Figura embobinado (1-8 o libre)</label>
+                        <label htmlFor={otPlanillaFieldId("orientacionEmbalaje")} className="ot-label required">Figura embobinado (1-8 o libre)</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
@@ -4971,14 +5006,15 @@ export default function WorkOrderPlanillaPage() {
                         value={readString(form.orientacionEmbalaje)}
                         onChange={(v) => setKey(setForm, "orientacionEmbalaje", v)}
                         invalid={otInvalid("orientacionEmbalaje")}
+                        figureInputId={otPlanillaFieldId("orientacionEmbalaje")}
                       />
                       {renderError("orientacionEmbalaje")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Ubic. fotocelda</label>
+                      <label htmlFor="ot-ubicFotoceldaCorte" className="ot-label required">Ubic. fotocelda</label>
                       <OtPlanillaInputIcon icon={MapPin}>
                         <input
-                          data-field="ubicFotoceldaCorte"
+                          data-field="ubicFotoceldaCorte" id="ot-ubicFotoceldaCorte" name="ubicFotoceldaCorte"
                           className="ot-input"
                           value={readString(form.ubicFotoceldaCorte)}
                           onChange={(e) => setKey(setForm, "ubicFotoceldaCorte", e.target.value)}
@@ -4989,10 +5025,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("ubicFotoceldaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Dist. fotocelda al borde (mm)</label>
+                      <label htmlFor="ot-distFotoceldaBorde" className="ot-label required">Dist. fotocelda al borde (mm)</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="distFotoceldaBorde"
+                          data-field="distFotoceldaBorde" id="ot-distFotoceldaBorde" name="distFotoceldaBorde"
                           className="ot-input"
                           value={readString(form.distFotoceldaBorde)}
                           placeholder="1±1"
@@ -5017,10 +5053,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("distFotoceldaBorde")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Distancia figura lado contrario (mm)</label>
+                      <label htmlFor="ot-distFiguraLadoContrario" className="ot-label required">Distancia figura lado contrario (mm)</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="distFiguraLadoContrario"
+                          data-field="distFiguraLadoContrario" id="ot-distFiguraLadoContrario" name="distFiguraLadoContrario"
                           className="ot-input"
                           value={readString(form.distFiguraLadoContrario)}
                           placeholder="250±1"
@@ -5045,10 +5081,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("distFiguraLadoContrario")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Distancia figura lado fotocelda (mm)</label>
+                      <label htmlFor="ot-distFiguraLadoFotocelda" className="ot-label required">Distancia figura lado fotocelda (mm)</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="distFiguraLadoFotocelda"
+                          data-field="distFiguraLadoFotocelda" id="ot-distFiguraLadoFotocelda" name="distFiguraLadoFotocelda"
                           className="ot-input"
                           value={readString(form.distFiguraLadoFotocelda)}
                           placeholder="250±1"
@@ -5073,10 +5109,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("distFiguraLadoFotocelda")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Max. empates</label>
+                      <label htmlFor="ot-maxEmpates" className="ot-label required">Max. empates</label>
                       <OtPlanillaInputIcon icon={Link2}>
                         <input
-                          data-field="maxEmpates"
+                          data-field="maxEmpates" id="ot-maxEmpates" name="maxEmpates"
                           className="ot-input"
                           value={readString(form.maxEmpates)}
                           placeholder="1"
@@ -5088,10 +5124,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("maxEmpates")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Diam. bobina (mm)</label>
+                      <label htmlFor="ot-diamBobina" className="ot-label required">Diam. bobina (mm)</label>
                       <OtPlanillaInputIcon icon={Circle}>
                         <input
-                          data-field="diamBobina"
+                          data-field="diamBobina" id="ot-diamBobina" name="diamBobina"
                           className="ot-input"
                           value={readString(form.diamBobina)}
                           placeholder="400 ± 5"
@@ -5116,10 +5152,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("diamBobina")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Ancho core (mm)</label>
+                      <label htmlFor="ot-anchoCore" className="ot-label required">Ancho core (mm)</label>
                       <OtPlanillaInputIcon icon={Columns}>
                         <input
-                          data-field="anchoCore"
+                          data-field="anchoCore" id="ot-anchoCore" name="anchoCore"
                           className="ot-input"
                           value={readString(form.anchoCore)}
                           onChange={(e) =>
@@ -5139,10 +5175,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("anchoCore")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Diam. core (Plg)</label>
+                      <label htmlFor="ot-diamCorePlg" className="ot-label required">Diam. core (Plg)</label>
                       <OtPlanillaInputIcon icon={Disc}>
                         <input
-                          data-field="diamCorePlg"
+                          data-field="diamCorePlg" id="ot-diamCorePlg" name="diamCorePlg"
                           className="ot-input"
                           value={readString(form.diamCorePlg)}
                           onChange={(e) =>
@@ -5155,10 +5191,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("diamCorePlg")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Cant. cores</label>
+                      <label htmlFor="ot-cantCores" className="ot-label required">Cant. cores</label>
                       <OtPlanillaInputIcon icon={Hash}>
                         <input
-                          data-field="cantCores"
+                          data-field="cantCores" id="ot-cantCores" name="cantCores"
                           className="ot-input"
                           value={readString(form.cantCores)}
                           inputMode="numeric"
@@ -5173,10 +5209,10 @@ export default function WorkOrderPlanillaPage() {
 
                   <div className="ot-grid ot-metrics-before-nested ot-cols-4">
                     <div className="ot-field">
-                      <label className="ot-label required">Kg ingresados</label>
+                      <label htmlFor="ot-kgIngresadosCorte" className="ot-label required">Kg ingresados</label>
                       <OtPlanillaInputIcon icon={PackagePlus}>
                         <input
-                          data-field="kgIngresadosCorte"
+                          data-field="kgIngresadosCorte" id="ot-kgIngresadosCorte" name="kgIngresadosCorte"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -5191,10 +5227,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgIngresadosCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Kg salida</label>
+                      <label htmlFor="ot-kgSalidaCorte" className="ot-label required">Kg salida</label>
                       <OtPlanillaInputIcon icon={ArrowUpFromLine}>
                         <input
-                          data-field="kgSalidaCorte"
+                          data-field="kgSalidaCorte" id="ot-kgSalidaCorte" name="kgSalidaCorte"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -5227,10 +5263,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgSalidaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Kg merma</label>
+                      <label htmlFor="ot-kgMermaCorte" className="ot-label required">Kg merma</label>
                       <OtPlanillaInputIcon icon={Trash2}>
                         <input
-                          data-field="kgMermaCorte"
+                          data-field="kgMermaCorte" id="ot-kgMermaCorte" name="kgMermaCorte"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -5245,10 +5281,10 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgMermaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label className="ot-label required">Metraje</label>
+                      <label htmlFor="ot-metrajeCorte" className="ot-label required">Metraje</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
-                          data-field="metrajeCorte"
+                          data-field="metrajeCorte" id="ot-metrajeCorte" name="metrajeCorte"
                           type="number"
                           inputMode="decimal"
                           step="0.01"
@@ -5280,9 +5316,11 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <div className="section-body">
                       <div className="ot-field">
-                        <label className="ot-label required">Observaciones generales</label>
+                        <label htmlFor="ot-observacionesGenerales" className="ot-label required">Observaciones generales</label>
                         <OtPlanillaInputIcon icon={FileText} align="top">
                           <Textarea
+                            id="ot-observacionesGenerales"
+                            name="observacionesGenerales"
                             data-field="observacionesGenerales"
                             className="min-h-[5rem] resize-y"
                             value={readString(form.observacionesGenerales)}
@@ -5300,11 +5338,11 @@ export default function WorkOrderPlanillaPage() {
                     <div className="section-body">
                       <div className="ot-grid ot-cols-2">
                         <div className="ot-field">
-                          <label className="ot-label required">F. Inicio</label>
+                          <label htmlFor="ot-fechaInicio" className="ot-label required">F. Inicio</label>
                           <OtPlanillaInputIcon icon={CalendarClock}>
                             <input
                               type="date"
-                              data-field="fechaInicio"
+                              data-field="fechaInicio" id="ot-fechaInicio" name="fechaInicio"
                               className="ot-input"
                               value={readString(form.fechaInicio)}
                               onChange={(e) => setKey(setForm, "fechaInicio", e.target.value)}
@@ -5314,11 +5352,11 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("fechaInicio")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label required">F. Entrega</label>
+                          <label htmlFor="ot-fechaEntrega" className="ot-label required">F. Entrega</label>
                           <OtPlanillaInputIcon icon={CalendarDays}>
                             <input
                               type="date"
-                              data-field="fechaEntrega"
+                              data-field="fechaEntrega" id="ot-fechaEntrega" name="fechaEntrega"
                               className="ot-input"
                               value={readString(form.fechaEntrega)}
                               onChange={(e) => setKey(setForm, "fechaEntrega", e.target.value)}
@@ -5328,14 +5366,14 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("fechaEntrega")}
                         </div>
                         <div className="ot-field">
-                          <label className="ot-label required">Prioridad</label>
+                          <label htmlFor="ot-priority" id="ot-label-priority" className="ot-label required">Prioridad</label>
                           <Popover open={priorityPickerOpen} onOpenChange={setPriorityPickerOpen}>
                             <PopoverTrigger asChild>
                               <Button
                                 type="button"
                                 variant="outline"
                                 role="combobox"
-                                data-field="priority"
+                                data-field="priority" id="ot-priority" aria-labelledby="ot-label-priority"
                                 aria-expanded={priorityPickerOpen}
                                 className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
                               >
@@ -5393,9 +5431,9 @@ export default function WorkOrderPlanillaPage() {
                             <span className="min-w-0 flex-1 truncate">{priorityComboLabel(form.priority)}</span>
                           </div>
                         </div>
-                        <div className="ot-field sm:col-span-2">
-                          <label className="ot-label required">Asignar a área(s)</label>
-                          <div className="relative min-w-0 rounded-md border border-[rgba(0,0,0,0.18)] bg-[rgba(255,255,255,0.92)] p-2 pl-8">
+                        <fieldset className="ot-field sm:col-span-2 border-0 p-0 m-0 min-w-0">
+                          <legend className="ot-label required float-left w-full mb-1">Asignar a área(s)</legend>
+                          <div className="relative min-w-0 rounded-md border border-[rgba(0,0,0,0.18)] bg-[rgba(255,255,255,0.92)] p-2 pl-8 clear-both">
                             <LayoutGrid
                               className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground"
                               aria-hidden
@@ -5404,11 +5442,13 @@ export default function WorkOrderPlanillaPage() {
                             <AreasMultiCheckbox value={readProgramacionAreas(form)} />
                           </div>
                           {renderError("programacionAreas")}
-                        </div>
+                        </fieldset>
                         <div className="ot-field sm:col-span-2">
-                          <label className="ot-label required">Motivo de asignación</label>
+                          <label htmlFor="ot-programacionMotivo" className="ot-label required">Motivo de asignación</label>
                           <OtPlanillaInputIcon icon={LucideClipboardList} align="top">
                             <Textarea
+                              id="ot-programacionMotivo"
+                              name="programacionMotivo"
                               data-field="programacionMotivo"
                               className="min-h-[4.5rem]"
                               value={readString(form.programacionMotivo)}

@@ -582,7 +582,23 @@
   }
 }
 
-/* 4 columnas densas: 1 → 2 → 4 (montaje, métricas, corte) */
+/* Montaje: 3×3 como planilla física (frec/bandas/tipo · corte/repet/desarrollo · mont/figura/colores) */
+.ax-ot .ot-grid.ot-grid-montaje {
+  align-items: start;
+}
+
+.ax-ot .ot-field-figure--montaje .ax-winding {
+  max-width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .ax-ot .ot-field-figure--montaje .ax-winding {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+}
+
+/* 4 columnas densas: 1 → 2 → 4 (métricas, corte) */
 .ax-ot .ot-grid.ot-cols-4 {
   grid-template-columns: 1fr;
 }

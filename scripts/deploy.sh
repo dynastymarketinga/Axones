@@ -13,6 +13,7 @@ git reset --hard origin/main
 cd "$APP_ROOT/backend"
 composer install --no-dev --optimize-autoloader --no-interaction
 php artisan migrate --force --no-interaction
+php artisan axones:cleanup-operational-alerts --no-interaction
 php artisan optimize --no-interaction
 
 cd "$APP_ROOT/pulse-ui-react"

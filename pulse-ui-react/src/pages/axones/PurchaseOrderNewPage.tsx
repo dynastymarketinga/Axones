@@ -1669,81 +1669,66 @@ export default function PurchaseOrderNewPage() {
       </form>
 
       <AlertDialog open={confirmCreateOpen} onOpenChange={setConfirmCreateOpen}>
-        <AlertDialogContent className="po-detail-dialog flex w-[min(calc(100vw-1.5rem),28rem)] flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
-          <div className="po-detail-dialog-header shrink-0 px-6 pb-5 pt-6">
-            <div className="flex items-start gap-4">
+        <AlertDialogContent className="po-detail-dialog po-confirm-dialog flex flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
+          <div className="po-detail-dialog-header shrink-0 px-6 py-5">
+            <div className="flex items-center gap-3">
               <div
-                className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20"
+                className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20"
                 aria-hidden
               >
-                <ShoppingCart className="size-5" />
+                <ShoppingCart className="size-[1.125rem]" />
               </div>
-              <div className="min-w-0 flex-1 space-y-1">
-                <AlertDialogTitle className="text-xl">Confirmar orden de compra</AlertDialogTitle>
+              <div className="min-w-0 flex-1">
+                <AlertDialogTitle className="text-lg">¿Crear orden de compra?</AlertDialogTitle>
                 <AlertDialogDescription className="px-0 py-0 text-sm text-muted-foreground">
-                  Revise el resumen antes de registrar la solicitud al proveedor.
+                  Confirme los datos antes de registrar la solicitud.
                 </AlertDialogDescription>
               </div>
             </div>
           </div>
 
           <div className="px-6 pb-5">
-            <div className="po-detail-hero space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Código de orden
+            <div className="po-confirm-code-hero">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Código de orden
+              </span>
+              <span className="po-code-pill px-3 py-1 text-[0.9375rem]">{code.trim() || "—"}</span>
+            </div>
+
+            <div className="po-confirm-stats mt-3">
+              <div className="po-confirm-stat-chip">
+                <Building2 className="size-4 shrink-0" aria-hidden />
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Proveedor
                 </span>
-                <span className="po-code-pill">{code.trim() || "—"}</span>
+                <span className="line-clamp-2 w-full text-xs font-semibold leading-tight text-foreground">
+                  {selectedSupplier?.name?.trim() || "—"}
+                </span>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="po-detail-stat">
-                  <Building2 className="size-4 shrink-0 text-primary" aria-hidden />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Proveedor</p>
-                    <p className="truncate text-sm font-medium">
-                      {selectedSupplier?.name?.trim() || "—"}
-                    </p>
-                  </div>
-                </div>
-                <div className="po-detail-stat">
-                  <ClipboardList className="size-4 shrink-0 text-primary" aria-hidden />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Líneas válidas</p>
-                    <p className="text-sm font-medium">
-                      {formatPoLinesCount(payloadLinesPreviewCount)}
-                    </p>
-                  </div>
-                </div>
-                <div className="po-detail-stat sm:col-span-2">
-                  <CalendarIcon className="size-4 shrink-0 text-primary" aria-hidden />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Fecha pedido</p>
-                    <p className="text-sm font-medium">{formatDateInputDisplay(orderedAt)}</p>
-                  </div>
-                </div>
+              <div className="po-confirm-stat-chip">
+                <ClipboardList className="size-4 shrink-0" aria-hidden />
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Líneas
+                </span>
+                <span className="text-xs font-semibold text-foreground">
+                  {formatPoLinesCount(payloadLinesPreviewCount)}
+                </span>
+              </div>
+              <div className="po-confirm-stat-chip">
+                <CalendarIcon className="size-4 shrink-0" aria-hidden />
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Pedido
+                </span>
+                <span className="text-xs font-semibold tabular-nums text-foreground">
+                  {formatDateInputDisplay(orderedAt)}
+                </span>
               </div>
             </div>
 
-            <ul className="mt-4 space-y-2" role="list">
-              <li className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
-                <div className="flex gap-2.5">
-                  <Hash className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-                  <span>
-                    El código es <strong>único e irrepetible</strong>. Si ya existe otra orden con
-                    el mismo código, el sistema no permitirá guardar.
-                  </span>
-                </div>
-              </li>
-              <li className="rounded-lg border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
-                <div className="flex gap-2.5">
-                  <Package className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                  <span>
-                    Es una <strong>solicitud de compra</strong>; el inventario no cambia hasta
-                    registrar la recepción física.
-                  </span>
-                </div>
-              </li>
-            </ul>
+            <p className="po-confirm-footnote">
+              Solicitud de compra · código único · el inventario se actualiza al registrar la
+              recepción física.
+            </p>
           </div>
 
           <AlertDialogFooter className="border-t border-border/60 bg-muted/20 px-6 py-4">

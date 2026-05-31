@@ -61,7 +61,6 @@ type PurchaseOrderPreviewDetail = {
     quantity_ordered: string | number
     quantity_received?: string | number
     unit?: string | null
-    unit_price?: string | number | null
     material?: { name?: string | null; sku?: string | null } | null
   }>
 }
@@ -114,49 +113,6 @@ function displayUnit(unit: string | null | undefined): string {
   const u = (unit ?? "").trim().toLowerCase()
   if (u === "kg" || u === "kilos" || u === "kilo") return "KILOS"
   return (unit ?? "").trim().toUpperCase() || "—"
-}
-
-function roundMoney2(n: number): number {
-  return Math.round(n * 100) / 100
-}
-
-function moneyEsUsd(amount: number): string {
-  return `${new Intl.NumberFormat("es-VE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(roundMoney2(amount))} $`
-}
-
-function lineQty(ln: NonNullable<PurchaseOrderPreviewDetail["lines"]>[0]): number {
-  const n = Number(ln.quantity_ordered ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
-function lineUnitPrice(ln: NonNullable<PurchaseOrderPreviewDetail["lines"]>[0]): number {
-  const n = Number(ln.unit_price ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
-function lineAmount(ln: NonNullable<PurchaseOrderPreviewDetail["lines"]>[0]): number {
-  return roundMoney2(lineQty(ln) * lineUnitPrice(ln))
-}
-
-function purchaseOrderTotals(detail: PurchaseOrderPreviewDetail): {
-  subtotal: number
-  tax: number
-  total: number
-  taxApplies: boolean
-} {
-  const rows = detail.lines ?? []
-  let subtotal = 0
-  for (const ln of rows) {
-    subtotal += lineAmount(ln)
-  }
-  subtotal = roundMoney2(subtotal)
-  const taxApplies = detail.tax_applies !== false
-  const tax = taxApplies ? roundMoney2(subtotal * 0.16) : 0
-  const total = roundMoney2(subtotal + tax)
-  return { subtotal, tax, total, taxApplies }
 }
 
 function absoluteBrandAssetUrl(pathUnderBrand: string): string {
@@ -246,8 +202,6 @@ async function downloadPurchaseOrderPdf(detail: PurchaseOrderPreviewDetail): Pro
   doc.text(`DIRECCIÓN: ${supplier?.address?.trim() ?? ""}`, margin, y)
   y += 10
 
-  const totalsPdf = purchaseOrderTotals(detail)
-
   const body =
     (detail.lines ?? []).length > 0
       ? (detail.lines ?? []).map((ln, idx) => [
@@ -255,14 +209,12 @@ async function downloadPurchaseOrderPdf(detail: PurchaseOrderPreviewDetail): Pro
           lineDescription(ln),
           formatQuantityEs(ln.quantity_ordered),
           displayUnit(ln.unit ?? undefined),
-          moneyEsUsd(lineUnitPrice(ln)),
-          moneyEsUsd(lineAmount(ln)),
         ])
-      : [["—", "Sin líneas en esta orden.", "—", "—", "—", "—"]]
+      : [["—", "Sin líneas en esta orden.", "—", "—"]]
 
   autoTable(doc, {
     startY: y,
-    head: [["ITEM", "DESCRIPCIÓN", "CANTIDAD", "UNIDAD", "PRECIO UNITARIO", "TOTAL"]],
+    head: [["ITEM", "DESCRIPCIÓN", "CANTIDAD", "UNIDAD"]],
     body,
     styles: {
       fontSize: 8,
@@ -278,32 +230,16 @@ async function downloadPurchaseOrderPdf(detail: PurchaseOrderPreviewDetail): Pro
       halign: "center",
     },
     columnStyles: {
-      0: { halign: "center", cellWidth: 14 },
+      0: { halign: "center", cellWidth: 16 },
       1: { cellWidth: "auto" },
-      2: { halign: "right", cellWidth: 22 },
-      3: { halign: "center", cellWidth: 18 },
-      4: { halign: "right", cellWidth: 26 },
-      5: { halign: "right", cellWidth: 24 },
+      2: { halign: "right", cellWidth: 28 },
+      3: { halign: "center", cellWidth: 24 },
     },
     margin: { left: margin, right: margin },
   })
 
   const tableFinal = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable
-  let ty = (tableFinal?.finalY ?? y + 30) + 6
-
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(9)
-  doc.text("SUBTOTAL", pageW - margin - 42, ty)
-  doc.text(moneyEsUsd(totalsPdf.subtotal), pageW - margin, ty, { align: "right" })
-  ty += 5
-  doc.text(totalsPdf.taxApplies ? "IVA (16%)" : "Sin IVA", pageW - margin - 42, ty)
-  doc.text(moneyEsUsd(totalsPdf.tax), pageW - margin, ty, { align: "right" })
-  ty += 5
-  doc.setFont("helvetica", "bold")
-  doc.text("TOTAL", pageW - margin - 42, ty)
-  doc.text(moneyEsUsd(totalsPdf.total), pageW - margin, ty, { align: "right" })
-  doc.setFont("helvetica", "normal")
-  ty += 10
+  let ty = (tableFinal?.finalY ?? y + 30) + 10
 
   doc.text("OBSERVACIÓN:", margin, ty)
   ty += 5
@@ -389,8 +325,6 @@ export default function PurchaseOrderPreviewPage() {
     if (!detail) return "—"
     return formatDateDMY(detail.ordered_at ?? detail.created_at)
   }, [detail])
-
-  const totals = useMemo(() => (detail ? purchaseOrderTotals(detail) : null), [detail])
 
   const supplier = detail?.supplier
   const isManuallyClosed = Boolean(detail?.manually_closed_at)
@@ -575,12 +509,6 @@ export default function PurchaseOrderPreviewPage() {
                   <th className="border border-black px-1 py-2 text-center font-semibold sm:px-2">
                     UNIDAD
                   </th>
-                  <th className="border border-black px-1 py-2 text-right font-semibold sm:px-2">
-                    PRECIO UNITARIO
-                  </th>
-                  <th className="border border-black px-1 py-2 text-right font-semibold sm:px-2">
-                    TOTAL
-                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -599,18 +527,12 @@ export default function PurchaseOrderPreviewPage() {
                       <td className="border border-black px-1 py-2 text-center sm:px-2">
                         {displayUnit(ln.unit ?? undefined)}
                       </td>
-                      <td className="border border-black px-1 py-2 text-right tabular-nums sm:px-2">
-                        {moneyEsUsd(lineUnitPrice(ln))}
-                      </td>
-                      <td className="border border-black px-1 py-2 text-right tabular-nums sm:px-2">
-                        {moneyEsUsd(lineAmount(ln))}
-                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={4}
                       className="border border-black px-2 py-4 text-center text-muted-foreground"
                     >
                       Sin líneas en esta orden.
@@ -619,25 +541,6 @@ export default function PurchaseOrderPreviewPage() {
                 )}
               </tbody>
             </table>
-          </div>
-
-          <div className="mt-4 flex justify-end">
-            <div className="min-w-[200px] space-y-1 text-sm tabular-nums">
-              <div className="flex justify-between gap-8 border-b border-black/30 py-0.5">
-                <span className="font-semibold">SUBTOTAL</span>
-                <span>{totals ? moneyEsUsd(totals.subtotal) : "—"}</span>
-              </div>
-              <div className="flex justify-between gap-8 border-b border-black/30 py-0.5">
-                <span className="font-semibold">
-                  {totals?.taxApplies ? "IVA (16 %)" : "Sin IVA"}
-                </span>
-                <span>{totals ? moneyEsUsd(totals.tax) : "—"}</span>
-              </div>
-              <div className="flex justify-between gap-8 py-0.5 font-bold">
-                <span>TOTAL</span>
-                <span>{totals ? moneyEsUsd(totals.total) : "—"}</span>
-              </div>
-            </div>
           </div>
 
           <div className="mt-8 text-sm">

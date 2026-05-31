@@ -671,7 +671,7 @@ class MasterDataAndPurchaseTest extends TestCase
             ],
         ], $headers)->assertCreated();
 
-        $this->postJson('/api/purchase-orders', [
+        $duplicateResponse = $this->postJson('/api/purchase-orders', [
             'supplier_id' => $supplier->id,
             'code' => 'OC-VALID-1',
             'lines' => [
@@ -680,5 +680,9 @@ class MasterDataAndPurchaseTest extends TestCase
         ], $headers)
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['code']);
+
+        $duplicateMsg = (string) $duplicateResponse->json('errors.code.0');
+        $this->assertStringContainsString('registrado', $duplicateMsg);
+        $this->assertStringNotContainsString('already been taken', strtolower($duplicateMsg));
     }
 }

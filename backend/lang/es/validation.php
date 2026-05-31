@@ -39,7 +39,7 @@ return [
         'string' => 'El campo :attribute debe tener :size caracteres.',
     ],
     'string' => 'El campo :attribute debe ser texto.',
-    'unique' => 'El valor de :attribute ya esta en uso.',
+    'unique' => 'El :attribute ya está registrado.',
 
     'custom' => [
         'login' => [
@@ -59,5 +59,11 @@ return [
         'email' => 'correo',
         'password' => 'contrasena',
         'password_confirmation' => 'confirmacion de contrasena',
+        'supplier_id' => 'proveedor',
+        'code' => 'código único',
+        'ordered_at' => 'fecha del pedido',
+        'notes' => 'notas',
+        'lines' => 'líneas del pedido',
+        'quantity_ordered' => 'cantidad pedida',
     ],
 ];

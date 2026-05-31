@@ -59,6 +59,7 @@ import SupplierFormPage from "@/pages/axones/SupplierFormPage"
 import VendorsPage from "@/pages/axones/VendorsPage"
 import VendorFormPage from "@/pages/axones/VendorFormPage"
 import MastersHubPage from "@/pages/axones/MastersHubPage"
+import PurchaseOrderEditPage from "@/pages/axones/PurchaseOrderEditPage"
 import PurchaseOrderNewPage from "@/pages/axones/PurchaseOrderNewPage"
 import PurchaseOrderPreviewPage from "@/pages/axones/PurchaseOrderPreviewPage"
 import PurchaseReceiptNewPage from "@/pages/axones/PurchaseReceiptNewPage"
@@ -141,31 +142,29 @@ export const router = createBrowserRouter(
           path: "ordenes-compra",
           element: guardAxonesRoute({
             routeKey: "ordenes-compra",
-            element: <Outlet />,
+            element: <PurchaseOrdersPage />,
           }),
-          children: [
-            {
-              index: true,
-              element: guardAxonesRoute({
-                routeKey: "ordenes-compra",
-                element: <PurchaseOrdersPage />,
-              }),
-            },
-            {
-              path: "nueva",
-              element: guardAxonesRoute({
-                routeKey: "ordenes-compra/nueva",
-                element: <PurchaseOrderNewPage />,
-              }),
-            },
-            {
-              path: ":id/vista-previa",
-              element: guardAxonesRoute({
-                routeKey: "ordenes-compra",
-                element: <PurchaseOrderPreviewPage />,
-              }),
-            },
-          ],
+        },
+        {
+          path: "ordenes-compra/nueva",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-compra/nueva",
+            element: <PurchaseOrderNewPage />,
+          }),
+        },
+        {
+          path: "ordenes-compra/:id/editar",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-compra",
+            element: <PurchaseOrderEditPage />,
+          }),
+        },
+        {
+          path: "ordenes-compra/:id/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-compra",
+            element: <PurchaseOrderPreviewPage />,
+          }),
         },
         { path: "ordenes-cliente", element: guardAxonesRoute({ routeKey: "ordenes-cliente", element: <ClientOrdersPage /> }) },
         { path: "ordenes-cliente/nueva", element: guardAxonesRoute({ routeKey: "ordenes-cliente/nueva", element: <ClientOrderNewPage /> }) },

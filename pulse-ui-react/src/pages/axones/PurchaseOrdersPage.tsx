@@ -3,27 +3,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useSearchParams } from "react-router-dom"
 import {
+  AlertTriangle,
   Ban,
   Barcode,
   CalendarDays,
   Check,
-  CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
+  ClipboardList,
   Eye,
-  FileText,
-  Loader2,
+  Filter,
+  Layers,
+  ListOrdered,
   Pencil,
   Printer,
   RotateCcw,
   Settings2,
   ShoppingCart,
-  ClipboardList,
   Truck,
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
@@ -35,10 +37,8 @@ import {
   catalogPaginationOutlineButtonClass,
   catalogPaginationSelectTriggerClass,
   catalogSelectTriggerClass,
-  catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
-import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -49,9 +49,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { getStoredUser } from "@/lib/auth-storage"
 import { isAxonesFullAccess } from "@/lib/axones-roles"
@@ -76,7 +74,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
@@ -87,19 +84,13 @@ import type {
   PurchaseOrderRow,
   SupplierRecord,
 } from "@/types/api"
-
-const PURCHASE_ORDER_STATUS_LABELS: Record<string, string> = {
-  open: "Abierta",
-  partial: "Parcial",
-  completed: "Completada",
-  /** Historial si llegara un valor antiguo antes de migrar */
-  cancelled: "Completada",
-}
-
-function purchaseOrderStatusLabel(value: string | null | undefined): string {
-  if (!value) return "—"
-  return PURCHASE_ORDER_STATUS_LABELS[value] ?? value
-}
+import { PurchaseOrderDetailSheet } from "@/pages/axones/PurchaseOrderDetailSheet"
+import {
+  formatDateDMY,
+  formatDateTime,
+  PurchaseOrderStatusBadge,
+} from "@/pages/axones/purchase-order-shared"
+import "./purchase-order-list.css"
 
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
@@ -107,11 +98,6 @@ type ViewTab = "pending" | "history"
 
 function parseViewTab(raw: string | null): ViewTab {
   return raw === "history" ? "history" : "pending"
-}
-
-function formatReceiptCode(id: number): string {
-  if (!Number.isFinite(id) || id < 1) return "REC-———"
-  return `REC-${String(Math.trunc(id)).padStart(6, "0")}`
 }
 
 /** Botones de acción en fila: colores distintos por función */
@@ -138,96 +124,6 @@ const poActionReactivateClass = cn(
   poActionIconBase,
   "border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400",
 )
-
-function formatDateDMY(value: string | null | undefined): string {
-  if (!value) return "—"
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return "—"
-  return new Intl.DateTimeFormat("es-VE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(d)
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "—"
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return "—"
-  return new Intl.DateTimeFormat("es-VE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(d)
-}
-
-function toDateInputValue(value: string | null | undefined): string {
-  if (!value) return ""
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ""
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${y}-${m}-${day}`
-}
-
-function PurchaseOrderStatusBadge({
-  status,
-  manuallyClosedAt,
-}: {
-  status: string
-  manuallyClosedAt?: string | null
-}) {
-  const normalized = status === "cancelled" ? "completed" : status
-  const label = purchaseOrderStatusLabel(status)
-  const wasManualClose = normalized === "completed" && Boolean(manuallyClosedAt)
-
-  if (normalized === "completed") {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 text-emerald-600"
-        title={
-          wasManualClose
-            ? "Cerrada manualmente por jefatura"
-            : "Cerrada automáticamente al despachar todas las OTs"
-        }
-      >
-        <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
-        <span className="text-sm font-medium">{label}</span>
-        {wasManualClose ? (
-          <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-            manual
-          </span>
-        ) : null}
-      </span>
-    )
-  }
-
-  if (normalized === "partial") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-amber-600">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-        <span className="text-sm font-medium">{label}</span>
-      </span>
-    )
-  }
-
-  if (normalized === "open") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-emerald-700">
-        <span
-          className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(34,197,94,0.65)]"
-          aria-hidden
-        />
-        <span className="text-sm font-medium">{label}</span>
-      </span>
-    )
-  }
-
-  return <span className="text-muted-foreground text-sm">{label}</span>
-}
 
 type PurchaseOrderSheetDetail = {
   id: number
@@ -291,7 +187,7 @@ export default function PurchaseOrdersPage() {
   const [viewTab, setViewTab] = useState<ViewTab>(() => parseViewTab(searchParams.get("tab")))
 
   const isHistoryTab = viewTab === "history"
-  const tableColSpan = isHistoryTab ? 7 : 5
+  const tableColSpan = isHistoryTab ? 8 : 6
 
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<PurchaseOrderRow> | null>(
@@ -305,20 +201,6 @@ export default function PurchaseOrdersPage() {
   const [detail, setDetail] = useState<PurchaseOrderSheetDetail | null>(null)
 
   const [selectedRowId, setSelectedRowId] = useState<number | null>(null)
-
-  const [editOpen, setEditOpen] = useState(false)
-  const [editPo, setEditPo] = useState<PurchaseOrderRow | null>(null)
-  const [editNotes, setEditNotes] = useState("")
-  const [editOrderedAt, setEditOrderedAt] = useState("")
-  const [editChangeReason, setEditChangeReason] = useState("")
-  const [editTaxApplies, setEditTaxApplies] = useState(true)
-  const [editFormLoading, setEditFormLoading] = useState(false)
-  const [editSaving, setEditSaving] = useState(false)
-  const editBaselineRef = useRef<{
-    notes: string
-    orderedAt: string
-    taxApplies: boolean
-  } | null>(null)
 
   const [deactivateOpen, setDeactivateOpen] = useState(false)
   const [deactivatePo, setDeactivatePo] = useState<PurchaseOrderRow | null>(null)
@@ -453,84 +335,6 @@ export default function PurchaseOrdersPage() {
 
   const showInitialSkeleton = loading && rows === null
 
-  const openEditDialog = useCallback((r: PurchaseOrderRow) => {
-    setEditPo(r)
-    setEditChangeReason("")
-    editBaselineRef.current = null
-    setEditOpen(true)
-    setEditFormLoading(true)
-    void (async () => {
-      try {
-        const d = await apiFetch<PurchaseOrderSheetDetail>(`purchase-orders/${r.id}`)
-        setEditNotes(d.notes ?? "")
-        const ord = toDateInputValue(d.ordered_at)
-        setEditOrderedAt(ord)
-        const ta = d.tax_applies !== false
-        setEditTaxApplies(ta)
-        editBaselineRef.current = {
-          notes: (d.notes ?? "").trim(),
-          orderedAt: ord,
-          taxApplies: ta,
-        }
-      } catch (e) {
-        if (e instanceof ApiError) toast.error(e.message)
-        else toast.error("No se pudo cargar la orden para editar.")
-        setEditOpen(false)
-        setEditPo(null)
-      } finally {
-        setEditFormLoading(false)
-      }
-    })()
-  }, [])
-
-  const submitEdit = useCallback(async () => {
-    if (!editPo) return
-    const base = editBaselineRef.current
-    if (!base) {
-      toast.error("Espere a que termine de cargar el formulario.")
-      return
-    }
-    const notesTrim = editNotes.trim()
-    const orderedTrim = editOrderedAt.trim()
-    const changed =
-      notesTrim !== base.notes ||
-      orderedTrim !== base.orderedAt ||
-      editTaxApplies !== base.taxApplies
-    if (!changed) {
-      toast.message("Sin cambios en la cabecera.")
-      setEditOpen(false)
-      setEditPo(null)
-      return
-    }
-    const reason = editChangeReason.trim()
-    if (reason.length < 5) {
-      toast.error("El motivo del cambio debe tener al menos 5 caracteres.")
-      return
-    }
-    setEditSaving(true)
-    try {
-      await apiFetch(`purchase-orders/${editPo.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          notes: notesTrim === "" ? null : notesTrim,
-          ordered_at: orderedTrim === "" ? null : orderedTrim,
-          tax_applies: editTaxApplies,
-          change_reason: reason,
-        }),
-      })
-      toast.success("Orden actualizada.")
-      setEditOpen(false)
-      setEditPo(null)
-      editBaselineRef.current = null
-      await load()
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo guardar el cambio.")
-    } finally {
-      setEditSaving(false)
-    }
-  }, [editPo, editNotes, editOrderedAt, editTaxApplies, editChangeReason, load])
-
   const submitDeactivate = useCallback(async () => {
     if (!deactivatePo) return
     const reason = deactivateReason.trim()
@@ -591,48 +395,22 @@ export default function PurchaseOrdersPage() {
     }
   }, [reactivatePo, reactivateReason, load])
 
-  const poDetailFields =
-    detail && !detailLoading
-      ? [
-          { label: "Código", value: detail.code, mono: true, icon: Barcode },
-          {
-            label: "Proveedor",
-            value: detail.supplier?.name ?? `#${detail.supplier_id}`,
-            icon: Truck,
-          },
-          {
-            label: "Estado",
-            value:
-              detail.manually_closed_at && detail.status === "completed"
-                ? `${purchaseOrderStatusLabel(detail.status)} · cerrada manualmente`
-                : purchaseOrderStatusLabel(detail.status),
-            icon: CircleDot,
-          },
-          { label: "Creado", value: formatDateTime(detail.created_at), icon: CalendarDays },
-          { label: "Ordenado", value: formatDateDMY(detail.ordered_at), icon: CalendarDays },
-          {
-            label: "Notas",
-            value: detail.notes?.trim() || "—",
-            full: true,
-            icon: FileText,
-          },
-        ]
-      : []
-
   return (
+    <div className="po-list-shell">
     <CatalogPageShell
       title="Órdenes de compra"
-      subtitle="Material solicitado a proveedores."
+      subtitle="Pedidos a proveedores: material, cantidades y seguimiento de recepción."
       icon={ShoppingCart}
       action={
-        <Button type="button" asChild>
+        <Button type="button" asChild className="shadow-sm">
           <Link to="/ordenes-compra/nueva" state={{ from }}>
+            <ShoppingCart className="mr-2 size-4" aria-hidden />
             Nueva OC
           </Link>
         </Button>
       }
     >
-      <EntityDetailDialog
+      <PurchaseOrderDetailSheet
         open={detailOpen}
         onOpenChange={(open) => {
           setDetailOpen(open)
@@ -641,233 +419,9 @@ export default function PurchaseOrdersPage() {
             setDetail(null)
           }
         }}
-        title="Detalle de orden de compra"
-        description="Cabecera y líneas de la orden seleccionada."
         loading={detailLoading}
-        fields={poDetailFields}
-        footer={
-          detailId != null ? (
-            <Button type="button" variant="outline" asChild>
-              <Link
-                to={`/ordenes-compra/${detailId}/vista-previa`}
-                className="inline-flex items-center gap-2"
-              >
-                <Printer className="h-4 w-4 shrink-0" />
-                Vista previa
-              </Link>
-            </Button>
-          ) : null
-        }
-      >
-        {!detailLoading && detail ? (
-          detail.lines?.length ? (
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-                Líneas ({detail.lines.length})
-              </p>
-              <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[10rem]">Material / descripción</TableHead>
-                      <TableHead className="w-24">SKU</TableHead>
-                      <TableHead className="w-28 text-right">Cantidad</TableHead>
-                      <TableHead className="w-24">Unidad</TableHead>
-                      <TableHead className="w-28 text-right">Recibido</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detail.lines.map((ln) => (
-                      <TableRow key={ln.id}>
-                        <TableCell className="align-top text-sm">
-                          {(ln.material?.name ?? ln.description?.trim()) || `Línea #${ln.id}`}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs align-top">
-                          {ln.material?.sku ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums align-top">
-                          {String(ln.quantity_ordered)}
-                        </TableCell>
-                        <TableCell className="align-top">{ln.unit ?? "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums align-top">
-                          {ln.quantity_received != null && String(ln.quantity_received) !== ""
-                            ? String(ln.quantity_received)
-                            : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">Sin líneas en esta orden.</p>
-          )
-        ) : null}
-        {!detailLoading && detail?.receipts?.length ? (
-          <div className="mt-4 space-y-2">
-            <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-              Recepciones vinculadas ({detail.receipts.length})
-            </p>
-            <div className="max-h-[min(16rem,40vh)] overflow-auto rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Recepción</TableHead>
-                    <TableHead>Factura</TableHead>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead className="text-right">Ítems</TableHead>
-                    <TableHead className="text-right">Acción</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {detail.receipts.map((rec) => (
-                    <TableRow key={rec.id}>
-                      <TableCell className="font-mono text-sm">{formatReceiptCode(rec.id)}</TableCell>
-                      <TableCell>{rec.invoice_number?.trim() || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {formatDateTime(rec.received_at ?? null)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {Array.isArray(rec.lines) ? rec.lines.length : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button type="button" variant="outline" size="sm" asChild>
-                          <Link to={`/recepciones-oc/${rec.id}/vista-previa`}>Ver</Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        ) : null}
-      </EntityDetailDialog>
-
-      <Dialog
-        open={editOpen}
-        onOpenChange={(open) => {
-          setEditOpen(open)
-          if (!open) {
-            setEditPo(null)
-            editBaselineRef.current = null
-            setEditFormLoading(false)
-          }
-        }}
-      >
-        <DialogContent className="max-h-[min(90vh,36rem)] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Editar orden {editPo?.code ?? ""}</DialogTitle>
-            <DialogDescription>
-              Si cambias notas, fecha de pedido o si aplica impuesto, indica el motivo; quedará registrado en auditoría.
-            </DialogDescription>
-          </DialogHeader>
-          {editFormLoading ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-              <span className="text-sm">Cargando datos…</span>
-            </div>
-          ) : (
-            <>
-              {editPo ? (
-                <div className="rounded-lg border bg-muted/40 px-3 py-3 text-sm">
-                  <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-                    Solo lectura
-                  </p>
-                  <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-                    <div>
-                      <dt className="text-muted-foreground text-xs">Código</dt>
-                      <dd className="font-mono font-medium">{editPo.code}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground text-xs">Proveedor</dt>
-                      <dd>{editPo.supplier?.name ?? `#${editPo.supplier_id}`}</dd>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <dt className="text-muted-foreground text-xs">Estado</dt>
-                      <dd>
-                        <PurchaseOrderStatusBadge
-                          status={editPo.status}
-                          manuallyClosedAt={editPo.manually_closed_at ?? null}
-                        />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground text-xs">Líneas</dt>
-                      <dd>{editPo.lines_count ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground text-xs">Creado</dt>
-                      <dd>{formatDateTime(editPo.created_at ?? null)}</dd>
-                    </div>
-                  </dl>
-                </div>
-              ) : null}
-              <div className="grid gap-4 py-2">
-                <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="po-edit-tax" className="text-base">
-                      Aplica impuesto (cabecera)
-                    </Label>
-                    <p className="text-muted-foreground text-xs">
-                      Indica si esta OC lleva impuesto según lo acordado con el proveedor.
-                    </p>
-                  </div>
-                  <Switch
-                    id="po-edit-tax"
-                    checked={editTaxApplies}
-                    onCheckedChange={setEditTaxApplies}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="po-edit-notes">Notas</Label>
-                  <Textarea
-                    id="po-edit-notes"
-                    value={editNotes}
-                    onChange={(ev) => setEditNotes(ev.target.value)}
-                    rows={3}
-                    className="resize-y"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="po-edit-ordered">Fecha de pedido</Label>
-                  <Input
-                    id="po-edit-ordered"
-                    type="date"
-                    value={editOrderedAt}
-                    onChange={(ev) => setEditOrderedAt(ev.target.value)}
-                    className={catalogSelectTriggerClass}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="po-edit-reason">Motivo del cambio</Label>
-                  <Textarea
-                    id="po-edit-reason"
-                    value={editChangeReason}
-                    onChange={(ev) => setEditChangeReason(ev.target.value)}
-                    placeholder="Obligatorio si altera notas, fecha o impuesto. Mínimo 5 caracteres."
-                    rows={3}
-                    className="resize-y"
-                  />
-                </div>
-              </div>
-            </>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              disabled={editSaving || editFormLoading}
-              onClick={() => void submitEdit()}
-            >
-              Guardar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        detail={detail}
+      />
 
       <Dialog
         open={deactivateOpen}
@@ -879,36 +433,90 @@ export default function PurchaseOrdersPage() {
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Desactivar orden {deactivatePo?.code ?? ""}</DialogTitle>
-            <DialogDescription>
-              La orden dejará de mostrarse en el listado para el equipo y no podrán registrarse recepciones contra ella.
-              Solo jefatura puede volver a listarla y reactivarla desde aquí, con motivo registrado.
-            </DialogDescription>
+        <DialogContent className="po-deactivate-dialog gap-0 overflow-hidden p-0 sm:max-w-none">
+          <DialogHeader className="space-y-0 border-b px-6 pb-4 pt-6 text-left">
+            <div className="flex items-start gap-3 pr-6">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <AlertTriangle className="size-5" aria-hidden />
+              </span>
+              <div className="space-y-1.5">
+                <DialogTitle className="text-xl">Desactivar orden {deactivatePo?.code ?? ""}</DialogTitle>
+                <DialogDescription className="text-sm leading-relaxed">
+                  Esta acción oculta la orden del listado operativo y bloquea nuevas recepciones.
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label htmlFor="po-deact-reason">Motivo</Label>
-            <Textarea
-              id="po-deact-reason"
-              value={deactivateReason}
-              onChange={(ev) => setDeactivateReason(ev.target.value)}
-              placeholder="Mínimo 5 caracteres."
-              rows={4}
-              className="resize-y"
-            />
+
+          <div className="space-y-4 px-6 py-5">
+            {deactivatePo ? (
+              <div className="po-deactivate-summary grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="text-muted-foreground text-xs">Código</p>
+                  <p className="font-mono text-sm font-semibold text-primary">{deactivatePo.code}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Proveedor</p>
+                  <p className="text-sm font-medium">
+                    {deactivatePo.supplier?.name ?? `#${deactivatePo.supplier_id}`}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="po-deactivate-panel text-sm leading-relaxed">
+                <p className="font-semibold text-destructive">Qué ocurre</p>
+                <ul className="text-muted-foreground mt-2 list-disc space-y-1 pl-4">
+                  <li>Dejará de mostrarse para el equipo en el listado habitual.</li>
+                  <li>No se podrán registrar recepciones contra esta orden.</li>
+                </ul>
+              </div>
+              <div className="po-deactivate-panel text-sm leading-relaxed">
+                <p className="font-semibold text-foreground">Reactivación</p>
+                <p className="text-muted-foreground mt-2">
+                  Solo jefatura puede volver a listarla y reactivarla, con motivo registrado en
+                  auditoría.
+                </p>
+              </div>
+            </div>
+
+            <div className="po-deactivate-reason-box space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <Label htmlFor="po-deact-reason" className="text-base font-semibold">
+                  Motivo de desactivación
+                </Label>
+                <span
+                  className={cn(
+                    "text-xs tabular-nums",
+                    deactivateReason.trim().length >= 5 ? "text-emerald-600" : "text-muted-foreground",
+                  )}
+                >
+                  {deactivateReason.trim().length}/5 mínimo
+                </span>
+              </div>
+              <Textarea
+                id="po-deact-reason"
+                value={deactivateReason}
+                onChange={(ev) => setDeactivateReason(ev.target.value)}
+                placeholder="Describa el motivo operativo: error de captura, duplicado, proveedor canceló, etc."
+                rows={6}
+                className="resize-y"
+              />
+            </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4 sm:justify-between">
             <Button type="button" variant="outline" onClick={() => setDeactivateOpen(false)}>
               Cancelar
             </Button>
             <Button
               type="button"
               variant="destructive"
-              disabled={deactivateSaving}
+              disabled={deactivateSaving || deactivateReason.trim().length < 5}
               onClick={() => void submitDeactivate()}
             >
-              Desactivar
+              {deactivateSaving ? "Desactivando…" : "Confirmar desactivación"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -924,22 +532,22 @@ export default function PurchaseOrdersPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Reactivar orden {reactivatePo?.code ?? ""}</DialogTitle>
             <DialogDescription>
-              La orden volverá a estar activa en el sistema. Indique el motivo; quedará en auditoría.
+              La orden volverá a estar activa en el listado. Indique el motivo; quedará en auditoría.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label htmlFor="po-react-reason">Motivo</Label>
+          <div className="grid gap-2 py-1">
+            <Label htmlFor="po-react-reason">Motivo de reactivación</Label>
             <Textarea
               id="po-react-reason"
               value={reactivateReason}
               onChange={(ev) => setReactivateReason(ev.target.value)}
               placeholder="Mínimo 5 caracteres."
               rows={4}
-              className="resize-y"
+              className="min-h-[7rem] resize-y"
             />
           </div>
           <DialogFooter>
@@ -948,10 +556,10 @@ export default function PurchaseOrdersPage() {
             </Button>
             <Button
               type="button"
-              disabled={reactivateSaving}
+              disabled={reactivateSaving || reactivateReason.trim().length < 5}
               onClick={() => void submitReactivate()}
             >
-              Reactivar
+              {reactivateSaving ? "Reactivando…" : "Reactivar orden"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -973,18 +581,23 @@ export default function PurchaseOrdersPage() {
             }}
             className="w-full"
           >
-            <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
-              <TabsTrigger value="pending" className="text-xs sm:text-sm">
-                Pendientes
+            <TabsList className="po-tab-list h-auto w-full justify-start sm:w-auto">
+              <TabsTrigger value="pending" className="po-tab-trigger text-xs sm:text-sm">
+                Sin recepción
               </TabsTrigger>
-              <TabsTrigger value="history" className="text-xs sm:text-sm">
-                Historial de recepción
+              <TabsTrigger value="history" className="po-tab-trigger text-xs sm:text-sm">
+                Con recepción
               </TabsTrigger>
             </TabsList>
           </Tabs>
 
-          <CatalogFilterGrid>
-            <CatalogLabeledField label="Proveedor" className="md:col-span-3">
+          <div className="po-filter-bar space-y-4 p-4 md:p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Filter className="size-4 text-primary" aria-hidden />
+              <p className="text-sm font-medium">Filtrar listado</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-12">
+            <CatalogLabeledField label="Proveedor" className="md:col-span-4">
               <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1068,7 +681,7 @@ export default function PurchaseOrdersPage() {
                 </PopoverContent>
               </Popover>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Estado" className="md:col-span-3">
+            <CatalogLabeledField label="Estado de la orden" className="md:col-span-3">
               <Select
                 value={status}
                 onValueChange={(v) => {
@@ -1077,28 +690,28 @@ export default function PurchaseOrdersPage() {
                 }}
               >
                 <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
-                  <SelectValue />
+                  <SelectValue placeholder="Todos los estados" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="open">Abierta</SelectItem>
-                  <SelectItem value="partial">Parcial</SelectItem>
-                  <SelectItem value="completed">Completada</SelectItem>
+                  <SelectItem value="all">Todos los estados</SelectItem>
+                  <SelectItem value="open">Abierta — sin recepción aún</SelectItem>
+                  <SelectItem value="partial">Parcial — con recepción incompleta</SelectItem>
+                  <SelectItem value="completed">Completada — cerrada</SelectItem>
                 </SelectContent>
               </Select>
             </CatalogLabeledField>
             <CatalogSearchField
               id="po-q"
-              placeholder="Código de OC…"
+              placeholder="Buscar por código OC…"
               value={qInput}
               onChange={(ev) => {
                 setPage(1)
                 setQInput(ev.target.value)
               }}
-              className="min-w-0 md:col-span-6"
+              className="min-w-0 md:col-span-5"
             />
             {isBoss ? (
-              <CatalogLabeledField label="Vigencia" className="md:col-span-3">
+              <CatalogLabeledField label="Mostrar en listado" className="md:col-span-4">
                 <Select
                   value={visibility}
                   onValueChange={(v) => {
@@ -1110,50 +723,53 @@ export default function PurchaseOrdersPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">Solo activas</SelectItem>
-                    <SelectItem value="all">Todas</SelectItem>
-                    <SelectItem value="inactive">Solo inactivas</SelectItem>
+                    <SelectItem value="active">Solo órdenes activas</SelectItem>
+                    <SelectItem value="all">Activas e inactivas</SelectItem>
+                    <SelectItem value="inactive">Solo desactivadas</SelectItem>
                   </SelectContent>
                 </Select>
               </CatalogLabeledField>
             ) : null}
-            <p className="text-muted-foreground text-xs md:col-span-12">
+            </div>
+            <p className="text-muted-foreground text-xs leading-relaxed">
               {isHistoryTab ? (
                 <>
-                  Aparecen aquí las OC con al menos una recepción de entrada vinculada. Las parciales pueden seguir
-                  recibiendo material desde{" "}
+                  Órdenes que ya tienen al menos una recepción de entrada. Puede seguir recibiendo
+                  material desde{" "}
                   <Link to="/recepciones-nueva" className="text-primary underline underline-offset-4">
-                    Recepción
+                    Recepción de OC
                   </Link>
                   .
                 </>
               ) : (
                 <>
-                  Órdenes sin recepción registrada. Al vincular una recepción con OC, la orden pasa al historial.{" "}
-                  <span className="font-medium">Parcial</span> aparece al registrar la primera recepción.{" "}
-                  <span className="font-medium">Completada</span> se marca cuando todas las órdenes de trabajo que
-                  usaron material de esta OC tienen su nota de entrega despachada (o cuando el jefe la cierra
-                  manualmente desde el detalle).
+                  Órdenes aún sin recepción registrada. Al vincular la primera recepción, la orden
+                  pasa a la pestaña <span className="font-medium">Con recepción</span>.
                 </>
               )}
               {!isBoss ? (
-                <>
-                  {" "}
-                  Las órdenes desactivadas solo las gestiona jefatura (listado y reactivación).
-                </>
+                <> Las órdenes desactivadas solo las gestiona jefatura.</>
               ) : null}
             </p>
-          </CatalogFilterGrid>
+          </div>
 
-          <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
-            <Table>
+          <div className="po-table-wrap overflow-x-auto">
+            <Table className="min-w-[880px]">
               <TableHeader>
-                <TableRow className={catalogTableHeaderRowClass}>
+                <TableRow className="hover:bg-transparent">
+                  <CatalogTableHead icon={ListOrdered} className="w-14">
+                    N.º
+                  </CatalogTableHead>
                   <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
                   <CatalogTableHead icon={Truck}>Proveedor</CatalogTableHead>
-                  <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
-                  <CatalogTableHead icon={CalendarDays} className="whitespace-nowrap">
-                    Creado
+                  <CatalogTableHead icon={CircleDot} className="po-col-status">
+                    Estado
+                  </CatalogTableHead>
+                  <CatalogTableHead icon={Layers} className="po-col-articles text-right">
+                    Artículos
+                  </CatalogTableHead>
+                  <CatalogTableHead icon={CalendarDays} className="po-col-date">
+                    Fecha pedido
                   </CatalogTableHead>
                   {isHistoryTab ? (
                     <>
@@ -1182,61 +798,59 @@ export default function PurchaseOrdersPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.data.map((r) => {
+                  rows.data.map((r, rowIndex) => {
                     const inactive = r.is_active === false
+                    const rowNum = (rows.from ?? 1) + rowIndex
                     return (
                     <TableRow
                       key={r.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedRowId(r.id)}
-                      onKeyDown={(ev) => {
-                        if (ev.key === "Enter" || ev.key === " ") {
-                          ev.preventDefault()
-                          setSelectedRowId(r.id)
-                        }
-                      }}
+                      data-selected={selectedRowId === r.id ? "true" : "false"}
                       className={cn(
-                        "cursor-pointer border-b transition-colors",
-                        inactive && "bg-muted/30",
-                        selectedRowId === r.id
-                          ? "bg-primary/12 hover:bg-primary/16"
-                          : "hover:bg-muted/60",
+                        "border-b transition-colors",
+                        inactive && "opacity-75",
+                        selectedRowId === r.id && "bg-primary/5",
                       )}
                     >
-                      <TableCell className="p-2 align-middle font-mono text-sm">
+                      <TableCell className="p-3 align-middle tabular-nums text-muted-foreground">
+                        {rowNum}
+                      </TableCell>
+                      <TableCell className="p-3 align-middle">
                         <span className="inline-flex flex-wrap items-center gap-2">
-                          {r.code}
+                          <span className="po-code-pill">{r.code}</span>
                           {inactive ? (
-                            <Badge variant="secondary" className="text-xs font-normal">
+                            <Badge variant="secondary" className="text-[10px] font-normal uppercase">
                               Inactiva
                             </Badge>
                           ) : null}
                         </span>
                       </TableCell>
-                      <TableCell className="p-2 align-middle">
+                      <TableCell className="p-3 align-middle font-medium">
                         {r.supplier?.name ?? `#${r.supplier_id}`}
                       </TableCell>
-                      <TableCell className="p-2 align-middle">
+                      <TableCell className="po-col-status p-3 align-middle">
                         <PurchaseOrderStatusBadge
                           status={r.status}
                           manuallyClosedAt={r.manually_closed_at ?? null}
+                          prominent
                         />
                       </TableCell>
-                      <TableCell className="p-2 align-middle whitespace-nowrap">
-                        {formatDateDMY(r.created_at ?? r.ordered_at)}
+                      <TableCell className="po-col-articles p-3 align-middle text-right tabular-nums font-semibold">
+                        {r.lines_count ?? "—"}
+                      </TableCell>
+                      <TableCell className="po-col-date p-3 align-middle text-sm">
+                        {formatDateDMY(r.ordered_at ?? r.created_at)}
                       </TableCell>
                       {isHistoryTab ? (
                         <>
-                          <TableCell className="p-2 align-middle text-right tabular-nums">
+                          <TableCell className="p-3 align-middle text-right tabular-nums">
                             {r.receipts_count ?? 0}
                           </TableCell>
-                          <TableCell className="p-2 align-middle whitespace-nowrap">
+                          <TableCell className="p-3 align-middle whitespace-nowrap text-sm">
                             {formatDateTime(r.last_receipt_at ?? null)}
                           </TableCell>
                         </>
                       ) : null}
-                      <TableCell className="p-2 align-middle text-right">
+                      <TableCell className="p-3 align-middle text-right">
                         <div className="inline-flex justify-end gap-1" onClick={(ev) => ev.stopPropagation()}>
                           <Link
                             to={`/ordenes-compra/${r.id}/vista-previa`}
@@ -1253,6 +867,7 @@ export default function PurchaseOrdersPage() {
                             title="Ver detalle"
                             aria-label="Ver detalle de la orden"
                             onClick={() => {
+                              setSelectedRowId(r.id)
                               setDetailId(r.id)
                               setDetailOpen(true)
                             }}
@@ -1261,16 +876,17 @@ export default function PurchaseOrdersPage() {
                             <span className="sr-only">Ver detalle</span>
                           </button>
                           {!inactive && !isHistoryTab ? (
-                            <button
-                              type="button"
+                            <Link
+                              to={`/ordenes-compra/${r.id}/editar`}
+                              state={{ from }}
+                              onClick={(ev) => ev.stopPropagation()}
                               className={poActionEditClass}
                               title="Editar cabecera"
                               aria-label="Editar orden de compra"
-                              onClick={() => openEditDialog(r)}
                             >
                               <Pencil className="h-4 w-4" />
                               <span className="sr-only">Editar</span>
-                            </button>
+                            </Link>
                           ) : null}
                           {inactive && isBoss ? (
                             <button
@@ -1315,17 +931,32 @@ export default function PurchaseOrdersPage() {
           </div>
 
           {rows ? (
-            <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <p className="text-muted-foreground min-w-0">
-                {rows.total === 0
-                  ? "Sin resultados con los filtros actuales."
-                  : rows.last_page > 1
-                    ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
-                    : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
+            <div className="po-pagination-bar">
+              <div className="po-pagination-meta">
+                <p className="text-sm">
+                  {rows.total === 0 ? (
+                    "Sin resultados con los filtros actuales."
+                  ) : (
+                    <>
+                      Mostrando <strong>{rows.from ?? 0}</strong> a <strong>{rows.to ?? 0}</strong> de{" "}
+                      <strong>{rows.total}</strong> registros
+                    </>
+                  )}
+                </p>
+                {rows.last_page > 1 ? (
+                  <p className="text-muted-foreground text-xs">
+                    Página {rows.current_page} de {rows.last_page}
+                  </p>
+                ) : null}
+              </div>
+              <div className="po-pagination-controls">
+                {rows.last_page > 1 ? (
+                  <span className="po-page-indicator">
+                    {rows.current_page} / {rows.last_page}
+                  </span>
+                ) : null}
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Por página</span>
+                  <span className="text-muted-foreground text-sm">Por página</span>
                   <Select
                     value={String(perPage)}
                     onValueChange={(v) => {
@@ -1336,7 +967,7 @@ export default function PurchaseOrdersPage() {
                     <SelectTrigger
                       id="purchase-orders-per-page"
                       className={cn(
-                        "h-8 w-[4.5rem] text-sm",
+                        "h-9 w-[4.75rem] text-sm",
                         catalogPaginationSelectTriggerClass,
                       )}
                       aria-label="Registros por página"
@@ -1356,22 +987,24 @@ export default function PurchaseOrdersPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
+                    className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
                     disabled={rows.current_page <= 1 || loading}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     type="button"
                   >
+                    <ChevronLeft className="mr-1 size-4" aria-hidden />
                     Anterior
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
+                    className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
                     disabled={rows.current_page >= rows.last_page || loading}
                     onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
                     type="button"
                   >
                     Siguiente
+                    <ChevronRight className="ml-1 size-4" aria-hidden />
                   </Button>
                 </div>
               </div>
@@ -1380,5 +1013,6 @@ export default function PurchaseOrdersPage() {
         </>
       )}
     </CatalogPageShell>
+    </div>
   )
 }

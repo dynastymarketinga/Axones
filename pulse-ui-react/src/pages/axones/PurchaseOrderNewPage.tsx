@@ -1,34 +1,56 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
   Building2,
-  Calendar,
+  Calendar as CalendarIcon,
   Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronsUpDown,
   ClipboardList,
   Droplet,
   FileText,
   FlaskConical,
   Hash,
+  Info,
   Layers,
   MapPin,
   Package,
+  PencilLine,
   Plus,
   Ruler,
   Scale,
   ShoppingCart,
+  UserPlus,
+  X,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, SupplierRecord } from "@/types/api"
+import {
+  isDuplicatePurchaseOrderCodeMessage,
+  translateApiValidationMessage,
+} from "@/lib/api-validation-es"
+import type { LaravelPaginated, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Calendar as UiCalendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command,
@@ -40,7 +62,7 @@ import {
 } from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
   Select,
@@ -60,7 +82,6 @@ import {
 
 type PoLineDraft = {
   description: string
-  material_id: string
   item_type: "sustrato" | "tinta" | "quimico" | "otros"
   micras: string
   ancho_mm: string
@@ -68,15 +89,16 @@ type PoLineDraft = {
   unit: string
 }
 
-const ADD_ARTICLE_TOOLTIP_LINES = [
-  "Las filas vacías se omiten si hay al menos una válida.",
-  "Si completa material o descripción en una fila, indique cantidad ≥ 0,001.",
-  "Este botón añade otra fila al pedido.",
-] as const
+const ADD_LINE_TOOLTIP =
+  "Agregar otra línea al pedido. Las filas vacías se omiten al guardar si hay al menos una línea válida con cantidad ≥ 0,001."
 
-function parseDecimalInput(raw: string, emptyAsZero = false): number {
+const PO_LINES_PAGE_SIZE = 8
+const PO_VALIDATION_TOAST_MS = 3000
+const PO_FIELD_ERRORS_AUTO_CLEAR_MS = 3000
+
+function parseDecimalInput(raw: string): number {
   const t = raw.trim().replace(/\s+/g, "").replace(",", ".")
-  if (!t) return emptyAsZero ? 0 : Number.NaN
+  if (!t) return Number.NaN
   const n = Number(t)
   return Number.isFinite(n) ? n : Number.NaN
 }
@@ -89,12 +111,39 @@ function toDateInputValue(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+function parseDateInputValue(value: string): Date | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return undefined
+  const [, year, month, day] = match
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+  if (
+    parsed.getFullYear() !== Number(year) ||
+    parsed.getMonth() !== Number(month) - 1 ||
+    parsed.getDate() !== Number(day)
+  ) {
+    return undefined
+  }
+  return parsed
+}
+
+function formatDateInputDisplay(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return "Seleccione fecha…"
+  return `${match[3]}/${match[2]}/${match[1]}`
+}
+
 /** Unidades alineadas con recepción de inventario (`StorePurchaseReceiptRequest`). */
 const PO_LINE_UNITS = ["kg", "unidad", "m", "rollo", "otros"] as const
 type PoLineUnit = (typeof PO_LINE_UNITS)[number]
 
 function isPoLineUnit(u: string): u is PoLineUnit {
   return (PO_LINE_UNITS as readonly string[]).includes(u)
+}
+
+function isPoLineSubmitReady(line: PoLineDraft): boolean {
+  const qty = parseDecimalInput(line.quantity_ordered)
+  const unit = line.unit.trim() || "kg"
+  return Number.isFinite(qty) && qty >= 0.001 && isPoLineUnit(unit)
 }
 
 /**
@@ -124,20 +173,12 @@ function sanitizePositiveDecimalInput(raw: string, maxFracDigits: number): strin
 
 const emptyLine = (): PoLineDraft => ({
   description: "",
-  material_id: "",
   item_type: "sustrato",
   micras: "",
   ancho_mm: "",
   quantity_ordered: "",
   unit: "kg" satisfies PoLineUnit,
 })
-
-const PO_ITEM_TYPES: { value: PoLineDraft["item_type"]; label: string }[] = [
-  { value: "sustrato", label: "Sustrato" },
-  { value: "tinta", label: "Tinta" },
-  { value: "quimico", label: "Químico" },
-  { value: "otros", label: "Otros" },
-] as const
 
 const PO_ITEM_TYPE_META: Record<
   PoLineDraft["item_type"],
@@ -146,6 +187,9 @@ const PO_ITEM_TYPE_META: Record<
     icon: typeof Layers
     iconClass: string
     badgeClass: string
+    rowClass: string
+    selectTriggerClass: string
+    rowNumberClass: string
   }
 > = {
   sustrato: {
@@ -153,25 +197,55 @@ const PO_ITEM_TYPE_META: Record<
     icon: Layers,
     iconClass: "text-emerald-600",
     badgeClass: "border-emerald-500/40 bg-emerald-50/90 text-emerald-950",
+    rowClass:
+      "border-l-4 border-l-emerald-600 !bg-emerald-100/85 hover:!bg-emerald-100/95 [&>td]:bg-transparent",
+    selectTriggerClass: "border-emerald-500/40 bg-emerald-50/95 text-emerald-950 shadow-sm",
+    rowNumberClass: "border-emerald-500/40 bg-emerald-200/70 text-emerald-900",
   },
   tinta: {
     label: "Tinta",
     icon: Droplet,
     iconClass: "text-violet-600",
     badgeClass: "border-violet-500/40 bg-violet-50/90 text-violet-950",
+    rowClass:
+      "border-l-4 border-l-violet-600 !bg-violet-100/85 hover:!bg-violet-100/95 [&>td]:bg-transparent",
+    selectTriggerClass: "border-violet-500/40 bg-violet-50/95 text-violet-950 shadow-sm",
+    rowNumberClass: "border-violet-500/40 bg-violet-200/70 text-violet-900",
   },
   quimico: {
     label: "Químico",
     icon: FlaskConical,
     iconClass: "text-sky-600",
     badgeClass: "border-sky-500/40 bg-sky-50/90 text-sky-950",
+    rowClass:
+      "border-l-4 border-l-sky-600 !bg-sky-100/85 hover:!bg-sky-100/95 [&>td]:bg-transparent",
+    selectTriggerClass: "border-sky-500/40 bg-sky-50/95 text-sky-950 shadow-sm",
+    rowNumberClass: "border-sky-500/40 bg-sky-200/70 text-sky-900",
   },
   otros: {
     label: "Otros",
     icon: Package,
     iconClass: "text-amber-600",
     badgeClass: "border-amber-500/40 bg-amber-50/90 text-amber-950",
+    rowClass:
+      "border-l-4 border-l-amber-600 !bg-amber-100/85 hover:!bg-amber-100/95 [&>td]:bg-transparent",
+    selectTriggerClass: "border-amber-500/40 bg-amber-50/95 text-amber-950 shadow-sm",
+    rowNumberClass: "border-amber-500/40 bg-amber-200/70 text-amber-900",
   },
+}
+
+const PO_ITEM_TYPE_OPTIONS = Object.keys(PO_ITEM_TYPE_META) as PoLineDraft["item_type"][]
+
+const PO_ROW_FIELD_CLASS = "border-white/60 bg-background/90 shadow-sm"
+
+function poInvalidHighlightClass(hasError: boolean) {
+  return hasError
+    ? "border-destructive/80 bg-destructive/[0.06] shadow-[inset_0_0_0_1px_rgba(239,68,68,0.35),0_0_0_3px_rgba(239,68,68,0.12)]"
+    : ""
+}
+
+function poToastError(message: string) {
+  toast.error(message, { duration: PO_VALIDATION_TOAST_MS })
 }
 
 function poFieldIconClass(hasError: boolean, disabled?: boolean) {
@@ -185,19 +259,13 @@ function poFieldIconClass(hasError: boolean, disabled?: boolean) {
   )
 }
 
-function PoItemTypeLabel({
-  type,
-  showLabel = true,
-}: {
-  type: PoLineDraft["item_type"]
-  showLabel?: boolean
-}) {
+function PoItemTypeLabel({ type }: { type: PoLineDraft["item_type"] }) {
   const meta = PO_ITEM_TYPE_META[type]
   const Icon = meta.icon
   return (
     <span className="flex min-w-0 items-center gap-2">
       <Icon className={cn("size-4 shrink-0", meta.iconClass)} aria-hidden />
-      {showLabel ? <span className="truncate">{meta.label}</span> : null}
+      <span className="truncate">{meta.label}</span>
     </span>
   )
 }
@@ -206,20 +274,18 @@ function shouldShowDims(itemType: PoLineDraft["item_type"]) {
   return itemType === "sustrato"
 }
 
-function buildLineDescription(line: PoLineDraft): string | null {
+function buildLineDescription(line: PoLineDraft): string {
   const base = line.description.trim()
   const micras = line.micras.trim()
   const ancho = line.ancho_mm.trim()
   const parts: string[] = []
   if (base) parts.push(base)
-  // Guardar tipo y dimensiones como referencia para Recepción (sin tocar esquema BD).
   parts.push(`Tipo: ${line.item_type}`)
   if (shouldShowDims(line.item_type)) {
     if (micras) parts.push(`Micras: ${micras}`)
     if (ancho) parts.push(`Ancho(mm): ${ancho}`)
   }
-  const out = parts.join(" | ").trim()
-  return out ? out : null
+  return parts.join(" | ").trim()
 }
 
 const OC_CODE_SEQ_KEY = "axones_oc_code_seq_v1"
@@ -255,7 +321,6 @@ function normalizePoLineDraftFromStorage(raw: unknown): PoLineDraft {
   const unit: PoLineUnit = isPoLineUnit(u) ? u : "kg"
   return normalizeLineByBusinessRules({
     description: typeof r.description === "string" ? r.description : "",
-    material_id: typeof r.material_id === "string" ? r.material_id : "",
     item_type,
     micras: typeof r.micras === "string" ? r.micras : "",
     ancho_mm: typeof r.ancho_mm === "string" ? r.ancho_mm : "",
@@ -288,12 +353,31 @@ function buildAutoPoCode(): string {
 function lineHasAnyValue(line: PoLineDraft): boolean {
   return Boolean(
     line.description.trim() ||
-      line.material_id.trim() ||
       line.micras.trim() ||
       line.ancho_mm.trim() ||
       line.quantity_ordered.trim() ||
       line.unit.trim() !== "kg",
   )
+}
+
+function formatPoLinesCount(n: number): string {
+  return n === 1 ? "1 línea" : `${n} líneas`
+}
+
+async function findPurchaseOrderIdByCode(poCode: string): Promise<number | null> {
+  const trimmed = poCode.trim()
+  if (!trimmed) return null
+  try {
+    const res = await apiFetch<LaravelPaginated<PurchaseOrderRow>>("purchase-orders", {
+      query: { q: trimmed, per_page: 20, page: 1 },
+    })
+    const exact = (res.data ?? []).find(
+      (row) => row.code.trim().toLowerCase() === trimmed.toLowerCase(),
+    )
+    return exact?.id ?? null
+  } catch {
+    return null
+  }
 }
 
 export default function PurchaseOrderNewPage() {
@@ -302,10 +386,12 @@ export default function PurchaseOrderNewPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
   const [supplierOpen, setSupplierOpen] = useState(false)
+  const [orderedAtOpen, setOrderedAtOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [supplierListReady, setSupplierListReady] = useState(false)
   const [resolvingSupplier, setResolvingSupplier] = useState(false)
   const supplierResolveFailedForRef = useRef<string | null>(null)
+  const fieldErrorsClearTimerRef = useRef<number | null>(null)
 
   const [supplierId, setSupplierId] = useState("")
   const [code, setCode] = useState("")
@@ -313,6 +399,15 @@ export default function PurchaseOrderNewPage() {
   const [orderedAt, setOrderedAt] = useState(() => toDateInputValue(new Date()))
   const [notes, setNotes] = useState("")
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()])
+  const [linesPage, setLinesPage] = useState(1)
+  const [confirmCreateOpen, setConfirmCreateOpen] = useState(false)
+  const [codeEditConfirmOpen, setCodeEditConfirmOpen] = useState(false)
+  const [codeEditUnlocked, setCodeEditUnlocked] = useState(false)
+  const [duplicatePoDialog, setDuplicatePoDialog] = useState<{
+    open: boolean
+    id: number | null
+    code: string
+  }>({ open: false, id: null, code: "" })
   const [fieldErrors, setFieldErrors] = useState<PoFieldErrors>({})
   const [lineErrors, setLineErrors] = useState<Record<number, PoLineFieldErrors>>({})
 
@@ -325,6 +420,25 @@ export default function PurchaseOrderNewPage() {
     () => lines.some((line) => shouldShowDims(line.item_type)),
     [lines],
   )
+
+  const linesPageCount = useMemo(
+    () => Math.max(1, Math.ceil(lines.length / PO_LINES_PAGE_SIZE)),
+    [lines.length],
+  )
+
+  const safeLinesPage = Math.min(linesPage, linesPageCount)
+
+  const paginatedLineEntries = useMemo(() => {
+    const start = (safeLinesPage - 1) * PO_LINES_PAGE_SIZE
+    return lines.slice(start, start + PO_LINES_PAGE_SIZE).map((line, offset) => ({
+      line,
+      index: start + offset,
+    }))
+  }, [lines, safeLinesPage])
+
+  useEffect(() => {
+    setLinesPage((p) => (p > linesPageCount ? linesPageCount : p))
+  }, [linesPageCount])
 
   const supplierTriggerDisplay = useMemo(() => {
     if (!supplierId.trim()) return { text: "Seleccione…", muted: true }
@@ -443,6 +557,7 @@ export default function PurchaseOrderNewPage() {
     if (parsed) {
       setCode(typeof parsed.code === "string" ? parsed.code : "")
       setCodeTouched(Boolean(parsed.codeTouched))
+      setCodeEditUnlocked(Boolean(parsed.codeTouched))
       setOrderedAt(
         typeof parsed.orderedAt === "string" && parsed.orderedAt
           ? parsed.orderedAt
@@ -455,18 +570,6 @@ export default function PurchaseOrderNewPage() {
         setLines([emptyLine()])
       }
     }
-
-    void (async () => {
-      try {
-        const one = await apiFetch<SupplierRecord>(`suppliers/${proveedorNum}`)
-        setSuppliers((prev) => {
-          if (prev.some((s) => s.id === one.id)) return prev
-          return [...prev, one].sort((a, b) => (a.name || "").localeCompare(b.name || ""))
-        })
-      } catch {
-        /* el combo puede mostrar vacío hasta recargar */
-      }
-    })()
 
     setSearchParams(
       (prev) => {
@@ -520,8 +623,49 @@ export default function PurchaseOrderNewPage() {
     }
   }, [supplierListReady, supplierId, suppliers])
 
+  useEffect(() => {
+    return () => {
+      if (fieldErrorsClearTimerRef.current != null) {
+        window.clearTimeout(fieldErrorsClearTimerRef.current)
+      }
+    }
+  }, [])
+
+  function cancelFieldErrorsAutoClear() {
+    if (fieldErrorsClearTimerRef.current != null) {
+      window.clearTimeout(fieldErrorsClearTimerRef.current)
+      fieldErrorsClearTimerRef.current = null
+    }
+  }
+
+  function scheduleFieldErrorsAutoClear() {
+    cancelFieldErrorsAutoClear()
+    fieldErrorsClearTimerRef.current = window.setTimeout(() => {
+      fieldErrorsClearTimerRef.current = null
+      setFieldErrors({})
+      setLineErrors({})
+    }, PO_FIELD_ERRORS_AUTO_CLEAR_MS) as unknown as number
+  }
+
+  function applyPurchaseOrderValidationErrors(
+    nextField: PoFieldErrors,
+    nextLine: Record<number, PoLineFieldErrors>,
+  ) {
+    cancelFieldErrorsAutoClear()
+    if (nextField.code) setCodeEditUnlocked(true)
+    setFieldErrors(nextField)
+    setLineErrors(nextLine)
+    scheduleFieldErrorsAutoClear()
+    toastPurchaseOrderValidationErrors(nextField, nextLine)
+    focusFirstPurchaseOrderValidationError(nextField, nextLine)
+  }
+
   function addLine() {
-    setLines((prev) => [...prev, emptyLine()])
+    setLines((prev) => {
+      const next = [...prev, emptyLine()]
+      setLinesPage(Math.ceil(next.length / PO_LINES_PAGE_SIZE))
+      return next
+    })
   }
 
   function updateLine(i: number, patch: Partial<PoLineDraft>) {
@@ -537,7 +681,11 @@ export default function PurchaseOrderNewPage() {
   }
 
   function removeLine(i: number) {
-    setLines((prev) => prev.filter((_, j) => j !== i))
+    setLines((prev) => {
+      const next = prev.filter((_, j) => j !== i)
+      setLinesPage((p) => Math.min(p, Math.max(1, Math.ceil(next.length / PO_LINES_PAGE_SIZE))))
+      return next
+    })
     setLineErrors((prev) => {
       const next: Record<number, PoLineFieldErrors> = {}
       for (const [k, v] of Object.entries(prev)) {
@@ -584,8 +732,7 @@ export default function PurchaseOrderNewPage() {
       const errs: PoLineFieldErrors = {}
       const qty = parseDecimalInput(L.quantity_ordered)
       if (!Number.isFinite(qty) || qty < 0.001) {
-        errs.quantity =
-          "Use un número mayor o igual a 0,001 (coma o punto decimal). Ej.: 10 o 10,5."
+        errs.quantity = "Indique cantidad ≥ 0,001."
       }
       const unitTrim = L.unit.trim() || "kg"
       if (!isPoLineUnit(unitTrim)) {
@@ -594,17 +741,7 @@ export default function PurchaseOrderNewPage() {
       if (Object.keys(errs).length) nextLine[i] = errs
     }
 
-    const payloadCandidate = lines
-      .map((L) => ({
-        quantity_ordered: parseDecimalInput(L.quantity_ordered),
-        unit: L.unit.trim() || "kg",
-      }))
-      .filter(
-        (L) =>
-          Number.isFinite(L.quantity_ordered) &&
-          L.quantity_ordered >= 0.001 &&
-          isPoLineUnit(L.unit.trim() || "kg"),
-      )
+    const payloadCandidate = lines.filter(isPoLineSubmitReady)
 
     if (!nextField.linesGeneral && payloadCandidate.length === 0) {
       nextField.linesGeneral =
@@ -625,9 +762,10 @@ export default function PurchaseOrderNewPage() {
     field: PoFieldErrors,
     lineErrs: Record<number, PoLineFieldErrors>,
   ) {
-    if (field.supplier) toast.error(`Proveedor: ${field.supplier}`)
-    if (field.code) toast.error(`Código: ${field.code}`)
-    if (field.linesGeneral) toast.error(`Artículos: ${field.linesGeneral}`)
+    const messages: string[] = []
+    if (field.supplier) messages.push(`Proveedor: ${field.supplier}`)
+    if (field.code) messages.push(`Código: ${field.code}`)
+    if (field.linesGeneral) messages.push(field.linesGeneral)
     const rowIndexes = Object.keys(lineErrs)
       .map(Number)
       .filter((n) => Number.isFinite(n))
@@ -635,9 +773,23 @@ export default function PurchaseOrderNewPage() {
     for (const i of rowIndexes) {
       const row = lineErrs[i]
       const n = i + 1
-      if (row.quantity) toast.error(`Ítem ${n} · Cantidad: ${row.quantity}`)
-      if (row.unit) toast.error(`Ítem ${n} · Unidad: ${row.unit}`)
+      if (row.quantity) messages.push(`Línea ${n}: ${row.quantity}`)
+      if (row.unit) messages.push(`Línea ${n}: ${row.unit}`)
     }
+    if (messages.length === 0) return
+    poToastError(messages.slice(0, 3).join(" · "))
+  }
+
+  function focusLineRow(rowIndex: number) {
+    const page = Math.floor(rowIndex / PO_LINES_PAGE_SIZE) + 1
+    setLinesPage(page)
+    window.requestAnimationFrame(() => {
+      document.getElementById(`po-line-row-${rowIndex}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      })
+      document.getElementById(`po-line-${rowIndex}-qty`)?.focus()
+    })
   }
 
   function focusFirstPurchaseOrderValidationError(
@@ -654,6 +806,7 @@ export default function PurchaseOrderNewPage() {
       return
     }
     if (field.linesGeneral) {
+      setLinesPage(1)
       document.getElementById("po-line-row-0")?.scrollIntoView({ behavior: "smooth", block: "center" })
       return
     }
@@ -662,8 +815,7 @@ export default function PurchaseOrderNewPage() {
       .filter((n) => Number.isFinite(n))
       .sort((a, b) => a - b)[0]
     if (firstRow != null) {
-      document.getElementById(`po-line-row-${firstRow}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
-      document.getElementById(`po-line-${firstRow}-qty`)?.focus()
+      focusLineRow(firstRow)
     }
   }
 
@@ -680,47 +832,29 @@ export default function PurchaseOrderNewPage() {
     if (supplierMsg) next.supplier = supplierMsg
     const codeMsg = first("code")
     if (codeMsg) {
-      next.code =
-        codeMsg.toLowerCase().includes("unique") || codeMsg.toLowerCase().includes("ya")
-          ? "Ese código ya existe. Use otro (ej. OC-2026-244)."
-          : codeMsg
+      const translated = translateApiValidationMessage(codeMsg)
+      next.code = isDuplicatePurchaseOrderCodeMessage(translated)
+        ? "Ese código ya existe. Use otro (ej. OC-2026-244)."
+        : translated
     }
     const linesMsg =
       first("lines") ||
       first("lines.0.quantity_ordered") ||
       first("lines.0.description")
-    if (linesMsg) next.linesGeneral = linesMsg
+    if (linesMsg) next.linesGeneral = translateApiValidationMessage(linesMsg)
     return next
   }
 
-  async function submit(ev: React.FormEvent) {
-    ev.preventDefault()
-
-    const validation = computePurchaseOrderValidation()
-    setFieldErrors(validation.fieldErrors)
-    setLineErrors(validation.lineErrors)
-    if (!validation.ok) {
-      toastPurchaseOrderValidationErrors(validation.fieldErrors, validation.lineErrors)
-      focusFirstPurchaseOrderValidationError(validation.fieldErrors, validation.lineErrors)
-      return
-    }
-
+  async function executeCreatePurchaseOrder() {
     const sid = Number(supplierId)
 
     const payloadLines = lines
+      .filter(isPoLineSubmitReady)
       .map((L) => ({
         description: buildLineDescription(L),
-        material_id: null,
         quantity_ordered: parseDecimalInput(L.quantity_ordered),
         unit: L.unit.trim() || "kg",
-        unit_price: 0,
       }))
-      .filter(
-        (L) =>
-          Number.isFinite(L.quantity_ordered) &&
-          L.quantity_ordered >= 0.001 &&
-          isPoLineUnit(L.unit.trim() || "kg"),
-      )
 
     setSaving(true)
     try {
@@ -745,46 +879,115 @@ export default function PurchaseOrderNewPage() {
     } catch (e) {
       if (e instanceof ApiError) {
         const errs = e.body?.errors
+        const codeMsgs = errs?.code
+        const isDuplicateCode =
+          e.status === 422 &&
+          codeMsgs &&
+          (Array.isArray(codeMsgs) ? codeMsgs : [String(codeMsgs)]).some((msg) =>
+            isDuplicatePurchaseOrderCodeMessage(String(msg)),
+          )
+
+        if (isDuplicateCode) {
+          const existingId = await findPurchaseOrderIdByCode(code.trim())
+          setFieldErrors((prev) => ({
+            ...prev,
+            code: "Ese código ya está registrado. Elija otro o abra la orden existente.",
+          }))
+          setCodeEditUnlocked(true)
+          scheduleFieldErrorsAutoClear()
+          setDuplicatePoDialog({
+            open: true,
+            id: existingId,
+            code: code.trim(),
+          })
+          focusFirstPurchaseOrderValidationError({ code: "duplicate" }, {})
+          return
+        }
+
         if (e.status === 422 && errs && typeof errs === "object" && Object.keys(errs).length) {
           const apiField = mapPurchaseOrderApiValidationErrors(
             errs as Record<string, string[] | string>,
           )
           setFieldErrors((prev) => ({ ...prev, ...apiField }))
+          scheduleFieldErrorsAutoClear()
           focusFirstPurchaseOrderValidationError(apiField, {})
           const flat = Object.values(errs)
             .flat()
-            .map((s) => String(s).trim())
+            .map((s) => translateApiValidationMessage(String(s).trim()))
             .filter(Boolean)
             .filter((x, i, a) => a.indexOf(x) === i)
-          toast.error(flat.length ? flat.join("\n") : e.message)
+          poToastError(flat.length ? flat.join("\n") : translateApiValidationMessage(e.message))
         } else {
-          toast.error(e.message)
+          poToastError(translateApiValidationMessage(e.message))
         }
-      } else toast.error("No se pudo crear la OC.")
+      } else poToastError("No se pudo crear la OC.")
     } finally {
       setSaving(false)
+      setConfirmCreateOpen(false)
     }
   }
 
+  function submit(ev: React.FormEvent) {
+    ev.preventDefault()
+
+    const validation = computePurchaseOrderValidation()
+    if (!validation.ok) {
+      applyPurchaseOrderValidationErrors(validation.fieldErrors, validation.lineErrors)
+      return
+    }
+
+    cancelFieldErrorsAutoClear()
+    setFieldErrors({})
+    setLineErrors({})
+    setConfirmCreateOpen(true)
+  }
+
+  const payloadLinesPreviewCount = useMemo(
+    () => lines.filter(isPoLineSubmitReady).length,
+    [lines],
+  )
+
   return (
     <>
+      <TooltipProvider delayDuration={200}>
       <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+        <div className="min-w-0 flex-1 space-y-3">
+          <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
+            <ShoppingCart className="size-7 shrink-0 text-primary" aria-hidden />
             Nueva orden de compra
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Indique proveedor, artículos y condiciones de la compra. La orden queda abierta; Parcial y Completada las marca el
-            inventario al recibir.
-          </p>
+          <Alert className="border-primary/40 bg-gradient-to-r from-primary/12 via-primary/8 to-primary/5 shadow-sm">
+            <Info className="h-5 w-5 text-primary" aria-hidden />
+            <AlertTitle className="text-base font-semibold text-foreground">
+              ¿Qué registra esta pantalla?
+            </AlertTitle>
+            <AlertDescription className="space-y-2 text-sm leading-relaxed text-foreground/90">
+              <p>
+                <strong>Indique proveedor, artículos y condiciones de la compra.</strong> Aquí se
+                documenta lo que se <strong>pide al proveedor</strong>, no lo que entra al inventario.
+              </p>
+              <p>
+                La orden queda en estado <strong>Abierta</strong>. El inventario la marca{" "}
+                <strong>Parcial</strong> o <strong>Completada</strong> al registrar recepciones
+                físicas en <strong>Recepciones</strong>.
+              </p>
+            </AlertDescription>
+          </Alert>
         </div>
-        <Button type="button" variant="outline" asChild>
-          <Link to={returnTo}>
-            <ArrowLeft aria-hidden />
-            Volver al listado
-          </Link>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="outline" size="icon" className="shrink-0 shadow-sm" asChild>
+              <Link to={returnTo} aria-label="Volver al listado de órdenes de compra">
+                <ArrowLeft aria-hidden />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left" className="max-w-[16rem] text-left">
+            Vuelve al listado de órdenes de compra. Si tenía borrador en esta pantalla, se conserva
+            al regresar desde proveedores.
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <form
@@ -811,16 +1014,6 @@ export default function PurchaseOrderNewPage() {
           </div>
         </div>
 
-        <Alert className="border-primary/30 bg-primary/5">
-          <ShoppingCart className="h-4 w-4 text-primary" aria-hidden />
-          <AlertTitle className="text-foreground">Solicitud de material al proveedor</AlertTitle>
-          <AlertDescription>
-            Esta pantalla registra lo que <strong>se pide</strong>, no lo que entra al inventario. El stock se actualiza
-            en <strong>Recepciones</strong> cuando el inventario confirma la entrada física. Parcial y Completada las
-            marca el inventario al recibir.
-          </AlertDescription>
-        </Alert>
-
         <div className="grid gap-4 md:grid-cols-2">
           <div className="grid gap-2">
             <Label htmlFor="po-supplier-trigger">Proveedor *</Label>
@@ -842,12 +1035,12 @@ export default function PurchaseOrderNewPage() {
                       role="combobox"
                       aria-expanded={supplierOpen}
                       aria-invalid={Boolean(fieldErrors.supplier)}
-                      aria-describedby={fieldErrors.supplier ? "po-supplier-error" : undefined}
+                      title={fieldErrors.supplier ?? undefined}
                       disabled={saving}
                       className={cn(
                         "h-10 w-full justify-between pl-10 pr-3 font-normal",
                         "border-primary/25 bg-background/90",
-                        fieldErrors.supplier && "border-destructive ring-1 ring-destructive/40",
+                        poInvalidHighlightClass(Boolean(fieldErrors.supplier)),
                       )}
                     >
                       <span
@@ -902,6 +1095,7 @@ export default function PurchaseOrderNewPage() {
                               setSupplierOpen(false)
                               setFieldErrors((prev) => {
                                 if (!prev.supplier) return prev
+                                cancelFieldErrorsAutoClear()
                                 const next = { ...prev }
                                 delete next.supplier
                                 return next
@@ -929,80 +1123,167 @@ export default function PurchaseOrderNewPage() {
                 </PopoverContent>
               </Popover>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => persistPoDraftAndGoToNewSupplier()}
-                disabled={saving}
-              >
-                <Plus aria-hidden />
-                Nuevo
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0 shadow-sm"
+                    onClick={() => persistPoDraftAndGoToNewSupplier()}
+                    disabled={saving}
+                    aria-label="Crear proveedor nuevo"
+                  >
+                    <UserPlus aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Crear proveedor nuevo</TooltipContent>
+              </Tooltip>
             </div>
-            {fieldErrors.supplier ? (
-              <p id="po-supplier-error" className="text-destructive text-xs font-medium">
-                {fieldErrors.supplier}
-              </p>
-            ) : null}
           </div>
+          <div className="grid min-w-0 gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Label htmlFor="po-code" className="inline-flex w-fit cursor-help items-center gap-1.5">
+                  <Hash className="size-3.5 text-primary" aria-hidden />
+                  Código único *
+                </Label>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[18rem] text-left">
+                Correlativo único e irrepetible (ej. OC-2026-001). No puede repetirse en otra orden.
+              </TooltipContent>
+            </Tooltip>
+            <div className="flex items-center gap-2">
+              <div className="group/field relative min-w-0 flex-1">
+                <Hash
+                  className={cn(
+                    poFieldIconClass(Boolean(fieldErrors.code), saving),
+                    "top-1/2 -translate-y-1/2",
+                  )}
+                  aria-hidden
+                />
+                <Input
+                  id="po-code"
+                  value={code}
+                  required
+                  maxLength={PO_CODE_MAX_LEN}
+                  disabled={saving}
+                  readOnly={!codeEditUnlocked}
+                  aria-invalid={Boolean(fieldErrors.code)}
+                  title={fieldErrors.code ?? undefined}
+                  onChange={(ev) => {
+                    if (!codeEditUnlocked) return
+                    setCodeTouched(true)
+                    setCode(ev.target.value)
+                    setFieldErrors((prev) => {
+                      if (!prev.code) return prev
+                      cancelFieldErrorsAutoClear()
+                      const next = { ...prev }
+                      delete next.code
+                      return next
+                    })
+                  }}
+                  placeholder="Ej: OC-2026-001"
+                  className={cn(
+                    "pl-10",
+                    !codeEditUnlocked && "cursor-default bg-muted/40",
+                    poInvalidHighlightClass(Boolean(fieldErrors.code)),
+                  )}
+                />
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0 shadow-sm"
+                    disabled={saving || codeEditUnlocked}
+                    aria-label={`Modificar código ${code.trim() || "de la orden"}`}
+                    onClick={() => setCodeEditConfirmOpen(true)}
+                  >
+                    <PencilLine aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Modificar código del pedido</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
           <div className="grid gap-2">
-            <Label htmlFor="po-code">Código único *</Label>
+            <Label htmlFor="po-date" className="inline-flex items-center gap-1.5">
+              <CalendarIcon className="size-3.5 text-primary" aria-hidden />
+              Fecha pedido
+            </Label>
+            <Popover open={orderedAtOpen} onOpenChange={setOrderedAtOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  id="po-date"
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={orderedAtOpen}
+                  disabled={saving}
+                  className={cn(
+                    "group/field h-9 w-full justify-between pl-3 pr-3 font-normal",
+                    "border-primary/25 bg-background/90 shadow-sm",
+                    !orderedAt && "text-muted-foreground",
+                  )}
+                >
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <CalendarIcon
+                      className={cn(
+                        "size-4 shrink-0 transition-colors",
+                        saving
+                          ? "text-muted-foreground/50"
+                          : "text-muted-foreground group-focus-visible:text-primary",
+                      )}
+                      aria-hidden
+                    />
+                    <span className="truncate">{formatDateInputDisplay(orderedAt)}</span>
+                  </span>
+                  <ChevronDown className="ml-1 size-4 shrink-0 opacity-50" aria-hidden />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <UiCalendar
+                  mode="single"
+                  selected={parseDateInputValue(orderedAt)}
+                  defaultMonth={parseDateInputValue(orderedAt) ?? new Date()}
+                  onSelect={(date) => {
+                    if (!date) return
+                    setOrderedAt(toDateInputValue(date))
+                    setOrderedAtOpen(false)
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="grid min-w-0 gap-2">
+            <Label htmlFor="po-notes" className="inline-flex items-center gap-1.5">
+              <FileText className="size-3.5 text-primary" aria-hidden />
+              Notas / observación
+            </Label>
             <div className="group/field relative">
-              <Hash
+              <FileText
                 className={cn(
-                  poFieldIconClass(Boolean(fieldErrors.code), saving),
+                  poFieldIconClass(false, saving),
                   "top-1/2 -translate-y-1/2",
                 )}
                 aria-hidden
               />
               <Input
-                id="po-code"
-                value={code}
-                required
-                maxLength={PO_CODE_MAX_LEN}
+                id="po-notes"
+                value={notes}
                 disabled={saving}
-                aria-invalid={Boolean(fieldErrors.code)}
-                aria-describedby={fieldErrors.code ? "po-code-error" : undefined}
-                onChange={(ev) => {
-                  setCodeTouched(true)
-                  setCode(ev.target.value)
-                  setFieldErrors((prev) => {
-                    if (!prev.code) return prev
-                    const next = { ...prev }
-                    delete next.code
-                    return next
-                  })
-                }}
-                placeholder="ej. OC-2026-001"
-                className={cn(
-                  "pl-10",
-                  fieldErrors.code && "border-destructive focus-visible:ring-destructive",
-                )}
+                onChange={(ev) => setNotes(ev.target.value)}
+                placeholder="Ej: Entrega 15 días · FOB Caracas · Ref. cotización #4521"
+                className="h-9 pl-10"
               />
             </div>
-            {fieldErrors.code ? (
-              <p id="po-code-error" className="text-destructive text-xs font-medium">
-                {fieldErrors.code}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid w-full max-w-full gap-2 sm:w-auto sm:max-w-[11rem]">
-          <Label htmlFor="po-date">Fecha pedido</Label>
-          <div className="group/field relative">
-            <Calendar
-              className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
-              aria-hidden
-            />
-            <Input
-              id="po-date"
-              type="date"
-              value={orderedAt}
-              disabled={saving}
-              onChange={(ev) => setOrderedAt(ev.target.value)}
-              className="min-w-0 pl-10"
-            />
           </div>
         </div>
 
@@ -1027,86 +1308,108 @@ export default function PurchaseOrderNewPage() {
           </div>
         ) : null}
 
-        <div className="grid gap-2">
-          <Label htmlFor="po-notes">Notas / observación (PDF)</Label>
-          <div className="group/field relative">
-            <FileText
-              className={cn(poFieldIconClass(false, saving), "top-3")}
-              aria-hidden
-            />
-            <Textarea
-              id="po-notes"
-              rows={2}
-              value={notes}
-              disabled={saving}
-              onChange={(ev) => setNotes(ev.target.value)}
-              placeholder="Condiciones, referencias o texto que debe aparecer en el PDF…"
-              className="min-h-[4.5rem] pl-10"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-3 rounded-xl border border-primary/15 bg-gradient-to-b from-muted/20 to-background p-4 shadow-sm">
+        <div
+          className={cn(
+            "space-y-3 rounded-xl border border-primary/15 bg-gradient-to-b from-muted/20 to-background p-4 shadow-sm transition-shadow",
+            fieldErrors.linesGeneral && poInvalidHighlightClass(true),
+          )}
+        >
           <div className="flex items-center justify-between gap-2">
             <div className="grid min-w-0 gap-1">
-              <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                 <Package className="size-4 text-primary" aria-hidden />
                 Artículos del pedido
+                <Badge
+                  variant="outline"
+                  className="min-w-[1.75rem] justify-center border-primary/30 bg-primary/5 px-2 text-xs font-semibold tabular-nums text-primary"
+                >
+                  {lines.length}
+                </Badge>
               </h2>
-              {fieldErrors.linesGeneral ? (
-                <p className="text-destructive text-xs font-medium">{fieldErrors.linesGeneral}</p>
-              ) : (
-                <p className="text-muted-foreground text-xs">
-                  Describa material, tipo y cantidad. Las filas vacías se omiten al guardar.
-                </p>
-              )}
+              <p className="text-muted-foreground text-xs">
+                Describa material, tipo y cantidad por línea. Las filas vacías se omiten al guardar.
+              </p>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={addLine}
-              title={ADD_ARTICLE_TOOLTIP_LINES.join(" ")}
-            >
-              <Plus aria-hidden />
-              Agregar ítem
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  disabled={saving}
+                  className="h-8 w-8 shrink-0 shadow-md"
+                  aria-label="Agregar línea al pedido"
+                  onClick={addLine}
+                >
+                  <Plus aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-[15rem] text-left">
+                {ADD_LINE_TOOLTIP}
+              </TooltipContent>
+            </Tooltip>
           </div>
           <div className="overflow-x-auto rounded-xl border border-primary/10 bg-card shadow-inner">
-            {/* Ítems: la OC es solicitud (texto); el alta real ocurre en Recepción. */}
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
                   <TableHead className="w-14">N°</TableHead>
-                  <TableHead className="min-w-[260px]">Material solicitado</TableHead>
+                  <TableHead className="min-w-[260px]">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Package className="size-3.5 text-primary" aria-hidden />
+                      Material solicitado
+                    </span>
+                  </TableHead>
                   <TableHead className="w-36">Tipo</TableHead>
                   {showDimensionColumns ? (
                     <>
-                      <TableHead className="w-24">Micras</TableHead>
-                      <TableHead className="w-24">Ancho</TableHead>
+                      <TableHead className="w-24">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Layers className="size-3.5 text-primary" aria-hidden />
+                          Micras
+                        </span>
+                      </TableHead>
+                      <TableHead className="w-24">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Ruler className="size-3.5 text-primary" aria-hidden />
+                          Ancho
+                        </span>
+                      </TableHead>
                     </>
                   ) : null}
-                  <TableHead className="w-32">Cantidad pedida *</TableHead>
+                  <TableHead className="w-32 align-middle whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Scale className="size-3.5 shrink-0 text-primary" aria-hidden />
+                      Cantidad *
+                    </span>
+                  </TableHead>
                   <TableHead className="w-36">Unidad</TableHead>
-                  <TableHead className="w-20 text-right">Acciones</TableHead>
+                  <TableHead className="w-11 p-0" aria-hidden />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lines.map((line, i) => {
-                  const rowErr = lineErrors[i]
-                  const rowHasError = Boolean(rowErr && Object.keys(rowErr).length > 0)
+                {paginatedLineEntries.map(({ line, index: i }) => {
+                  const rowHasError = Boolean(lineErrors[i] && Object.keys(lineErrors[i]).length > 0)
+                  const typeMeta = PO_ITEM_TYPE_META[line.item_type]
                   return (
-                    <Fragment key={i}>
                       <TableRow
+                        key={i}
                         id={`po-line-row-${i}`}
-                        className={cn(rowHasError && "bg-red-50/40")}
+                        className={cn(
+                          typeMeta.rowClass,
+                          rowHasError && "ring-2 ring-inset ring-destructive/35",
+                        )}
                       >
-                        <TableCell className="align-top">
-                          <div className="flex h-9 items-center justify-center rounded-md border border-primary/20 bg-primary/10 px-2 text-sm font-semibold text-primary">
+                        <TableCell className="align-middle">
+                          <div
+                            className={cn(
+                              "flex h-9 items-center justify-center rounded-md border px-2 text-sm font-semibold",
+                              typeMeta.rowNumberClass,
+                            )}
+                          >
                             {i + 1}
                           </div>
                         </TableCell>
-                        <TableCell className="align-top">
+                        <TableCell className="align-middle">
                           <div className="group/field relative">
                             <Package
                               className={cn(
@@ -1119,17 +1422,16 @@ export default function PurchaseOrderNewPage() {
                               id={`po-line-${i}-requested`}
                               value={line.description}
                               onChange={(ev) => {
-                                const next = ev.target.value
-                                updateLine(i, { description: next, material_id: "" })
+                                updateLine(i, { description: ev.target.value })
                               }}
-                              placeholder="Ej: BOPP transparente 20 micras 520 mm"
+                              placeholder="Ej: BOPP transparente · 20 µ · 520 mm"
                               aria-label={`Material solicitado, fila ${i + 1}`}
                               disabled={saving}
-                              className="pl-10"
+                              className={cn("pl-10", PO_ROW_FIELD_CLASS)}
                             />
                           </div>
                         </TableCell>
-                        <TableCell className="align-top">
+                        <TableCell className="align-middle">
                           <Select
                             value={line.item_type}
                             disabled={saving}
@@ -1143,13 +1445,22 @@ export default function PurchaseOrderNewPage() {
                               })
                             }}
                           >
-                            <SelectTrigger className="h-9 border-primary/15 bg-background/80">
+                            <SelectTrigger
+                              className={cn("h-9 font-medium", typeMeta.selectTriggerClass)}
+                            >
                               <SelectValue placeholder="Tipo..." />
                             </SelectTrigger>
                             <SelectContent>
-                              {PO_ITEM_TYPES.map((t) => (
-                                <SelectItem key={t.value} value={t.value}>
-                                  <PoItemTypeLabel type={t.value} />
+                              {PO_ITEM_TYPE_OPTIONS.map((type) => (
+                                <SelectItem
+                                  key={type}
+                                  value={type}
+                                  className={cn(
+                                    "my-0.5 rounded-md",
+                                    PO_ITEM_TYPE_META[type].badgeClass,
+                                  )}
+                                >
+                                  <PoItemTypeLabel type={type} />
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1158,7 +1469,7 @@ export default function PurchaseOrderNewPage() {
                         {showDimensionColumns ? (
                           shouldShowDims(line.item_type) ? (
                             <>
-                              <TableCell className="align-top">
+                              <TableCell className="align-middle">
                                 <div className="group/field relative">
                                   <Layers
                                     className={cn(
@@ -1178,14 +1489,14 @@ export default function PurchaseOrderNewPage() {
                                         ),
                                       })
                                     }
-                                    placeholder="µ"
+                                    placeholder="20"
                                     disabled={saving}
                                     aria-label={`Micras, fila ${i + 1}`}
-                                    className="pl-9"
+                                    className={cn("pl-9", PO_ROW_FIELD_CLASS)}
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell className="align-top">
+                              <TableCell className="align-middle">
                                 <div className="group/field relative">
                                   <Ruler
                                     className={cn(
@@ -1205,88 +1516,78 @@ export default function PurchaseOrderNewPage() {
                                         ),
                                       })
                                     }
-                                    placeholder="mm"
+                                    placeholder="520"
                                     disabled={saving}
                                     aria-label={`Ancho mm, fila ${i + 1}`}
-                                    className="pl-9"
+                                    className={cn("pl-9", PO_ROW_FIELD_CLASS)}
                                   />
                                 </div>
                               </TableCell>
                             </>
                           ) : (
                             <>
-                              <TableCell className="align-top" aria-hidden />
-                              <TableCell className="align-top" aria-hidden />
+                              <TableCell className="align-middle" aria-hidden />
+                              <TableCell className="align-middle" aria-hidden />
                             </>
                           )
                         ) : null}
-                        <TableCell className="align-top">
-                          <div className="grid gap-1">
-                            <div className="group/field relative">
-                              <Scale
-                                className={cn(
-                                  poFieldIconClass(Boolean(lineErrors[i]?.quantity), saving),
-                                  "top-1/2 -translate-y-1/2",
-                                )}
-                                aria-hidden
-                              />
-                              <Input
-                                id={`po-line-${i}-qty`}
-                                inputMode="decimal"
-                                autoComplete="off"
-                                aria-label={`Cantidad pedida, fila ${i + 1}`}
-                                aria-invalid={Boolean(lineErrors[i]?.quantity)}
-                                aria-describedby={
-                                  lineErrors[i]?.quantity ? `po-line-${i}-qty-err` : undefined
-                                }
-                                value={line.quantity_ordered}
-                                disabled={saving}
-                                onChange={(ev) =>
-                                  updateLine(i, {
-                                    quantity_ordered: sanitizePositiveDecimalInput(
-                                      ev.target.value,
-                                      6,
-                                    ),
-                                  })
-                                }
-                                className={cn(
-                                  "pl-9",
-                                  lineErrors[i]?.quantity &&
-                                    "border-destructive focus-visible:ring-destructive",
-                                )}
-                              />
-                            </div>
-                            {lineErrors[i]?.quantity ? (
-                              <p id={`po-line-${i}-qty-err`} className="text-destructive text-xs">
-                                {lineErrors[i].quantity}
-                              </p>
-                            ) : null}
+                        <TableCell className="align-middle">
+                          <div className="group/field relative">
+                            <Scale
+                              className={cn(
+                                poFieldIconClass(Boolean(lineErrors[i]?.quantity), saving),
+                                "top-1/2 -translate-y-1/2",
+                              )}
+                              aria-hidden
+                            />
+                            <Input
+                              id={`po-line-${i}-qty`}
+                              inputMode="decimal"
+                              autoComplete="off"
+                              aria-label={`Cantidad pedida, fila ${i + 1}`}
+                              aria-invalid={Boolean(lineErrors[i]?.quantity)}
+                              title={lineErrors[i]?.quantity ?? undefined}
+                              value={line.quantity_ordered}
+                              disabled={saving}
+                              placeholder="Ej: 500"
+                              onChange={(ev) =>
+                                updateLine(i, {
+                                  quantity_ordered: sanitizePositiveDecimalInput(
+                                    ev.target.value,
+                                    6,
+                                  ),
+                                })
+                              }
+                              className={cn(
+                                "h-9 pl-9",
+                                PO_ROW_FIELD_CLASS,
+                                poInvalidHighlightClass(Boolean(lineErrors[i]?.quantity)),
+                              )}
+                            />
                           </div>
                         </TableCell>
-                        <TableCell className="align-top">
-                          <div className="grid gap-1">
-                            <Select
-                              value={
-                                isPoLineUnit(line.unit.trim()) ? line.unit.trim() : "kg"
-                              }
-                              onValueChange={(v) =>
-                                updateLine(i, { unit: v as PoLineUnit })
-                              }
+                        <TableCell className="align-middle">
+                          <Select
+                            value={
+                              isPoLineUnit(line.unit.trim()) ? line.unit.trim() : "kg"
+                            }
+                            onValueChange={(v) =>
+                              updateLine(i, { unit: v as PoLineUnit })
+                            }
+                          >
+                            <SelectTrigger
+                              id={`po-line-${i}-unit`}
+                              className={cn(
+                                "h-9",
+                                PO_ROW_FIELD_CLASS,
+                                poInvalidHighlightClass(Boolean(lineErrors[i]?.unit)),
+                              )}
+                              aria-label={`Unidad, fila ${i + 1}`}
+                              aria-invalid={Boolean(lineErrors[i]?.unit)}
+                              title={lineErrors[i]?.unit ?? undefined}
                             >
-                              <SelectTrigger
-                                id={`po-line-${i}-unit`}
-                                className={cn(
-                                  "h-9 border-primary/15 bg-background/80",
-                                  lineErrors[i]?.unit && "border-destructive ring-1 ring-destructive/40",
-                                )}
-                                aria-label={`Unidad, fila ${i + 1}`}
-                                aria-invalid={Boolean(lineErrors[i]?.unit)}
-                                aria-describedby={
-                                  lineErrors[i]?.unit ? `po-line-${i}-unit-err` : undefined
-                                }
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="kg">kg</SelectItem>
                                 <SelectItem value="unidad">Unidad</SelectItem>
@@ -1295,35 +1596,63 @@ export default function PurchaseOrderNewPage() {
                                 <SelectItem value="otros">Otros</SelectItem>
                               </SelectContent>
                             </Select>
-                            {lineErrors[i]?.unit ? (
-                              <p id={`po-line-${i}-unit-err`} className="text-destructive text-xs">
-                                {lineErrors[i].unit}
-                              </p>
-                            ) : null}
-                          </div>
                         </TableCell>
-                        <TableCell className="align-top">
-                          <div className="flex items-start justify-end">
+                        <TableCell className="align-middle">
+                          <div className="flex items-center justify-center">
                             <Button
                               type="button"
                               size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-base font-semibold leading-none text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              disabled={lines.length <= 1}
+                              variant="ghost"
+                              className="h-8 w-8 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              disabled={lines.length <= 1 || saving}
                               onClick={() => removeLine(i)}
                               aria-label={`Eliminar fila ${i + 1}`}
-                              title={`Eliminar fila ${i + 1}`}
                             >
-                              ×
+                              <X className="size-4" aria-hidden />
                             </Button>
                           </div>
                         </TableCell>
                       </TableRow>
-                    </Fragment>
                   )
                 })}
               </TableBody>
             </Table>
+            {lines.length > PO_LINES_PAGE_SIZE ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-primary/10 bg-muted/20 px-3 py-2 text-sm">
+                <p className="text-muted-foreground text-xs">
+                  Líneas {(safeLinesPage - 1) * PO_LINES_PAGE_SIZE + 1}–
+                  {Math.min(safeLinesPage * PO_LINES_PAGE_SIZE, lines.length)} de{" "}
+                  {formatPoLinesCount(lines.length)}
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shadow-sm"
+                    disabled={safeLinesPage <= 1 || saving}
+                    onClick={() => setLinesPage((p) => Math.max(1, p - 1))}
+                    aria-label="Página anterior de líneas"
+                  >
+                    <ChevronLeft className="size-4" aria-hidden />
+                  </Button>
+                  <span className="text-muted-foreground min-w-[5.5rem] text-center text-xs font-medium">
+                    Pág. {safeLinesPage} / {linesPageCount}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shadow-sm"
+                    disabled={safeLinesPage >= linesPageCount || saving}
+                    onClick={() => setLinesPage((p) => Math.min(linesPageCount, p + 1))}
+                    aria-label="Página siguiente de líneas"
+                  >
+                    <ChevronRight className="size-4" aria-hidden />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -1338,7 +1667,110 @@ export default function PurchaseOrderNewPage() {
           </Button>
         </div>
       </form>
+
+      <AlertDialog open={confirmCreateOpen} onOpenChange={setConfirmCreateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Crear orden de compra?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-left">
+              <span className="block">
+                Se registrará la orden <strong>{code.trim() || "—"}</strong> con{" "}
+                <strong>{formatPoLinesCount(payloadLinesPreviewCount)}</strong> válida(s) para el
+                proveedor seleccionado.
+              </span>
+              <span className="block">
+                El <strong>código único es obligatorio y no puede repetirse</strong>. Si ya existe
+                otra orden con el mismo código, el sistema no permitirá guardar.
+              </span>
+              <span className="block">
+                Esto es una <strong>solicitud de compra</strong>; el inventario no cambia hasta
+                registrar la recepción física.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Revisar formulario</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(ev) => {
+                ev.preventDefault()
+                void executeCreatePurchaseOrder()
+              }}
+            >
+              {saving ? "Guardando…" : "Sí, crear orden"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={codeEditConfirmOpen} onOpenChange={setCodeEditConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Modificar código de la orden?</AlertDialogTitle>
+            <AlertDialogDescription className="text-left">
+              ¿Desea modificar el código <strong>{code.trim() || "—"}</strong>?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setCodeEditUnlocked(true)
+                setCodeTouched(true)
+                window.requestAnimationFrame(() => {
+                  const el = document.getElementById("po-code") as HTMLInputElement | null
+                  el?.focus()
+                  el?.select()
+                })
+              }}
+            >
+              Sí, modificar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={duplicatePoDialog.open}
+        onOpenChange={(open) => setDuplicatePoDialog((prev) => ({ ...prev, open }))}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Código de orden ya registrado</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-left">
+              <span className="block">
+                Ya existe una orden con el código <strong>{duplicatePoDialog.code}</strong>.
+              </span>
+              <span className="block">
+                Puede cambiar el correlativo en el formulario o abrir la orden existente para
+                consultarla.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cambiar código</AlertDialogCancel>
+            {duplicatePoDialog.id != null ? (
+              <AlertDialogAction
+                onClick={() => {
+                  navigate(`/ordenes-compra/${duplicatePoDialog.id}/vista-previa`)
+                }}
+              >
+                Abrir orden existente
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction
+                onClick={() => {
+                  navigate(returnTo)
+                }}
+              >
+                Ir al listado
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </div>
+      </TooltipProvider>
     </>
   )
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import {
   ArrowLeft,
@@ -213,6 +214,13 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
     props.selectedPurchaseOrderRow?.code?.trim() ||
     null
 
+  const primaryItemTypeKey = useMemo(() => {
+    const firstLine = props.freeLines.find((line) => line.item_type.trim())
+    return firstLine ? receiptUiLabelToItemTypeKey(firstLine.item_type) : "sustrato"
+  }, [props.freeLines])
+
+  const primaryItemTypeMeta = PURCHASE_ITEM_TYPE_META[primaryItemTypeKey]
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6 p-4 md:p-6">
@@ -222,6 +230,10 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               <PackagePlus className="size-7 shrink-0 text-primary" aria-hidden />
               Ingreso de material
             </h1>
+            <p className="text-muted-foreground max-w-3xl text-sm leading-relaxed">
+              Punto de partida del stock: registre aquí las cantidades físicas que entran al
+              inventario (con factura; la orden de compra es opcional).
+            </p>
             <Alert className="border-primary/40 bg-gradient-to-r from-primary/12 via-primary/8 to-primary/5 shadow-sm">
               <Info className="h-5 w-5 text-primary" aria-hidden />
               <AlertTitle className="text-base font-semibold text-foreground">
@@ -260,15 +272,26 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
           className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
         >
           <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 space-y-2">
               <p className="text-muted-foreground text-xs">Documento de recepción</p>
-              <Badge
-                variant="outline"
-                className="mt-1 rounded-md border-primary/35 bg-primary/5 px-2.5 py-1 text-sm font-semibold text-primary shadow-sm"
-              >
-                <Scale className="mr-1.5 size-3.5" aria-hidden />
-                Recepción · Entrada al inventario
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className="rounded-md border-primary/35 bg-primary/5 px-2.5 py-1 text-sm font-semibold text-primary shadow-sm"
+                >
+                  <Scale className="mr-1.5 size-3.5" aria-hidden />
+                  Recepción · Entrada al inventario
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={cn("rounded-md px-2.5 py-1 text-sm font-semibold shadow-sm", primaryItemTypeMeta.badgeClass)}
+                >
+                  <PurchaseItemTypeLabel typeKey={primaryItemTypeKey} />
+                </Badge>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Área de ingreso según el tipo de la primera línea válida.
+              </p>
             </div>
             <div className="shrink-0 text-right">
               <p className="text-muted-foreground text-xs">Correlativo de recepción</p>
@@ -277,6 +300,24 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </h2>
             </div>
           </div>
+
+          <Alert className="border-primary/35 bg-gradient-to-r from-primary/10 via-primary/5 to-background shadow-sm">
+            <Scale className="h-5 w-5 text-primary" aria-hidden />
+            <AlertTitle className="text-base font-semibold text-foreground">
+              Cantidades reales en inventario
+            </AlertTitle>
+            <AlertDescription className="space-y-2 text-sm leading-relaxed text-foreground/90">
+              <p>
+                Esta pantalla es el registro oficial de <strong>entrada física</strong> al inventario:
+                lo que guarde aquí es lo que suma al stock del material y queda trazado en movimientos.
+              </p>
+              <p>
+                Use <strong>kg reales en báscula</strong> o lo documentado en la factura de este despacho.
+                Si vincula una orden de compra, el sistema cruza líneas y respeta lo pendiente; sin OC
+                registra la cantidad que indique.
+              </p>
+            </AlertDescription>
+          </Alert>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2">
@@ -369,7 +410,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="h-10 w-10 shrink-0"
+                      className="h-10 w-10 shrink-0 shadow-sm"
                       onClick={props.persistReceiptDraftAndGoToNewSupplier}
                       disabled={props.saving}
                       aria-label="Crear proveedor"
@@ -552,7 +593,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="h-10 w-10 shrink-0"
+                      className="h-10 w-10 shrink-0 shadow-sm"
                       disabled={props.saving}
                       onClick={props.navigateToNewPurchaseOrder}
                       aria-label="Crear orden de compra"
@@ -564,8 +605,11 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                 </Tooltip>
               </div>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                Puede recibir contra una OC abierta o parcial, o dejar{" "}
-                <strong>entrada directa (sin OC)</strong> si el material no tiene pedido previo.
+                <strong>Sin orden de compra:</strong> elija tipo, material y la cantidad física que entra
+                (kg en báscula o factura); no hay tope de pedido.{" "}
+                <strong>Con orden de compra:</strong> en cada fila use la línea de la OC; en cantidad
+                recibida registre lo recibido en este despacho (puede ser menor al sugerido, pero no
+                mayor que lo pendiente de esa línea).
               </p>
             </div>
 
@@ -637,16 +681,22 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </p>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={props.saving}
-                  onClick={() => props.goToCreateMaterialFromReceipt()}
-                >
-                  <PackagePlus className="h-4 w-4" aria-hidden />
-                  Crear material
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      disabled={props.saving}
+                      className="h-8 w-8 shrink-0 shadow-sm"
+                      aria-label="Crear material en catálogo"
+                      onClick={() => props.goToCreateMaterialFromReceipt()}
+                    >
+                      <PackagePlus className="size-4" aria-hidden />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Crear material</TooltipContent>
+                </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -669,7 +719,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-primary/10 bg-card shadow-inner">
+            <div className="po-doc-lines-table overflow-x-auto rounded-xl border border-primary/10 bg-card shadow-inner">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -682,7 +732,12 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         </span>
                       </TableHead>
                     ) : null}
-                    <TableHead className="w-40">Tipo</TableHead>
+                    <TableHead className="w-40">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Layers className="size-3.5 text-primary" aria-hidden />
+                        Tipo
+                      </span>
+                    </TableHead>
                     <TableHead className="min-w-[210px]">
                       <span className="inline-flex items-center gap-1.5">
                         <Package className="size-3.5 text-primary" aria-hidden />
@@ -712,7 +767,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       </span>
                     </TableHead>
                     <TableHead className="w-32">Unidad</TableHead>
-                    <TableHead className="w-11 p-0" aria-hidden />
+                    <TableHead className="w-[4.5rem] p-0 text-center">
+                      <span className="sr-only">Acciones</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -728,7 +785,11 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       <TableRow
                         key={i}
                         id={`receipt-row-${i}`}
-                        className={cn(typeMeta.rowClass, rowHasError && "ring-2 ring-inset ring-destructive/35")}
+                        data-po-line-type={typeKey}
+                        className={cn(
+                          typeMeta.rowClass,
+                          rowHasError && "ring-2 ring-inset ring-destructive/35",
+                        )}
                       >
                         <TableCell className="align-middle">
                           <div
@@ -749,8 +810,17 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                 )
                                 if (!pol) return null
                                 return (
-                                  <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
-                                    {props.formatPolLabel(pol)}
+                                  <div className="group/field relative">
+                                    <Package
+                                      className={cn(
+                                        documentFieldIconClass(false, props.saving),
+                                        "top-1/2 -translate-y-1/2",
+                                      )}
+                                      aria-hidden
+                                    />
+                                    <div className="flex h-9 items-center rounded-md border border-white/60 bg-background/90 px-3 pl-10 text-sm font-medium shadow-sm">
+                                      {props.formatPolLabel(pol)}
+                                    </div>
                                   </div>
                                 )
                               })()
@@ -774,8 +844,13 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                               })
                             }}
                           >
-                            <SelectTrigger className={cn("h-9 font-medium", typeMeta.selectTriggerClass)}>
-                              <SelectValue placeholder="Tipo..." />
+                            <SelectTrigger
+                              className={cn(
+                                "h-9 gap-2 font-medium [&>span]:flex [&>span]:min-w-0 [&>span]:flex-1",
+                                typeMeta.selectTriggerClass,
+                              )}
+                            >
+                              <PurchaseItemTypeLabel typeKey={typeKey} />
                             </SelectTrigger>
                             <SelectContent>
                               {PURCHASE_ITEM_TYPE_KEYS.map((itemType) => (
@@ -998,7 +1073,23 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                           </Select>
                         </TableCell>
                         <TableCell className="align-middle">
-                          <div className="flex items-center justify-center">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                                  disabled={props.saving}
+                                  aria-label={`Crear material desde fila ${i + 1}`}
+                                  onClick={() => props.goToCreateMaterialFromReceipt(i)}
+                                >
+                                  <PackagePlus className="size-4" aria-hidden />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">Crear material</TooltipContent>
+                            </Tooltip>
                             <Button
                               type="button"
                               size="icon"

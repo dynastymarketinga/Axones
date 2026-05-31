@@ -283,6 +283,46 @@
   font-size: 0.9375rem;
 }
 
+.po-doc-lines-table tbody tr[data-po-line-type="sustrato"] {
+  background-color: rgb(209 250 229 / 0.85) !important;
+  border-left: 4px solid rgb(5 150 105);
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="sustrato"]:hover {
+  background-color: rgb(209 250 229 / 0.95) !important;
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="tinta"] {
+  background-color: rgb(237 233 254 / 0.85) !important;
+  border-left: 4px solid rgb(124 58 237);
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="tinta"]:hover {
+  background-color: rgb(237 233 254 / 0.95) !important;
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="quimico"] {
+  background-color: rgb(224 242 254 / 0.85) !important;
+  border-left: 4px solid rgb(2 132 199);
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="quimico"]:hover {
+  background-color: rgb(224 242 254 / 0.95) !important;
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="otros"] {
+  background-color: rgb(254 243 199 / 0.85) !important;
+  border-left: 4px solid rgb(217 119 6);
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type="otros"]:hover {
+  background-color: rgb(254 243 199 / 0.95) !important;
+}
+
+.po-doc-lines-table tbody tr[data-po-line-type] > td {
+  background-color: transparent !important;
+}
+
 .po-deactivate-dialog {
   max-width: min(calc(100vw - 1.5rem), 42rem) !important;
 }

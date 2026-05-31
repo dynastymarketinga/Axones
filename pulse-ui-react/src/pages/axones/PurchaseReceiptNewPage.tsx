@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText, PackagePlus, Scale } from "lucide-react"
 import { toast } from "sonner"
@@ -307,6 +307,28 @@ function purchaseOrderStatusHint(status: string): string {
   return status
 }
 
+function isPurchaseOrderReceiptEligible(po: PurchaseOrderRow): boolean {
+  return (
+    (po.status === "open" || po.status === "partial") &&
+    po.is_active !== false &&
+    !po.manually_closed_at
+  )
+}
+
+function sortPurchaseOrdersForReceipt(
+  rows: PurchaseOrderRow[],
+  preferredSupplierId: number | null,
+): PurchaseOrderRow[] {
+  return [...rows].sort((a, b) => {
+    if (preferredSupplierId != null && preferredSupplierId > 0) {
+      const aMatch = a.supplier_id === preferredSupplierId ? 0 : 1
+      const bMatch = b.supplier_id === preferredSupplierId ? 0 : 1
+      if (aMatch !== bMatch) return aMatch - bMatch
+    }
+    return (b.code || "").localeCompare(a.code || "", "es")
+  })
+}
+
 function formatReceiptCode(id: number | null | undefined): string {
   const n = Number(id)
   if (!Number.isFinite(n) || n < 1) return "REC-———"
@@ -419,31 +441,31 @@ export default function PurchaseReceiptNewPage() {
     prevSupplierRef.current = supplierId
   }, [supplierId])
 
-  useEffect(() => {
-    if (!supplierId) {
-      setPurchaseOrderOptions([])
-      setPoListLoading(false)
-      return
-    }
-    let cancelled = false
+  const loadPurchaseOrderOptions = useCallback(async () => {
     setPoListLoading(true)
-    void (async () => {
-      try {
-        const res = await apiFetch<LaravelPaginated<PurchaseOrderRow>>("purchase-orders", {
-          query: { supplier_id: String(supplierId), per_page: 100, page: 1 },
-        })
-        const eligible = res.data.filter((po) => po.status === "open" || po.status === "partial")
-        if (!cancelled) setPurchaseOrderOptions(eligible)
-      } catch {
-        if (!cancelled) setPurchaseOrderOptions([])
-      } finally {
-        if (!cancelled) setPoListLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
+    try {
+      const res = await apiFetch<LaravelPaginated<PurchaseOrderRow>>("purchase-orders", {
+        query: { per_page: 100, page: 1 },
+      })
+      const eligible = sortPurchaseOrdersForReceipt(
+        res.data.filter(isPurchaseOrderReceiptEligible),
+        supplierId,
+      )
+      setPurchaseOrderOptions(eligible)
+    } catch {
+      setPurchaseOrderOptions([])
+    } finally {
+      setPoListLoading(false)
     }
   }, [supplierId])
+
+  useEffect(() => {
+    void loadPurchaseOrderOptions()
+  }, [loadPurchaseOrderOptions])
+
+  useEffect(() => {
+    if (poComboOpen) void loadPurchaseOrderOptions()
+  }, [poComboOpen, loadPurchaseOrderOptions])
 
   useEffect(() => {
     if (!purchaseOrderId) {
@@ -1154,22 +1176,20 @@ export default function PurchaseReceiptNewPage() {
                       variant="outline"
                       role="combobox"
                       aria-expanded={poComboOpen}
-                      disabled={saving || !supplierId || poListLoading}
+                      disabled={saving || poListLoading}
                       className={cn(
                         "h-10 w-full justify-between pl-10 pr-3 font-normal",
                         purchaseOrderError ? "border-red-500 focus-visible:ring-red-500" : "",
                       )}
                     >
                       <span className={cn("truncate text-left", !purchaseOrderId && "text-muted-foreground")}>
-                        {!supplierId
-                          ? "Seleccione proveedor primero…"
-                          : poListLoading
-                            ? "Cargando órdenes…"
-                            : purchaseOrderId
-                              ? `${purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code ?? "…"} · ${purchaseOrderStatusHint(
+                        {poListLoading
+                          ? "Cargando órdenes…"
+                          : purchaseOrderId
+                            ? `${purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code ?? "…"} · ${purchaseOrderStatusHint(
                                 purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
                               )}${poDetailLoading ? " (cargando…)" : ""}`
-                              : "Entrada directa (sin OC)…"}
+                            : "Entrada directa (sin OC)…"}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
@@ -1180,33 +1200,35 @@ export default function PurchaseReceiptNewPage() {
                     <CommandInput placeholder="Buscar por código OC…" />
                     <CommandList className="max-h-60">
                       <CommandEmpty>
-                        {supplierId && !poListLoading
-                          ? "No hay órdenes abiertas o parciales. Use «Sin orden de compra» para entrada directa."
-                          : "Seleccione un proveedor."}
+                        {poListLoading
+                          ? "Cargando órdenes de compra…"
+                          : "No hay órdenes abiertas o parciales. Use «Sin orden de compra» para entrada directa."}
                       </CommandEmpty>
                       <CommandGroup>
-                        {supplierId ? (
-                          <CommandItem
-                            value="sin orden de compra entrada directa"
-                            onSelect={() => clearPurchaseOrder()}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                !purchaseOrderId ? "opacity-100" : "opacity-0",
-                              )}
-                              aria-hidden
-                            />
-                            <span className="font-medium">Sin orden de compra</span>
-                            <span className="text-muted-foreground ml-2 text-xs">Entrada directa al inventario</span>
-                          </CommandItem>
-                        ) : null}
+                        <CommandItem
+                          value="sin orden de compra entrada directa"
+                          onSelect={() => clearPurchaseOrder()}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              !purchaseOrderId ? "opacity-100" : "opacity-0",
+                            )}
+                            aria-hidden
+                          />
+                          <span className="font-medium">Sin orden de compra</span>
+                          <span className="text-muted-foreground ml-2 text-xs">Entrada directa al inventario</span>
+                        </CommandItem>
                         {purchaseOrderOptions.map((po) => (
                           <CommandItem
                             key={po.id}
-                            value={`${po.code} ${po.status}`}
+                            value={`${po.code} ${po.supplier?.name ?? ""} ${po.status}`}
                             onSelect={() => {
                               setPurchaseOrderId(po.id)
+                              if (po.supplier_id > 0 && po.supplier_id !== supplierId) {
+                                setSupplierId(po.supplier_id)
+                                if (supplierError) setSupplierError(false)
+                              }
                               if (purchaseOrderError) setPurchaseOrderError(false)
                               setPoComboOpen(false)
                             }}
@@ -1219,8 +1241,9 @@ export default function PurchaseReceiptNewPage() {
                               aria-hidden
                             />
                             <span className="truncate">{po.code}</span>
-                            <span className="text-muted-foreground ml-2 text-xs">
+                            <span className="text-muted-foreground ml-2 truncate text-xs">
                               {purchaseOrderStatusHint(po.status)}
+                              {po.supplier?.name ? ` · ${po.supplier.name}` : ""}
                             </span>
                           </CommandItem>
                         ))}

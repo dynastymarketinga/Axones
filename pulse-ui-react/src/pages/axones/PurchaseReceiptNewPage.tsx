@@ -267,9 +267,9 @@ function polRemainingQty(line: PurchaseOrderLineDetail): number {
   return Math.max(0, o - r)
 }
 
+/** Etiqueta de estado en recepciones: no mostrar «Parcial»; las OC elegibles se presentan como «Abierta». */
 function purchaseOrderStatusHint(status: string): string {
-  if (status === "open") return "Abierta"
-  if (status === "partial") return "Parcial"
+  if (status === "open" || status === "partial") return "Abierta"
   if (status === "completed") return "Completada"
   if (status === "cancelled") return "Completada"
   return status

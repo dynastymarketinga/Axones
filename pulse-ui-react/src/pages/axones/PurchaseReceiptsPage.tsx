@@ -1,26 +1,46 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { CalendarDays, Eraser, Eye, FileText, Hash, ListOrdered, Search, Truck } from "lucide-react"
+import {
+  Barcode,
+  CalendarDays,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Eye,
+  Filter,
+  Hash,
+  Layers,
+  ListOrdered,
+  PackagePlus,
+  Printer,
+  Ruler,
+  Settings2,
+  Truck,
+  Type,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
+import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
-  AXONES_INVENTORY_FILTER_INPUT_CLASS,
-  AXONES_INVENTORY_PAGE_CLASS,
-  AxonesInventoryModuleNav,
-  AxonesPageHeader,
-  AxonesTableCard,
-} from "@/components/axones/inventory-page-layout"
+  CatalogTableHead,
+  CatalogTableHeadRight,
+} from "@/components/axones/CatalogTableHead"
+import {
+  catalogPaginationOutlineButtonClass,
+  catalogPaginationSelectTriggerClass,
+  catalogSelectTriggerClass,
+} from "@/components/axones/catalog-list-classes"
 import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Calendar as UiCalendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Dialog,
   DialogContent,
@@ -28,14 +48,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { formatDateInputDisplay, parseDateInputValue, toDateInputValue } from "@/pages/axones/purchase-document-form-ui"
+import { formatDateTime } from "@/pages/axones/purchase-order-shared"
+import "./purchase-order-list.css"
 
 type ReceiptRow = {
   id: number
@@ -65,34 +96,19 @@ type ReceiptRow = {
   }>
 }
 
-function formatApiDateToDisplay(value: string): string {
-  const trimmed = value.trim()
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
-  if (!match) return "01/01/2001"
-  return `${match[3]}/${match[2]}/${match[1]}`
-}
+const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
-function parseApiDate(value: string): Date | undefined {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
-  if (!match) return undefined
-  const [, year, month, day] = match
-  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
-  if (
-    parsed.getFullYear() !== Number(year) ||
-    parsed.getMonth() !== Number(month) - 1 ||
-    parsed.getDate() !== Number(day)
-  ) {
-    return undefined
-  }
-  return parsed
-}
+const poActionIconBase =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow-sm"
 
-function formatDateToApi(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
-}
+const poActionPrintClass = cn(
+  poActionIconBase,
+  "border-sky-400/50 text-sky-600 hover:bg-sky-500/10 dark:text-sky-400",
+)
+const poActionEyeClass = cn(
+  poActionIconBase,
+  "border-violet-400/50 text-violet-600 hover:bg-violet-500/10 dark:text-violet-400",
+)
 
 function receiptSupplierLabel(row: ReceiptRow): string {
   return row.supplier?.name || row.supplier_name || "—"
@@ -109,89 +125,103 @@ function formatReceiptCode(id: number | null | undefined): string {
   return `REC-${String(Math.trunc(n)).padStart(6, "0")}`
 }
 
+function receiptMaterialNames(row: ReceiptRow): string[] {
+  return Array.from(
+    new Set(
+      (row.lines ?? [])
+        .map((line) => line.material)
+        .filter((material): material is NonNullable<typeof material> => Boolean(material))
+        .map((material) => (material.name || "").trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+function receiptMaterialNamesSummary(row: ReceiptRow): string {
+  const unique = receiptMaterialNames(row)
+  if (!unique.length) return "—"
+  if (unique.length <= 2) return unique.join(" · ")
+  return `${unique.slice(0, 2).join(" · ")} +${unique.length - 2} más`
+}
+
 export default function PurchaseReceiptsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialPage = Number(searchParams.get("page") || "1")
-  const [page, setPage] = useState(Number.isFinite(initialPage) && initialPage > 0 ? initialPage : 1)
-  const [supplierInput, setSupplierInput] = useState(searchParams.get("supplier_name") || "")
-  const [invoiceInput, setInvoiceInput] = useState(searchParams.get("invoice_number") || "")
-  const [fromInput, setFromInput] = useState(searchParams.get("from") || "")
-  const [toInput, setToInput] = useState(searchParams.get("to") || "")
-  const [supplierFilter, setSupplierFilter] = useState(searchParams.get("supplier_name") || "")
-  const [invoiceFilter, setInvoiceFilter] = useState(searchParams.get("invoice_number") || "")
-  const [fromFilter, setFromFilter] = useState(searchParams.get("from") || "")
-  const [toFilter, setToFilter] = useState(searchParams.get("to") || "")
+
+  const [page, setPage] = useState(() => {
+    const n = Number(searchParams.get("page") || "1")
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1
+  })
+  const [perPage, setPerPage] = useState(20)
+
+  const [supplierInput, setSupplierInput] = useState(() => searchParams.get("supplier_name")?.trim() ?? "")
+  const [invoiceInput, setInvoiceInput] = useState(() => searchParams.get("invoice_number")?.trim() ?? "")
+  const [materialInput, setMaterialInput] = useState(() => searchParams.get("material_term")?.trim() ?? "")
+  const [fromInput, setFromInput] = useState(() => searchParams.get("from")?.trim() ?? "")
+  const [toInput, setToInput] = useState(() => searchParams.get("to")?.trim() ?? "")
+
+  const [supplierFilter, setSupplierFilter] = useState(supplierInput)
+  const [invoiceFilter, setInvoiceFilter] = useState(invoiceInput)
+  const [materialFilter, setMaterialFilter] = useState(materialInput)
+  const [fromFilter, setFromFilter] = useState(fromInput)
+  const [toFilter, setToFilter] = useState(toInput)
+
+  const textDebounceRef = useRef<number | null>(null)
+
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ReceiptRow> | null>(null)
+  const [selectedRowId, setSelectedRowId] = useState<number | null>(null)
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptRow | null>(null)
   const [selectedReceiptDetail, setSelectedReceiptDetail] = useState<ReceiptRow | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
-  function syncQuery(next: {
-    page: number
-    supplier_name?: string
-    invoice_number?: string
-    from?: string
-    to?: string
-  }) {
-    const params = new URLSearchParams()
-    if (next.page > 1) params.set("page", String(next.page))
-    if (next.supplier_name) params.set("supplier_name", next.supplier_name)
-    if (next.invoice_number) params.set("invoice_number", next.invoice_number)
-    if (next.from) params.set("from", next.from)
-    if (next.to) params.set("to", next.to)
-    setSearchParams(params)
-  }
+  useEffect(() => {
+    if (textDebounceRef.current) window.clearTimeout(textDebounceRef.current)
+    textDebounceRef.current = window.setTimeout(() => {
+      setSupplierFilter(supplierInput.trim())
+      setInvoiceFilter(invoiceInput.trim())
+      setMaterialFilter(materialInput.trim())
+      setPage(1)
+    }, 320)
+    return () => {
+      if (textDebounceRef.current) window.clearTimeout(textDebounceRef.current)
+    }
+  }, [supplierInput, invoiceInput, materialInput])
 
-  function setPageAndQuery(nextPage: number) {
-    setPage(nextPage)
-    syncQuery({
-      page: nextPage,
-      supplier_name: supplierFilter || undefined,
-      invoice_number: invoiceFilter || undefined,
-      from: fromFilter || undefined,
-      to: toFilter || undefined,
-    })
-  }
-
-  function applyFilters() {
+  useEffect(() => {
     if (fromInput && toInput && fromInput > toInput) {
       toast.error("La fecha desde no puede ser mayor que la fecha hasta.")
       return
     }
-
-    setPage(1)
-    const supplier = supplierInput.trim()
-    const invoice = invoiceInput.trim()
-    setSupplierFilter(supplier)
-    setInvoiceFilter(invoice)
     setFromFilter(fromInput)
     setToFilter(toInput)
-    syncQuery({
-      page: 1,
-      supplier_name: supplier || undefined,
-      invoice_number: invoice || undefined,
-      from: fromInput || undefined,
-      to: toInput || undefined,
-    })
-  }
+    setPage(1)
+  }, [fromInput, toInput])
+
+  useEffect(() => {
+    const next = new URLSearchParams()
+    if (page > 1) next.set("page", String(page))
+    if (supplierFilter) next.set("supplier_name", supplierFilter)
+    if (invoiceFilter) next.set("invoice_number", invoiceFilter)
+    if (materialFilter) next.set("material_term", materialFilter)
+    if (fromFilter) next.set("from", fromFilter)
+    if (toFilter) next.set("to", toFilter)
+    setSearchParams(next, { replace: true })
+  }, [page, supplierFilter, invoiceFilter, materialFilter, fromFilter, toFilter, setSearchParams])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await apiFetch<LaravelPaginated<ReceiptRow>>(
-        "purchase-receipts",
-        {
-          query: {
-            page,
-            per_page: 20,
-            supplier_name: supplierFilter || undefined,
-            invoice_number: invoiceFilter || undefined,
-            from: fromFilter || undefined,
-            to: toFilter || undefined,
-          },
+      const data = await apiFetch<LaravelPaginated<ReceiptRow>>("purchase-receipts", {
+        query: {
+          page,
+          per_page: perPage,
+          supplier_name: supplierFilter || undefined,
+          invoice_number: invoiceFilter || undefined,
+          material_term: materialFilter || undefined,
+          from: fromFilter || undefined,
+          to: toFilter || undefined,
         },
-      )
+      })
       setRows(data)
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -200,51 +230,11 @@ export default function PurchaseReceiptsPage() {
     } finally {
       setLoading(false)
     }
-  }, [fromFilter, invoiceFilter, page, supplierFilter, toFilter])
-
-  useEffect(() => {
-    const nextSupplier = searchParams.get("supplier_name") || ""
-    const nextInvoice = searchParams.get("invoice_number") || ""
-    const nextFrom = searchParams.get("from") || ""
-    const nextTo = searchParams.get("to") || ""
-    const nextPageRaw = Number(searchParams.get("page") || "1")
-    const nextPage = Number.isFinite(nextPageRaw) && nextPageRaw > 0 ? nextPageRaw : 1
-
-    setSupplierInput(nextSupplier)
-    setInvoiceInput(nextInvoice)
-    setFromInput(nextFrom)
-    setToInput(nextTo)
-    setSupplierFilter(nextSupplier)
-    setInvoiceFilter(nextInvoice)
-    setFromFilter(nextFrom)
-    setToFilter(nextTo)
-    setPage(nextPage)
-  }, [searchParams])
-
-  function receiptMaterialNames(row: ReceiptRow) {
-    return Array.from(
-      new Set(
-        (row.lines ?? [])
-          .map((line) => line.material)
-          .filter((material): material is NonNullable<typeof material> => Boolean(material))
-          .map((material) => (material.name || "").trim())
-          .filter(Boolean),
-      ),
-    )
-  }
-
-  function receiptMaterialNamesSummary(row: ReceiptRow) {
-    const unique = receiptMaterialNames(row)
-    if (!unique.length) return "—"
-    if (unique.length <= 2) return unique.join(" · ")
-    return `${unique.slice(0, 2).join(" · ")} +${unique.length - 2} más`
-  }
+  }, [fromFilter, invoiceFilter, materialFilter, page, perPage, supplierFilter, toFilter])
 
   useEffect(() => {
     void load()
   }, [load])
-
-  const showInitialSkeleton = loading && rows === null
 
   useEffect(() => {
     if (!selectedReceipt?.id) {
@@ -272,379 +262,431 @@ export default function PurchaseReceiptsPage() {
     }
   }, [selectedReceipt?.id])
 
+  const showInitialSkeleton = loading && rows === null
+
+  function openDetail(row: ReceiptRow) {
+    setSelectedRowId(row.id)
+    setSelectedReceipt(row)
+  }
+
   return (
-    <div className={AXONES_INVENTORY_PAGE_CLASS}>
-      <AxonesPageHeader
+    <div className="po-list-shell">
+      <CatalogPageShell
         title="Recepción de material"
-        description="Historial de ingresos registrados en inventario."
-        actions={
-          <Button type="button" asChild>
-            <Link to="/recepciones-nueva">Nueva recepción</Link>
+        subtitle="Historial de ingresos registrados en inventario: factura, proveedor y cruce con órdenes de compra."
+        icon={PackagePlus}
+        action={
+          <Button type="button" asChild className="shadow-sm">
+            <Link to="/recepciones-nueva">
+              <PackagePlus className="mr-2 size-4" aria-hidden />
+              Nueva recepción
+            </Link>
           </Button>
         }
-      />
-
-      <AxonesInventoryModuleNav active="recepciones-oc" />
-
-      {showInitialSkeleton ? (
-        <div className="space-y-4">
-          <PageLoadingBlock />
-          <PageLoadingBlock />
-        </div>
-      ) : (
-        <>
-          <AxonesTableCard>
-          <div className="border-b p-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-10">
-        <div className="grid gap-2 xl:col-span-2">
-          <Label htmlFor="receipt-from" className="inline-flex items-center gap-2 font-semibold text-foreground">
-            <CalendarDays className="h-4 w-4 text-primary" />
-            Fecha desde
-          </Label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                id="receipt-from"
-                type="button"
-                variant="outline"
-                className={`w-full justify-start text-left font-normal ${AXONES_INVENTORY_FILTER_INPUT_CLASS}`}
-              >
-                {formatApiDateToDisplay(fromInput)}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <UiCalendar
-                mode="single"
-                selected={parseApiDate(fromInput)}
-                onSelect={(date) => setFromInput(date ? formatDateToApi(date) : "")}
-              />
-            </PopoverContent>
-          </Popover>
-        </div>
-        <div className="grid gap-2 xl:col-span-2">
-          <Label htmlFor="receipt-to" className="inline-flex items-center gap-2 font-semibold text-foreground">
-            <CalendarDays className="h-4 w-4 text-primary" />
-            Fecha hasta
-          </Label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                id="receipt-to"
-                type="button"
-                variant="outline"
-                className={`w-full justify-start text-left font-normal ${AXONES_INVENTORY_FILTER_INPUT_CLASS}`}
-              >
-                {formatApiDateToDisplay(toInput)}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <UiCalendar
-                mode="single"
-                selected={parseApiDate(toInput)}
-                onSelect={(date) => setToInput(date ? formatDateToApi(date) : "")}
-              />
-            </PopoverContent>
-          </Popover>
-        </div>
-        <div className="grid gap-2 xl:col-span-2">
-          <Label htmlFor="receipt-supplier" className="inline-flex items-center gap-2 font-semibold text-foreground">
-            <Truck className="h-4 w-4 text-primary" />
-            Proveedor
-          </Label>
-          <Input
-            id="receipt-supplier"
-            placeholder="Nombre de proveedor..."
-            value={supplierInput}
-            className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
-            onChange={(ev) => setSupplierInput(ev.target.value)}
-            onKeyDown={(ev) => {
-              if (ev.key === "Enter") applyFilters()
-            }}
-          />
-        </div>
-        <div className="grid gap-2 xl:col-span-2">
-          <Label htmlFor="receipt-invoice" className="inline-flex items-center gap-2 font-semibold text-foreground">
-            <Hash className="h-4 w-4 text-primary" />
-            N° Factura
-          </Label>
-          <Input
-            id="receipt-invoice"
-            placeholder="Número de factura..."
-            value={invoiceInput}
-            className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
-            onChange={(ev) => setInvoiceInput(ev.target.value.toUpperCase().slice(0, 15))}
-            onKeyDown={(ev) => {
-              if (ev.key === "Enter") applyFilters()
-            }}
-          />
-        </div>
-        <div className="flex w-full items-end gap-2 xl:col-span-2 xl:justify-end">
-          <Button
-            type="button"
-            onClick={applyFilters}
-            className="flex-1 px-3 sm:min-w-28 sm:px-4 lg:flex-1 xl:min-w-40 xl:flex-none xl:px-6"
-          >
-            <Search className="mr-2 h-4 w-4" />
-            Buscar
-          </Button>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  aria-label="Limpiar filtros"
-                  className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800"
-                  onClick={() => {
-                    setPage(1)
-                    setSupplierInput("")
-                    setInvoiceInput("")
-                    setFromInput("")
-                    setToInput("")
-                    setSupplierFilter("")
-                    setInvoiceFilter("")
-                    setFromFilter("")
-                    setToFilter("")
-                    setSearchParams(new URLSearchParams())
-                  }}
-                >
-                  <Eraser className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Limpiar filtros</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+      >
+        {showInitialSkeleton ? (
+          <div className="space-y-4">
+            <PageLoadingBlock />
+            <PageLoadingBlock />
           </div>
-          </div>
+        ) : (
+          <>
+            <div className="po-filter-bar space-y-4 p-4 md:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Filter className="size-4 text-primary" aria-hidden />
+                <p className="text-sm font-medium">Filtrar listado</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-12">
+                <CatalogLabeledField label="Fecha desde" className="md:col-span-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "h-11 w-full justify-between font-normal",
+                          catalogSelectTriggerClass,
+                          !fromInput && "text-muted-foreground",
+                        )}
+                      >
+                        <span className="truncate">
+                          {fromInput ? formatDateInputDisplay(fromInput) : "Seleccione…"}
+                        </span>
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <UiCalendar
+                        mode="single"
+                        selected={parseDateInputValue(fromInput)}
+                        onSelect={(date) => setFromInput(date ? toDateInputValue(date) : "")}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </CatalogLabeledField>
+                <CatalogLabeledField label="Fecha hasta" className="md:col-span-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "h-11 w-full justify-between font-normal",
+                          catalogSelectTriggerClass,
+                          !toInput && "text-muted-foreground",
+                        )}
+                      >
+                        <span className="truncate">
+                          {toInput ? formatDateInputDisplay(toInput) : "Seleccione…"}
+                        </span>
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <UiCalendar
+                        mode="single"
+                        selected={parseDateInputValue(toInput)}
+                        onSelect={(date) => setToInput(date ? toDateInputValue(date) : "")}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </CatalogLabeledField>
+                <CatalogLabeledField label="Proveedor" icon={Truck} className="md:col-span-3">
+                  <Input
+                    id="rc-filter-supplier"
+                    placeholder="Nombre de proveedor…"
+                    value={supplierInput}
+                    className={cn("h-11", catalogSelectTriggerClass)}
+                    onChange={(ev) => setSupplierInput(ev.target.value)}
+                  />
+                </CatalogLabeledField>
+                <CatalogLabeledField label="N° Factura" icon={Hash} className="md:col-span-2">
+                  <Input
+                    id="rc-filter-invoice"
+                    placeholder="Número de factura…"
+                    value={invoiceInput}
+                    maxLength={15}
+                    className={cn("h-11 uppercase", catalogSelectTriggerClass)}
+                    onChange={(ev) => setInvoiceInput(ev.target.value.toUpperCase().slice(0, 15))}
+                  />
+                </CatalogLabeledField>
+                <CatalogSearchField
+                  id="rc-filter-material"
+                  label="Material"
+                  placeholder="Buscar por nombre o SKU…"
+                  value={materialInput}
+                  onChange={(ev) => setMaterialInput(ev.target.value)}
+                  className="md:col-span-3"
+                />
+              </div>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                Listado de entradas físicas al inventario. Use los filtros para acotar por fecha,
+                proveedor, factura o material. Para registrar una nueva entrada use{" "}
+                <Link to="/recepciones-nueva" className="text-primary underline underline-offset-4">
+                  Nueva recepción
+                </Link>
+                .
+              </p>
+            </div>
 
-          <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="font-bold text-foreground">
-                <ListOrdered className="h-4 w-4" />
-              </TableHead>
-              <TableHead className="font-bold text-foreground">Proveedor</TableHead>
-              <TableHead className="font-bold text-foreground">Material</TableHead>
-              <TableHead className="font-bold text-foreground">N° Factura</TableHead>
-              <TableHead className="font-bold text-foreground">N° OC (referencia)</TableHead>
-              <TableHead className="font-bold text-foreground">Fecha recepción</TableHead>
-              <TableHead className="text-right font-bold text-foreground">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <LoadingTableRow colSpan={7} />
-            ) : !rows?.data.length ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
-                  Sin recepciones registradas todavía.
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.data.map((r) => (
-                <TableRow
-                  key={r.id}
-                  className="group hover:bg-transparent data-[state=selected]:bg-transparent focus-within:bg-transparent"
-                >
-                  <TableCell className="transition-colors group-hover:bg-muted/60">{formatReceiptCode(r.id)}</TableCell>
-                  <TableCell className="transition-colors group-hover:bg-muted/60">{receiptSupplierLabel(r)}</TableCell>
-                  <TableCell className="max-w-[26rem] truncate transition-colors group-hover:bg-muted/60" title={receiptMaterialNamesSummary(r)}>
-                    {receiptMaterialNamesSummary(r)}
-                  </TableCell>
-                  <TableCell className="transition-colors group-hover:bg-muted/60">{r.invoice_number || "—"}</TableCell>
-                  <TableCell className="transition-colors group-hover:bg-muted/60">
-                    {r.without_purchase_order ? (
-                      <span className="text-muted-foreground text-xs font-medium">Sin OC</span>
+            <div className="po-table-wrap overflow-x-auto">
+              <Table className="min-w-[960px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <CatalogTableHead icon={ListOrdered} className="w-14">
+                      N.º
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Barcode}>Recepción</CatalogTableHead>
+                    <CatalogTableHead icon={Truck}>Proveedor</CatalogTableHead>
+                    <CatalogTableHead icon={Layers} className="min-w-[10rem]">
+                      Material
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Hash}>N° Factura</CatalogTableHead>
+                    <CatalogTableHead icon={ClipboardList}>N° OC</CatalogTableHead>
+                    <CatalogTableHead icon={CalendarDays} className="po-col-date whitespace-nowrap">
+                      Fecha recepción
+                    </CatalogTableHead>
+                    <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
+                      Acciones
+                    </CatalogTableHeadRight>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <LoadingTableRow colSpan={8} />
+                  ) : !rows?.data.length ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-muted-foreground">
+                        Sin recepciones registradas con los filtros actuales.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.data.map((r, rowIndex) => {
+                      const rowNum = (rows.from ?? 1) + rowIndex
+                      return (
+                        <TableRow
+                          key={r.id}
+                          data-selected={selectedRowId === r.id ? "true" : "false"}
+                          className={cn(
+                            "border-b transition-colors",
+                            selectedRowId === r.id && "bg-primary/5",
+                          )}
+                        >
+                          <TableCell className="p-3 align-middle tabular-nums text-muted-foreground">
+                            {rowNum}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle">
+                            <span className="po-code-pill">{formatReceiptCode(r.id)}</span>
+                          </TableCell>
+                          <TableCell className="p-3 align-middle font-medium">
+                            {receiptSupplierLabel(r)}
+                          </TableCell>
+                          <TableCell
+                            className="max-w-[16rem] truncate p-3 align-middle text-sm"
+                            title={receiptMaterialNamesSummary(r)}
+                          >
+                            {receiptMaterialNamesSummary(r)}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle tabular-nums">
+                            {r.invoice_number || "—"}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle">
+                            {r.without_purchase_order ? (
+                              <span className="text-muted-foreground text-xs font-medium">Sin OC</span>
+                            ) : (
+                              r.purchase_order_reference || "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="po-col-date p-3 align-middle text-sm">
+                            {formatDateTime(r.received_at)}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle text-right">
+                            <div className="inline-flex justify-end gap-1">
+                              <button
+                                type="button"
+                                className={poActionEyeClass}
+                                title="Ver detalle"
+                                aria-label="Ver detalle de la recepción"
+                                onClick={() => openDetail(r)}
+                              >
+                                <Eye className="h-4 w-4" />
+                                <span className="sr-only">Ver detalle</span>
+                              </button>
+                              <Link
+                                to={`/recepciones-oc/${r.id}/vista-previa`}
+                                className={poActionPrintClass}
+                                title="Vista previa / PDF"
+                              >
+                                <Printer className="h-4 w-4" />
+                                <span className="sr-only">Vista previa</span>
+                              </Link>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {rows ? (
+              <div className="po-pagination-bar">
+                <div className="po-pagination-meta">
+                  <p className="text-sm">
+                    {rows.total === 0 ? (
+                      "Sin resultados con los filtros actuales."
                     ) : (
-                      r.purchase_order_reference || "—"
+                      <>
+                        Mostrando <strong>{rows.from ?? 0}</strong> a <strong>{rows.to ?? 0}</strong> de{" "}
+                        <strong>{rows.total}</strong> registros
+                      </>
                     )}
-                  </TableCell>
-                  <TableCell className="transition-colors group-hover:bg-muted/60">
-                    {r.received_at
-                      ? String(r.received_at).slice(0, 19).replace("T", " ")
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-right transition-colors group-hover:bg-muted/60">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        className="h-8 w-8 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
-                        title="Ver detalles"
-                        aria-label="Ver detalles"
-                        onClick={() => setSelectedReceipt(r)}
+                  </p>
+                  {rows.last_page > 1 ? (
+                    <p className="text-muted-foreground text-xs">
+                      Página {rows.current_page} de {rows.last_page}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="po-pagination-controls">
+                  {rows.last_page > 1 ? (
+                    <span className="po-page-indicator">
+                      {rows.current_page} / {rows.last_page}
+                    </span>
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-sm">Por página</span>
+                    <Select
+                      value={String(perPage)}
+                      onValueChange={(v) => {
+                        setPerPage(Number(v))
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="purchase-receipts-per-page"
+                        className={cn("h-9 w-[4.75rem] text-sm", catalogPaginationSelectTriggerClass)}
+                        aria-label="Registros por página"
                       >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        className="h-8 w-8 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
-                        title="Vista previa"
-                        aria-label="Vista previa"
-                        asChild
-                      >
-                        <Link to={`/recepciones-oc/${r.id}/vista-previa`}>
-                          <FileText className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-          </div>
-          </AxonesTableCard>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PER_PAGE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt} value={String(opt)}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+                      disabled={rows.current_page <= 1 || loading}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      type="button"
+                    >
+                      <ChevronLeft className="mr-1 size-4" aria-hidden />
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+                      disabled={rows.current_page >= rows.last_page || loading}
+                      onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                      type="button"
+                    >
+                      Siguiente
+                      <ChevronRight className="ml-1 size-4" aria-hidden />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
 
-          {rows && rows.last_page > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Página {rows.current_page} de {rows.last_page} · {rows.total}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPageAndQuery(Math.max(1, page - 1))}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPageAndQuery(Math.min(rows.last_page, page + 1))}
-                >
-                  Siguiente
-                </Button>
+        <Dialog
+          open={selectedReceipt !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedReceipt(null)
+              setSelectedReceiptDetail(null)
+              setSelectedRowId(null)
+            }
+          }}
+        >
+          <DialogContent className="po-detail-dialog flex w-[min(calc(100vw-1.5rem),48rem)] max-w-none flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
+            <DialogHeader className="po-detail-dialog-header space-y-0 px-6 pb-4 pt-6 text-left">
+              <DialogTitle className="text-xl">
+                Detalle {formatReceiptCode(selectedReceiptDetail?.id ?? selectedReceipt?.id)}
+              </DialogTitle>
+              <DialogDescription className="text-sm">
+                Resumen operativo de la recepción y detalle de líneas / materiales.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 px-6 py-5">
+              <div className="po-detail-hero grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-muted-foreground text-xs">Proveedor</p>
+                  <p className="text-sm font-medium">
+                    {receiptSupplierLabelNullable(selectedReceiptDetail ?? selectedReceipt)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">N° Factura</p>
+                  <p className="text-sm font-medium">
+                    {selectedReceiptDetail?.invoice_number || selectedReceipt?.invoice_number || "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Fecha recepción</p>
+                  <p className="text-sm font-medium">
+                    {formatDateTime(
+                      selectedReceiptDetail?.received_at ?? selectedReceipt?.received_at ?? null,
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">N° OC (referencia)</p>
+                  <p className="text-sm font-medium">
+                    {selectedReceiptDetail?.purchase_order_reference ||
+                      selectedReceipt?.purchase_order_reference ||
+                      "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Líneas</p>
+                  <p className="text-sm font-medium tabular-nums">
+                    {selectedReceiptDetail?.lines_count ??
+                      selectedReceiptDetail?.lines?.length ??
+                      selectedReceipt?.lines_count ??
+                      selectedReceipt?.lines?.length ??
+                      "—"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="po-table-wrap max-h-[52vh] overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <CatalogTableHead icon={Barcode}>SKU</CatalogTableHead>
+                      <CatalogTableHead icon={Layers}>Material</CatalogTableHead>
+                      <CatalogTableHead icon={Type}>Tipo</CatalogTableHead>
+                      <CatalogTableHead icon={Hash} className="text-right">
+                        Cantidad
+                      </CatalogTableHead>
+                      <CatalogTableHead icon={Ruler}>Unidad</CatalogTableHead>
+                      <CatalogTableHead icon={Ruler} className="text-right">
+                        Micras
+                      </CatalogTableHead>
+                      <CatalogTableHead icon={Ruler} className="text-right">
+                        Ancho
+                      </CatalogTableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loadingDetail ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-muted-foreground">
+                          <span className="inline-flex items-center gap-2">
+                            <InlineSpinner />
+                            Cargando detalle…
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ) : selectedReceiptDetail?.lines?.length ? (
+                      selectedReceiptDetail.lines.map((line, index) => (
+                        <TableRow key={`${selectedReceiptDetail.id}-${index}-${line.material?.sku || "linea"}`}>
+                          <TableCell>{line.material?.sku || "—"}</TableCell>
+                          <TableCell>{line.material?.name || "—"}</TableCell>
+                          <TableCell>{line.item_type || "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{line.quantity ?? "—"}</TableCell>
+                          <TableCell>{line.unit || "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{line.micras ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{line.ancho_mm ?? "—"}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-muted-foreground">
+                          Sin detalle de líneas para esta recepción.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             </div>
-          ) : null}
-        </>
-      )}
-
-      <Dialog
-        open={selectedReceipt !== null}
-        onOpenChange={(open) => (!open ? (setSelectedReceipt(null), setSelectedReceiptDetail(null)) : null)}
-      >
-        <DialogContent className="w-[95vw] max-w-6xl">
-          <DialogHeader>
-            <DialogTitle>
-              Detalle de recepción #{selectedReceipt?.id ?? "—"}
-            </DialogTitle>
-            <DialogDescription>
-              Resumen operativo de la recepción y detalle de líneas/materiales.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-3 rounded-md border p-3 text-sm md:grid-cols-3">
-            <div>
-              <p className="text-muted-foreground text-xs">ID</p>
-              <p className="font-medium">{formatReceiptCode(selectedReceiptDetail?.id ?? selectedReceipt?.id)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Fecha recepción</p>
-              <p className="font-medium">
-                {(selectedReceiptDetail?.received_at ?? selectedReceipt?.received_at)
-                  ? String(selectedReceiptDetail?.received_at ?? selectedReceipt?.received_at)
-                    .slice(0, 19)
-                    .replace("T", " ")
-                  : "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">N° OC (referencia)</p>
-              <p className="font-medium">{selectedReceiptDetail?.purchase_order_reference || selectedReceipt?.purchase_order_reference || "—"}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Proveedor</p>
-              <p className="font-medium">
-                {receiptSupplierLabelNullable(selectedReceiptDetail ?? selectedReceipt)}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">N° Factura</p>
-              <p className="font-medium">{selectedReceiptDetail?.invoice_number || selectedReceipt?.invoice_number || "—"}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Líneas</p>
-              <p className="font-medium">
-                {selectedReceiptDetail?.lines_count
-                  ?? selectedReceiptDetail?.lines?.length
-                  ?? selectedReceipt?.lines_count
-                  ?? selectedReceipt?.lines?.length
-                  ?? "—"}
-              </p>
-            </div>
-          </div>
-
-          <div className="max-h-[52vh] overflow-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="sticky left-0 z-20 bg-card">SKU</TableHead>
-                  <TableHead className="sticky left-[12rem] z-20 bg-card">Material</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Cantidad</TableHead>
-                  <TableHead>Unidad</TableHead>
-                  <TableHead>Micras</TableHead>
-                  <TableHead>Ancho</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loadingDetail ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">
-                      <span className="inline-flex items-center gap-2">
-                        <InlineSpinner />
-                        Cargando detalle...
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ) : selectedReceiptDetail?.lines?.length ? (
-                  selectedReceiptDetail.lines.map((line, index) => (
-                    <TableRow key={`${selectedReceiptDetail.id}-${index}-${line.material?.sku || "linea"}`}>
-                      <TableCell className="sticky left-0 z-10 bg-card">{line.material?.sku || "—"}</TableCell>
-                      <TableCell className="sticky left-[12rem] z-10 bg-card">{line.material?.name || "—"}</TableCell>
-                      <TableCell>{line.item_type || "—"}</TableCell>
-                      <TableCell>{line.quantity ?? "—"}</TableCell>
-                      <TableCell>{line.unit || "—"}</TableCell>
-                      <TableCell>{line.micras ?? "—"}</TableCell>
-                      <TableCell>{line.ancho_mm ?? "—"}</TableCell>
-                    </TableRow>
-                  ))
-                ) : selectedReceipt?.lines?.length ? (
-                  selectedReceipt.lines.map((line, index) => (
-                    <TableRow key={`${selectedReceipt.id}-${index}-${line.material?.sku || "linea"}`}>
-                      <TableCell className="sticky left-0 z-10 bg-card">{line.material?.sku || "—"}</TableCell>
-                      <TableCell className="sticky left-[12rem] z-10 bg-card">{line.material?.name || "—"}</TableCell>
-                      <TableCell>{line.item_type || "—"}</TableCell>
-                      <TableCell>{line.quantity ?? "—"}</TableCell>
-                      <TableCell>{line.unit || "—"}</TableCell>
-                      <TableCell>{line.micras ?? "—"}</TableCell>
-                      <TableCell>{line.ancho_mm ?? "—"}</TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">
-                      Sin detalle de líneas para esta recepción.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      </CatalogPageShell>
     </div>
   )
 }

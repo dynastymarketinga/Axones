@@ -301,24 +301,6 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
             </div>
           </div>
 
-          <Alert className="border-primary/35 bg-gradient-to-r from-primary/10 via-primary/5 to-background shadow-sm">
-            <Scale className="h-5 w-5 text-primary" aria-hidden />
-            <AlertTitle className="text-base font-semibold text-foreground">
-              Cantidades reales en inventario
-            </AlertTitle>
-            <AlertDescription className="space-y-2 text-sm leading-relaxed text-foreground/90">
-              <p>
-                Esta pantalla es el registro oficial de <strong>entrada física</strong> al inventario:
-                lo que guarde aquí es lo que suma al stock del material y queda trazado en movimientos.
-              </p>
-              <p>
-                Use <strong>kg reales en báscula</strong> o lo documentado en la factura de este despacho.
-                Si vincula una orden de compra, el sistema cruza líneas y respeta lo pendiente; sin OC
-                registra la cantidad que indique.
-              </p>
-            </AlertDescription>
-          </Alert>
-
           <div className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="rc-supplier-trigger" className="inline-flex items-center gap-1.5">
@@ -548,7 +530,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         <CommandEmpty>
                           {props.poListLoading
                             ? "Cargando ordenes de compra..."
-                            : "No hay ordenes abiertas o parciales. Use 'Sin orden de compra' para entrada directa."}
+                            : "No hay ordenes abiertas. Use 'Sin orden de compra' para entrada directa."}
                         </CommandEmpty>
                         <CommandGroup>
                           <CommandItem value="sin orden de compra entrada directa" onSelect={() => props.clearPurchaseOrder()}>

@@ -5,9 +5,11 @@ import { Link, useSearchParams } from "react-router-dom"
 import {
   Barcode,
   CalendarDays,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleDot,
   ClipboardList,
   Eye,
   Filter,
@@ -15,6 +17,7 @@ import {
   Layers,
   ListOrdered,
   PackagePlus,
+  Pencil,
   Printer,
   Ruler,
   Settings2,
@@ -24,7 +27,7 @@ import {
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated } from "@/types/api"
+import type { LaravelPaginated, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
@@ -50,12 +53,21 @@ import {
 } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -65,8 +77,18 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { formatDateInputDisplay, parseDateInputValue, toDateInputValue } from "@/pages/axones/purchase-document-form-ui"
-import { formatDateTime } from "@/pages/axones/purchase-order-shared"
+import {
+  formatDateDMY,
+  formatDateTime,
+  PurchaseOrderStatusBadge,
+} from "@/pages/axones/purchase-order-shared"
 import "./purchase-order-list.css"
+
+type ViewTab = "history" | "pending"
+
+function parseViewTab(raw: string | null): ViewTab {
+  return raw === "pending" ? "pending" : "history"
+}
 
 type ReceiptRow = {
   id: number
@@ -109,6 +131,14 @@ const poActionEyeClass = cn(
   poActionIconBase,
   "border-violet-400/50 text-violet-600 hover:bg-violet-500/10 dark:text-violet-400",
 )
+const poActionReceiveClass = cn(
+  poActionIconBase,
+  "border-primary/45 text-primary hover:bg-primary/10",
+)
+const poActionEditClass = cn(
+  poActionIconBase,
+  "border-amber-400/55 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400",
+)
 
 function receiptSupplierLabel(row: ReceiptRow): string {
   return row.supplier?.name || row.supplier_name || "—"
@@ -146,6 +176,8 @@ function receiptMaterialNamesSummary(row: ReceiptRow): string {
 
 export default function PurchaseReceiptsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const [viewTab, setViewTab] = useState<ViewTab>(() => parseViewTab(searchParams.get("tab")))
+  const isPendingTab = viewTab === "pending"
 
   const [page, setPage] = useState(() => {
     const n = Number(searchParams.get("page") || "1")
@@ -159,6 +191,15 @@ export default function PurchaseReceiptsPage() {
   const [fromInput, setFromInput] = useState(() => searchParams.get("from")?.trim() ?? "")
   const [toInput, setToInput] = useState(() => searchParams.get("to")?.trim() ?? "")
 
+  const [poQInput, setPoQInput] = useState(() => searchParams.get("q")?.trim() ?? "")
+  const [poQApi, setPoQApi] = useState(() => searchParams.get("q")?.trim() ?? "")
+  const [poSupplierId, setPoSupplierId] = useState<string>(() => {
+    const raw = searchParams.get("supplier_id")
+    return raw && raw.trim() ? raw : "all"
+  })
+  const [poSupplierOpen, setPoSupplierOpen] = useState(false)
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
+
   const [supplierFilter, setSupplierFilter] = useState(supplierInput)
   const [invoiceFilter, setInvoiceFilter] = useState(invoiceInput)
   const [materialFilter, setMaterialFilter] = useState(materialInput)
@@ -166,10 +207,13 @@ export default function PurchaseReceiptsPage() {
   const [toFilter, setToFilter] = useState(toInput)
 
   const textDebounceRef = useRef<number | null>(null)
+  const poQDebounceRef = useRef<number | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ReceiptRow> | null>(null)
+  const [pendingRows, setPendingRows] = useState<LaravelPaginated<PurchaseOrderRow> | null>(null)
   const [selectedRowId, setSelectedRowId] = useState<number | null>(null)
+  const [selectedPendingPoId, setSelectedPendingPoId] = useState<number | null>(null)
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptRow | null>(null)
   const [selectedReceiptDetail, setSelectedReceiptDetail] = useState<ReceiptRow | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
@@ -188,6 +232,34 @@ export default function PurchaseReceiptsPage() {
   }, [supplierInput, invoiceInput, materialInput])
 
   useEffect(() => {
+    if (poQDebounceRef.current) window.clearTimeout(poQDebounceRef.current)
+    poQDebounceRef.current = window.setTimeout(() => {
+      setPoQApi(poQInput.trim())
+      setPage(1)
+    }, 320)
+    return () => {
+      if (poQDebounceRef.current) window.clearTimeout(poQDebounceRef.current)
+    }
+  }, [poQInput])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
+          query: { per_page: 100, page: 1 },
+        })
+        if (!cancelled) setSuppliers(res.data)
+      } catch {
+        if (!cancelled) setSuppliers([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     if (fromInput && toInput && fromInput > toInput) {
       toast.error("La fecha desde no puede ser mayor que la fecha hasta.")
       return
@@ -199,16 +271,34 @@ export default function PurchaseReceiptsPage() {
 
   useEffect(() => {
     const next = new URLSearchParams()
+    if (viewTab === "pending") next.set("tab", "pending")
     if (page > 1) next.set("page", String(page))
-    if (supplierFilter) next.set("supplier_name", supplierFilter)
-    if (invoiceFilter) next.set("invoice_number", invoiceFilter)
-    if (materialFilter) next.set("material_term", materialFilter)
-    if (fromFilter) next.set("from", fromFilter)
-    if (toFilter) next.set("to", toFilter)
+    if (isPendingTab) {
+      if (poSupplierId !== "all") next.set("supplier_id", poSupplierId)
+      if (poQApi.trim()) next.set("q", poQApi.trim())
+    } else {
+      if (supplierFilter) next.set("supplier_name", supplierFilter)
+      if (invoiceFilter) next.set("invoice_number", invoiceFilter)
+      if (materialFilter) next.set("material_term", materialFilter)
+      if (fromFilter) next.set("from", fromFilter)
+      if (toFilter) next.set("to", toFilter)
+    }
     setSearchParams(next, { replace: true })
-  }, [page, supplierFilter, invoiceFilter, materialFilter, fromFilter, toFilter, setSearchParams])
+  }, [
+    fromFilter,
+    invoiceFilter,
+    isPendingTab,
+    materialFilter,
+    page,
+    poQApi,
+    poSupplierId,
+    setSearchParams,
+    supplierFilter,
+    toFilter,
+    viewTab,
+  ])
 
-  const load = useCallback(async () => {
+  const loadReceipts = useCallback(async () => {
     setLoading(true)
     try {
       const data = await apiFetch<LaravelPaginated<ReceiptRow>>("purchase-receipts", {
@@ -232,9 +322,33 @@ export default function PurchaseReceiptsPage() {
     }
   }, [fromFilter, invoiceFilter, materialFilter, page, perPage, supplierFilter, toFilter])
 
+  const loadPendingOrders = useCallback(async () => {
+    setLoading(true)
+    try {
+      const sid = poSupplierId !== "all" ? Number(poSupplierId) : undefined
+      const data = await apiFetch<LaravelPaginated<PurchaseOrderRow>>("purchase-orders", {
+        query: {
+          page,
+          per_page: perPage,
+          supplier_id: sid,
+          q: poQApi.trim() || undefined,
+          has_receipts: "false",
+        },
+      })
+      setPendingRows(data)
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudieron cargar las órdenes pendientes.")
+      setPendingRows(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [page, perPage, poQApi, poSupplierId])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    if (isPendingTab) void loadPendingOrders()
+    else void loadReceipts()
+  }, [isPendingTab, loadPendingOrders, loadReceipts])
 
   useEffect(() => {
     if (!selectedReceipt?.id) {
@@ -262,7 +376,88 @@ export default function PurchaseReceiptsPage() {
     }
   }, [selectedReceipt?.id])
 
-  const showInitialSkeleton = loading && rows === null
+  const showInitialSkeleton = loading && (isPendingTab ? pendingRows === null : rows === null)
+
+  function renderPagination(meta: LaravelPaginated<unknown> | null) {
+    if (!meta) return null
+    return (
+      <div className="po-pagination-bar">
+        <div className="po-pagination-meta">
+          <p className="text-sm">
+            {meta.total === 0 ? (
+              "Sin resultados con los filtros actuales."
+            ) : (
+              <>
+                Mostrando <strong>{meta.from ?? 0}</strong> a <strong>{meta.to ?? 0}</strong> de{" "}
+                <strong>{meta.total}</strong> registros
+              </>
+            )}
+          </p>
+          {meta.last_page > 1 ? (
+            <p className="text-muted-foreground text-xs">
+              Página {meta.current_page} de {meta.last_page}
+            </p>
+          ) : null}
+        </div>
+        <div className="po-pagination-controls">
+          {meta.last_page > 1 ? (
+            <span className="po-page-indicator">
+              {meta.current_page} / {meta.last_page}
+            </span>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-sm">Por página</span>
+            <Select
+              value={String(perPage)}
+              onValueChange={(v) => {
+                setPerPage(Number(v))
+                setPage(1)
+              }}
+            >
+              <SelectTrigger
+                id="purchase-receipts-per-page"
+                className={cn("h-9 w-[4.75rem] text-sm", catalogPaginationSelectTriggerClass)}
+                aria-label="Registros por página"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PER_PAGE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt} value={String(opt)}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+              disabled={meta.current_page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              type="button"
+            >
+              <ChevronLeft className="mr-1 size-4" aria-hidden />
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+              disabled={meta.current_page >= meta.last_page || loading}
+              onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
+              type="button"
+            >
+              Siguiente
+              <ChevronRight className="ml-1 size-4" aria-hidden />
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   function openDetail(row: ReceiptRow) {
     setSelectedRowId(row.id)
@@ -291,6 +486,233 @@ export default function PurchaseReceiptsPage() {
           </div>
         ) : (
           <>
+            <Tabs
+              value={viewTab}
+              onValueChange={(value) => {
+                setViewTab(parseViewTab(value))
+                setPage(1)
+                setSelectedRowId(null)
+                setSelectedPendingPoId(null)
+              }}
+              className="w-full"
+            >
+              <TabsList className="po-tab-list h-auto w-full justify-start sm:w-auto">
+                <TabsTrigger value="history" className="po-tab-trigger text-xs sm:text-sm">
+                  Historial
+                </TabsTrigger>
+                <TabsTrigger value="pending" className="po-tab-trigger text-xs sm:text-sm">
+                  OC pendientes
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {isPendingTab ? (
+              <>
+                <div className="po-filter-bar space-y-4 p-4 md:p-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Filter className="size-4 text-primary" aria-hidden />
+                    <p className="text-sm font-medium">Filtrar órdenes pendientes</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-12">
+                    <CatalogLabeledField label="Proveedor" className="md:col-span-4">
+                      <Popover open={poSupplierOpen} onOpenChange={setPoSupplierOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={poSupplierOpen}
+                            className={cn(
+                              "h-11 w-full justify-between font-normal",
+                              catalogSelectTriggerClass,
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "truncate text-left",
+                                poSupplierId === "all" && "text-muted-foreground",
+                              )}
+                            >
+                              {poSupplierId === "all"
+                                ? "Todos"
+                                : suppliers.find((s) => String(s.id) === poSupplierId)?.name ??
+                                  `#${poSupplierId}`}
+                            </span>
+                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+                          align="start"
+                        >
+                          <Command shouldFilter>
+                            <CommandInput placeholder="Buscar proveedor..." />
+                            <CommandList className="max-h-60">
+                              <CommandEmpty>Sin resultados.</CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem
+                                  value="__all__"
+                                  onSelect={() => {
+                                    setPoSupplierId("all")
+                                    setPage(1)
+                                    setPoSupplierOpen(false)
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      poSupplierId === "all" ? "opacity-100" : "opacity-0",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  <span>Todos</span>
+                                </CommandItem>
+                                {suppliers.map((s) => (
+                                  <CommandItem
+                                    key={s.id}
+                                    value={`${s.name} ${s.rif ?? ""}`}
+                                    onSelect={() => {
+                                      setPoSupplierId(String(s.id))
+                                      setPage(1)
+                                      setPoSupplierOpen(false)
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        String(s.id) === poSupplierId ? "opacity-100" : "opacity-0",
+                                      )}
+                                      aria-hidden
+                                    />
+                                    <span className="truncate">{s.name}</span>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </CatalogLabeledField>
+                    <CatalogSearchField
+                      id="rc-pending-po-q"
+                      placeholder="Buscar por código OC…"
+                      value={poQInput}
+                      onChange={(ev) => setPoQInput(ev.target.value)}
+                      className="min-w-0 md:col-span-8"
+                    />
+                  </div>
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    Órdenes de compra creadas que aún no tienen recepción registrada. Al registrar
+                    la primera entrada, la orden pasa al historial de recepciones.
+                  </p>
+                </div>
+
+                <div className="po-table-wrap overflow-x-auto">
+                  <Table className="min-w-[880px]">
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <CatalogTableHead icon={ListOrdered} className="w-14">
+                          N.º
+                        </CatalogTableHead>
+                        <CatalogTableHead icon={Barcode}>Código OC</CatalogTableHead>
+                        <CatalogTableHead icon={Truck}>Proveedor</CatalogTableHead>
+                        <CatalogTableHead icon={CircleDot} className="po-col-status">
+                          Estado
+                        </CatalogTableHead>
+                        <CatalogTableHead icon={Layers} className="po-col-articles text-right">
+                          Artículos
+                        </CatalogTableHead>
+                        <CatalogTableHead icon={CalendarDays} className="po-col-date">
+                          Fecha pedido
+                        </CatalogTableHead>
+                        <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
+                          Acciones
+                        </CatalogTableHeadRight>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        <LoadingTableRow colSpan={7} />
+                      ) : !pendingRows?.data.length ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-muted-foreground">
+                            Sin órdenes pendientes de recepción.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        pendingRows.data.map((r, rowIndex) => {
+                          const rowNum = (pendingRows.from ?? 1) + rowIndex
+                          return (
+                            <TableRow
+                              key={r.id}
+                              data-selected={selectedPendingPoId === r.id ? "true" : "false"}
+                              className={cn(
+                                "border-b transition-colors",
+                                selectedPendingPoId === r.id && "bg-primary/5",
+                              )}
+                            >
+                              <TableCell className="p-3 align-middle tabular-nums text-muted-foreground">
+                                {rowNum}
+                              </TableCell>
+                              <TableCell className="p-3 align-middle">
+                                <span className="po-code-pill">{r.code}</span>
+                              </TableCell>
+                              <TableCell className="p-3 align-middle font-medium">
+                                {r.supplier?.name ?? `#${r.supplier_id}`}
+                              </TableCell>
+                              <TableCell className="po-col-status p-3 align-middle">
+                                <PurchaseOrderStatusBadge status={r.status} prominent />
+                              </TableCell>
+                              <TableCell className="po-col-articles p-3 align-middle text-right tabular-nums font-semibold">
+                                {r.lines_count ?? "—"}
+                              </TableCell>
+                              <TableCell className="po-col-date p-3 align-middle text-sm">
+                                {formatDateDMY(r.ordered_at ?? r.created_at)}
+                              </TableCell>
+                              <TableCell className="p-3 align-middle text-right">
+                                <div className="inline-flex justify-end gap-1">
+                                  <Link
+                                    to={`/recepciones-nueva?oc=${r.id}`}
+                                    className={poActionReceiveClass}
+                                    title="Recibir material"
+                                    aria-label={`Recibir material de ${r.code}`}
+                                    onClick={() => setSelectedPendingPoId(r.id)}
+                                  >
+                                    <PackagePlus className="h-4 w-4" />
+                                    <span className="sr-only">Recibir</span>
+                                  </Link>
+                                  <Link
+                                    to={`/ordenes-compra/${r.id}/vista-previa`}
+                                    className={poActionPrintClass}
+                                    title="Vista previa OC"
+                                  >
+                                    <Printer className="h-4 w-4" />
+                                    <span className="sr-only">Vista previa</span>
+                                  </Link>
+                                  <Link
+                                    to={`/ordenes-compra/${r.id}/editar`}
+                                    className={poActionEditClass}
+                                    title="Editar orden"
+                                    aria-label={`Editar orden ${r.code}`}
+                                    onClick={() => setSelectedPendingPoId(r.id)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                    <span className="sr-only">Editar</span>
+                                  </Link>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {renderPagination(pendingRows)}
+              </>
+            ) : (
+              <>
             <div className="po-filter-bar space-y-4 p-4 md:p-5">
               <div className="flex flex-wrap items-center gap-2">
                 <Filter className="size-4 text-primary" aria-hidden />
@@ -490,83 +912,9 @@ export default function PurchaseReceiptsPage() {
               </Table>
             </div>
 
-            {rows ? (
-              <div className="po-pagination-bar">
-                <div className="po-pagination-meta">
-                  <p className="text-sm">
-                    {rows.total === 0 ? (
-                      "Sin resultados con los filtros actuales."
-                    ) : (
-                      <>
-                        Mostrando <strong>{rows.from ?? 0}</strong> a <strong>{rows.to ?? 0}</strong> de{" "}
-                        <strong>{rows.total}</strong> registros
-                      </>
-                    )}
-                  </p>
-                  {rows.last_page > 1 ? (
-                    <p className="text-muted-foreground text-xs">
-                      Página {rows.current_page} de {rows.last_page}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="po-pagination-controls">
-                  {rows.last_page > 1 ? (
-                    <span className="po-page-indicator">
-                      {rows.current_page} / {rows.last_page}
-                    </span>
-                  ) : null}
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground text-sm">Por página</span>
-                    <Select
-                      value={String(perPage)}
-                      onValueChange={(v) => {
-                        setPerPage(Number(v))
-                        setPage(1)
-                      }}
-                    >
-                      <SelectTrigger
-                        id="purchase-receipts-per-page"
-                        className={cn("h-9 w-[4.75rem] text-sm", catalogPaginationSelectTriggerClass)}
-                        aria-label="Registros por página"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PER_PAGE_OPTIONS.map((opt) => (
-                          <SelectItem key={opt} value={String(opt)}>
-                            {opt}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
-                      disabled={rows.current_page <= 1 || loading}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      type="button"
-                    >
-                      <ChevronLeft className="mr-1 size-4" aria-hidden />
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
-                      disabled={rows.current_page >= rows.last_page || loading}
-                      onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                      type="button"
-                    >
-                      Siguiente
-                      <ChevronRight className="ml-1 size-4" aria-hidden />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
+            {renderPagination(rows)}
+              </>
+            )}
           </>
         )}
 

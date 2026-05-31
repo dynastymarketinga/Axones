@@ -2,25 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { CheckCircle2, FileDown, Lock, RotateCcw, Truck } from "lucide-react"
+import { CheckCircle2, FileDown, Lock, Truck } from "lucide-react"
 import { toast } from "sonner"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
-import { getStoredUser } from "@/lib/auth-storage"
 
 const AXONES_ADDRESS_LINE =
   "CALLE PARCELAMIENTO INDUSTRIAL GUERE, LOCAL 35, SECTOR LA JULIA. TURMERO-EDO ARAGUA, ZONA POSTAL 2115. TELFS: (0244) 663.53.76 – (0244) 663.50.60"
@@ -267,18 +255,6 @@ export default function PurchaseOrderPreviewPage() {
   const [pdfBusy, setPdfBusy] = useState(false)
   const [headerLogoSrc, setHeaderLogoSrc] = useState(REPORT_LOGO_VAR01)
   const [consuming, setConsuming] = useState<ConsumingWorkOrdersResponse | null>(null)
-  const [closeOpen, setCloseOpen] = useState(false)
-  const [closeReason, setCloseReason] = useState("")
-  const [closeBusy, setCloseBusy] = useState(false)
-  const [reopenBusy, setReopenBusy] = useState(false)
-
-  const session = getStoredUser()
-  const role = (session?.role ?? "").toLowerCase().trim()
-  const isBoss =
-    role === "boss" ||
-    role === "admin" ||
-    role === "jefe_supremo" ||
-    role === "superadmin"
 
   useEffect(() => {
     setHeaderLogoSrc(REPORT_LOGO_VAR01)
@@ -329,50 +305,6 @@ export default function PurchaseOrderPreviewPage() {
   const supplier = detail?.supplier
   const isManuallyClosed = Boolean(detail?.manually_closed_at)
 
-  async function submitManualClose() {
-    if (!detail) return
-    const trimmed = closeReason.trim()
-    if (trimmed.length < 5) {
-      toast.error("El motivo debe tener al menos 5 caracteres.")
-      return
-    }
-    setCloseBusy(true)
-    try {
-      const updated = await apiFetch<PurchaseOrderPreviewDetail>(
-        `purchase-orders/${detail.id}/manual-close`,
-        { method: "POST", body: JSON.stringify({ reason: trimmed }) },
-      )
-      setDetail(updated)
-      setCloseOpen(false)
-      setCloseReason("")
-      toast.success("Orden cerrada manualmente.")
-      void reloadConsuming(detail.id)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo cerrar la orden.")
-    } finally {
-      setCloseBusy(false)
-    }
-  }
-
-  async function submitReopen() {
-    if (!detail) return
-    if (!confirm("¿Reabrir esta orden de compra? El estado se recalculará automáticamente.")) return
-    setReopenBusy(true)
-    try {
-      const updated = await apiFetch<PurchaseOrderPreviewDetail>(
-        `purchase-orders/${detail.id}/reopen`,
-        { method: "POST" },
-      )
-      setDetail(updated)
-      toast.success("Orden reabierta.")
-      void reloadConsuming(detail.id)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo reabrir la orden.")
-    } finally {
-      setReopenBusy(false)
-    }
-  }
-
   return (
     <div className="space-y-6 p-4 md:p-6 print:bg-white print:p-0">
       <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
@@ -386,28 +318,6 @@ export default function PurchaseOrderPreviewPage() {
           <Button type="button" variant="outline" asChild>
             <Link to="/ordenes-compra">Volver al listado</Link>
           </Button>
-          {isBoss && detail ? (
-            isManuallyClosed ? (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={reopenBusy}
-                onClick={() => void submitReopen()}
-              >
-                <RotateCcw className="mr-2 h-4 w-4" />
-                <LoadingButtonLabel loading={reopenBusy} loadingText="Reabriendo…" idleText="Reabrir orden" />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setCloseOpen(true)}
-              >
-                <Lock className="mr-2 h-4 w-4" />
-                Cerrar manualmente
-              </Button>
-            )
-          ) : null}
           <Button
             type="button"
             disabled={!detail || pdfBusy}
@@ -602,7 +512,7 @@ export default function PurchaseOrderPreviewPage() {
           ) : consuming.no_consumers ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               No se detectaron órdenes de trabajo que hayan consumido material trazable a esta OC. La OC permanecerá
-              en <span className="font-medium">Parcial</span> hasta que jefatura la cierre manualmente.
+              en <span className="font-medium">Parcial</span> hasta completar recepciones y despachos vinculados.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-md border">
@@ -651,45 +561,6 @@ export default function PurchaseOrderPreviewPage() {
           )}
         </section>
       ) : null}
-
-      <Dialog open={closeOpen} onOpenChange={(open) => { if (!closeBusy) setCloseOpen(open) }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Cerrar manualmente la orden</DialogTitle>
-            <DialogDescription>
-              Esta acción marca la OC como Completada aunque queden recepciones o despachos pendientes. Se registrará
-              el motivo y el usuario que la cierra.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label htmlFor="po-close-reason">Motivo del cierre</Label>
-            <Textarea
-              id="po-close-reason"
-              value={closeReason}
-              onChange={(ev) => setCloseReason(ev.target.value)}
-              placeholder="Ej. proveedor desistió, sobrante quedará en stock, etc."
-              rows={4}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCloseOpen(false)}
-              disabled={closeBusy}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void submitManualClose()}
-              disabled={closeBusy}
-            >
-              <LoadingButtonLabel loading={closeBusy} loadingText="Cerrando…" idleText="Cerrar OC" />
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

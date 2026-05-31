@@ -136,8 +136,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'show']);
     Route::patch('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'update']);
     Route::get('/purchase-orders/{purchase_order}/consuming-work-orders', [PurchaseOrderController::class, 'consumingWorkOrders']);
-    Route::post('/purchase-orders/{purchase_order}/manual-close', [PurchaseOrderController::class, 'manualClose']);
-    Route::post('/purchase-orders/{purchase_order}/reopen', [PurchaseOrderController::class, 'reopen']);
 
     Route::get('/purchase-receipts', [PurchaseReceiptController::class, 'index']);
     Route::post('/purchase-receipts', [PurchaseReceiptController::class, 'store'])

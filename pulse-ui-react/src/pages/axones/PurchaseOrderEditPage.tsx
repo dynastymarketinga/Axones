@@ -154,7 +154,7 @@ export default function PurchaseOrderEditPage() {
 
   if (!Number.isFinite(id) || id < 1) {
     return (
-      <div className="po-list-shell mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+      <div className="po-list-shell space-y-4 p-4 md:p-6">
         <p className="text-muted-foreground">Identificador de orden no válido.</p>
         <Button type="button" variant="outline" asChild>
           <Link to="/ordenes-compra">Volver al listado</Link>
@@ -164,7 +164,7 @@ export default function PurchaseOrderEditPage() {
   }
 
   return (
-    <div className="po-list-shell mx-auto max-w-4xl space-y-6 p-4 md:p-6">
+    <div className="po-list-shell space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <Button type="button" variant="outline" size="icon" className="shrink-0" asChild>

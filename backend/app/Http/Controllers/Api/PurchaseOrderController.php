@@ -140,7 +140,7 @@ class PurchaseOrderController extends Controller
 
         if (array_key_exists('status', $payload) && $payload['status'] !== null) {
             return response()->json([
-                'message' => 'El estado de la orden de compra se calcula automáticamente. Para cerrarla o reabrirla manualmente use /manual-close o /reopen.',
+                'message' => 'El estado de la orden de compra se calcula automáticamente según recepciones y despachos.',
             ], 422);
         }
 
@@ -210,64 +210,6 @@ class PurchaseOrderController extends Controller
         }
 
         return response()->json($purchase_order->fresh()->load('lines.material', 'supplier'));
-    }
-
-    /**
-     * Cierre manual por el jefe (cuando hay material que nunca se va a consumir,
-     * proveedor desistió, etc.). Marca la OC como Completada y registra motivo.
-     */
-    public function manualClose(Request $request, PurchaseOrder $purchase_order): JsonResponse
-    {
-        $this->assertBoss($request);
-
-        $payload = $request->validate([
-            'reason' => ['required', 'string', 'min:5', 'max:1000'],
-        ], [
-            'reason.required' => 'Indique el motivo del cierre manual.',
-            'reason.min' => 'El motivo debe tener al menos 5 caracteres.',
-        ]);
-
-        $purchase_order->update([
-            'manually_closed_at' => now(),
-            'manually_closed_by' => (int) $request->user()->getKey(),
-            'manual_close_reason' => trim($payload['reason']),
-        ]);
-
-        $this->purchaseOrderClosing->recompute($purchase_order->refresh());
-
-        return response()->json($purchase_order->fresh()->load([
-            'lines.material',
-            'supplier',
-            'manuallyClosedBy:id,name',
-        ]));
-    }
-
-    /**
-     * Reabre una OC cerrada manualmente y vuelve a recalcular su estado real.
-     */
-    public function reopen(Request $request, PurchaseOrder $purchase_order): JsonResponse
-    {
-        $this->assertBoss($request);
-
-        if ($purchase_order->manually_closed_at === null) {
-            return response()->json([
-                'message' => 'Esta orden no está cerrada manualmente.',
-            ], 422);
-        }
-
-        $purchase_order->update([
-            'manually_closed_at' => null,
-            'manually_closed_by' => null,
-            'manual_close_reason' => null,
-        ]);
-
-        $this->purchaseOrderClosing->recompute($purchase_order->refresh());
-
-        return response()->json($purchase_order->fresh()->load([
-            'lines.material',
-            'supplier',
-            'manuallyClosedBy:id,name',
-        ]));
     }
 
     /**

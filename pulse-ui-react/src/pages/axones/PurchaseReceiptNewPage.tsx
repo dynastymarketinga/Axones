@@ -677,6 +677,39 @@ export default function PurchaseReceiptNewPage() {
     }
   }, [searchParams, setSearchParams])
 
+  useEffect(() => {
+    const ocRaw = searchParams.get("oc")
+    const ocId = ocRaw ? Number(ocRaw) : NaN
+    if (!Number.isFinite(ocId) || ocId < 1) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const po = await apiFetch<PurchaseOrderDetailPayload>(`purchase-orders/${ocId}`)
+        if (cancelled) return
+        if (po.supplier_id > 0) setSupplierId(po.supplier_id)
+        setPurchaseOrderId(ocId)
+      } catch {
+        if (!cancelled) toast.error("No se pudo abrir la orden de compra indicada.")
+      } finally {
+        if (!cancelled) {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev)
+              next.delete("oc")
+              return next
+            },
+            { replace: true },
+          )
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [searchParams, setSearchParams])
+
   const supplierOptions = useMemo(
     () => [...suppliers].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
     [suppliers],

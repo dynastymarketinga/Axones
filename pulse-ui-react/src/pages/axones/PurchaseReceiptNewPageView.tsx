@@ -69,7 +69,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -262,26 +261,15 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
           className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
         >
           <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
-            <div className="min-w-0 flex-1 space-y-2">
+            <div className="min-w-0 flex-1">
               <p className="text-muted-foreground text-xs">Documento de recepción</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="rounded-md border-primary/35 bg-primary/5 px-2.5 py-1 text-sm font-semibold text-primary shadow-sm"
-                >
-                  <Scale className="mr-1.5 size-3.5" aria-hidden />
-                  Recepción · Entrada al inventario
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className={cn("rounded-md px-2.5 py-1 text-sm font-semibold shadow-sm", primaryItemTypeMeta.badgeClass)}
-                >
-                  <PurchaseItemTypeLabel typeKey={primaryItemTypeKey} />
-                </Badge>
-              </div>
-              <p className="text-muted-foreground text-xs">
-                Área de ingreso según el tipo de la primera línea válida.
-              </p>
+              <Badge
+                variant="outline"
+                className="mt-1 rounded-md border-primary/35 bg-primary/5 px-2.5 py-1 text-sm font-semibold text-primary shadow-sm"
+              >
+                <Scale className="mr-1.5 size-3.5" aria-hidden />
+                Recepción · Entrada al inventario
+              </Badge>
             </div>
             <div className="shrink-0 text-right">
               <p className="text-muted-foreground text-xs">Correlativo de recepción</p>
@@ -292,19 +280,19 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
+            <div className="grid min-w-0 gap-2">
               <Label htmlFor="rc-supplier-trigger" className="inline-flex items-center gap-1.5">
                 <Building2 className="size-3.5 text-primary" aria-hidden />
                 Proveedor *
               </Label>
               <div className="flex items-center gap-2">
-                <Popover open={props.supplierComboOpen} onOpenChange={props.setSupplierComboOpen}>
-                  <PopoverTrigger asChild>
-                    <div className="group/field relative flex-1">
-                      <Building2
-                        className={cn(documentFieldIconClass(supplierHasError, props.saving), "top-1/2 -translate-y-1/2")}
-                        aria-hidden
-                      />
+                <div className="group/field relative min-w-0 flex-1">
+                  <Building2
+                    className={cn(documentFieldIconClass(supplierHasError, props.saving), "top-1/2 -translate-y-1/2")}
+                    aria-hidden
+                  />
+                  <Popover open={props.supplierComboOpen} onOpenChange={props.setSupplierComboOpen}>
+                    <PopoverTrigger asChild>
                       <Button
                         id="rc-supplier-trigger"
                         type="button"
@@ -324,8 +312,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         </span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
-                    </div>
-                  </PopoverTrigger>
+                    </PopoverTrigger>
                   <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
                     <Command shouldFilter>
                       <CommandInput placeholder="Buscar proveedor..." />
@@ -376,6 +363,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                     </Command>
                   </PopoverContent>
                 </Popover>
+                </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -395,7 +383,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </div>
             </div>
 
-            <div className="grid gap-2">
+            <div className="grid min-w-0 gap-2">
               <Label htmlFor="rc-invoice" className="inline-flex items-center gap-1.5">
                 <Hash className="size-3.5 text-primary" aria-hidden />
                 N° Factura *
@@ -414,14 +402,16 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                   disabled={props.saving}
                   aria-invalid={invoiceHasError}
                   className={cn(
-                    "pl-10",
+                    "h-10 pl-10",
                     "border-primary/25 bg-background/90 shadow-sm",
                     documentInvalidHighlightClass(invoiceHasError),
                   )}
                 />
               </div>
             </div>
+          </div>
 
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
             <div className="grid gap-2">
               <Label htmlFor="rc-date" className="inline-flex items-center gap-1.5">
                 <CalendarIcon className="size-3.5 text-primary" aria-hidden />
@@ -438,7 +428,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                     aria-invalid={dateHasError}
                     disabled={props.saving}
                     className={cn(
-                      "group/field h-10 w-full justify-between pl-3 pr-3 font-normal",
+                      "group/field h-9 w-full justify-between pl-3 pr-3 font-normal",
                       "border-primary/25 bg-background/90 shadow-sm",
                       !props.receivedAtDateValue && "text-muted-foreground",
                       documentInvalidHighlightClass(dateHasError),
@@ -475,19 +465,32 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </Popover>
             </div>
 
-            <div id="purchase-order-field" className="grid gap-2">
-              <Label className="inline-flex items-center gap-1.5">
-                <ClipboardList className="size-3.5 text-primary" aria-hidden />
-                Orden de compra (opcional)
-              </Label>
+            <div id="purchase-order-field" className="grid min-w-0 gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Label className="inline-flex w-fit cursor-help items-center gap-1.5">
+                    <ClipboardList className="size-3.5 text-primary" aria-hidden />
+                    Orden de compra (opcional)
+                  </Label>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[22rem] space-y-2 text-left text-xs leading-relaxed">
+                  <p>
+                    <strong>Sin OC:</strong> elija tipo, material y cantidad física (sin tope de pedido).
+                  </p>
+                  <p>
+                    <strong>Con OC:</strong> enlace cada fila a la línea del pedido; la cantidad no puede superar lo
+                    pendiente.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
               <div className="flex items-center gap-2">
-                <Popover open={props.poComboOpen} onOpenChange={props.setPoComboOpen}>
-                  <PopoverTrigger asChild>
-                    <div className="group/field relative flex-1">
-                      <ClipboardList
-                        className={cn(documentFieldIconClass(purchaseOrderHasError, props.saving), "top-1/2 -translate-y-1/2")}
-                        aria-hidden
-                      />
+                <div className="group/field relative min-w-0 flex-1">
+                  <ClipboardList
+                    className={cn(documentFieldIconClass(purchaseOrderHasError, props.saving), "top-1/2 -translate-y-1/2")}
+                    aria-hidden
+                  />
+                  <Popover open={props.poComboOpen} onOpenChange={props.setPoComboOpen}>
+                    <PopoverTrigger asChild>
                       <Button
                         type="button"
                         variant="outline"
@@ -495,7 +498,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         aria-expanded={props.poComboOpen}
                         disabled={props.saving || props.poListLoading}
                         className={cn(
-                          "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                          "h-9 w-full justify-between pl-10 pr-3 font-normal",
                           "border-primary/25 bg-background/90 shadow-sm",
                           documentInvalidHighlightClass(purchaseOrderHasError),
                         )}
@@ -511,8 +514,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         </span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
-                    </div>
-                  </PopoverTrigger>
+                    </PopoverTrigger>
                   <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
                     <Command shouldFilter>
                       <CommandInput placeholder="Buscar por codigo OC..." />
@@ -559,13 +561,14 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                     </Command>
                   </PopoverContent>
                 </Popover>
+                </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="h-10 w-10 shrink-0 shadow-sm"
+                      className="h-9 w-9 shrink-0 shadow-sm"
                       disabled={props.saving}
                       onClick={props.navigateToNewPurchaseOrder}
                       aria-label="Crear orden de compra"
@@ -576,56 +579,48 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                   <TooltipContent side="top">Crear orden de compra</TooltipContent>
                 </Tooltip>
               </div>
-              <p className="text-muted-foreground text-xs leading-relaxed">
-                <strong>Sin orden de compra:</strong> elija tipo, escriba el material y la cantidad física que entra
-                (kg en báscula o factura); no hay tope de pedido.{" "}
-                <strong>Con orden de compra:</strong> en cada fila use la línea de la OC; en cantidad
-                recibida registre lo recibido en este despacho (puede ser menor al sugerido, pero no
-                mayor que lo pendiente de esa línea).
-              </p>
             </div>
+          </div>
 
-            <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="rc-notes" className="inline-flex items-center gap-1.5">
-                <FileText className="size-3.5 text-primary" aria-hidden />
-                Observaciones
-              </Label>
-              <div className="group/field relative">
-                <FileText
-                  className={cn(documentFieldIconClass(false, props.saving), "top-3.5")}
-                  aria-hidden
-                />
-                <Textarea
-                  id="rc-notes"
-                  rows={2}
-                  maxLength={650}
-                  value={props.notes}
-                  onChange={(ev) => props.setNotes(ev.target.value.slice(0, 650))}
-                  placeholder="Notas adicionales de la recepción..."
-                  disabled={props.saving}
-                  className="border-primary/25 bg-background/90 pl-10 shadow-sm"
-                />
-              </div>
+          <div className="grid min-w-0 gap-2">
+            <Label htmlFor="rc-notes" className="inline-flex items-center gap-1.5">
+              <FileText className="size-3.5 text-primary" aria-hidden />
+              Observaciones
+            </Label>
+            <div className="group/field relative">
+              <FileText
+                className={cn(documentFieldIconClass(false, props.saving), "top-1/2 -translate-y-1/2")}
+                aria-hidden
+              />
+              <Input
+                id="rc-notes"
+                maxLength={650}
+                value={props.notes}
+                onChange={(ev) => props.setNotes(ev.target.value.slice(0, 650))}
+                placeholder="Notas adicionales de la recepción..."
+                disabled={props.saving}
+                className="h-9 pl-10 border-primary/25 bg-background/90 shadow-sm"
+              />
             </div>
           </div>
 
           {props.supplierId && props.selectedSupplier ? (
-            <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-muted/30 p-4 text-sm shadow-sm">
-              <p className="flex items-center gap-2 font-medium text-foreground">
-                <MapPin className="size-4 text-primary" aria-hidden />
-                Dirección del proveedor
-              </p>
-              <p className="text-muted-foreground mt-1 whitespace-pre-wrap">
-                {props.selectedSupplier.address?.trim() || "Sin dirección registrada en el proveedor."}
-              </p>
-              {!props.selectedSupplier.address?.trim() ? (
-                <Link
-                  to={`/proveedores/form?id=${props.supplierId}`}
-                  className="text-primary mt-2 inline-block text-xs underline underline-offset-4"
-                >
-                  Registrar dirección del proveedor
-                </Link>
-              ) : null}
+            <div className="flex items-start gap-2.5 rounded-lg border border-primary/15 bg-muted/30 px-3 py-2.5 text-sm">
+              <MapPin className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+              <div className="min-w-0">
+                <p className="font-medium text-foreground">Dirección del proveedor</p>
+                <p className="text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                  {props.selectedSupplier.address?.trim() || "Sin dirección registrada en el proveedor."}
+                </p>
+                {!props.selectedSupplier.address?.trim() ? (
+                  <Link
+                    to={`/proveedores/form?id=${props.supplierId}`}
+                    className="text-primary mt-1 inline-block text-xs underline underline-offset-4"
+                  >
+                    Registrar dirección del proveedor
+                  </Link>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -645,6 +640,12 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                     className="min-w-[1.75rem] justify-center border-primary/30 bg-primary/5 px-2 text-xs font-semibold tabular-nums text-primary"
                   >
                     {props.freeLines.length}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={cn("px-2 text-xs font-semibold shadow-sm", primaryItemTypeMeta.badgeClass)}
+                  >
+                    <PurchaseItemTypeLabel typeKey={primaryItemTypeKey} />
                   </Badge>
                 </h2>
               <p className="text-muted-foreground text-xs">

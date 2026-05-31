@@ -20,6 +20,7 @@ import {
   Layers,
   MapPin,
   Package,
+  PackagePlus,
   PencilLine,
   Plus,
   Ruler,
@@ -143,7 +144,12 @@ function isPoLineUnit(u: string): u is PoLineUnit {
 function isPoLineSubmitReady(line: PoLineDraft): boolean {
   const qty = parseDecimalInput(line.quantity_ordered)
   const unit = line.unit.trim() || "kg"
-  return Number.isFinite(qty) && qty >= 0.001 && isPoLineUnit(unit)
+  return (
+    line.description.trim().length > 0 &&
+    Number.isFinite(qty) &&
+    qty >= 0.001 &&
+    isPoLineUnit(unit)
+  )
 }
 
 /**
@@ -336,8 +342,29 @@ type PoFieldErrors = {
 }
 
 type PoLineFieldErrors = {
+  description?: string
   quantity?: string
   unit?: string
+}
+
+function suggestSkuFromLabel(label: string): string {
+  const compact = label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+  return compact || `MAT-${Date.now().toString(36).toUpperCase()}`
+}
+
+function mapPoItemTypeToMaterialFormTab(
+  itemType: PoLineDraft["item_type"],
+): "sustratos" | "tintas" | "quimicos" | "miscelaneo" {
+  if (itemType === "tinta") return "tintas"
+  if (itemType === "quimico") return "quimicos"
+  if (itemType === "otros") return "miscelaneo"
+  return "sustratos"
 }
 
 function buildAutoPoCode(): string {
@@ -494,6 +521,57 @@ export default function PurchaseOrderNewPage() {
     navigate("/proveedores/form", { state: { from: "/ordenes-compra/nueva" } })
   }
 
+  function buildPoReturnPath(): string {
+    const path = location.pathname
+    const params = new URLSearchParams(location.search.startsWith("?") ? location.search.slice(1) : "")
+    const sid = Number(supplierId)
+    if (Number.isFinite(sid) && sid > 0) {
+      params.set("proveedor", String(sid))
+    } else {
+      params.set("borrador", "1")
+    }
+    const qs = params.toString()
+    return qs ? `${path}?${qs}` : path
+  }
+
+  function goToCreateMaterialFromPo(preferredRowIndex?: number) {
+    const resolvedIdx =
+      preferredRowIndex != null && preferredRowIndex >= 0 && preferredRowIndex < lines.length
+        ? preferredRowIndex
+        : 0
+    const row = lines[resolvedIdx]
+    goToMaterialMasterFromPo(resolvedIdx, row?.item_type ?? "sustrato")
+  }
+
+  function goToMaterialMasterFromPo(
+    rowIndex: number,
+    itemType: PoLineDraft["item_type"],
+    preset?: { sku?: string; name?: string },
+  ) {
+    if (!savePoDraftToSession()) return
+    const row = lines[rowIndex]
+    const presetSku = preset?.sku?.trim() ?? ""
+    const presetName = preset?.name?.trim() ?? ""
+    const labelText = row?.description?.trim() ?? ""
+    const suggestedName = presetName || presetSku || labelText
+    const suggestedSku = (presetSku || suggestSkuFromLabel(labelText)).toUpperCase()
+    const sid = Number(supplierId)
+
+    navigate("/materiales/nuevo", {
+      state: {
+        from: buildPoReturnPath(),
+        materialPrefillFromReceipt: {
+          tab: mapPoItemTypeToMaterialFormTab(itemType),
+          sku: suggestedSku,
+          name: suggestedName,
+          micras: row?.micras?.trim() ?? "",
+          ancho: row?.ancho_mm?.trim() ?? "",
+          supplierId: Number.isFinite(sid) && sid > 0 ? sid : null,
+        },
+      },
+    })
+  }
+
   useEffect(() => {
     if (!codeTouched && !code.trim()) {
       setCode(buildAutoPoCode())
@@ -534,9 +612,10 @@ export default function PurchaseOrderNewPage() {
 
   useEffect(() => {
     const proveedorRaw = searchParams.get("proveedor")
+    const borradorRestore = searchParams.get("borrador") === "1"
     const proveedorNum = proveedorRaw ? Number(proveedorRaw) : NaN
     const hasProveedor = Number.isFinite(proveedorNum) && proveedorNum > 0
-    if (!hasProveedor) return
+    if (!hasProveedor && !borradorRestore) return
 
     let parsed: PurchaseOrderNewDraftV1 | null = null
     try {
@@ -549,12 +628,17 @@ export default function PurchaseOrderNewPage() {
       parsed = null
     }
 
-    setSupplierId(String(proveedorNum))
-    supplierResolveFailedForRef.current = null
+    if (hasProveedor) {
+      setSupplierId(String(proveedorNum))
+      supplierResolveFailedForRef.current = null
+    }
     setFieldErrors({})
     setLineErrors({})
 
     if (parsed) {
+      if (!hasProveedor && typeof parsed.supplierId === "string" && parsed.supplierId.trim()) {
+        setSupplierId(parsed.supplierId)
+      }
       setCode(typeof parsed.code === "string" ? parsed.code : "")
       setCodeTouched(Boolean(parsed.codeTouched))
       setCodeEditUnlocked(Boolean(parsed.codeTouched))
@@ -575,6 +659,7 @@ export default function PurchaseOrderNewPage() {
       (prev) => {
         const next = new URLSearchParams(prev)
         next.delete("proveedor")
+        next.delete("borrador")
         return next
       },
       { replace: true },
@@ -730,6 +815,9 @@ export default function PurchaseOrderNewPage() {
     for (const i of editedRowIndexes) {
       const L = lines[i]
       const errs: PoLineFieldErrors = {}
+      if (!L.description.trim()) {
+        errs.description = "Escriba el material solicitado."
+      }
       const qty = parseDecimalInput(L.quantity_ordered)
       if (!Number.isFinite(qty) || qty < 0.001) {
         errs.quantity = "Indique cantidad ≥ 0,001."
@@ -773,6 +861,7 @@ export default function PurchaseOrderNewPage() {
     for (const i of rowIndexes) {
       const row = lineErrs[i]
       const n = i + 1
+      if (row.description) messages.push(`Línea ${n}: ${row.description}`)
       if (row.quantity) messages.push(`Línea ${n}: ${row.quantity}`)
       if (row.unit) messages.push(`Línea ${n}: ${row.unit}`)
     }
@@ -780,7 +869,7 @@ export default function PurchaseOrderNewPage() {
     poToastError(messages.slice(0, 3).join(" · "))
   }
 
-  function focusLineRow(rowIndex: number) {
+  function focusLineRow(rowIndex: number, field: "description" | "quantity" = "quantity") {
     const page = Math.floor(rowIndex / PO_LINES_PAGE_SIZE) + 1
     setLinesPage(page)
     window.requestAnimationFrame(() => {
@@ -788,7 +877,11 @@ export default function PurchaseOrderNewPage() {
         behavior: "smooth",
         block: "center",
       })
-      document.getElementById(`po-line-${rowIndex}-qty`)?.focus()
+      const targetId =
+        field === "description"
+          ? `po-line-${rowIndex}-requested`
+          : `po-line-${rowIndex}-qty`
+      document.getElementById(targetId)?.focus()
     })
   }
 
@@ -815,7 +908,8 @@ export default function PurchaseOrderNewPage() {
       .filter((n) => Number.isFinite(n))
       .sort((a, b) => a - b)[0]
     if (firstRow != null) {
-      focusLineRow(firstRow)
+      const rowErr = lineErrs[firstRow]
+      focusLineRow(firstRow, rowErr?.description ? "description" : "quantity")
     }
   }
 
@@ -1327,29 +1421,48 @@ export default function PurchaseOrderNewPage() {
                 </Badge>
               </h2>
               <p className="text-muted-foreground text-xs">
-                Escriba el material solicitado (no hace falta que exista en inventario), tipo y cantidad por línea.
-                Las filas vacías se omiten al guardar.
+                Escriba el material solicitado y la cantidad por línea. Puede ir a inventario para crearlo
+                antes o escribirlo libremente; al recepcionar se registrará en stock. Las filas vacías se
+                omiten al guardar.
               </p>
             </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon"
-                  disabled={saving}
-                  className="h-8 w-8 shrink-0 shadow-md"
-                  aria-label="Agregar línea al pedido"
-                  onClick={addLine}
-                >
-                  <Plus aria-hidden />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left" className="max-w-[15rem] text-left">
-                {ADD_LINE_TOOLTIP}
-              </TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    disabled={saving}
+                    className="h-8 w-8 shrink-0 shadow-sm"
+                    aria-label="Crear material en inventario"
+                    onClick={() => goToCreateMaterialFromPo()}
+                  >
+                    <PackagePlus className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Crear material</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    disabled={saving}
+                    className="h-8 w-8 shrink-0 shadow-md"
+                    aria-label="Agregar línea al pedido"
+                    onClick={addLine}
+                  >
+                    <Plus aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[15rem] text-left">
+                  {ADD_LINE_TOOLTIP}
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </div>
-          <div className="overflow-x-auto rounded-xl border border-primary/10 bg-card shadow-inner">
+          <div className="po-doc-lines-table overflow-x-auto rounded-xl border border-primary/10 bg-card shadow-inner">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -1395,6 +1508,7 @@ export default function PurchaseOrderNewPage() {
                       <TableRow
                         key={i}
                         id={`po-line-row-${i}`}
+                        data-po-line-type={line.item_type}
                         className={cn(
                           typeMeta.rowClass,
                           rowHasError && "ring-2 ring-inset ring-destructive/35",
@@ -1414,7 +1528,7 @@ export default function PurchaseOrderNewPage() {
                           <div className="group/field relative">
                             <Package
                               className={cn(
-                                poFieldIconClass(false, saving),
+                                poFieldIconClass(Boolean(lineErrors[i]?.description), saving),
                                 "top-1/2 -translate-y-1/2",
                               )}
                               aria-hidden
@@ -1425,10 +1539,15 @@ export default function PurchaseOrderNewPage() {
                               onChange={(ev) => {
                                 updateLine(i, { description: ev.target.value })
                               }}
-                              placeholder="Ej: BOPP transparente · 20 µ · 520 mm"
+                              placeholder="Ej: BOPP transparente"
                               aria-label={`Material solicitado, fila ${i + 1}`}
+                              aria-invalid={Boolean(lineErrors[i]?.description)}
                               disabled={saving}
-                              className={cn("pl-10", PO_ROW_FIELD_CLASS)}
+                              className={cn(
+                                "pl-10",
+                                PO_ROW_FIELD_CLASS,
+                                poInvalidHighlightClass(Boolean(lineErrors[i]?.description)),
+                              )}
                             />
                           </div>
                         </TableCell>

@@ -13,6 +13,11 @@ git reset --hard origin/main
 cd "$APP_ROOT/backend"
 composer install --no-dev --optimize-autoloader --no-interaction
 php artisan migrate --force --no-interaction
+
+# Reset operativo: vacía todas las tablas excepto users y migrations.
+# Quitar o comentar la siguiente línea cuando ya no quieras borrar datos en cada deploy.
+php artisan axones:truncate-keep-users --force --no-interaction
+
 php artisan axones:cleanup-operational-alerts --no-interaction
 php artisan optimize --no-interaction
 

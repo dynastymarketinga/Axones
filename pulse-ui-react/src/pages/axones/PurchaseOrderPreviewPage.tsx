@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { CheckCircle2, FileDown, Lock, Truck } from "lucide-react"
+import { ArrowLeft, CheckCircle2, FileDown, Lock, Truck } from "lucide-react"
 import { toast } from "sonner"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
-import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
+import { InlineSpinner } from "@/components/axones/LoadingStates"
 
 const AXONES_ADDRESS_LINE =
   "CALLE PARCELAMIENTO INDUSTRIAL GUERE, LOCAL 35, SECTOR LA JULIA. TURMERO-EDO ARAGUA, ZONA POSTAL 2115. TELFS: (0244) 663.53.76 – (0244) 663.50.60"
@@ -316,12 +316,16 @@ export default function PurchaseOrderPreviewPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" asChild>
-            <Link to="/ordenes-compra">Volver al listado</Link>
+          <Button type="button" variant="outline" size="icon" asChild>
+            <Link to="/ordenes-compra" aria-label="Volver al listado">
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+            </Link>
           </Button>
           <Button
             type="button"
+            size="icon"
             disabled={!detail || pdfBusy}
+            aria-label={pdfBusy ? "Generando PDF…" : "Descargar PDF"}
             onClick={() => {
               if (!detail) return
               setPdfBusy(true)
@@ -331,8 +335,7 @@ export default function PurchaseOrderPreviewPage() {
                 .finally(() => setPdfBusy(false))
             }}
           >
-            <FileDown className="mr-2 h-4 w-4" />
-            <LoadingButtonLabel loading={pdfBusy} loadingText="Generando…" idleText="Descargar PDF" />
+            {pdfBusy ? <InlineSpinner /> : <FileDown className="h-4 w-4" aria-hidden />}
           </Button>
         </div>
       </div>

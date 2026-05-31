@@ -881,8 +881,8 @@ export default function PurchaseOrdersPage() {
                               state={{ from }}
                               onClick={(ev) => ev.stopPropagation()}
                               className={poActionEditClass}
-                              title="Editar cabecera"
-                              aria-label="Editar orden de compra"
+                              title="Editar orden"
+                              aria-label="Editar orden de compra (cabecera y líneas)"
                             >
                               <Pencil className="h-4 w-4" />
                               <span className="sr-only">Editar</span>

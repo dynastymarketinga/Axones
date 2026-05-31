@@ -115,11 +115,6 @@ type PurchaseOrderOption = {
   supplier?: { name?: string | null } | null
 }
 
-type MaterialOption = {
-  id: number | string
-  sku: string
-}
-
 type UnitOption = {
   value: string
   label: string
@@ -167,11 +162,6 @@ export type PurchaseReceiptNewPageViewProps = {
   freeLines: FreeLine[]
   paginatedLineEntries: PaginatedLineEntry[]
   showDimensionColumns: boolean
-  materialComboOpenRow: number | null
-  setMaterialComboOpenRow: (index: number | null) => void
-  materialComboSearch: string
-  setMaterialComboSearch: (value: string) => void
-  materialsForItemType: (itemType: string) => MaterialOption[]
   updateFreeLine: (index: number, patch: Partial<FreeLine>) => void
   allowedUnitsByItemType: (itemType: string) => readonly UnitOption[]
   removeFreeLine: (index: number) => void
@@ -587,7 +577,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                 </Tooltip>
               </div>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                <strong>Sin orden de compra:</strong> elija tipo, material y la cantidad física que entra
+                <strong>Sin orden de compra:</strong> elija tipo, escriba el material y la cantidad física que entra
                 (kg en báscula o factura); no hay tope de pedido.{" "}
                 <strong>Con orden de compra:</strong> en cada fila use la línea de la OC; en cantidad
                 recibida registre lo recibido en este despacho (puede ser menor al sugerido, pero no
@@ -658,8 +648,8 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                   </Badge>
                 </h2>
               <p className="text-muted-foreground text-xs">
-                Registre tipo, material del catálogo y cantidad física por línea. Las filas vacías se
-                omiten al guardar.
+                Escriba el material recibido y la cantidad física por línea. Si no existe en inventario, se
+                creará al registrar. Las filas vacías se omiten al guardar.
               </p>
               </div>
               <div className="flex items-center gap-2">
@@ -756,12 +746,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                 </TableHeader>
                 <TableBody>
                   {props.paginatedLineEntries.map(({ line, index: i }) => {
+                    const rowHasError = Boolean(props.lineErrors[i] && Object.keys(props.lineErrors[i]).length > 0)
                     const typeKey = receiptUiLabelToItemTypeKey(line.item_type)
                     const typeMeta = PURCHASE_ITEM_TYPE_META[typeKey]
-                    const rowHasError = Boolean(props.lineErrors[i] && Object.keys(props.lineErrors[i]).length > 0)
-                    const selectedMaterial = props
-                      .materialsForItemType(line.item_type)
-                      .find((m) => String(m.id) === line.material_id)
                     const shouldShowDims = shouldShowDimsForItemType(typeKey)
                     return (
                       <TableRow
@@ -848,101 +835,33 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                           </Select>
                         </TableCell>
                         <TableCell className="align-middle">
-                          <Popover
-                            open={props.materialComboOpenRow === i}
-                            onOpenChange={(open) => {
-                              if (open) props.setMaterialComboSearch("")
-                              props.setMaterialComboOpenRow(open ? i : null)
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <div className="group/field relative">
-                                <Package
-                                  className={cn(
-                                    documentFieldIconClass(Boolean(props.lineErrors[i]?.material), props.saving),
-                                    "top-1/2 -translate-y-1/2",
-                                  )}
-                                  aria-hidden
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  role="combobox"
-                                  aria-expanded={props.materialComboOpenRow === i}
-                                  disabled={props.saving}
-                                  className={cn(
-                                    "h-9 w-full justify-between pl-10 font-normal",
-                                    DOCUMENT_ROW_FIELD_CLASS,
-                                    documentInvalidHighlightClass(Boolean(props.lineErrors[i]?.material)),
-                                  )}
-                                >
-                                  <span className={cn("min-w-0 flex-1 text-left", !line.material_id && "text-muted-foreground")}>
-                                    {selectedMaterial?.sku || "Seleccione material del catálogo..."}
-                                  </span>
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </div>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                              <Command shouldFilter>
-                                <CommandInput
-                                  placeholder="Buscar SKU..."
-                                  value={props.materialComboOpenRow === i ? props.materialComboSearch : ""}
-                                  onValueChange={props.setMaterialComboSearch}
-                                />
-                                <CommandList className="max-h-60">
-                                  <CommandEmpty>
-                                    {props.materialComboSearch.trim() ? (
-                                      <div className="space-y-2 px-2">
-                                        <p className="text-muted-foreground">No hay coincidencias con la busqueda.</p>
-                                        {line.item_type ? (
-                                          <Button
-                                            type="button"
-                                            variant="secondary"
-                                            size="sm"
-                                            className="h-auto w-full whitespace-normal py-2 text-xs"
-                                            onClick={() => {
-                                              const q = props.materialComboSearch.trim()
-                                              props.goToMaterialMaster(i, line.item_type, { sku: q, name: q })
-                                              props.setMaterialComboOpenRow(null)
-                                              props.setMaterialComboSearch("")
-                                            }}
-                                          >
-                                            Ir a nuevo material con "{props.materialComboSearch.trim()}"
-                                          </Button>
-                                        ) : (
-                                          <p className="text-muted-foreground text-xs">
-                                            Seleccione primero el tipo de item en esta fila.
-                                          </p>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      "No hay SKU disponibles."
-                                    )}
-                                  </CommandEmpty>
-                                  <CommandGroup>
-                                    {props.materialsForItemType(line.item_type).map((m) => (
-                                      <CommandItem
-                                        key={m.id}
-                                        value={m.sku}
-                                        onSelect={() => {
-                                          props.updateFreeLine(i, { material_id: String(m.id) })
-                                          props.setMaterialComboOpenRow(null)
-                                          props.setMaterialComboSearch("")
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn("mr-2 h-4 w-4", line.material_id === String(m.id) ? "opacity-100" : "opacity-0")}
-                                          aria-hidden
-                                        />
-                                        {m.sku}
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
+                          <div className="group/field relative">
+                            <Package
+                              className={cn(
+                                documentFieldIconClass(Boolean(props.lineErrors[i]?.material), props.saving),
+                                "top-1/2 -translate-y-1/2",
+                              )}
+                              aria-hidden
+                            />
+                            <Input
+                              id={`receipt-line-${i}-material`}
+                              value={line.material_label}
+                              onChange={(ev) =>
+                                props.updateFreeLine(i, {
+                                  material_label: ev.target.value,
+                                  material_id: "",
+                                })
+                              }
+                              placeholder="Ej: BOPP transparente"
+                              disabled={props.saving}
+                              aria-label={`Material recibido, fila ${i + 1}`}
+                              className={cn(
+                                "pl-10",
+                                DOCUMENT_ROW_FIELD_CLASS,
+                                documentInvalidHighlightClass(Boolean(props.lineErrors[i]?.material)),
+                              )}
+                            />
+                          </div>
                         </TableCell>
                         {props.showDimensionColumns ? (
                           shouldShowDims ? (

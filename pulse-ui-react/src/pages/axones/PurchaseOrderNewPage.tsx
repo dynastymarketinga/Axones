@@ -1327,7 +1327,8 @@ export default function PurchaseOrderNewPage() {
                 </Badge>
               </h2>
               <p className="text-muted-foreground text-xs">
-                Describa material, tipo y cantidad por línea. Las filas vacías se omiten al guardar.
+                Escriba el material solicitado (no hace falta que exista en inventario), tipo y cantidad por línea.
+                Las filas vacías se omiten al guardar.
               </p>
             </div>
             <Tooltip>

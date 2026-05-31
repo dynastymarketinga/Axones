@@ -42,6 +42,8 @@ export type PurchaseOrderDetailPayload = {
 export type FreeLine = {
   purchase_order_line_id: string
   item_type: string
+  /** Texto libre; al guardar se busca en catálogo o se crea el material. */
+  material_label: string
   material_id: string
   micras: string
   ancho_mm: string
@@ -120,16 +122,41 @@ function allowedUnitsByItemType(itemType: string) {
   return UNIT_OPTIONS
 }
 
+function suggestSkuFromLabel(label: string): string {
+  const compact = label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+  return compact || `MAT-${Date.now().toString(36).toUpperCase()}`
+}
+
 function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
   const allowed = allowedUnitsByItemType(line.item_type).map((u) => u.value)
   const safeUnit = allowed.includes(line.unit as (typeof allowed)[number]) ? line.unit : "kg"
   const requiresDimensions = receiptLineRequiresDimensions(line.item_type)
   return {
     ...line,
+    material_label: typeof line.material_label === "string" ? line.material_label : "",
     unit: safeUnit,
     micras: requiresDimensions ? line.micras : "",
     ancho_mm: requiresDimensions ? line.ancho_mm : "",
   }
+}
+
+function hydrateFreeLineMaterialLabel(line: FreeLine, materialsList: MaterialRow[]): FreeLine {
+  const normalized = normalizeLineByBusinessRules(line)
+  if (normalized.material_label.trim()) return normalized
+  const matId = normalized.material_id.trim()
+  if (matId) {
+    const mat = materialsList.find((m) => String(m.id) === matId)
+    if (mat) {
+      return { ...normalized, material_label: mat.sku || mat.name || "" }
+    }
+  }
+  return normalized
 }
 
 export type ReceiptFieldErrors = {
@@ -149,11 +176,10 @@ export type ReceiptLineFieldErrors = {
   purchaseOrderLine?: string
 }
 
-/** Mensaje concreto por fila; evita el toast genérico cuando el fallo es solo el SKU del catálogo. */
 function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: boolean): string | null {
   const hasPol = row.purchase_order_line_id.trim().length > 0
   const hasType = row.item_type.trim().length > 0
-  const materialId = Number(row.material_id)
+  const materialLabel = row.material_label.trim()
   const quantity = Number(row.quantity)
   const requiresDimensions = receiptLineRequiresDimensions(row.item_type)
   const micras = Number(row.micras)
@@ -164,10 +190,10 @@ function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: b
   if (!hasType) {
     return "Seleccione el tipo de ítem (Sustrato, Tinta, etc.) en cada fila."
   }
-  if (!Number.isFinite(materialId) || materialId <= 0) {
+  if (!materialLabel) {
     return requirePurchaseOrderLine
-      ? "Debe abrir «Material» y elegir un SKU del catálogo. Lo que muestra la OC es solo referencia hasta que seleccione el material."
-      : "Seleccione un material del catálogo en cada fila."
+      ? "Escriba el material recibido. La columna de la OC es solo referencia."
+      : "Escriba el material recibido en cada fila."
   }
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return "Indique cantidad recibida mayor que 0 (entrada física)."
@@ -200,12 +226,75 @@ function emptyLine(): FreeLine {
   return {
     purchase_order_line_id: "",
     item_type: "Sustrato",
+    material_label: "",
     material_id: "",
     micras: "",
     ancho_mm: "",
     quantity: "",
     unit: "kg",
   }
+}
+
+function findMaterialByLabel(label: string, materialsList: MaterialRow[]): MaterialRow | undefined {
+  const nk = normalizeKey(label)
+  if (!nk) return undefined
+  return materialsList.find(
+    (m) => normalizeKey(m.sku) === nk || normalizeKey(m.name ?? "") === nk,
+  )
+}
+
+async function createMaterialForReceiptLine(
+  row: FreeLine,
+  supplierId: number | null,
+): Promise<MaterialRow> {
+  const label = row.material_label.trim()
+  const area = mapItemTypeToInventoryArea(row.item_type)
+  const unit = row.unit || "kg"
+  const baseSku = suggestSkuFromLabel(label)
+
+  const body: Record<string, unknown> = {
+    name: label.slice(0, 255),
+    inventory_area: area,
+    unit,
+    min_stock: 0,
+  }
+  if (supplierId != null && supplierId > 0) body.supplier_id = supplierId
+  if (area === "tintas") body.tinta_subarea = "laminacion"
+  if (receiptLineRequiresDimensions(row.item_type)) {
+    if (row.micras.trim()) body.micras = Number(row.micras)
+    if (row.ancho_mm.trim()) body.ancho = Number(row.ancho_mm)
+  }
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const sku = attempt === 0 ? baseSku : `${baseSku.slice(0, 58)}-${attempt + 1}`
+    try {
+      return await apiFetch<MaterialRow>("materials", {
+        method: "POST",
+        body: JSON.stringify({ ...body, sku }),
+      })
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 422 && attempt < 4) continue
+      throw e
+    }
+  }
+  throw new Error("No se pudo crear el material en inventario.")
+}
+
+async function resolveReceiptLineMaterialId(
+  row: FreeLine,
+  materialsList: MaterialRow[],
+  supplierId: number | null,
+): Promise<{ materialId: number; materialsList: MaterialRow[] }> {
+  const label = row.material_label.trim()
+  if (!label) throw new Error("Material vacío")
+
+  const existing = findMaterialByLabel(label, materialsList)
+  if (existing) {
+    return { materialId: existing.id, materialsList }
+  }
+
+  const created = await createMaterialForReceiptLine(row, supplierId)
+  return { materialId: created.id, materialsList: [...materialsList, created] }
 }
 
 function inferUiItemTypeFromInventoryArea(area: string): string {
@@ -346,9 +435,6 @@ export default function PurchaseReceiptNewPage() {
   const [purchaseOrderDetail, setPurchaseOrderDetail] = useState<PurchaseOrderDetailPayload | null>(null)
   const [poDetailLoading, setPoDetailLoading] = useState(false)
   const [poComboOpen, setPoComboOpen] = useState(false)
-  const [materialComboOpenRow, setMaterialComboOpenRow] = useState<number | null>(null)
-  /** Texto del buscador SKU del combo de material (solo una fila abierta a la vez). */
-  const [materialComboSearch, setMaterialComboSearch] = useState("")
   const [estimatedNextReceiptId, setEstimatedNextReceiptId] = useState<number | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateReceiptMatch[]>([])
@@ -473,10 +559,18 @@ export default function PurchaseReceiptNewPage() {
             ? inferUiItemTypeFromInventoryArea(mat.inventory_area)
             : (parsed.itemType || "")
           const unitRaw = (pol.unit || mat?.unit || "kg").trim()
+          const materialLabel =
+            mat?.sku ||
+            mat?.name ||
+            parsed.baseText ||
+            pol.material?.sku ||
+            pol.material?.name ||
+            ""
           return normalizeLineByBusinessRules({
             purchase_order_line_id: String(pol.id),
             item_type: inferredItemType,
-            material_id: matId,
+            material_label: materialLabel,
+            material_id: "",
             micras: mat ? "" : parsed.micras,
             ancho_mm: mat ? "" : parsed.ancho_mm,
             quantity: String(rem),
@@ -541,10 +635,14 @@ export default function PurchaseReceiptNewPage() {
 
       if (poId != null && Array.isArray(parsed.freeLines) && parsed.freeLines.length > 0) {
         skipRemoteFreeLinesForPurchaseOrderRef.current = poId
-        pendingRestoredFreeLinesRef.current = parsed.freeLines.map((row) => normalizeLineByBusinessRules(row))
+        pendingRestoredFreeLinesRef.current = parsed.freeLines.map((row) =>
+          hydrateFreeLineMaterialLabel(row, materials),
+        )
       } else if (Array.isArray(parsed.freeLines)) {
         setFreeLines(
-          parsed.freeLines.length ? parsed.freeLines.map((row) => normalizeLineByBusinessRules(row)) : [emptyLine()],
+          parsed.freeLines.length
+            ? parsed.freeLines.map((row) => hydrateFreeLineMaterialLabel(row, materials))
+            : [emptyLine()],
         )
       }
     }
@@ -685,7 +783,7 @@ export default function PurchaseReceiptNewPage() {
     documentToastError(messages.slice(0, 3).join(" · "))
   }
 
-  function focusLineRow(rowIndex: number) {
+  function focusLineRow(rowIndex: number, field: "material" | "quantity" = "quantity") {
     const page = Math.floor(rowIndex / DOCUMENT_LINES_PAGE_SIZE) + 1
     setLinesPage(page)
     window.requestAnimationFrame(() => {
@@ -693,7 +791,9 @@ export default function PurchaseReceiptNewPage() {
         behavior: "smooth",
         block: "center",
       })
-      document.getElementById(`receipt-line-${rowIndex}-qty`)?.focus()
+      const targetId =
+        field === "material" ? `receipt-line-${rowIndex}-material` : `receipt-line-${rowIndex}-qty`
+      document.getElementById(targetId)?.focus()
     })
   }
 
@@ -728,7 +828,10 @@ export default function PurchaseReceiptNewPage() {
       .filter((n) => Number.isFinite(n))
       .sort((a, b) => a - b)[0]
     if (firstRow != null) {
-      focusLineRow(firstRow)
+      const rowErr = lineErrs[firstRow]
+      const focusField =
+        rowErr?.material || rowErr?.purchaseOrderLine ? "material" : "quantity"
+      focusLineRow(firstRow, focusField)
     }
   }
 
@@ -736,6 +839,7 @@ export default function PurchaseReceiptNewPage() {
     return Boolean(
       row.purchase_order_line_id.trim() ||
         row.item_type.trim() ||
+        row.material_label.trim() ||
         row.material_id.trim() ||
         row.quantity.trim() ||
         row.micras.trim() ||
@@ -785,7 +889,7 @@ export default function PurchaseReceiptNewPage() {
       const errs: ReceiptLineFieldErrors = {}
       if (msg.includes("línea de la orden")) errs.purchaseOrderLine = msg
       else if (msg.includes("tipo")) errs.material = msg
-      else if (msg.includes("material") || msg.includes("SKU") || msg.includes("catálogo"))
+      else if (msg.includes("material") || msg.includes("Escriba"))
         errs.material = msg
       else if (msg.includes("cantidad")) errs.quantity = msg
       else if (msg.includes("Micras") || msg.includes("Ancho")) {
@@ -806,12 +910,16 @@ export default function PurchaseReceiptNewPage() {
     return { ok, fieldErrors: nextField, lineErrors: nextLine }
   }
 
-  function buildReceiptPayload(hasPurchaseOrder: boolean): Record<string, unknown> {
+  function buildReceiptPayload(
+    hasPurchaseOrder: boolean,
+    sourceLines: FreeLine[] = freeLines,
+  ): Record<string, unknown> {
     const poDetail = purchaseOrderDetail
-    const rowsWithContent = freeLines.filter(receiptLineHasAnyValue)
+    const rowsWithContent = sourceLines.filter(receiptLineHasAnyValue)
     const lines = rowsWithContent.map((row) => {
+      const materialId = Number(row.material_id)
       const base = {
-        material_id: Number(row.material_id),
+        material_id: materialId,
         quantity: Number(row.quantity),
         item_type: mapUiItemTypeToApi(row.item_type),
         unit: row.unit || "kg",
@@ -917,9 +1025,12 @@ export default function PurchaseReceiptNewPage() {
 
     const presetSku = preset?.sku?.trim() ?? ""
     const presetName = preset?.name?.trim() ?? ""
+    const labelText = row?.material_label?.trim() ?? ""
     const selected = materials.find((m) => String(m.id) === row?.material_id)
-    const suggestedName = (presetName || presetSku || selected?.name) ?? (resolvedType ? `${resolvedType} ` : "")
-    const suggestedSku = (presetSku || selected?.sku || "").toUpperCase()
+    const suggestedName =
+      (presetName || presetSku || labelText || selected?.name) ??
+      (resolvedType ? `${resolvedType} ` : "")
+    const suggestedSku = (presetSku || selected?.sku || suggestSkuFromLabel(labelText)).toUpperCase()
 
     navigate("/materiales/nuevo", {
       state: {
@@ -999,10 +1110,22 @@ export default function PurchaseReceiptNewPage() {
     setPoComboOpen(false)
   }
 
-  function materialsForItemType(itemType: string) {
-    if (!itemType) return materials
-    const area = mapItemTypeToInventoryArea(itemType)
-    return materials.filter((m) => normalizeKey(m.inventory_area) === normalizeKey(area))
+  async function resolveReceiptLinesForSave(): Promise<FreeLine[]> {
+    let mats = materials
+    const resolved: FreeLine[] = []
+
+    for (const row of freeLines) {
+      if (!receiptLineHasAnyValue(row)) continue
+      const { materialId, materialsList } = await resolveReceiptLineMaterialId(row, mats, supplierId)
+      mats = materialsList
+      resolved.push({ ...row, material_id: String(materialId) })
+    }
+
+    if (mats.length > materials.length) {
+      setMaterials(mats)
+    }
+
+    return resolved
   }
 
   async function persistReceipt(payload: Record<string, unknown>) {
@@ -1030,7 +1153,19 @@ export default function PurchaseReceiptNewPage() {
 
   async function executeCreateReceipt(skipDuplicateCheck = false) {
     const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
-    const payload = buildReceiptPayload(hasPurchaseOrder)
+
+    setSaving(true)
+    let resolvedLines: FreeLine[]
+    try {
+      resolvedLines = await resolveReceiptLinesForSave()
+    } catch (e) {
+      setSaving(false)
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo registrar el material en inventario. Revise los datos e intente de nuevo.")
+      return
+    }
+
+    const payload = buildReceiptPayload(hasPurchaseOrder, resolvedLines)
 
     if (!skipDuplicateCheck) {
       try {
@@ -1047,6 +1182,7 @@ export default function PurchaseReceiptNewPage() {
           setDuplicateMatches(duplicateCheck.matches)
           setPendingPayload(payload)
           setDuplicateDialogOpen(true)
+          setSaving(false)
           return
         }
       } catch {
@@ -1124,11 +1260,6 @@ export default function PurchaseReceiptNewPage() {
       freeLines={freeLines}
       paginatedLineEntries={paginatedLineEntries}
       showDimensionColumns={showDimensionColumns}
-      materialComboOpenRow={materialComboOpenRow}
-      setMaterialComboOpenRow={setMaterialComboOpenRow}
-      materialComboSearch={materialComboSearch}
-      setMaterialComboSearch={setMaterialComboSearch}
-      materialsForItemType={materialsForItemType}
       updateFreeLine={updateFreeLine}
       allowedUnitsByItemType={allowedUnitsByItemType}
       removeFreeLine={removeFreeLine}

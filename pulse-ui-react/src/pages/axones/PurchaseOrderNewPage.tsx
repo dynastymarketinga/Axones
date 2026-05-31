@@ -36,7 +36,7 @@ import {
   isDuplicatePurchaseOrderCodeMessage,
   translateApiValidationMessage,
 } from "@/lib/api-validation-es"
-import type { LaravelPaginated, PurchaseOrderRow, SupplierRecord } from "@/types/api"
+import type { LaravelPaginated, MaterialRow, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import "./purchase-order-list.css"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import {
@@ -52,7 +52,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Calendar as UiCalendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command,
   CommandEmpty,
@@ -83,6 +83,7 @@ import {
 
 type PoLineDraft = {
   description: string
+  material_id: string
   item_type: "sustrato" | "tinta" | "quimico" | "otros"
   micras: string
   ancho_mm: string
@@ -179,12 +180,36 @@ function sanitizePositiveDecimalInput(raw: string, maxFracDigits: number): strin
 
 const emptyLine = (): PoLineDraft => ({
   description: "",
+  material_id: "",
   item_type: "sustrato",
   micras: "",
   ancho_mm: "",
   quantity_ordered: "",
   unit: "kg" satisfies PoLineUnit,
 })
+
+function normalizeKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+}
+
+function mapPoItemTypeToInventoryArea(itemType: PoLineDraft["item_type"]): string {
+  if (itemType === "tinta") return "tintas"
+  if (itemType === "quimico") return "quimicos"
+  if (itemType === "otros") return "miscelaneos"
+  return "material"
+}
+
+function materialsForPoItemType(
+  materialsList: MaterialRow[],
+  itemType: PoLineDraft["item_type"],
+): MaterialRow[] {
+  const area = mapPoItemTypeToInventoryArea(itemType)
+  return materialsList.filter((m) => normalizeKey(m.inventory_area) === normalizeKey(area))
+}
 
 const PO_ITEM_TYPE_META: Record<
   PoLineDraft["item_type"],
@@ -327,6 +352,7 @@ function normalizePoLineDraftFromStorage(raw: unknown): PoLineDraft {
   const unit: PoLineUnit = isPoLineUnit(u) ? u : "kg"
   return normalizeLineByBusinessRules({
     description: typeof r.description === "string" ? r.description : "",
+    material_id: typeof r.material_id === "string" ? r.material_id : "",
     item_type,
     micras: typeof r.micras === "string" ? r.micras : "",
     ancho_mm: typeof r.ancho_mm === "string" ? r.ancho_mm : "",
@@ -427,6 +453,8 @@ export default function PurchaseOrderNewPage() {
   const [notes, setNotes] = useState("")
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()])
   const [linesPage, setLinesPage] = useState(1)
+  const [materials, setMaterials] = useState<MaterialRow[]>([])
+  const [materialPickerOpenRow, setMaterialPickerOpenRow] = useState<number | null>(null)
   const [confirmCreateOpen, setConfirmCreateOpen] = useState(false)
   const [codeEditConfirmOpen, setCodeEditConfirmOpen] = useState(false)
   const [codeEditUnlocked, setCodeEditUnlocked] = useState(false)
@@ -577,6 +605,23 @@ export default function PurchaseOrderNewPage() {
       setCode(buildAutoPoCode())
     }
   }, [code, codeTouched])
+
+  useEffect(() => {
+    let c = false
+    void (async () => {
+      try {
+        const matRes = await apiFetch<LaravelPaginated<MaterialRow>>("materials", {
+          query: { per_page: 200, page: 1 },
+        })
+        if (!c) setMaterials(matRes.data ?? [])
+      } catch {
+        if (!c) setMaterials([])
+      }
+    })()
+    return () => {
+      c = true
+    }
+  }, [])
 
   useEffect(() => {
     let c = false
@@ -761,8 +806,37 @@ export default function PurchaseOrderNewPage() {
       return next
     })
     setLines((prev) =>
-      prev.map((row, j) => (j === i ? { ...row, ...patch } : row)),
+      prev.map((row, j) => (j === i ? normalizeLineByBusinessRules({ ...row, ...patch }) : row)),
     )
+  }
+
+  async function refreshMaterialsList() {
+    try {
+      const matRes = await apiFetch<LaravelPaginated<MaterialRow>>("materials", {
+        query: { per_page: 200, page: 1 },
+      })
+      setMaterials(matRes.data ?? [])
+    } catch {
+      /* mantener listado previo */
+    }
+  }
+
+  function openMaterialPicker(rowIndex: number) {
+    setMaterialPickerOpenRow(rowIndex)
+    void refreshMaterialsList()
+  }
+
+  function selectMaterialFromCatalog(rowIndex: number, material: MaterialRow) {
+    const unitRaw = (material.unit || "kg").trim()
+    const unit: PoLineUnit = isPoLineUnit(unitRaw) ? unitRaw : "kg"
+    updateLine(rowIndex, {
+      material_id: String(material.id),
+      description: material.sku || material.name || "",
+      micras: material.micras?.trim() ?? "",
+      ancho_mm: material.ancho?.trim() ?? "",
+      unit,
+    })
+    setMaterialPickerOpenRow(null)
   }
 
   function removeLine(i: number) {
@@ -944,11 +1018,15 @@ export default function PurchaseOrderNewPage() {
 
     const payloadLines = lines
       .filter(isPoLineSubmitReady)
-      .map((L) => ({
-        description: buildLineDescription(L),
-        quantity_ordered: parseDecimalInput(L.quantity_ordered),
-        unit: L.unit.trim() || "kg",
-      }))
+      .map((L) => {
+        const materialId = Number(L.material_id)
+        return {
+          description: buildLineDescription(L),
+          quantity_ordered: parseDecimalInput(L.quantity_ordered),
+          unit: L.unit.trim() || "kg",
+          ...(Number.isFinite(materialId) && materialId > 0 ? { material_id: materialId } : {}),
+        }
+      })
 
     setSaving(true)
     try {
@@ -1421,9 +1499,9 @@ export default function PurchaseOrderNewPage() {
                 </Badge>
               </h2>
               <p className="text-muted-foreground text-xs">
-                Escriba el material solicitado y la cantidad por línea. Puede ir a inventario para crearlo
-                antes o escribirlo libremente; al recepcionar se registrará en stock. Las filas vacías se
-                omiten al guardar.
+                Escriba o elija del inventario el material solicitado y la cantidad por línea. Puede crear
+                material desde cada fila o escribirlo libremente; al recepcionar se registrará en stock. Las
+                filas vacías se omiten al guardar.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1497,7 +1575,9 @@ export default function PurchaseOrderNewPage() {
                     </span>
                   </TableHead>
                   <TableHead className="w-36">Unidad</TableHead>
-                  <TableHead className="w-11 p-0" aria-hidden />
+                  <TableHead className="w-[4.5rem] p-0 text-center">
+                    <span className="sr-only">Acciones</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1525,31 +1605,123 @@ export default function PurchaseOrderNewPage() {
                           </div>
                         </TableCell>
                         <TableCell className="align-middle">
-                          <div className="group/field relative">
-                            <Package
-                              className={cn(
-                                poFieldIconClass(Boolean(lineErrors[i]?.description), saving),
-                                "top-1/2 -translate-y-1/2",
-                              )}
-                              aria-hidden
-                            />
-                            <Input
-                              id={`po-line-${i}-requested`}
-                              value={line.description}
-                              onChange={(ev) => {
-                                updateLine(i, { description: ev.target.value })
-                              }}
-                              placeholder="Ej: BOPP transparente"
-                              aria-label={`Material solicitado, fila ${i + 1}`}
-                              aria-invalid={Boolean(lineErrors[i]?.description)}
-                              disabled={saving}
-                              className={cn(
-                                "pl-10",
-                                PO_ROW_FIELD_CLASS,
-                                poInvalidHighlightClass(Boolean(lineErrors[i]?.description)),
-                              )}
-                            />
-                          </div>
+                          <Popover
+                            open={materialPickerOpenRow === i}
+                            onOpenChange={(open) => setMaterialPickerOpenRow(open ? i : null)}
+                          >
+                            <div className="group/field relative">
+                              <Package
+                                className={cn(
+                                  poFieldIconClass(Boolean(lineErrors[i]?.description), saving),
+                                  "top-1/2 -translate-y-1/2",
+                                )}
+                                aria-hidden
+                              />
+                              <PopoverAnchor asChild>
+                                <Input
+                                  id={`po-line-${i}-requested`}
+                                  role="combobox"
+                                  aria-expanded={materialPickerOpenRow === i}
+                                  value={line.description}
+                                  onFocus={() => openMaterialPicker(i)}
+                                  onClick={() => openMaterialPicker(i)}
+                                  onChange={(ev) => {
+                                    updateLine(i, {
+                                      description: ev.target.value,
+                                      material_id: "",
+                                    })
+                                  }}
+                                  placeholder="Escriba o elija del inventario…"
+                                  aria-label={`Material solicitado, fila ${i + 1}`}
+                                  aria-invalid={Boolean(lineErrors[i]?.description)}
+                                  disabled={saving}
+                                  className={cn(
+                                    "pl-10 pr-8",
+                                    PO_ROW_FIELD_CLASS,
+                                    poInvalidHighlightClass(Boolean(lineErrors[i]?.description)),
+                                  )}
+                                />
+                              </PopoverAnchor>
+                              <ChevronsUpDown
+                                className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50"
+                                aria-hidden
+                              />
+                            </div>
+                            <PopoverContent
+                              className="w-[min(100vw-2rem,28rem)] min-w-[var(--radix-popover-trigger-width)] p-0"
+                              align="start"
+                              side="bottom"
+                              onOpenAutoFocus={(ev) => ev.preventDefault()}
+                            >
+                              <Command shouldFilter>
+                                <CommandInput placeholder="Buscar SKU o nombre…" />
+                                <CommandList className="max-h-60">
+                                  <CommandEmpty>
+                                    <div className="space-y-2 px-2 py-1">
+                                      <p className="text-muted-foreground text-xs">
+                                        No hay coincidencias. Escriba libremente en el campo o cree el material.
+                                      </p>
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        className="h-auto w-full whitespace-normal py-2 text-xs"
+                                        onClick={() => {
+                                          goToMaterialMasterFromPo(i, line.item_type, {
+                                            sku: line.description.trim(),
+                                            name: line.description.trim(),
+                                          })
+                                          setMaterialPickerOpenRow(null)
+                                        }}
+                                      >
+                                        Crear material en inventario
+                                      </Button>
+                                    </div>
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    <CommandItem
+                                      value="sin seleccion solo texto libre"
+                                      onSelect={() => {
+                                        updateLine(i, { material_id: "" })
+                                        setMaterialPickerOpenRow(null)
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          !line.material_id ? "opacity-100" : "opacity-0",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      Solo texto libre
+                                    </CommandItem>
+                                    {materialsForPoItemType(materials, line.item_type).map((m) => {
+                                      const search = [m.sku, m.name, String(m.id)].filter(Boolean).join(" ")
+                                      return (
+                                        <CommandItem
+                                          key={m.id}
+                                          value={search}
+                                          onSelect={() => selectMaterialFromCatalog(i, m)}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              line.material_id === String(m.id) ? "opacity-100" : "opacity-0",
+                                            )}
+                                            aria-hidden
+                                          />
+                                          <span className="truncate">
+                                            {m.sku}
+                                            {m.name ? ` · ${m.name}` : ""}
+                                          </span>
+                                        </CommandItem>
+                                      )
+                                    })}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </TableCell>
                         <TableCell className="align-middle">
                           <Select
@@ -1559,6 +1731,7 @@ export default function PurchaseOrderNewPage() {
                               const next = v as PoLineDraft["item_type"]
                               updateLine(i, {
                                 item_type: next,
+                                material_id: "",
                                 ...(shouldShowDims(next)
                                   ? {}
                                   : { micras: "", ancho_mm: "" }),
@@ -1718,7 +1891,23 @@ export default function PurchaseOrderNewPage() {
                             </Select>
                         </TableCell>
                         <TableCell className="align-middle">
-                          <div className="flex items-center justify-center">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                                  disabled={saving}
+                                  aria-label={`Crear material desde fila ${i + 1}`}
+                                  onClick={() => goToCreateMaterialFromPo(i)}
+                                >
+                                  <PackagePlus className="size-4" aria-hidden />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">Crear material</TooltipContent>
+                            </Tooltip>
                             <Button
                               type="button"
                               size="icon"

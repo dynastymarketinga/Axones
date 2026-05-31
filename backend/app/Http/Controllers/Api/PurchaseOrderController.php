@@ -67,6 +67,23 @@ class PurchaseOrderController extends Controller
             $query->where('code', 'like', '%'.$escaped.'%');
         }
 
+        $linkedReceiptsFilter = static function ($q): void {
+            $q->where('without_purchase_order', false);
+        };
+
+        if ($request->has('has_receipts')) {
+            $hasReceipts = filter_var($request->query('has_receipts'), FILTER_VALIDATE_BOOLEAN);
+            if ($hasReceipts) {
+                $query->whereHas('receipts', $linkedReceiptsFilter);
+            } else {
+                $query->whereDoesntHave('receipts', $linkedReceiptsFilter);
+            }
+        }
+
+        $query
+            ->withCount(['receipts as receipts_count' => $linkedReceiptsFilter])
+            ->withMax(['receipts as last_receipt_at' => $linkedReceiptsFilter], 'received_at');
+
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
     }
 

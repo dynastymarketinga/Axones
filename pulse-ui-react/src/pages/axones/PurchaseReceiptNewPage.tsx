@@ -1061,7 +1061,29 @@ export default function PurchaseReceiptNewPage() {
                   <Command shouldFilter>
                     <CommandInput placeholder="Buscar proveedor..." />
                     <CommandList className="max-h-60">
-                      <CommandEmpty>No hay coincidencias.</CommandEmpty>
+                      <CommandEmpty>
+                        {supplierOptions.length === 0 ? (
+                          <div className="space-y-3 px-2 py-4 text-center">
+                            <p className="text-muted-foreground text-sm">
+                              No hay proveedores registrados.
+                            </p>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={saving}
+                              onClick={() => {
+                                setSupplierComboOpen(false)
+                                persistReceiptDraftAndGoToNewSupplier()
+                              }}
+                            >
+                              Crear proveedor
+                            </Button>
+                          </div>
+                        ) : (
+                          "No hay coincidencias."
+                        )}
+                      </CommandEmpty>
                       <CommandGroup>
                         {supplierOptions.map((supplier) => (
                           <CommandItem

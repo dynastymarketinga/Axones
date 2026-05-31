@@ -192,6 +192,92 @@ class MasterDataAndPurchaseTest extends TestCase
         $this->assertEquals('40.000', (string) $material->quantity_on_hand);
     }
 
+    public function test_purchase_order_index_filters_by_has_receipts(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory_chief']);
+        $token = $user->createToken('t')->plainTextToken;
+        $headers = ['Authorization' => 'Bearer '.$token];
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov filtros',
+            'rif' => 'J-FILT',
+        ]);
+
+        $material = Material::query()->create([
+            'sku' => 'MAT-FILT',
+            'name' => 'Material filtros',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $material->forceFill(['quantity_on_hand' => 0])->save();
+
+        $pendingPo = $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-PENDING-FILT',
+            'lines' => [
+                [
+                    'description' => 'Sin recepcion',
+                    'material_id' => $material->id,
+                    'quantity_ordered' => 50,
+                    'unit' => 'kg',
+                    'unit_price' => 0,
+                ],
+            ],
+        ], $headers);
+        $pendingPo->assertCreated();
+
+        $receivedPo = $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-RECEIVED-FILT',
+            'lines' => [
+                [
+                    'description' => 'Con recepcion',
+                    'material_id' => $material->id,
+                    'quantity_ordered' => 80,
+                    'unit' => 'kg',
+                    'unit_price' => 0,
+                ],
+            ],
+        ], $headers);
+        $receivedPo->assertCreated();
+        $receivedPoId = $receivedPo->json('id');
+        $receivedLineId = $receivedPo->json('lines.0.id');
+
+        $this->postJson('/api/purchase-receipts', [
+            'purchase_order_id' => $receivedPoId,
+            'supplier_id' => $supplier->id,
+            'invoice_number' => 'FAC-FILT-1',
+            'lines' => [
+                [
+                    'purchase_order_line_id' => $receivedLineId,
+                    'material_id' => $material->id,
+                    'item_type' => 'sustrato',
+                    'quantity' => 10,
+                    'unit' => 'kg',
+                    'micras' => 20,
+                    'ancho_mm' => 1200,
+                ],
+            ],
+        ], $headers)->assertCreated();
+
+        $pendingIndex = $this->getJson('/api/purchase-orders?has_receipts=false&per_page=100', $headers);
+        $pendingIndex->assertOk();
+        $pendingCodes = collect($pendingIndex->json('data'))->pluck('code')->all();
+        $this->assertContains('OC-PENDING-FILT', $pendingCodes);
+        $this->assertNotContains('OC-RECEIVED-FILT', $pendingCodes);
+
+        $historyIndex = $this->getJson('/api/purchase-orders?has_receipts=true&per_page=100', $headers);
+        $historyIndex->assertOk();
+        $historyCodes = collect($historyIndex->json('data'))->pluck('code')->all();
+        $this->assertContains('OC-RECEIVED-FILT', $historyCodes);
+        $this->assertNotContains('OC-PENDING-FILT', $historyCodes);
+
+        $receivedRow = collect($historyIndex->json('data'))->firstWhere('code', 'OC-RECEIVED-FILT');
+        $this->assertSame(1, (int) ($receivedRow['receipts_count'] ?? 0));
+        $this->assertNotEmpty($receivedRow['last_receipt_at'] ?? null);
+    }
+
     public function test_receipt_rejects_closed_purchase_order_without_full_lines(): void
     {
         $boss = User::factory()->create(['role' => 'boss']);
@@ -233,7 +319,7 @@ class MasterDataAndPurchaseTest extends TestCase
 
         $this->actingAs($boss, 'sanctum')
             ->postJson('/api/purchase-orders/'.$poId.'/manual-close', [
-                'reason' => 'Proveedor desistió, cerrar sin recibir nada.',
+                'reason' => 'Proveedor desisti?, cerrar sin recibir nada.',
             ])
             ->assertOk()
             ->assertJsonPath('status', PurchaseOrderStatus::Completed->value);
@@ -301,7 +387,7 @@ class MasterDataAndPurchaseTest extends TestCase
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
             'is_active' => false,
-            'deactivation_reason' => 'OC duplicada por error de captura; ya no se usará.',
+            'deactivation_reason' => 'OC duplicada por error de captura; ya no se usar?.',
         ], $headers)->assertOk();
 
         $this->assertDatabaseHas('purchase_orders', [
@@ -367,13 +453,13 @@ class MasterDataAndPurchaseTest extends TestCase
         $poId = $poResponse->json('id');
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
-            'notes' => 'Actualización de cabecera.',
+            'notes' => 'Actualizacion de cabecera.',
         ], $headers)->assertUnprocessable()->assertJsonValidationErrors(['change_reason']);
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
-            'notes' => 'Actualización de cabecera.',
-            'change_reason' => 'Corrección solicitada por compras.',
-        ], $headers)->assertOk()->assertJsonPath('notes', 'Actualización de cabecera.');
+            'notes' => 'Actualizacion de cabecera.',
+            'change_reason' => 'Correccion solicitada por compras.',
+        ], $headers)->assertOk()->assertJsonPath('notes', 'Actualizacion de cabecera.');
     }
 
     public function test_purchase_order_index_visibility_only_boss_sees_inactive(): void
@@ -433,7 +519,7 @@ class MasterDataAndPurchaseTest extends TestCase
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
             'is_active' => true,
-            'change_reason' => 'Reactivación autorizada por jefatura tras revisión.',
+            'change_reason' => 'Reactivacion autorizada por jefatura tras revision.',
         ], $invHeaders)->assertForbidden();
 
         $inactiveForBoss = collect(
@@ -447,7 +533,7 @@ class MasterDataAndPurchaseTest extends TestCase
         $this->actingAs($boss, 'sanctum')
             ->patchJson('/api/purchase-orders/'.$poId, [
                 'is_active' => true,
-                'change_reason' => 'Reactivación autorizada por jefatura tras revisión.',
+                'change_reason' => 'Reactivacion autorizada por jefatura tras revision.',
             ])
             ->assertOk()
             ->assertJsonPath('is_active', true);
@@ -497,12 +583,12 @@ class MasterDataAndPurchaseTest extends TestCase
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
             'is_active' => false,
-            'deactivation_reason' => 'Se desactiva por prueba de bloqueo de edición en inactiva.',
+            'deactivation_reason' => 'Se desactiva por prueba de bloqueo de edicion en inactiva.',
         ], $headers)->assertOk();
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
             'notes' => 'Intento de nota mientras inactiva.',
-            'change_reason' => 'Motivo de cambio con más de cinco caracteres.',
+            'change_reason' => 'Motivo de cambio con m?s de cinco caracteres.',
         ], $headers)->assertUnprocessable()->assertJsonValidationErrors(['is_active']);
     }
 
@@ -548,7 +634,51 @@ class MasterDataAndPurchaseTest extends TestCase
 
         $this->patchJson('/api/purchase-orders/'.$poId, [
             'tax_applies' => false,
-            'change_reason' => 'Proveedor exonerado de IVA según contrato vigente.',
+            'change_reason' => 'Proveedor exonerado de IVA segun contrato vigente.',
         ], $headers)->assertOk()->assertJsonPath('tax_applies', false);
+    }
+
+    public function test_purchase_order_store_validation_rules(): void
+    {
+        $user = User::factory()->create(['role' => 'inventory_chief']);
+        $token = $user->createToken('t')->plainTextToken;
+        $headers = ['Authorization' => 'Bearer '.$token];
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov validacion OC',
+            'rif' => 'J-VALID-OC',
+        ]);
+
+        $this->postJson('/api/purchase-orders', [], $headers)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['supplier_id', 'code', 'lines']);
+
+        $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-VALID-1',
+            'lines' => [
+                ['quantity_ordered' => 0, 'unit' => 'kg'],
+            ],
+        ], $headers)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['lines.0.quantity_ordered']);
+
+        $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-VALID-1',
+            'lines' => [
+                ['description' => 'Pedido minimo', 'quantity_ordered' => 0.001, 'unit' => 'kg'],
+            ],
+        ], $headers)->assertCreated();
+
+        $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-VALID-1',
+            'lines' => [
+                ['description' => 'Duplicado', 'quantity_ordered' => 1, 'unit' => 'kg'],
+            ],
+        ], $headers)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code']);
     }
 }

@@ -2,12 +2,32 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
-import { Check, ChevronsUpDown } from "lucide-react"
+import {
+  ArrowLeft,
+  Building2,
+  Calendar,
+  Check,
+  ChevronsUpDown,
+  ClipboardList,
+  Droplet,
+  FileText,
+  FlaskConical,
+  Hash,
+  Layers,
+  MapPin,
+  Package,
+  Plus,
+  Ruler,
+  Scale,
+  ShoppingCart,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, SupplierRecord } from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -118,6 +138,69 @@ const PO_ITEM_TYPES: { value: PoLineDraft["item_type"]; label: string }[] = [
   { value: "quimico", label: "Químico" },
   { value: "otros", label: "Otros" },
 ] as const
+
+const PO_ITEM_TYPE_META: Record<
+  PoLineDraft["item_type"],
+  {
+    label: string
+    icon: typeof Layers
+    iconClass: string
+    badgeClass: string
+  }
+> = {
+  sustrato: {
+    label: "Sustrato",
+    icon: Layers,
+    iconClass: "text-emerald-600",
+    badgeClass: "border-emerald-500/40 bg-emerald-50/90 text-emerald-950",
+  },
+  tinta: {
+    label: "Tinta",
+    icon: Droplet,
+    iconClass: "text-violet-600",
+    badgeClass: "border-violet-500/40 bg-violet-50/90 text-violet-950",
+  },
+  quimico: {
+    label: "Químico",
+    icon: FlaskConical,
+    iconClass: "text-sky-600",
+    badgeClass: "border-sky-500/40 bg-sky-50/90 text-sky-950",
+  },
+  otros: {
+    label: "Otros",
+    icon: Package,
+    iconClass: "text-amber-600",
+    badgeClass: "border-amber-500/40 bg-amber-50/90 text-amber-950",
+  },
+}
+
+function poFieldIconClass(hasError: boolean, disabled?: boolean) {
+  return cn(
+    "pointer-events-none absolute left-3 h-4 w-4 transition-colors",
+    hasError
+      ? "text-red-500"
+      : disabled
+        ? "text-muted-foreground/50"
+        : "text-muted-foreground group-focus-within/field:text-primary",
+  )
+}
+
+function PoItemTypeLabel({
+  type,
+  showLabel = true,
+}: {
+  type: PoLineDraft["item_type"]
+  showLabel?: boolean
+}) {
+  const meta = PO_ITEM_TYPE_META[type]
+  const Icon = meta.icon
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <Icon className={cn("size-4 shrink-0", meta.iconClass)} aria-hidden />
+      {showLabel ? <span className="truncate">{meta.label}</span> : null}
+    </span>
+  )
+}
 
 function shouldShowDims(itemType: PoLineDraft["item_type"]) {
   return itemType === "sustrato"
@@ -557,6 +640,59 @@ export default function PurchaseOrderNewPage() {
     }
   }
 
+  function focusFirstPurchaseOrderValidationError(
+    field: PoFieldErrors,
+    lineErrs: Record<number, PoLineFieldErrors>,
+  ) {
+    if (field.supplier) {
+      document.getElementById("po-supplier-trigger")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+    if (field.code) {
+      document.getElementById("po-code")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      document.getElementById("po-code")?.focus()
+      return
+    }
+    if (field.linesGeneral) {
+      document.getElementById("po-line-row-0")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+    const firstRow = Object.keys(lineErrs)
+      .map(Number)
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b)[0]
+    if (firstRow != null) {
+      document.getElementById(`po-line-row-${firstRow}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      document.getElementById(`po-line-${firstRow}-qty`)?.focus()
+    }
+  }
+
+  function mapPurchaseOrderApiValidationErrors(
+    errs: Record<string, string[] | string>,
+  ): PoFieldErrors {
+    const next: PoFieldErrors = {}
+    const first = (key: string) => {
+      const v = errs[key]
+      if (!v) return undefined
+      return Array.isArray(v) ? v[0]?.trim() : String(v).trim()
+    }
+    const supplierMsg = first("supplier_id")
+    if (supplierMsg) next.supplier = supplierMsg
+    const codeMsg = first("code")
+    if (codeMsg) {
+      next.code =
+        codeMsg.toLowerCase().includes("unique") || codeMsg.toLowerCase().includes("ya")
+          ? "Ese código ya existe. Use otro (ej. OC-2026-244)."
+          : codeMsg
+    }
+    const linesMsg =
+      first("lines") ||
+      first("lines.0.quantity_ordered") ||
+      first("lines.0.description")
+    if (linesMsg) next.linesGeneral = linesMsg
+    return next
+  }
+
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
 
@@ -565,6 +701,7 @@ export default function PurchaseOrderNewPage() {
     setLineErrors(validation.lineErrors)
     if (!validation.ok) {
       toastPurchaseOrderValidationErrors(validation.fieldErrors, validation.lineErrors)
+      focusFirstPurchaseOrderValidationError(validation.fieldErrors, validation.lineErrors)
       return
     }
 
@@ -606,8 +743,24 @@ export default function PurchaseOrderNewPage() {
       }
       navigate(returnTo)
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo crear la OC.")
+      if (e instanceof ApiError) {
+        const errs = e.body?.errors
+        if (e.status === 422 && errs && typeof errs === "object" && Object.keys(errs).length) {
+          const apiField = mapPurchaseOrderApiValidationErrors(
+            errs as Record<string, string[] | string>,
+          )
+          setFieldErrors((prev) => ({ ...prev, ...apiField }))
+          focusFirstPurchaseOrderValidationError(apiField, {})
+          const flat = Object.values(errs)
+            .flat()
+            .map((s) => String(s).trim())
+            .filter(Boolean)
+            .filter((x, i, a) => a.indexOf(x) === i)
+          toast.error(flat.length ? flat.join("\n") : e.message)
+        } else {
+          toast.error(e.message)
+        }
+      } else toast.error("No se pudo crear la OC.")
     } finally {
       setSaving(false)
     }
@@ -627,7 +780,10 @@ export default function PurchaseOrderNewPage() {
           </p>
         </div>
         <Button type="button" variant="outline" asChild>
-          <Link to={returnTo}>Volver al listado</Link>
+          <Link to={returnTo}>
+            <ArrowLeft aria-hidden />
+            Volver al listado
+          </Link>
         </Button>
       </div>
 
@@ -636,11 +792,47 @@ export default function PurchaseOrderNewPage() {
         onSubmit={(ev) => void submit(ev)}
         className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
       >
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-muted-foreground text-xs">Documento de compra</p>
+            <Badge
+              variant="outline"
+              className="mt-1 rounded-md border-primary/35 bg-primary/5 px-2.5 py-1 text-sm font-semibold text-primary shadow-sm"
+            >
+              <ClipboardList className="mr-1.5 size-3.5" aria-hidden />
+              Orden de compra · Abierta al crear
+            </Badge>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-muted-foreground text-xs">Código del pedido</p>
+            <h2 className="text-primary text-3xl font-bold tracking-tight">
+              {code.trim() || "OC-…"}
+            </h2>
+          </div>
+        </div>
+
+        <Alert className="border-primary/30 bg-primary/5">
+          <ShoppingCart className="h-4 w-4 text-primary" aria-hidden />
+          <AlertTitle className="text-foreground">Solicitud de material al proveedor</AlertTitle>
+          <AlertDescription>
+            Esta pantalla registra lo que <strong>se pide</strong>, no lo que entra al inventario. El stock se actualiza
+            en <strong>Recepciones</strong> cuando el inventario confirma la entrada física. Parcial y Completada las
+            marca el inventario al recibir.
+          </AlertDescription>
+        </Alert>
+
         <div className="grid gap-4 md:grid-cols-2">
           <div className="grid gap-2">
             <Label htmlFor="po-supplier-trigger">Proveedor *</Label>
             <div className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
+              <div className="group/field relative min-w-0 flex-1">
+                <Building2
+                  className={cn(
+                    poFieldIconClass(Boolean(fieldErrors.supplier), saving),
+                    "top-1/2 -translate-y-1/2",
+                  )}
+                  aria-hidden
+                />
                 <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
                   <PopoverTrigger asChild>
                     <Button
@@ -651,8 +843,9 @@ export default function PurchaseOrderNewPage() {
                       aria-expanded={supplierOpen}
                       aria-invalid={Boolean(fieldErrors.supplier)}
                       aria-describedby={fieldErrors.supplier ? "po-supplier-error" : undefined}
+                      disabled={saving}
                       className={cn(
-                        "h-10 w-full justify-between font-normal",
+                        "h-10 w-full justify-between pl-10 pr-3 font-normal",
                         "border-primary/25 bg-background/90",
                         fieldErrors.supplier && "border-destructive ring-1 ring-destructive/40",
                       )}
@@ -675,7 +868,29 @@ export default function PurchaseOrderNewPage() {
                   <Command shouldFilter>
                     <CommandInput placeholder="Buscar proveedor..." />
                     <CommandList className="max-h-60">
-                      <CommandEmpty>Sin resultados.</CommandEmpty>
+                      <CommandEmpty>
+                        {suppliers.length === 0 ? (
+                          <div className="space-y-3 px-2 py-4 text-center">
+                            <p className="text-muted-foreground text-sm">
+                              No hay proveedores registrados.
+                            </p>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={saving}
+                              onClick={() => {
+                                setSupplierOpen(false)
+                                persistPoDraftAndGoToNewSupplier()
+                              }}
+                            >
+                              Crear proveedor
+                            </Button>
+                          </div>
+                        ) : (
+                          "Sin resultados."
+                        )}
+                      </CommandEmpty>
                       <CommandGroup>
                         {suppliers.map((s) => (
                           <CommandItem
@@ -720,7 +935,8 @@ export default function PurchaseOrderNewPage() {
                 onClick={() => persistPoDraftAndGoToNewSupplier()}
                 disabled={saving}
               >
-                + Nuevo
+                <Plus aria-hidden />
+                Nuevo
               </Button>
             </div>
             {fieldErrors.supplier ? (
@@ -731,25 +947,39 @@ export default function PurchaseOrderNewPage() {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="po-code">Código único *</Label>
-            <Input
-              id="po-code"
-              value={code}
-              required
-              maxLength={PO_CODE_MAX_LEN}
-              aria-invalid={Boolean(fieldErrors.code)}
-              aria-describedby={fieldErrors.code ? "po-code-error" : undefined}
-              onChange={(ev) => {
-                setCodeTouched(true)
-                setCode(ev.target.value)
-                setFieldErrors((prev) => {
-                  if (!prev.code) return prev
-                  const next = { ...prev }
-                  delete next.code
-                  return next
-                })
-              }}
-              placeholder="ej. OC-2026-001"
-            />
+            <div className="group/field relative">
+              <Hash
+                className={cn(
+                  poFieldIconClass(Boolean(fieldErrors.code), saving),
+                  "top-1/2 -translate-y-1/2",
+                )}
+                aria-hidden
+              />
+              <Input
+                id="po-code"
+                value={code}
+                required
+                maxLength={PO_CODE_MAX_LEN}
+                disabled={saving}
+                aria-invalid={Boolean(fieldErrors.code)}
+                aria-describedby={fieldErrors.code ? "po-code-error" : undefined}
+                onChange={(ev) => {
+                  setCodeTouched(true)
+                  setCode(ev.target.value)
+                  setFieldErrors((prev) => {
+                    if (!prev.code) return prev
+                    const next = { ...prev }
+                    delete next.code
+                    return next
+                  })
+                }}
+                placeholder="ej. OC-2026-001"
+                className={cn(
+                  "pl-10",
+                  fieldErrors.code && "border-destructive focus-visible:ring-destructive",
+                )}
+              />
+            </div>
             {fieldErrors.code ? (
               <p id="po-code-error" className="text-destructive text-xs font-medium">
                 {fieldErrors.code}
@@ -760,18 +990,28 @@ export default function PurchaseOrderNewPage() {
 
         <div className="grid w-full max-w-full gap-2 sm:w-auto sm:max-w-[11rem]">
           <Label htmlFor="po-date">Fecha pedido</Label>
-          <Input
-            id="po-date"
-            type="date"
-            value={orderedAt}
-            onChange={(ev) => setOrderedAt(ev.target.value)}
-            className="min-w-0"
-          />
+          <div className="group/field relative">
+            <Calendar
+              className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
+              aria-hidden
+            />
+            <Input
+              id="po-date"
+              type="date"
+              value={orderedAt}
+              disabled={saving}
+              onChange={(ev) => setOrderedAt(ev.target.value)}
+              className="min-w-0 pl-10"
+            />
+          </div>
         </div>
 
         {supplierId && selectedSupplier ? (
-          <div className="rounded-xl border border-primary/15 bg-muted/30 p-4 text-sm">
-            <p className="font-medium text-foreground">Dirección del proveedor</p>
+          <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-muted/30 p-4 text-sm shadow-sm">
+            <p className="flex items-center gap-2 font-medium text-foreground">
+              <MapPin className="size-4 text-primary" aria-hidden />
+              Dirección del proveedor
+            </p>
             <p className="text-muted-foreground mt-1 whitespace-pre-wrap">
               {selectedSupplier.address?.trim() || "Sin dirección registrada en el proveedor."}
             </p>
@@ -789,21 +1029,37 @@ export default function PurchaseOrderNewPage() {
 
         <div className="grid gap-2">
           <Label htmlFor="po-notes">Notas / observación (PDF)</Label>
-          <Textarea
-            id="po-notes"
-            rows={2}
-            value={notes}
-            onChange={(ev) => setNotes(ev.target.value)}
-          />
+          <div className="group/field relative">
+            <FileText
+              className={cn(poFieldIconClass(false, saving), "top-3")}
+              aria-hidden
+            />
+            <Textarea
+              id="po-notes"
+              rows={2}
+              value={notes}
+              disabled={saving}
+              onChange={(ev) => setNotes(ev.target.value)}
+              placeholder="Condiciones, referencias o texto que debe aparecer en el PDF…"
+              className="min-h-[4.5rem] pl-10"
+            />
+          </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 rounded-xl border border-primary/15 bg-gradient-to-b from-muted/20 to-background p-4 shadow-sm">
           <div className="flex items-center justify-between gap-2">
             <div className="grid min-w-0 gap-1">
-              <h2 className="text-sm font-medium">Artículos del pedido</h2>
+              <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <Package className="size-4 text-primary" aria-hidden />
+                Artículos del pedido
+              </h2>
               {fieldErrors.linesGeneral ? (
                 <p className="text-destructive text-xs font-medium">{fieldErrors.linesGeneral}</p>
-              ) : null}
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  Describa material, tipo y cantidad. Las filas vacías se omiten al guardar.
+                </p>
+              )}
             </div>
             <Button
               type="button"
@@ -812,14 +1068,15 @@ export default function PurchaseOrderNewPage() {
               onClick={addLine}
               title={ADD_ARTICLE_TOOLTIP_LINES.join(" ")}
             >
+              <Plus aria-hidden />
               Agregar ítem
             </Button>
           </div>
-          <div className="overflow-x-auto rounded-xl border">
+          <div className="overflow-x-auto rounded-xl border border-primary/10 bg-card shadow-inner">
             {/* Ítems: la OC es solicitud (texto); el alta real ocurre en Recepción. */}
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
                   <TableHead className="w-14">N°</TableHead>
                   <TableHead className="min-w-[260px]">Material solicitado</TableHead>
                   <TableHead className="w-36">Tipo</TableHead>
@@ -845,22 +1102,32 @@ export default function PurchaseOrderNewPage() {
                         className={cn(rowHasError && "bg-red-50/40")}
                       >
                         <TableCell className="align-top">
-                          <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                          <div className="flex h-9 items-center justify-center rounded-md border border-primary/20 bg-primary/10 px-2 text-sm font-semibold text-primary">
                             {i + 1}
                           </div>
                         </TableCell>
                         <TableCell className="align-top">
-                          <Input
-                            id={`po-line-${i}-requested`}
-                            value={line.description}
-                            onChange={(ev) => {
-                              const next = ev.target.value
-                              updateLine(i, { description: next, material_id: "" })
-                            }}
-                            placeholder="Ej: BOPP transparente 20 micras 520 mm"
-                            aria-label={`Material solicitado, fila ${i + 1}`}
-                            disabled={saving}
-                          />
+                          <div className="group/field relative">
+                            <Package
+                              className={cn(
+                                poFieldIconClass(false, saving),
+                                "top-1/2 -translate-y-1/2",
+                              )}
+                              aria-hidden
+                            />
+                            <Input
+                              id={`po-line-${i}-requested`}
+                              value={line.description}
+                              onChange={(ev) => {
+                                const next = ev.target.value
+                                updateLine(i, { description: next, material_id: "" })
+                              }}
+                              placeholder="Ej: BOPP transparente 20 micras 520 mm"
+                              aria-label={`Material solicitado, fila ${i + 1}`}
+                              disabled={saving}
+                              className="pl-10"
+                            />
+                          </div>
                         </TableCell>
                         <TableCell className="align-top">
                           <Select
@@ -876,13 +1143,13 @@ export default function PurchaseOrderNewPage() {
                               })
                             }}
                           >
-                            <SelectTrigger className="h-9">
+                            <SelectTrigger className="h-9 border-primary/15 bg-background/80">
                               <SelectValue placeholder="Tipo..." />
                             </SelectTrigger>
                             <SelectContent>
                               {PO_ITEM_TYPES.map((t) => (
                                 <SelectItem key={t.value} value={t.value}>
-                                  {t.label}
+                                  <PoItemTypeLabel type={t.value} />
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -892,38 +1159,58 @@ export default function PurchaseOrderNewPage() {
                           shouldShowDims(line.item_type) ? (
                             <>
                               <TableCell className="align-top">
-                                <Input
-                                  inputMode="numeric"
-                                  value={line.micras}
-                                  onChange={(ev) =>
-                                    updateLine(i, {
-                                      micras: sanitizePositiveDecimalInput(
-                                        ev.target.value,
-                                        3,
-                                      ),
-                                    })
-                                  }
-                                  placeholder="µ"
-                                  disabled={saving}
-                                  aria-label={`Micras, fila ${i + 1}`}
-                                />
+                                <div className="group/field relative">
+                                  <Layers
+                                    className={cn(
+                                      poFieldIconClass(false, saving),
+                                      "top-1/2 -translate-y-1/2",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  <Input
+                                    inputMode="numeric"
+                                    value={line.micras}
+                                    onChange={(ev) =>
+                                      updateLine(i, {
+                                        micras: sanitizePositiveDecimalInput(
+                                          ev.target.value,
+                                          3,
+                                        ),
+                                      })
+                                    }
+                                    placeholder="µ"
+                                    disabled={saving}
+                                    aria-label={`Micras, fila ${i + 1}`}
+                                    className="pl-9"
+                                  />
+                                </div>
                               </TableCell>
                               <TableCell className="align-top">
-                                <Input
-                                  inputMode="numeric"
-                                  value={line.ancho_mm}
-                                  onChange={(ev) =>
-                                    updateLine(i, {
-                                      ancho_mm: sanitizePositiveDecimalInput(
-                                        ev.target.value,
-                                        3,
-                                      ),
-                                    })
-                                  }
-                                  placeholder="mm"
-                                  disabled={saving}
-                                  aria-label={`Ancho mm, fila ${i + 1}`}
-                                />
+                                <div className="group/field relative">
+                                  <Ruler
+                                    className={cn(
+                                      poFieldIconClass(false, saving),
+                                      "top-1/2 -translate-y-1/2",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  <Input
+                                    inputMode="numeric"
+                                    value={line.ancho_mm}
+                                    onChange={(ev) =>
+                                      updateLine(i, {
+                                        ancho_mm: sanitizePositiveDecimalInput(
+                                          ev.target.value,
+                                          3,
+                                        ),
+                                      })
+                                    }
+                                    placeholder="mm"
+                                    disabled={saving}
+                                    aria-label={`Ancho mm, fila ${i + 1}`}
+                                    className="pl-9"
+                                  />
+                                </div>
                               </TableCell>
                             </>
                           ) : (
@@ -935,26 +1222,40 @@ export default function PurchaseOrderNewPage() {
                         ) : null}
                         <TableCell className="align-top">
                           <div className="grid gap-1">
-                            <Input
-                              id={`po-line-${i}-qty`}
-                              inputMode="decimal"
-                              autoComplete="off"
-                              aria-label={`Cantidad pedida, fila ${i + 1}`}
-                              aria-invalid={Boolean(lineErrors[i]?.quantity)}
-                              aria-describedby={
-                                lineErrors[i]?.quantity ? `po-line-${i}-qty-err` : undefined
-                              }
-                              value={line.quantity_ordered}
-                              onChange={(ev) =>
-                                updateLine(i, {
-                                  quantity_ordered: sanitizePositiveDecimalInput(
-                                    ev.target.value,
-                                    6,
-                                  ),
-                                })
-                              }
-                              className={cn(lineErrors[i]?.quantity && "border-destructive")}
-                            />
+                            <div className="group/field relative">
+                              <Scale
+                                className={cn(
+                                  poFieldIconClass(Boolean(lineErrors[i]?.quantity), saving),
+                                  "top-1/2 -translate-y-1/2",
+                                )}
+                                aria-hidden
+                              />
+                              <Input
+                                id={`po-line-${i}-qty`}
+                                inputMode="decimal"
+                                autoComplete="off"
+                                aria-label={`Cantidad pedida, fila ${i + 1}`}
+                                aria-invalid={Boolean(lineErrors[i]?.quantity)}
+                                aria-describedby={
+                                  lineErrors[i]?.quantity ? `po-line-${i}-qty-err` : undefined
+                                }
+                                value={line.quantity_ordered}
+                                disabled={saving}
+                                onChange={(ev) =>
+                                  updateLine(i, {
+                                    quantity_ordered: sanitizePositiveDecimalInput(
+                                      ev.target.value,
+                                      6,
+                                    ),
+                                  })
+                                }
+                                className={cn(
+                                  "pl-9",
+                                  lineErrors[i]?.quantity &&
+                                    "border-destructive focus-visible:ring-destructive",
+                                )}
+                              />
+                            </div>
                             {lineErrors[i]?.quantity ? (
                               <p id={`po-line-${i}-qty-err`} className="text-destructive text-xs">
                                 {lineErrors[i].quantity}
@@ -975,7 +1276,7 @@ export default function PurchaseOrderNewPage() {
                               <SelectTrigger
                                 id={`po-line-${i}-unit`}
                                 className={cn(
-                                  "h-9",
+                                  "h-9 border-primary/15 bg-background/80",
                                   lineErrors[i]?.unit && "border-destructive ring-1 ring-destructive/40",
                                 )}
                                 aria-label={`Unidad, fila ${i + 1}`}
@@ -1027,7 +1328,8 @@ export default function PurchaseOrderNewPage() {
         </div>
 
         <div className="flex w-full justify-center pt-1">
-          <Button type="submit" disabled={saving} className="min-w-[10rem]">
+          <Button type="submit" disabled={saving} className="min-w-[12rem] shadow-md">
+            <ShoppingCart aria-hidden />
             <LoadingButtonLabel
               loading={saving}
               loadingText="Guardando..."

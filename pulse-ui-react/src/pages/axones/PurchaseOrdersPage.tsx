@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Settings2,
   ShoppingCart,
+  ClipboardList,
   Truck,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -79,6 +80,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
   LaravelPaginated,
@@ -100,6 +102,17 @@ function purchaseOrderStatusLabel(value: string | null | undefined): string {
 }
 
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
+
+type ViewTab = "pending" | "history"
+
+function parseViewTab(raw: string | null): ViewTab {
+  return raw === "history" ? "history" : "pending"
+}
+
+function formatReceiptCode(id: number): string {
+  if (!Number.isFinite(id) || id < 1) return "REC-———"
+  return `REC-${String(Math.trunc(id)).padStart(6, "0")}`
+}
 
 /** Botones de acción en fila: colores distintos por función */
 const poActionIconBase =
@@ -237,6 +250,12 @@ type PurchaseOrderSheetDetail = {
     unit?: string
     material?: { name?: string; sku?: string } | null
   }>
+  receipts?: Array<{
+    id: number
+    invoice_number?: string | null
+    received_at?: string | null
+    lines?: unknown[]
+  }>
 }
 
 export default function PurchaseOrdersPage() {
@@ -269,6 +288,10 @@ export default function PurchaseOrdersPage() {
     if (v === "all" || v === "inactive") return v
     return "active"
   })
+  const [viewTab, setViewTab] = useState<ViewTab>(() => parseViewTab(searchParams.get("tab")))
+
+  const isHistoryTab = viewTab === "history"
+  const tableColSpan = isHistoryTab ? 7 : 5
 
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<PurchaseOrderRow> | null>(
@@ -316,9 +339,10 @@ export default function PurchaseOrdersPage() {
     if (status !== "all") params.set("status", status)
     if (qApi.trim()) params.set("q", qApi.trim())
     if (isBoss && visibility !== "active") params.set("visibility", visibility)
+    if (viewTab === "history") params.set("tab", "history")
     const qs = params.toString()
     return `${location.pathname}${qs ? `?${qs}` : ""}`
-  }, [location.pathname, page, status, supplierId, qApi, isBoss, visibility])
+  }, [location.pathname, page, status, supplierId, qApi, isBoss, visibility, viewTab])
 
   useEffect(() => {
     if (qDebounceRef.current) window.clearTimeout(qDebounceRef.current)
@@ -343,8 +367,9 @@ export default function PurchaseOrdersPage() {
     if (status !== "all") next.set("status", status)
     if (qApi.trim()) next.set("q", qApi.trim())
     if (isBoss && visibility !== "active") next.set("visibility", visibility)
+    if (viewTab === "history") next.set("tab", "history")
     setSearchParams(next, { replace: true })
-  }, [page, setSearchParams, status, supplierId, qApi, visibility, isBoss])
+  }, [page, setSearchParams, status, supplierId, qApi, visibility, isBoss, viewTab])
 
   useEffect(() => {
     let c = false
@@ -381,6 +406,7 @@ export default function PurchaseOrdersPage() {
             status: st,
             q: qApi.trim() || undefined,
             visibility: vis === "active" ? undefined : vis,
+            has_receipts: isHistoryTab ? "true" : "false",
           },
         },
       )
@@ -392,7 +418,7 @@ export default function PurchaseOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, supplierId, status, qApi, visibility, isBoss])
+  }, [page, perPage, supplierId, status, qApi, visibility, isBoss, isHistoryTab])
 
   useEffect(() => {
     void load()
@@ -678,6 +704,45 @@ export default function PurchaseOrdersPage() {
             <p className="text-muted-foreground text-sm">Sin líneas en esta orden.</p>
           )
         ) : null}
+        {!detailLoading && detail?.receipts?.length ? (
+          <div className="mt-4 space-y-2">
+            <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+              Recepciones vinculadas ({detail.receipts.length})
+            </p>
+            <div className="max-h-[min(16rem,40vh)] overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Recepción</TableHead>
+                    <TableHead>Factura</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead className="text-right">Ítems</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {detail.receipts.map((rec) => (
+                    <TableRow key={rec.id}>
+                      <TableCell className="font-mono text-sm">{formatReceiptCode(rec.id)}</TableCell>
+                      <TableCell>{rec.invoice_number?.trim() || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {formatDateTime(rec.received_at ?? null)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {Array.isArray(rec.lines) ? rec.lines.length : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button type="button" variant="outline" size="sm" asChild>
+                          <Link to={`/recepciones-oc/${rec.id}/vista-previa`}>Ver</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        ) : null}
       </EntityDetailDialog>
 
       <Dialog
@@ -899,6 +964,25 @@ export default function PurchaseOrdersPage() {
         </div>
       ) : (
         <>
+          <Tabs
+            value={viewTab}
+            onValueChange={(value) => {
+              setViewTab(parseViewTab(value))
+              setPage(1)
+              setSelectedRowId(null)
+            }}
+            className="w-full"
+          >
+            <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
+              <TabsTrigger value="pending" className="text-xs sm:text-sm">
+                Pendientes
+              </TabsTrigger>
+              <TabsTrigger value="history" className="text-xs sm:text-sm">
+                Historial de recepción
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
           <CatalogFilterGrid>
             <CatalogLabeledField label="Proveedor" className="md:col-span-3">
               <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
@@ -1034,10 +1118,24 @@ export default function PurchaseOrdersPage() {
               </CatalogLabeledField>
             ) : null}
             <p className="text-muted-foreground text-xs md:col-span-12">
-              Escribe para filtrar automáticamente por código. <span className="font-medium">Parcial</span> aparece al
-              registrar la primera recepción. <span className="font-medium">Completada</span> se marca cuando todas las
-              órdenes de trabajo que usaron material de esta OC tienen su nota de entrega despachada (o cuando el jefe
-              la cierra manualmente desde el detalle).
+              {isHistoryTab ? (
+                <>
+                  Aparecen aquí las OC con al menos una recepción de entrada vinculada. Las parciales pueden seguir
+                  recibiendo material desde{" "}
+                  <Link to="/recepciones-nueva" className="text-primary underline underline-offset-4">
+                    Recepción
+                  </Link>
+                  .
+                </>
+              ) : (
+                <>
+                  Órdenes sin recepción registrada. Al vincular una recepción con OC, la orden pasa al historial.{" "}
+                  <span className="font-medium">Parcial</span> aparece al registrar la primera recepción.{" "}
+                  <span className="font-medium">Completada</span> se marca cuando todas las órdenes de trabajo que
+                  usaron material de esta OC tienen su nota de entrega despachada (o cuando el jefe la cierra
+                  manualmente desde el detalle).
+                </>
+              )}
               {!isBoss ? (
                 <>
                   {" "}
@@ -1057,6 +1155,16 @@ export default function PurchaseOrdersPage() {
                   <CatalogTableHead icon={CalendarDays} className="whitespace-nowrap">
                     Creado
                   </CatalogTableHead>
+                  {isHistoryTab ? (
+                    <>
+                      <CatalogTableHead icon={ClipboardList} className="whitespace-nowrap text-right">
+                        Recepciones
+                      </CatalogTableHead>
+                      <CatalogTableHead icon={CalendarDays} className="whitespace-nowrap">
+                        Última recepción
+                      </CatalogTableHead>
+                    </>
+                  ) : null}
                   <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
                     Acciones
                   </CatalogTableHeadRight>
@@ -1064,11 +1172,13 @@ export default function PurchaseOrdersPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <LoadingTableRow colSpan={5} />
+                  <LoadingTableRow colSpan={tableColSpan} />
                 ) : !rows?.data.length ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-muted-foreground">
-                      Sin órdenes.
+                    <TableCell colSpan={tableColSpan} className="text-muted-foreground">
+                      {isHistoryTab
+                        ? "Aún no hay órdenes con recepción registrada."
+                        : "Sin órdenes pendientes de recepción."}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1116,6 +1226,16 @@ export default function PurchaseOrdersPage() {
                       <TableCell className="p-2 align-middle whitespace-nowrap">
                         {formatDateDMY(r.created_at ?? r.ordered_at)}
                       </TableCell>
+                      {isHistoryTab ? (
+                        <>
+                          <TableCell className="p-2 align-middle text-right tabular-nums">
+                            {r.receipts_count ?? 0}
+                          </TableCell>
+                          <TableCell className="p-2 align-middle whitespace-nowrap">
+                            {formatDateTime(r.last_receipt_at ?? null)}
+                          </TableCell>
+                        </>
+                      ) : null}
                       <TableCell className="p-2 align-middle text-right">
                         <div className="inline-flex justify-end gap-1" onClick={(ev) => ev.stopPropagation()}>
                           <Link
@@ -1140,7 +1260,7 @@ export default function PurchaseOrdersPage() {
                             <Eye className="h-4 w-4" />
                             <span className="sr-only">Ver detalle</span>
                           </button>
-                          {!inactive ? (
+                          {!inactive && !isHistoryTab ? (
                             <button
                               type="button"
                               className={poActionEditClass}
@@ -1168,7 +1288,7 @@ export default function PurchaseOrdersPage() {
                               <span className="sr-only">Reactivar</span>
                             </button>
                           ) : null}
-                          {!inactive ? (
+                          {!inactive && !isHistoryTab ? (
                             <button
                               type="button"
                               className={poActionDeactivateClass}

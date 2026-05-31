@@ -70,6 +70,8 @@ export type PurchaseOrderRow = {
   is_active?: boolean
   supplier?: Pick<SupplierRecord, "id" | "name">
   lines_count?: number
+  receipts_count?: number
+  last_receipt_at?: string | null
   /** Cuando no es null, la OC fue cerrada manualmente por jefatura. */
   manually_closed_at?: string | null
   manually_closed_by?: number | null

@@ -758,6 +758,8 @@ function setSustratosImp(
 }
 
 const OT_BLUR_REQUIRED_MSG = "Este campo es obligatorio."
+/** TEMPORAL: true = no validar obligatorios al guardar ni en blur (reactivar en producción). */
+const OT_SKIP_SAVE_VALIDATION = true
 /** Cuánto tiempo se muestra el aviso por blur antes de ocultarlo solo (los errores de “Guardar orden” no caducan). */
 const OT_BLUR_TIP_MS = 4000
 
@@ -785,6 +787,7 @@ function sustratosLamBlockEmpty(form: Record<string, unknown>): boolean {
 
 /** Vacío según criterio “obligatorio al guardar” (solo texto vacío / sin selección; no valida formatos). */
 function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
+  if (OT_SKIP_SAVE_VALIDATION) return false
   const {
     form,
     prefill,
@@ -1991,6 +1994,7 @@ export default function WorkOrderPlanillaPage() {
       if (!errors[key]) errors[key] = message
     }
 
+    if (!OT_SKIP_SAVE_VALIDATION) {
     if (canEditShared) {
       const fechaOrden =
         readString(form.fechaOrden).trim() || readString(prefill.fechaOrden).trim()
@@ -2393,6 +2397,7 @@ export default function WorkOrderPlanillaPage() {
         addError("programacionAreas", "Seleccione al menos un área.")
       }
     }
+    } // OT_SKIP_SAVE_VALIDATION
 
     const programacionAreas = readProgramacionAreas(form)
     const programacionMotivo = readString(form.programacionMotivo).trim()
@@ -2614,7 +2619,12 @@ export default function WorkOrderPlanillaPage() {
             {isDraftRoute ? (
               <>
                 <span className="text-primary">Borrador:</span> la OT aún no existe en base de datos.{" "}
-                <span className="text-primary">Guardar orden</span> la crea, valida obligatorios y la deja en la lista.
+                <span className="text-primary">Guardar orden</span> la crea
+                {OT_SKIP_SAVE_VALIDATION ? (
+                  <> (validación de obligatorios desactivada temporalmente).</>
+                ) : (
+                  <>, valida obligatorios y la deja en la lista.</>
+                )}
               </>
             ) : (
               <>

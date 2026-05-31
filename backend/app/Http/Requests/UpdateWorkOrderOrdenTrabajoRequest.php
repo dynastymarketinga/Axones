@@ -11,6 +11,9 @@ use Illuminate\Validation\Validator;
 
 class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
 {
+    /** TEMPORAL: true = no validar obligatorios de planilla (reactivar en producción). */
+    private const SKIP_STRICT_VALIDATION = true;
+
     public function authorize(): bool
     {
         return true;
@@ -32,6 +35,10 @@ class UpdateWorkOrderOrdenTrabajoRequest extends FormRequest
 
     public function withValidator(Validator $validator): void
     {
+        if (self::SKIP_STRICT_VALIDATION) {
+            return;
+        }
+
         $validator->after(function (Validator $validator): void {
             $form = $this->input('form');
             if (! is_array($form)) {

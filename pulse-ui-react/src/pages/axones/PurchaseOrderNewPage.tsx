@@ -36,6 +36,7 @@ import {
   translateApiValidationMessage,
 } from "@/lib/api-validation-es"
 import type { LaravelPaginated, PurchaseOrderRow, SupplierRecord } from "@/types/api"
+import "./purchase-order-list.css"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import {
   AlertDialog,
@@ -44,7 +45,6 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -1669,51 +1669,150 @@ export default function PurchaseOrderNewPage() {
       </form>
 
       <AlertDialog open={confirmCreateOpen} onOpenChange={setConfirmCreateOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Crear orden de compra?</AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2 text-left">
-              <span className="block">
-                Se registrará la orden <strong>{code.trim() || "—"}</strong> con{" "}
-                <strong>{formatPoLinesCount(payloadLinesPreviewCount)}</strong> válida(s) para el
-                proveedor seleccionado.
-              </span>
-              <span className="block">
-                El <strong>código único es obligatorio y no puede repetirse</strong>. Si ya existe
-                otra orden con el mismo código, el sistema no permitirá guardar.
-              </span>
-              <span className="block">
-                Esto es una <strong>solicitud de compra</strong>; el inventario no cambia hasta
-                registrar la recepción física.
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
+        <AlertDialogContent className="po-detail-dialog flex w-[min(calc(100vw-1.5rem),28rem)] flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
+          <div className="po-detail-dialog-header shrink-0 px-6 pb-5 pt-6">
+            <div className="flex items-start gap-4">
+              <div
+                className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20"
+                aria-hidden
+              >
+                <ShoppingCart className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <AlertDialogTitle className="text-xl">Confirmar orden de compra</AlertDialogTitle>
+                <AlertDialogDescription className="px-0 py-0 text-sm text-muted-foreground">
+                  Revise el resumen antes de registrar la solicitud al proveedor.
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 pb-5">
+            <div className="po-detail-hero space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Código de orden
+                </span>
+                <span className="po-code-pill">{code.trim() || "—"}</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="po-detail-stat">
+                  <Building2 className="size-4 shrink-0 text-primary" aria-hidden />
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Proveedor</p>
+                    <p className="truncate text-sm font-medium">
+                      {selectedSupplier?.name?.trim() || "—"}
+                    </p>
+                  </div>
+                </div>
+                <div className="po-detail-stat">
+                  <ClipboardList className="size-4 shrink-0 text-primary" aria-hidden />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Líneas válidas</p>
+                    <p className="text-sm font-medium">
+                      {formatPoLinesCount(payloadLinesPreviewCount)}
+                    </p>
+                  </div>
+                </div>
+                <div className="po-detail-stat sm:col-span-2">
+                  <CalendarIcon className="size-4 shrink-0 text-primary" aria-hidden />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Fecha pedido</p>
+                    <p className="text-sm font-medium">{formatDateInputDisplay(orderedAt)}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <ul className="mt-4 space-y-2" role="list">
+              <li className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
+                <div className="flex gap-2.5">
+                  <Hash className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                  <span>
+                    El código es <strong>único e irrepetible</strong>. Si ya existe otra orden con
+                    el mismo código, el sistema no permitirá guardar.
+                  </span>
+                </div>
+              </li>
+              <li className="rounded-lg border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
+                <div className="flex gap-2.5">
+                  <Package className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                  <span>
+                    Es una <strong>solicitud de compra</strong>; el inventario no cambia hasta
+                    registrar la recepción física.
+                  </span>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <AlertDialogFooter className="border-t border-border/60 bg-muted/20 px-6 py-4">
             <AlertDialogCancel disabled={saving}>Revisar formulario</AlertDialogCancel>
             <AlertDialogAction
               disabled={saving}
+              className="bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:ring-primary"
               onClick={(ev) => {
                 ev.preventDefault()
                 void executeCreatePurchaseOrder()
               }}
             >
-              {saving ? "Guardando…" : "Sí, crear orden"}
+              {saving ? (
+                "Guardando…"
+              ) : (
+                <>
+                  <Check className="size-4" aria-hidden />
+                  Crear orden
+                </>
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <AlertDialog open={codeEditConfirmOpen} onOpenChange={setCodeEditConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Modificar código de la orden?</AlertDialogTitle>
-            <AlertDialogDescription className="text-left">
-              ¿Desea modificar el código <strong>{code.trim() || "—"}</strong>?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
+        <AlertDialogContent className="po-detail-dialog flex w-[min(calc(100vw-1.5rem),26rem)] flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
+          <div className="po-detail-dialog-header shrink-0 px-6 pb-5 pt-6">
+            <div className="flex items-start gap-4">
+              <div
+                className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20"
+                aria-hidden
+              >
+                <PencilLine className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <AlertDialogTitle className="text-xl">Modificar código de la orden</AlertDialogTitle>
+                <AlertDialogDescription className="px-0 py-0 text-sm text-muted-foreground">
+                  El código sugerido se genera automáticamente; puede personalizarlo si lo necesita.
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 pb-5">
+            <div className="po-detail-hero space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Código actual
+                </span>
+                <span className="po-code-pill">{code.trim() || "—"}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
+              <div className="flex gap-2.5">
+                <Hash className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                <span>
+                  Recuerde que el código debe ser <strong>único</strong>. No puede coincidir con otra
+                  orden ya registrada.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <AlertDialogFooter className="border-t border-border/60 bg-muted/20 px-6 py-4">
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
+              className="bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:ring-primary"
               onClick={() => {
                 setCodeEditUnlocked(true)
                 setCodeTouched(true)
@@ -1724,6 +1823,7 @@ export default function PurchaseOrderNewPage() {
                 })
               }}
             >
+              <PencilLine className="size-4" aria-hidden />
               Sí, modificar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1734,35 +1834,76 @@ export default function PurchaseOrderNewPage() {
         open={duplicatePoDialog.open}
         onOpenChange={(open) => setDuplicatePoDialog((prev) => ({ ...prev, open }))}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Código de orden ya registrado</AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2 text-left">
-              <span className="block">
-                Ya existe una orden con el código <strong>{duplicatePoDialog.code}</strong>.
-              </span>
-              <span className="block">
-                Puede cambiar el correlativo en el formulario o abrir la orden existente para
-                consultarla.
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
+        <AlertDialogContent className="po-detail-dialog flex w-[min(calc(100vw-1.5rem),28rem)] flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
+          <div className="po-detail-dialog-header shrink-0 px-6 pb-5 pt-6">
+            <div className="flex items-start gap-4">
+              <div
+                className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/12 text-amber-600 ring-1 ring-amber-500/25 dark:text-amber-400"
+                aria-hidden
+              >
+                <Hash className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <AlertDialogTitle className="text-xl">Código ya registrado</AlertDialogTitle>
+                <AlertDialogDescription className="px-0 py-0 text-sm text-muted-foreground">
+                  No se puede crear otra orden con el mismo identificador.
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 pb-5">
+            <div className="po-detail-hero space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Código en conflicto
+                </span>
+                <span className="po-code-pill">{duplicatePoDialog.code || "—"}</span>
+              </div>
+            </div>
+
+            <ul className="mt-4 space-y-2" role="list">
+              <li className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
+                <div className="flex gap-2.5">
+                  <FileText className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                  <span>
+                    Ya existe una orden con el código <strong>{duplicatePoDialog.code}</strong> en el
+                    sistema.
+                  </span>
+                </div>
+              </li>
+              <li className="rounded-lg border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm leading-snug text-foreground/90">
+                <div className="flex gap-2.5">
+                  <PencilLine className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                  <span>
+                    Cambie el correlativo en el formulario o abra la orden existente para
+                    consultarla.
+                  </span>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <AlertDialogFooter className="border-t border-border/60 bg-muted/20 px-6 py-4">
             <AlertDialogCancel>Cambiar código</AlertDialogCancel>
             {duplicatePoDialog.id != null ? (
               <AlertDialogAction
+                className="bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:ring-primary"
                 onClick={() => {
                   navigate(`/ordenes-compra/${duplicatePoDialog.id}/vista-previa`)
                 }}
               >
+                <FileText className="size-4" aria-hidden />
                 Abrir orden existente
               </AlertDialogAction>
             ) : (
               <AlertDialogAction
+                className="bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:ring-primary"
                 onClick={() => {
                   navigate(returnTo)
                 }}
               >
+                <ClipboardList className="size-4" aria-hidden />
                 Ir al listado
               </AlertDialogAction>
             )}

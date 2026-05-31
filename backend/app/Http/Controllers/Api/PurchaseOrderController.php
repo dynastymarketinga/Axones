@@ -136,6 +136,13 @@ class PurchaseOrderController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'deactivation_reason' => ['nullable', 'string', 'min:5', 'max:1000'],
             'change_reason' => ['nullable', 'string', 'min:5', 'max:500'],
+            'lines' => ['sometimes', 'array', 'min:1'],
+            'lines.*.id' => ['nullable', 'integer', 'exists:purchase_order_lines,id'],
+            'lines.*.description' => ['nullable', 'string'],
+            'lines.*.material_id' => ['nullable', 'integer', 'exists:materials,id'],
+            'lines.*.quantity_ordered' => ['required_with:lines', 'numeric', 'min:0.001'],
+            'lines.*.unit' => ['nullable', 'string', 'max:16'],
+            'lines.*.unit_price' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         if (array_key_exists('status', $payload) && $payload['status'] !== null) {
@@ -184,7 +191,12 @@ class PurchaseOrderController extends Controller
             $data['deactivated_at'] = now();
             $data['deactivation_reason'] = $reason;
         } else {
-            if ($request->exists('notes') || $request->exists('ordered_at') || $request->exists('tax_applies')) {
+            $headerOrLinesChange = $request->exists('notes')
+                || $request->exists('ordered_at')
+                || $request->exists('tax_applies')
+                || $request->exists('lines');
+
+            if ($headerOrLinesChange) {
                 $cr = trim((string) ($payload['change_reason'] ?? ''));
                 if ($cr === '' || mb_strlen($cr) < 5) {
                     throw ValidationException::withMessages([
@@ -202,6 +214,17 @@ class PurchaseOrderController extends Controller
             }
             if (array_key_exists('tax_applies', $payload)) {
                 $data['tax_applies'] = (bool) $payload['tax_applies'];
+            }
+
+            if ($request->exists('lines')) {
+                DB::transaction(function () use ($purchase_order, $payload, &$data): void {
+                    if ($data !== []) {
+                        $purchase_order->update($data);
+                    }
+                    $this->syncPurchaseOrderLines($purchase_order, $payload['lines'] ?? []);
+                });
+
+                return response()->json($purchase_order->fresh()->load('lines.material', 'supplier'));
             }
         }
 
@@ -307,6 +330,74 @@ class PurchaseOrderController extends Controller
             'all_dispatched' => $allDispatched,
             'no_consumers' => false,
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $linesPayload
+     */
+    private function syncPurchaseOrderLines(PurchaseOrder $purchase_order, array $linesPayload): void
+    {
+        $purchase_order->loadMissing('lines');
+        $existingById = $purchase_order->lines->keyBy('id');
+        $seenIds = [];
+
+        foreach ($linesPayload as $index => $lineData) {
+            $qtyOrdered = (string) $lineData['quantity_ordered'];
+            $lineId = isset($lineData['id']) ? (int) $lineData['id'] : 0;
+
+            if ($lineId > 0) {
+                /** @var PurchaseOrderLine|null $line */
+                $line = $existingById->get($lineId);
+                if ($line === null || (int) $line->purchase_order_id !== (int) $purchase_order->getKey()) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}.id" => ['La línea no pertenece a esta orden.'],
+                    ]);
+                }
+
+                $seenIds[] = $lineId;
+                $qtyReceived = (string) $line->quantity_received;
+                if (bccomp($qtyOrdered, $qtyReceived, 3) < 0) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}.quantity_ordered" => [
+                            "La cantidad pedida no puede ser menor a lo ya recibido ({$qtyReceived}).",
+                        ],
+                    ]);
+                }
+
+                $line->update([
+                    'description' => $lineData['description'] ?? null,
+                    'material_id' => $lineData['material_id'] ?? null,
+                    'quantity_ordered' => $qtyOrdered,
+                    'unit' => $lineData['unit'] ?? 'kg',
+                ]);
+
+                continue;
+            }
+
+            PurchaseOrderLine::query()->create([
+                'purchase_order_id' => $purchase_order->getKey(),
+                'description' => $lineData['description'] ?? null,
+                'material_id' => $lineData['material_id'] ?? null,
+                'quantity_ordered' => $qtyOrdered,
+                'quantity_received' => 0,
+                'unit' => $lineData['unit'] ?? 'kg',
+                'unit_price' => $lineData['unit_price'] ?? 0,
+            ]);
+        }
+
+        foreach ($existingById as $lineId => $line) {
+            if (in_array((int) $lineId, $seenIds, true)) {
+                continue;
+            }
+
+            if (bccomp((string) $line->quantity_received, '0', 3) === 1) {
+                throw ValidationException::withMessages([
+                    'lines' => ['No puede eliminar líneas que ya tienen material recibido.'],
+                ]);
+            }
+
+            $line->delete();
+        }
     }
 
     /**

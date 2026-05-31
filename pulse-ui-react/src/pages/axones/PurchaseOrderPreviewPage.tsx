@@ -9,6 +9,7 @@ import autoTable from "jspdf-autotable"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
+import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 
 const AXONES_ADDRESS_LINE =
   "CALLE PARCELAMIENTO INDUSTRIAL GUERE, LOCAL 35, SECTOR LA JULIA. TURMERO-EDO ARAGUA, ZONA POSTAL 2115. TELFS: (0244) 663.53.76 – (0244) 663.50.60"

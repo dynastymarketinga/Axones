@@ -457,6 +457,75 @@ class MasterDataAndPurchaseTest extends TestCase
         ], $headers)->assertOk()->assertJsonPath('notes', 'Actualizacion de cabecera.');
     }
 
+    public function test_purchase_order_patch_lines_requires_change_reason_and_updates(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+        $headers = ['Authorization' => 'Bearer '.$token];
+
+        $supplier = Supplier::query()->create([
+            'name' => 'Prov lines',
+            'rif' => 'J-445',
+        ]);
+
+        $material = Material::query()->create([
+            'sku' => 'MAT-LINE',
+            'name' => 'Mat line',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $material->forceFill(['quantity_on_hand' => 0])->save();
+
+        $poResponse = $this->postJson('/api/purchase-orders', [
+            'supplier_id' => $supplier->id,
+            'code' => 'OC-LINE-1',
+            'lines' => [
+                [
+                    'description' => 'Sustrato | Tipo: sustrato',
+                    'material_id' => $material->id,
+                    'quantity_ordered' => 5,
+                    'unit' => 'kg',
+                    'unit_price' => 0,
+                ],
+            ],
+        ], $headers);
+
+        $poResponse->assertCreated();
+        $poId = $poResponse->json('id');
+        $lineId = $poResponse->json('lines.0.id');
+
+        $this->patchJson('/api/purchase-orders/'.$poId, [
+            'lines' => [
+                [
+                    'id' => $lineId,
+                    'description' => 'Sustrato editado | Tipo: sustrato',
+                    'material_id' => $material->id,
+                    'quantity_ordered' => 8,
+                    'unit' => 'kg',
+                ],
+            ],
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors(['change_reason']);
+
+        $this->patchJson('/api/purchase-orders/'.$poId, [
+            'change_reason' => 'Ajuste de cantidad solicitado por compras.',
+            'lines' => [
+                [
+                    'id' => $lineId,
+                    'description' => 'Sustrato editado | Tipo: sustrato',
+                    'material_id' => $material->id,
+                    'quantity_ordered' => 8,
+                    'unit' => 'kg',
+                ],
+            ],
+        ], $headers)->assertOk();
+
+        $this->assertDatabaseHas('purchase_order_lines', [
+            'id' => $lineId,
+            'quantity_ordered' => '8.000',
+        ]);
+    }
+
     public function test_purchase_order_index_visibility_only_boss_sees_inactive(): void
     {
         $inventory = User::factory()->create(['role' => 'inventory_chief']);

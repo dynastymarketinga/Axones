@@ -2,47 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
-import { Building2, Calendar, Check, ChevronsUpDown, ClipboardList, FileText, PackagePlus, Scale } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow, PurchaseOrderRow, SupplierRecord } from "@/types/api"
-import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
-import { Button } from "@/components/ui/button"
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
+  DOCUMENT_FORM_FIELD_ERRORS_AUTO_CLEAR_MS,
+  DOCUMENT_LINES_PAGE_SIZE,
+  documentToastError,
+  toDateInputValue,
+} from "@/pages/axones/purchase-document-form-ui"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { getMaterialAreaTheme } from "@/lib/material-area-theme"
-import { cn } from "@/lib/utils"
+  itemTypeKeyToReceiptUiLabel,
+  PURCHASE_ITEM_TYPE_KEYS,
+  receiptUiLabelToItemTypeKey,
+  shouldShowDimsForItemType,
+} from "@/pages/axones/purchase-item-type-meta"
+import { PurchaseReceiptNewPageView } from "@/pages/axones/PurchaseReceiptNewPageView"
+import "./purchase-order-list.css"
 
-type PurchaseOrderLineDetail = {
+export type PurchaseOrderLineDetail = {
   id: number
   description?: string | null
   quantity_ordered: string | number
@@ -52,7 +31,7 @@ type PurchaseOrderLineDetail = {
   material?: { id?: number; name?: string; sku?: string } | null
 }
 
-type PurchaseOrderDetailPayload = {
+export type PurchaseOrderDetailPayload = {
   id: number
   supplier_id: number
   code: string
@@ -60,7 +39,7 @@ type PurchaseOrderDetailPayload = {
   lines?: PurchaseOrderLineDetail[]
 }
 
-type FreeLine = {
+export type FreeLine = {
   purchase_order_line_id: string
   item_type: string
   material_id: string
@@ -70,7 +49,7 @@ type FreeLine = {
   unit: string
 }
 
-type DuplicateReceiptMatch = {
+export type DuplicateReceiptMatch = {
   id: number
   supplier_name?: string | null
   invoice_number?: string | null
@@ -84,14 +63,10 @@ type DuplicateCheckResponse = {
   matches: DuplicateReceiptMatch[]
 }
 
-const RECEIPT_ITEM_TYPES = [
-  "Sustrato",
-  "Misceláneo",
-  "Tinta",
-  "Químico",
-] as const
+const RECEIPT_ITEM_TYPE_LABELS = PURCHASE_ITEM_TYPE_KEYS.map(itemTypeKeyToReceiptUiLabel)
 
-const HIDE_DIMENSIONS_FOR_TYPES = new Set(["Tinta", "Químico", "Misceláneo"])
+const ADD_RECEIPT_LINE_TOOLTIP =
+  "Agregar otra línea a la recepción. Las filas vacías se omiten al guardar si hay al menos una línea válida."
 
 const UNIT_OPTIONS = [
   { value: "kg", label: "Kg" },
@@ -102,29 +77,15 @@ const UNIT_OPTIONS = [
 const MAX_RECEIPT_LINES = 25
 
 function mapItemTypeToInventoryArea(itemType: string): "material" | "tintas" | "quimicos" | "miscelaneos" {
-  if (itemType === "Tinta") return "tintas"
-  if (itemType === "Químico") return "quimicos"
-  if (itemType === "Misceláneo") return "miscelaneos"
+  const key = receiptUiLabelToItemTypeKey(itemType)
+  if (key === "tinta") return "tintas"
+  if (key === "quimico") return "quimicos"
+  if (key === "otros") return "miscelaneos"
   return "material"
 }
 
-/** Etiquetas alineadas con las pastillas de Materiales (insumos). */
-function receiptInventoryAreaLabel(area: "material" | "tintas" | "quimicos" | "miscelaneos"): string {
-  if (area === "material") return "Sustrato"
-  if (area === "tintas") return "Tintas"
-  if (area === "quimicos") return "Químicos"
-  return "Misceláneos"
-}
-
-const RECEIPT_AREA_ORDER: Array<"material" | "tintas" | "quimicos" | "miscelaneos"> = [
-  "material",
-  "tintas",
-  "quimicos",
-  "miscelaneos",
-]
-
-function receiptAreaBadgeClassName(area: "material" | "tintas" | "quimicos" | "miscelaneos"): string {
-  return cn("border shadow-sm", getMaterialAreaTheme(area).rowClass)
+function receiptLineRequiresDimensions(itemType: string): boolean {
+  return shouldShowDimsForItemType(receiptUiLabelToItemTypeKey(itemType))
 }
 
 function mapUiItemTypeToApi(itemType: string) {
@@ -152,7 +113,8 @@ function getTodayLocalDate() {
 }
 
 function allowedUnitsByItemType(itemType: string) {
-  if (itemType === "Tinta" || itemType === "Químico" || itemType === "Misceláneo") {
+  const key = receiptUiLabelToItemTypeKey(itemType)
+  if (key === "tinta" || key === "quimico" || key === "otros") {
     return UNIT_OPTIONS.filter((option) => option.value === "kg" || option.value === "unidad")
   }
   return UNIT_OPTIONS
@@ -161,7 +123,7 @@ function allowedUnitsByItemType(itemType: string) {
 function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
   const allowed = allowedUnitsByItemType(line.item_type).map((u) => u.value)
   const safeUnit = allowed.includes(line.unit as (typeof allowed)[number]) ? line.unit : "kg"
-  const requiresDimensions = !HIDE_DIMENSIONS_FOR_TYPES.has(line.item_type)
+  const requiresDimensions = receiptLineRequiresDimensions(line.item_type)
   return {
     ...line,
     unit: safeUnit,
@@ -170,13 +132,30 @@ function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
   }
 }
 
+export type ReceiptFieldErrors = {
+  supplier?: string
+  invoice?: string
+  receivedAt?: string
+  purchaseOrder?: string
+  linesGeneral?: string
+}
+
+export type ReceiptLineFieldErrors = {
+  material?: string
+  quantity?: string
+  micras?: string
+  ancho?: string
+  unit?: string
+  purchaseOrderLine?: string
+}
+
 /** Mensaje concreto por fila; evita el toast genérico cuando el fallo es solo el SKU del catálogo. */
 function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: boolean): string | null {
   const hasPol = row.purchase_order_line_id.trim().length > 0
   const hasType = row.item_type.trim().length > 0
   const materialId = Number(row.material_id)
   const quantity = Number(row.quantity)
-  const requiresDimensions = !HIDE_DIMENSIONS_FOR_TYPES.has(row.item_type)
+  const requiresDimensions = receiptLineRequiresDimensions(row.item_type)
   const micras = Number(row.micras)
   const ancho = Number(row.ancho_mm)
   if (requirePurchaseOrderLine && !hasPol) {
@@ -202,16 +181,6 @@ function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: b
   return null
 }
 
-function sanitizeDecimalInput(raw: string) {
-  const normalized = raw.replace(",", ".")
-  const onlyNumeric = normalized.replace(/[^0-9.]/g, "")
-  const firstDot = onlyNumeric.indexOf(".")
-  if (firstDot === -1) return onlyNumeric
-  const integerPart = onlyNumeric.slice(0, firstDot + 1)
-  const decimalPart = onlyNumeric.slice(firstDot + 1).replace(/\./g, "").slice(0, 2)
-  return `${integerPart}${decimalPart}`
-}
-
 function mapReceiptItemTypeToMaterialFormTab(
   itemType: string,
 ): "sustratos" | "tintas" | "quimicos" | "miscelaneo" {
@@ -221,11 +190,10 @@ function mapReceiptItemTypeToMaterialFormTab(
   return "sustratos"
 }
 
-function defaultReceiptItemType(raw: string): (typeof RECEIPT_ITEM_TYPES)[number] {
+function defaultReceiptItemType(raw: string): string {
   const t = raw.trim()
-  return RECEIPT_ITEM_TYPES.includes(t as (typeof RECEIPT_ITEM_TYPES)[number])
-    ? (t as (typeof RECEIPT_ITEM_TYPES)[number])
-    : "Sustrato"
+  if (RECEIPT_ITEM_TYPE_LABELS.includes(t)) return t
+  return itemTypeKeyToReceiptUiLabel("sustrato")
 }
 
 function emptyLine(): FreeLine {
@@ -358,11 +326,16 @@ export default function PurchaseReceiptNewPage() {
   const [receivedAt, setReceivedAt] = useState(`${todayDate}T00:00`)
 
   const [freeLines, setFreeLines] = useState<FreeLine[]>([emptyLine()])
+  const [linesPage, setLinesPage] = useState(1)
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
   const [saving, setSaving] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
+  const [confirmCreateOpen, setConfirmCreateOpen] = useState(false)
+  const [receivedAtOpen, setReceivedAtOpen] = useState(false)
   const [supplierComboOpen, setSupplierComboOpen] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<ReceiptFieldErrors>({})
+  const [lineErrors, setLineErrors] = useState<Record<number, ReceiptLineFieldErrors>>({})
+  const fieldErrorsClearTimerRef = useRef<number | null>(null)
   const prevSupplierRef = useRef<number | null>(null)
   /** Si coincide con `purchaseOrderId`, no reemplazar `freeLines` con la hidratación de la API (p. ej. tras restaurar borrador). */
   const skipRemoteFreeLinesForPurchaseOrderRef = useRef<number | null>(null)
@@ -373,14 +346,9 @@ export default function PurchaseReceiptNewPage() {
   const [purchaseOrderDetail, setPurchaseOrderDetail] = useState<PurchaseOrderDetailPayload | null>(null)
   const [poDetailLoading, setPoDetailLoading] = useState(false)
   const [poComboOpen, setPoComboOpen] = useState(false)
-  const [purchaseOrderError, setPurchaseOrderError] = useState(false)
   const [materialComboOpenRow, setMaterialComboOpenRow] = useState<number | null>(null)
   /** Texto del buscador SKU del combo de material (solo una fila abierta a la vez). */
   const [materialComboSearch, setMaterialComboSearch] = useState("")
-  const [firstInvalidRowIndex, setFirstInvalidRowIndex] = useState<number | null>(null)
-  const [supplierError, setSupplierError] = useState(false)
-  const [invoiceNumberError, setInvoiceNumberError] = useState(false)
-  const [receivedAtError, setReceivedAtError] = useState(false)
   const [estimatedNextReceiptId, setEstimatedNextReceiptId] = useState<number | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateReceiptMatch[]>([])
@@ -555,7 +523,8 @@ export default function PurchaseReceiptNewPage() {
     }
 
     setSupplierId(proveedorNum)
-    setSupplierError(false)
+    setFieldErrors({})
+    setLineErrors({})
 
     if (parsed) {
       setInvoiceNumber(typeof parsed.invoiceNumber === "string" ? parsed.invoiceNumber : "")
@@ -622,6 +591,270 @@ export default function PurchaseReceiptNewPage() {
   const selectedPurchaseOrderRow = useMemo(
     () => purchaseOrderOptions.find((p) => p.id === purchaseOrderId) ?? null,
     [purchaseOrderId, purchaseOrderOptions],
+  )
+
+  const linesPageCount = useMemo(
+    () => Math.max(1, Math.ceil(freeLines.length / DOCUMENT_LINES_PAGE_SIZE)),
+    [freeLines.length],
+  )
+  const safeLinesPage = Math.min(linesPage, linesPageCount)
+
+  const paginatedLineEntries = useMemo(() => {
+    const start = (safeLinesPage - 1) * DOCUMENT_LINES_PAGE_SIZE
+    return freeLines.slice(start, start + DOCUMENT_LINES_PAGE_SIZE).map((line, offset) => ({
+      line,
+      index: start + offset,
+    }))
+  }, [freeLines, safeLinesPage])
+
+  const showDimensionColumns = useMemo(
+    () => freeLines.some((line) => receiptLineRequiresDimensions(line.item_type)),
+    [freeLines],
+  )
+
+  const receivedAtDateValue = useMemo(() => {
+    const d = receivedAt.trim().slice(0, 10)
+    return d || toDateInputValue(new Date())
+  }, [receivedAt])
+
+  useEffect(() => {
+    setLinesPage((p) => (p > linesPageCount ? linesPageCount : p))
+  }, [linesPageCount])
+
+  useEffect(() => {
+    return () => {
+      if (fieldErrorsClearTimerRef.current != null) {
+        window.clearTimeout(fieldErrorsClearTimerRef.current)
+      }
+    }
+  }, [])
+
+  function cancelFieldErrorsAutoClear() {
+    if (fieldErrorsClearTimerRef.current != null) {
+      window.clearTimeout(fieldErrorsClearTimerRef.current)
+      fieldErrorsClearTimerRef.current = null
+    }
+  }
+
+  function scheduleFieldErrorsAutoClear() {
+    cancelFieldErrorsAutoClear()
+    fieldErrorsClearTimerRef.current = window.setTimeout(() => {
+      fieldErrorsClearTimerRef.current = null
+      setFieldErrors({})
+      setLineErrors({})
+    }, DOCUMENT_FORM_FIELD_ERRORS_AUTO_CLEAR_MS) as unknown as number
+  }
+
+  function applyReceiptValidationErrors(
+    nextField: ReceiptFieldErrors,
+    nextLine: Record<number, ReceiptLineFieldErrors>,
+  ) {
+    cancelFieldErrorsAutoClear()
+    setFieldErrors(nextField)
+    setLineErrors(nextLine)
+    scheduleFieldErrorsAutoClear()
+    toastReceiptValidationErrors(nextField, nextLine)
+    focusFirstReceiptValidationError(nextField, nextLine)
+  }
+
+  function toastReceiptValidationErrors(
+    field: ReceiptFieldErrors,
+    lineErrs: Record<number, ReceiptLineFieldErrors>,
+  ) {
+    const messages: string[] = []
+    if (field.supplier) messages.push(`Proveedor: ${field.supplier}`)
+    if (field.invoice) messages.push(`Factura: ${field.invoice}`)
+    if (field.receivedAt) messages.push(field.receivedAt)
+    if (field.purchaseOrder) messages.push(field.purchaseOrder)
+    if (field.linesGeneral) messages.push(field.linesGeneral)
+    const rowIndexes = Object.keys(lineErrs)
+      .map(Number)
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b)
+    for (const i of rowIndexes) {
+      const row = lineErrs[i]
+      const n = i + 1
+      if (row.purchaseOrderLine) messages.push(`Línea ${n}: ${row.purchaseOrderLine}`)
+      if (row.material) messages.push(`Línea ${n}: ${row.material}`)
+      if (row.quantity) messages.push(`Línea ${n}: ${row.quantity}`)
+      if (row.micras) messages.push(`Línea ${n}: ${row.micras}`)
+      if (row.ancho) messages.push(`Línea ${n}: ${row.ancho}`)
+      if (row.unit) messages.push(`Línea ${n}: ${row.unit}`)
+    }
+    if (messages.length === 0) return
+    documentToastError(messages.slice(0, 3).join(" · "))
+  }
+
+  function focusLineRow(rowIndex: number) {
+    const page = Math.floor(rowIndex / DOCUMENT_LINES_PAGE_SIZE) + 1
+    setLinesPage(page)
+    window.requestAnimationFrame(() => {
+      document.getElementById(`receipt-row-${rowIndex}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      })
+      document.getElementById(`receipt-line-${rowIndex}-qty`)?.focus()
+    })
+  }
+
+  function focusFirstReceiptValidationError(
+    field: ReceiptFieldErrors,
+    lineErrs: Record<number, ReceiptLineFieldErrors>,
+  ) {
+    if (field.supplier) {
+      document.getElementById("rc-supplier-trigger")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+    if (field.invoice) {
+      document.getElementById("rc-invoice")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      document.getElementById("rc-invoice")?.focus()
+      return
+    }
+    if (field.receivedAt) {
+      document.getElementById("rc-date")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+    if (field.purchaseOrder) {
+      document.getElementById("purchase-order-field")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+    if (field.linesGeneral) {
+      setLinesPage(1)
+      document.getElementById("receipt-row-0")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+    const firstRow = Object.keys(lineErrs)
+      .map(Number)
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b)[0]
+    if (firstRow != null) {
+      focusLineRow(firstRow)
+    }
+  }
+
+  function receiptLineHasAnyValue(row: FreeLine): boolean {
+    return Boolean(
+      row.purchase_order_line_id.trim() ||
+        row.item_type.trim() ||
+        row.material_id.trim() ||
+        row.quantity.trim() ||
+        row.micras.trim() ||
+        row.ancho_mm.trim() ||
+        row.unit.trim() !== "kg",
+    )
+  }
+
+  function computeReceiptValidation(hasPurchaseOrder: boolean): {
+    ok: boolean
+    fieldErrors: ReceiptFieldErrors
+    lineErrors: Record<number, ReceiptLineFieldErrors>
+  } {
+    const nextField: ReceiptFieldErrors = {}
+    const nextLine: Record<number, ReceiptLineFieldErrors> = {}
+
+    if (!Number.isFinite(supplierId) || (supplierId ?? 0) < 1) {
+      nextField.supplier = "Seleccione un proveedor."
+    }
+    if (!invoiceNumber.trim()) {
+      nextField.invoice = "El N° de factura es obligatorio."
+    }
+    if (!receivedAt.trim()) {
+      nextField.receivedAt = "La fecha recibido es obligatoria."
+    }
+    if (
+      hasPurchaseOrder &&
+      (!Number.isFinite(purchaseOrderId) ||
+        (purchaseOrderId ?? 0) < 1 ||
+        !purchaseOrderDetail?.code)
+    ) {
+      nextField.purchaseOrder = "No se pudo cargar la orden de compra seleccionada."
+    }
+
+    const editedRowIndexes = freeLines
+      .map((row, idx) => (receiptLineHasAnyValue(row) ? idx : -1))
+      .filter((idx) => idx >= 0)
+
+    if (editedRowIndexes.length === 0) {
+      nextField.linesGeneral = "Agregue al menos un ítem con material y cantidad."
+    }
+
+    for (const i of editedRowIndexes) {
+      const row = freeLines[i]
+      const msg = receiptLineValidationMessage(row, hasPurchaseOrder)
+      if (!msg) continue
+      const errs: ReceiptLineFieldErrors = {}
+      if (msg.includes("línea de la orden")) errs.purchaseOrderLine = msg
+      else if (msg.includes("tipo")) errs.material = msg
+      else if (msg.includes("material") || msg.includes("SKU") || msg.includes("catálogo"))
+        errs.material = msg
+      else if (msg.includes("cantidad")) errs.quantity = msg
+      else if (msg.includes("Micras") || msg.includes("Ancho")) {
+        if (msg.includes("Micras")) errs.micras = msg
+        else errs.ancho = msg
+      } else errs.quantity = msg
+      nextLine[i] = errs
+    }
+
+    const ok =
+      !nextField.supplier &&
+      !nextField.invoice &&
+      !nextField.receivedAt &&
+      !nextField.purchaseOrder &&
+      !nextField.linesGeneral &&
+      Object.keys(nextLine).length === 0
+
+    return { ok, fieldErrors: nextField, lineErrors: nextLine }
+  }
+
+  function buildReceiptPayload(hasPurchaseOrder: boolean): Record<string, unknown> {
+    const poDetail = purchaseOrderDetail
+    const rowsWithContent = freeLines.filter(receiptLineHasAnyValue)
+    const lines = rowsWithContent.map((row) => {
+      const base = {
+        material_id: Number(row.material_id),
+        quantity: Number(row.quantity),
+        item_type: mapUiItemTypeToApi(row.item_type),
+        unit: row.unit || "kg",
+        micras: row.micras.trim() ? Number(row.micras) : null,
+        ancho_mm: row.ancho_mm.trim() ? Number(row.ancho_mm) : null,
+      }
+      if (hasPurchaseOrder) {
+        return {
+          ...base,
+          purchase_order_line_id: Number(row.purchase_order_line_id),
+        }
+      }
+      return base
+    })
+
+    if (hasPurchaseOrder) {
+      return {
+        purchase_order_id: purchaseOrderId,
+        without_purchase_order: false,
+        exception_reason: null,
+        supplier_id: supplierId,
+        supplier_name: selectedSupplier?.name?.trim() || null,
+        invoice_number: invoiceNumber.trim() || null,
+        purchase_order_reference: poDetail?.code?.trim() ?? null,
+        notes: notes.trim() || null,
+        received_at: receivedAt || null,
+        lines,
+      }
+    }
+    return {
+      without_purchase_order: true,
+      supplier_id: supplierId,
+      supplier_name: selectedSupplier?.name?.trim() || null,
+      invoice_number: invoiceNumber.trim() || null,
+      notes: notes.trim() || null,
+      received_at: receivedAt || null,
+      lines,
+    }
+  }
+
+  const payloadLinesPreviewCount = useMemo(
+    () => freeLines.filter((row) => receiptLineValidationMessage(row, purchaseOrderId != null && purchaseOrderId > 0) === null && receiptLineHasAnyValue(row)).length,
+    [freeLines, purchaseOrderId],
   )
 
   function saveReceiptDraftToSession(): boolean {
@@ -704,24 +937,26 @@ export default function PurchaseReceiptNewPage() {
   }
 
   function addFreeLine() {
+    setLinesPage((p) => p)
     setFreeLines((prev) => {
       if (prev.length >= MAX_RECEIPT_LINES) {
-        toast.error(`Solo puede agregar hasta ${MAX_RECEIPT_LINES} items por recepción.`)
+        documentToastError(`Solo puede agregar hasta ${MAX_RECEIPT_LINES} ítems por recepción.`)
         return prev
       }
       const next = [...prev, emptyLine()]
-      toast.success(`Item agregado (${next.length}/${MAX_RECEIPT_LINES}).`)
-      if (next.length === MAX_RECEIPT_LINES) {
-        toast.warning(`Llegó al límite de ${MAX_RECEIPT_LINES} items por recepción.`)
-      }
+      setLinesPage(Math.ceil(next.length / DOCUMENT_LINES_PAGE_SIZE))
       return next
     })
+    setLineErrors({})
   }
 
   function updateFreeLine(i: number, patch: Partial<FreeLine>) {
-    if (firstInvalidRowIndex !== null && i === firstInvalidRowIndex) {
-      setFirstInvalidRowIndex(null)
-    }
+    setLineErrors((prev) => {
+      if (!prev[i]) return prev
+      const next = { ...prev }
+      delete next[i]
+      return next
+    })
     setFreeLines((p) =>
       p.map((row, j) => {
         if (j !== i) return row
@@ -732,26 +967,35 @@ export default function PurchaseReceiptNewPage() {
 
   function removeFreeLine(i: number) {
     setFreeLines((prev) => {
-      if (prev.length <= 1) {
-        return [emptyLine()]
-      }
-      return prev.filter((_, index) => index !== i)
+      const next = prev.length <= 1 ? [emptyLine()] : prev.filter((_, index) => index !== i)
+      setLinesPage((p) => Math.min(p, Math.max(1, Math.ceil(next.length / DOCUMENT_LINES_PAGE_SIZE))))
+      return next
     })
-
-    setFirstInvalidRowIndex((prev) => {
-      if (prev === null) return null
-      if (prev === i) return null
-      return prev > i ? prev - 1 : prev
+    setLineErrors((prev) => {
+      const next: Record<number, ReceiptLineFieldErrors> = {}
+      for (const [k, v] of Object.entries(prev)) {
+        const idx = Number(k)
+        if (!Number.isFinite(idx)) continue
+        if (idx === i) continue
+        next[idx > i ? idx - 1 : idx] = v
+      }
+      return next
     })
   }
 
   function clearPurchaseOrder() {
     setPurchaseOrderId(null)
     setPurchaseOrderDetail(null)
-    setPurchaseOrderError(false)
+    setFieldErrors((prev) => {
+      if (!prev.purchaseOrder) return prev
+      const next = { ...prev }
+      delete next.purchaseOrder
+      return next
+    })
     skipRemoteFreeLinesForPurchaseOrderRef.current = null
     pendingRestoredFreeLinesRef.current = null
     setFreeLines([emptyLine()])
+    setLinesPage(1)
     setPoComboOpen(false)
   }
 
@@ -784,128 +1028,9 @@ export default function PurchaseReceiptNewPage() {
     }
   }
 
-  async function submit(ev: React.FormEvent, skipDuplicateCheck = false) {
-    ev.preventDefault()
-
+  async function executeCreateReceipt(skipDuplicateCheck = false) {
     const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
-    const supplierOk = Number.isFinite(supplierId) && (supplierId ?? 0) > 0
-    const invoiceOk = invoiceNumber.trim().length > 0
-    const receivedAtOk = receivedAt.trim().length > 0
-    const purchaseOrderOk =
-      !hasPurchaseOrder ||
-      (Number.isFinite(purchaseOrderId) &&
-        (purchaseOrderId ?? 0) > 0 &&
-        Boolean(purchaseOrderDetail?.code))
-    setSupplierError(!supplierOk)
-    setInvoiceNumberError(!invoiceOk)
-    setReceivedAtError(!receivedAtOk)
-    setPurchaseOrderError(!purchaseOrderOk)
-
-    if (!supplierOk) {
-      document.getElementById("supplier-name")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("El proveedor es obligatorio.")
-      return
-    }
-    if (!invoiceOk) {
-      document.getElementById("invoice-number")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("El N° de factura es obligatorio.")
-      return
-    }
-    if (!receivedAtOk) {
-      document.getElementById("received-at")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("La fecha recibido es obligatoria.")
-      return
-    }
-    if (hasPurchaseOrder && !purchaseOrderOk) {
-      document.getElementById("purchase-order-field")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("No se pudo cargar la orden de compra seleccionada.")
-      return
-    }
-    const poDetail = purchaseOrderDetail
-
-    const rowsWithContent = freeLines
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => {
-        const hasPol = row.purchase_order_line_id.trim() !== ""
-        const hasType = row.item_type.trim() !== ""
-        const hasMaterial = row.material_id.trim() !== ""
-        const hasQuantity = row.quantity.trim() !== ""
-        const hasMicras = row.micras.trim() !== ""
-        const hasAncho = row.ancho_mm.trim() !== ""
-        return hasPol || hasType || hasMaterial || hasQuantity || hasMicras || hasAncho
-      })
-
-    if (!rowsWithContent.length) {
-      setFirstInvalidRowIndex(0)
-      document.getElementById("receipt-row-0")?.scrollIntoView({ behavior: "smooth", block: "center" })
-      toast.error("Agregue al menos 1 ítem.")
-      return
-    }
-
-    const firstInvalid = rowsWithContent.findIndex(
-      ({ row }) => receiptLineValidationMessage(row, hasPurchaseOrder) !== null,
-    )
-
-    if (firstInvalid !== -1) {
-      const invalidEntry = rowsWithContent[firstInvalid]
-      const invalidRowIndex = invalidEntry?.index ?? 0
-      setFirstInvalidRowIndex(invalidRowIndex)
-      document
-        .getElementById(`receipt-row-${invalidRowIndex}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" })
-      const msg = invalidEntry
-        ? receiptLineValidationMessage(invalidEntry.row, hasPurchaseOrder)
-        : null
-      toast.error(
-        msg ??
-          (hasPurchaseOrder
-            ? "Revise línea de OC, tipo, material del catálogo, cantidad y (en Sustrato) Micras y Ancho."
-            : "Revise tipo, material del catálogo, cantidad y (en Sustrato) Micras y Ancho."),
-      )
-      return
-    }
-
-    setFirstInvalidRowIndex(null)
-    const lines = rowsWithContent.map(({ row }) => {
-      const base = {
-        material_id: Number(row.material_id),
-        quantity: Number(row.quantity),
-        item_type: mapUiItemTypeToApi(row.item_type),
-        unit: row.unit || "kg",
-        micras: row.micras.trim() ? Number(row.micras) : null,
-        ancho_mm: row.ancho_mm.trim() ? Number(row.ancho_mm) : null,
-      }
-      if (hasPurchaseOrder) {
-        return {
-          ...base,
-          purchase_order_line_id: Number(row.purchase_order_line_id),
-        }
-      }
-      return base
-    })
-
-    const payload: Record<string, unknown> = hasPurchaseOrder
-      ? {
-          purchase_order_id: purchaseOrderId,
-          without_purchase_order: false,
-          exception_reason: null,
-          supplier_id: supplierId,
-          supplier_name: selectedSupplier?.name?.trim() || null,
-          invoice_number: invoiceNumber.trim() || null,
-          purchase_order_reference: poDetail?.code?.trim() ?? null,
-          notes: notes.trim() || null,
-          received_at: receivedAt || null,
-          lines,
-        }
-      : {
-          without_purchase_order: true,
-          supplier_id: supplierId,
-          supplier_name: selectedSupplier?.name?.trim() || null,
-          invoice_number: invoiceNumber.trim() || null,
-          notes: notes.trim() || null,
-          received_at: receivedAt || null,
-          lines,
-        }
+    const payload = buildReceiptPayload(hasPurchaseOrder)
 
     if (!skipDuplicateCheck) {
       try {
@@ -913,8 +1038,8 @@ export default function PurchaseReceiptNewPage() {
           query: {
             supplier_id: String(supplierId ?? ""),
             invoice_number: invoiceNumber.trim() || undefined,
-            ...(hasPurchaseOrder && poDetail?.code
-              ? { purchase_order_reference: poDetail.code.trim() }
+            ...(hasPurchaseOrder && purchaseOrderDetail?.code
+              ? { purchase_order_reference: purchaseOrderDetail.code.trim() }
               : {}),
           },
         })
@@ -932,762 +1057,103 @@ export default function PurchaseReceiptNewPage() {
     await persistReceipt(payload)
   }
 
+  function submit(ev: React.FormEvent) {
+    ev.preventDefault()
+
+    const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
+    const validation = computeReceiptValidation(hasPurchaseOrder)
+    if (!validation.ok) {
+      applyReceiptValidationErrors(validation.fieldErrors, validation.lineErrors)
+      return
+    }
+
+    cancelFieldErrorsAutoClear()
+    setFieldErrors({})
+    setLineErrors({})
+    setConfirmCreateOpen(true)
+  }
+
+  async function confirmAndCreateReceipt() {
+    await executeCreateReceipt(false)
+  }
+
   const reachedItemLimit = freeLines.length >= MAX_RECEIPT_LINES
   const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
 
-  const receiptAreaSummary = useMemo(() => {
-    const areaSet = new Set<"material" | "tintas" | "quimicos" | "miscelaneos">()
-    for (const line of freeLines) {
-      const t = line.item_type.trim()
-      if (t) areaSet.add(mapItemTypeToInventoryArea(t))
-    }
-    const labels = RECEIPT_AREA_ORDER.filter((a) => areaSet.has(a)).map(receiptInventoryAreaLabel)
-    if (labels.length === 0) {
-      return {
-        mainText: "Seleccione tipo en ítems…",
-        badgeClassName: "border-muted-foreground/30 bg-muted/50 text-muted-foreground",
-      }
-    }
-    if (labels.length === 1) {
-      const only = RECEIPT_AREA_ORDER.find((a) => areaSet.has(a))!
-      return {
-        mainText: labels[0],
-        badgeClassName: receiptAreaBadgeClassName(only),
-      }
-    }
-    return {
-      mainText: `Varias áreas (${labels.join(", ")})`,
-      badgeClassName: "border-amber-500/45 bg-amber-50/90 text-amber-950 shadow-sm",
-    }
-  }, [freeLines])
+  function navigateToNewPurchaseOrder() {
+    navigate("/ordenes-compra/nueva", {
+      state: {
+        from: "/recepciones-nueva",
+        ...(supplierId ? { presetSupplierId: supplierId } : {}),
+      },
+    })
+  }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Ingreso de material
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Punto de partida del stock: registre aquí las cantidades físicas que entran al inventario (con factura; la
-            orden de compra es opcional).
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="secondary" onClick={() => setHelpOpen(true)}>
-            Ayuda
-          </Button>
-          <Button type="button" variant="outline" onClick={() => navigate(-1)}>
-            Regresar
-          </Button>
-        </div>
-      </div>
-
-      <form
-        onSubmit={(ev) => void submit(ev)}
-        className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
-          <div className="min-w-0 flex-1" aria-live="polite">
-            <p className="text-muted-foreground text-xs">Área de ingreso</p>
-            <Badge
-              variant="outline"
-              className={cn(
-                "mt-1 max-w-full whitespace-normal rounded-md px-2.5 py-1 text-left text-sm font-semibold leading-snug",
-                receiptAreaSummary.badgeClassName,
-              )}
-            >
-              {receiptAreaSummary.mainText}
-            </Badge>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-muted-foreground text-xs">Correlativo de recepción</p>
-            <h2 className="text-primary text-3xl font-bold tracking-tight">
-              {formatReceiptCode(estimatedNextReceiptId)}
-            </h2>
-          </div>
-        </div>
-
-        <Alert className="border-primary/30 bg-primary/5">
-          <Scale className="h-4 w-4 text-primary" aria-hidden />
-          <AlertTitle className="text-foreground">Cantidades reales en inventario</AlertTitle>
-          <AlertDescription>
-            Esta pantalla es el registro oficial de <strong>entrada física</strong> al inventario: lo que guarde aquí es
-            lo que suma al stock del material (y queda trazado en movimientos de inventario). Use kg reales en báscula o
-            lo documentado en la factura de este despacho. Si vincula una orden de compra, el sistema cruza líneas y
-            respeta lo pendiente; sin OC registra la cantidad que indique. El maestro de materiales no sustituye esta
-            recepción.
-          </AlertDescription>
-        </Alert>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="supplier-name">Proveedor *</Label>
-            <div className="flex items-center gap-2">
-              <Popover open={supplierComboOpen} onOpenChange={setSupplierComboOpen}>
-                <PopoverTrigger asChild>
-                  <div className="group/field relative flex-1">
-                    <Building2
-                      className={cn(
-                        "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                        supplierError
-                          ? "text-red-500"
-                          : saving
-                            ? "text-muted-foreground/50"
-                            : "text-muted-foreground group-focus-within/field:text-primary",
-                      )}
-                      aria-hidden
-                    />
-                    <Button
-                      id="supplier-name"
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={supplierComboOpen}
-                      disabled={saving}
-                      className={cn(
-                        "h-10 w-full justify-between pl-10 pr-3 font-normal",
-                        supplierError ? "border-red-500 focus-visible:ring-red-500" : "",
-                      )}
-                    >
-                      <span className={cn("truncate text-left", !selectedSupplier && "text-muted-foreground")}>
-                        {selectedSupplier?.name || "Escriba o seleccione proveedor..."}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                  <Command shouldFilter>
-                    <CommandInput placeholder="Buscar proveedor..." />
-                    <CommandList className="max-h-60">
-                      <CommandEmpty>
-                        {supplierOptions.length === 0 ? (
-                          <div className="space-y-3 px-2 py-4 text-center">
-                            <p className="text-muted-foreground text-sm">
-                              No hay proveedores registrados.
-                            </p>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              disabled={saving}
-                              onClick={() => {
-                                setSupplierComboOpen(false)
-                                persistReceiptDraftAndGoToNewSupplier()
-                              }}
-                            >
-                              Crear proveedor
-                            </Button>
-                          </div>
-                        ) : (
-                          "No hay coincidencias."
-                        )}
-                      </CommandEmpty>
-                      <CommandGroup>
-                        {supplierOptions.map((supplier) => (
-                          <CommandItem
-                            key={supplier.id}
-                            value={`${supplier.name} ${supplier.rif ?? ""}`}
-                            onSelect={() => {
-                              setSupplierId(supplier.id)
-                              if (supplierError) setSupplierError(false)
-                              setSupplierComboOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn("mr-2 h-4 w-4", supplierId === supplier.id ? "opacity-100" : "opacity-0")}
-                              aria-hidden
-                            />
-                            <span>{supplier.name}</span>
-                            {supplier.rif ? (
-                              <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span>
-                            ) : null}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => persistReceiptDraftAndGoToNewSupplier()}
-                disabled={saving}
-              >
-                + Nuevo
-              </Button>
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="invoice-number">N° Factura *</Label>
-            <div className="group/field relative">
-              <FileText
-                className={cn(
-                  "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                  invoiceNumberError
-                    ? "text-red-500"
-                    : saving
-                      ? "text-muted-foreground/50"
-                      : "text-muted-foreground group-focus-within/field:text-primary",
-                )}
-                aria-hidden
-              />
-              <Input
-                id="invoice-number"
-                value={invoiceNumber}
-                onChange={(ev) => {
-                  setInvoiceNumber(ev.target.value.toUpperCase().slice(0, 15))
-                  if (invoiceNumberError) setInvoiceNumberError(false)
-                }}
-                maxLength={15}
-                placeholder="Número de factura"
-                disabled={saving}
-                className={cn("pl-10", invoiceNumberError ? "border-red-500 focus-visible:ring-red-500" : "")}
-              />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="received-at">Fecha recibido *</Label>
-            <div className="group/field relative">
-              <Calendar
-                className={cn(
-                  "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                  receivedAtError
-                    ? "text-red-500"
-                    : saving
-                      ? "text-muted-foreground/50"
-                      : "text-muted-foreground group-focus-within/field:text-primary",
-                )}
-                aria-hidden
-              />
-              <Input
-                id="received-at"
-                type="date"
-                max={todayDate}
-                value={receivedAt ? receivedAt.slice(0, 10) : ""}
-                onChange={(ev) => {
-                  setReceivedAt(ev.target.value ? `${ev.target.value}T00:00` : "")
-                  if (receivedAtError) setReceivedAtError(false)
-                }}
-                className={cn("pl-10", receivedAtError ? "border-red-500 focus-visible:ring-red-500" : "")}
-                disabled={saving}
-              />
-            </div>
-          </div>
-          <div id="purchase-order-field" className="grid gap-2">
-            <Label>Orden de compra (opcional)</Label>
-            <div className="flex items-center gap-2">
-              <Popover open={poComboOpen} onOpenChange={setPoComboOpen}>
-                <PopoverTrigger asChild>
-                  <div className="group/field relative flex-1">
-                    <ClipboardList
-                      className={cn(
-                        "pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 transition-colors",
-                        purchaseOrderError
-                          ? "text-red-500"
-                          : saving
-                            ? "text-muted-foreground/50"
-                            : "text-muted-foreground group-focus-within/field:text-primary",
-                      )}
-                      aria-hidden
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={poComboOpen}
-                      disabled={saving || poListLoading}
-                      className={cn(
-                        "h-10 w-full justify-between pl-10 pr-3 font-normal",
-                        purchaseOrderError ? "border-red-500 focus-visible:ring-red-500" : "",
-                      )}
-                    >
-                      <span className={cn("truncate text-left", !purchaseOrderId && "text-muted-foreground")}>
-                        {poListLoading
-                          ? "Cargando órdenes…"
-                          : purchaseOrderId
-                            ? `${purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code ?? "…"} · ${purchaseOrderStatusHint(
-                                purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
-                              )}${poDetailLoading ? " (cargando…)" : ""}`
-                            : "Entrada directa (sin OC)…"}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                  <Command shouldFilter>
-                    <CommandInput placeholder="Buscar por código OC…" />
-                    <CommandList className="max-h-60">
-                      <CommandEmpty>
-                        {poListLoading
-                          ? "Cargando órdenes de compra…"
-                          : "No hay órdenes abiertas o parciales. Use «Sin orden de compra» para entrada directa."}
-                      </CommandEmpty>
-                      <CommandGroup>
-                        <CommandItem
-                          value="sin orden de compra entrada directa"
-                          onSelect={() => clearPurchaseOrder()}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              !purchaseOrderId ? "opacity-100" : "opacity-0",
-                            )}
-                            aria-hidden
-                          />
-                          <span className="font-medium">Sin orden de compra</span>
-                          <span className="text-muted-foreground ml-2 text-xs">Entrada directa al inventario</span>
-                        </CommandItem>
-                        {purchaseOrderOptions.map((po) => (
-                          <CommandItem
-                            key={po.id}
-                            value={`${po.code} ${po.supplier?.name ?? ""} ${po.status}`}
-                            onSelect={() => {
-                              setPurchaseOrderId(po.id)
-                              if (po.supplier_id > 0 && po.supplier_id !== supplierId) {
-                                setSupplierId(po.supplier_id)
-                                if (supplierError) setSupplierError(false)
-                              }
-                              if (purchaseOrderError) setPurchaseOrderError(false)
-                              setPoComboOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                purchaseOrderId === po.id ? "opacity-100" : "opacity-0",
-                              )}
-                              aria-hidden
-                            />
-                            <span className="truncate">{po.code}</span>
-                            <span className="text-muted-foreground ml-2 truncate text-xs">
-                              {purchaseOrderStatusHint(po.status)}
-                              {po.supplier?.name ? ` · ${po.supplier.name}` : ""}
-                            </span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving}
-                title={
-                  supplierId
-                    ? "Crear orden de compra y volver a completar la recepción"
-                    : "Crear orden de compra (elija proveedor arriba para prellenar la OC)"
-                }
-                onClick={() =>
-                  navigate("/ordenes-compra/nueva", {
-                    state: {
-                      from: "/recepciones-nueva",
-                      ...(supplierId ? { presetSupplierId: supplierId } : {}),
-                    },
-                  })
-                }
-              >
-                + Nuevo
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <p className="text-muted-foreground text-xs">
-          <strong>Sin orden de compra:</strong> elija tipo, material y la cantidad física que entra (kg en báscula o
-          factura); no hay tope de pedido.{" "}
-          <strong>Con orden de compra:</strong> en cada fila use la línea de la OC; en{" "}
-          <strong>Cantidad recibida</strong> registre lo recibido en este despacho (puede ser menor al sugerido, pero no
-          mayor que lo pendiente de esa línea). Los estados Parcial y Completa de la orden se calculan al guardar cuando
-          hay OC vinculada.
-        </p>
-
-        <div className="grid gap-2">
-          <Label htmlFor="rc-notes">Observaciones</Label>
-          <Textarea
-            id="rc-notes"
-            rows={2}
-            maxLength={650}
-            value={notes}
-            onChange={(ev) => setNotes(ev.target.value.slice(0, 650))}
-            placeholder="Notas adicionales de la recepción..."
-            disabled={saving}
-          />
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-medium">Items recibidos</h2>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={saving}
-                title="Abre Nuevo material; se guarda el borrador de esta recepción para continuar al volver."
-                onClick={() => goToCreateMaterialFromReceipt()}
-              >
-                <PackagePlus className="h-4 w-4" aria-hidden />
-                Crear material
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={addFreeLine}
-                disabled={saving || reachedItemLimit}
-                title={reachedItemLimit ? `Límite alcanzado (${MAX_RECEIPT_LINES} items)` : undefined}
-              >
-                Agregar item
-              </Button>
-            </div>
-          </div>
-          <div className="overflow-x-auto rounded-xl border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-14">N°</TableHead>
-                  {hasPurchaseOrder ? (
-                    <TableHead className="min-w-[200px]">Ítem solicitado (OC)</TableHead>
-                  ) : null}
-                  <TableHead className="w-40">Tipo</TableHead>
-                  <TableHead className="min-w-[200px]">Material *</TableHead>
-                  <TableHead className="w-24">Micras</TableHead>
-                  <TableHead className="w-24">Ancho</TableHead>
-                  <TableHead className="min-w-[12rem] whitespace-nowrap">Cantidad recibida *</TableHead>
-                  <TableHead className="w-52 text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {freeLines.map((line, i) => (
-                  <TableRow
-                    id={`receipt-row-${i}`}
-                    key={i}
-                    className={cn(firstInvalidRowIndex === i ? "bg-red-50/40" : "")}
-                  >
-                    <TableCell className="align-top">
-                      <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
-                        {i + 1}
-                      </div>
-                    </TableCell>
-                    {hasPurchaseOrder ? (
-                      <TableCell className="align-top">
-                        {line.purchase_order_line_id ? (
-                          (() => {
-                            const pol = purchaseOrderDetail?.lines?.find(
-                              (ln) => String(ln.id) === String(line.purchase_order_line_id),
-                            )
-                            if (!pol) return null
-                            return (
-                              <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
-                                {formatPolLabel(pol)}
-                              </div>
-                            )
-                          })()
-                        ) : (
-                          <div
-                            className="flex h-9 min-w-0 max-w-full items-center truncate rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground"
-                            title="Seleccione OC arriba para cargar ítems…"
-                          >
-                            Seleccione OC arriba para cargar ítems…
-                          </div>
-                        )}
-                      </TableCell>
-                    ) : null}
-                    <TableCell className="align-top">
-                      <Select
-                        value={line.item_type}
-                        disabled={saving}
-                        onValueChange={(v) => {
-                          const shouldHideDimensions = HIDE_DIMENSIONS_FOR_TYPES.has(v)
-                          updateFreeLine(i, {
-                            item_type: v,
-                            ...(shouldHideDimensions ? { micras: "", ancho_mm: "" } : {}),
-                          })
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Tipo..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {RECEIPT_ITEM_TYPES.map((itemType) => (
-                            <SelectItem key={itemType} value={itemType}>
-                              {itemType}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <Popover
-                        open={materialComboOpenRow === i}
-                        onOpenChange={(open) => {
-                          if (open) setMaterialComboSearch("")
-                          setMaterialComboOpenRow(open ? i : null)
-                        }}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={materialComboOpenRow === i}
-                            disabled={saving}
-                            className="h-9 w-full justify-between font-normal"
-                          >
-                            <span
-                              className={cn(
-                                "min-w-0 flex-1 text-left",
-                                !line.material_id && "text-muted-foreground",
-                                line.material_id && "truncate",
-                              )}
-                            >
-                              {line.material_id ? (
-                                materials.find((m) => String(m.id) === line.material_id)?.sku || "Seleccione SKU…"
-                              ) : (
-                                <span className="text-foreground">Seleccione material del catálogo…</span>
-                              )}
-                            </span>
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
-                          <Command shouldFilter>
-                            <CommandInput
-                              placeholder="Buscar SKU..."
-                              value={materialComboOpenRow === i ? materialComboSearch : ""}
-                              onValueChange={setMaterialComboSearch}
-                            />
-                            <CommandList className="max-h-60">
-                              <CommandEmpty>
-                                {materialComboSearch.trim() ? (
-                                  <div className="space-y-2 px-2">
-                                    <p className="text-muted-foreground">No hay coincidencias con la búsqueda.</p>
-                                    {line.item_type ? (
-                                      <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        className="h-auto w-full whitespace-normal py-2 text-xs"
-                                        onClick={() => {
-                                          const q = materialComboSearch.trim()
-                                          goToMaterialMaster(i, line.item_type, { sku: q, name: q })
-                                          setMaterialComboOpenRow(null)
-                                          setMaterialComboSearch("")
-                                        }}
-                                      >
-                                        Ir a nuevo material con «{materialComboSearch.trim()}»
-                                      </Button>
-                                    ) : (
-                                      <p className="text-muted-foreground text-xs">
-                                        Seleccione primero el tipo de ítem en esta fila.
-                                      </p>
-                                    )}
-                                  </div>
-                                ) : (
-                                  "No hay SKU disponibles."
-                                )}
-                              </CommandEmpty>
-                              <CommandGroup>
-                                {materialsForItemType(line.item_type).map((m) => (
-                                  <CommandItem
-                                    key={m.id}
-                                    value={m.sku}
-                                    onSelect={() => {
-                                      updateFreeLine(i, { material_id: String(m.id) })
-                                      setMaterialComboOpenRow(null)
-                                      setMaterialComboSearch("")
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        line.material_id === String(m.id) ? "opacity-100" : "opacity-0",
-                                      )}
-                                      aria-hidden
-                                    />
-                                    {m.sku}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <Input
-                        inputMode="numeric"
-                        value={line.micras}
-                        onChange={(ev) => updateFreeLine(i, { micras: ev.target.value })}
-                        placeholder="µ"
-                        disabled={saving || HIDE_DIMENSIONS_FOR_TYPES.has(line.item_type)}
-                      />
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <Input
-                        inputMode="numeric"
-                        value={line.ancho_mm}
-                        onChange={(ev) => updateFreeLine(i, { ancho_mm: ev.target.value })}
-                        placeholder="mm"
-                        disabled={saving || HIDE_DIMENSIONS_FOR_TYPES.has(line.item_type)}
-                      />
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <div className="flex min-w-[11rem] items-center gap-2">
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          pattern="[0-9]*[.,]?[0-9]*"
-                          className="min-w-0 flex-1"
-                          value={line.quantity}
-                          onChange={(ev) => updateFreeLine(i, { quantity: sanitizeDecimalInput(ev.target.value) })}
-                          placeholder="Cantidad"
-                          title="Cantidad física de esta recepción; la unidad es la del selector a la derecha."
-                          disabled={saving}
-                        />
-                        <Select
-                          value={line.unit || "kg"}
-                          disabled={saving}
-                          onValueChange={(v) => updateFreeLine(i, { unit: v })}
-                        >
-                          <SelectTrigger className="h-9 w-[4.75rem] shrink-0 px-2">
-                            <SelectValue placeholder="…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {allowedUnitsByItemType(line.item_type).map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <div className="flex items-start justify-end gap-1.5">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="h-8 shrink-0 px-2 text-xs"
-                          disabled={saving}
-                          title="Ir a Nuevo material (se guarda el borrador de esta recepción)."
-                          onClick={() => goToCreateMaterialFromReceipt(i)}
-                        >
-                          <PackagePlus className="mr-1 h-3.5 w-3.5" aria-hidden />
-                          Crear material
-                        </Button>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="outline"
-                          className="h-8 w-8"
-                          onClick={() => removeFreeLine(i)}
-                          aria-label={`Eliminar fila ${i + 1}`}
-                          title={`Eliminar fila ${i + 1}`}
-                        >
-                          ×
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-
-        <div className="flex justify-center pt-2">
-          <Button type="submit" disabled={saving}>
-            <LoadingButtonLabel loading={saving} loadingText="Guardando..." idleText="Registrar" />
-          </Button>
-        </div>
-      </form>
-
-      <Dialog open={duplicateDialogOpen} onOpenChange={setDuplicateDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Posible duplicado detectado</DialogTitle>
-            <DialogDescription>
-              Se encontraron recepciones previas con el mismo proveedor + N° factura o N° OC referencia.
-              Si es despacho parcial puede continuar.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-60 overflow-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>N° Recepción</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>N° Factura</TableHead>
-                  <TableHead>N° OC (referencia)</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {duplicateMatches.map((match) => (
-                  <TableRow key={match.id}>
-                    <TableCell>{formatReceiptCode(match.id)}</TableCell>
-                    <TableCell>{match.received_at ? String(match.received_at).slice(0, 19).replace("T", " ") : "—"}</TableCell>
-                    <TableCell>{match.invoice_number || "—"}</TableCell>
-                    <TableCell>{match.purchase_order_reference || "—"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDuplicateDialogOpen(false)}>
-              Revisar
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                const payload = pendingPayload
-                setDuplicateDialogOpen(false)
-                if (payload) void persistReceipt(payload)
-              }}
-            >
-              Continuar y guardar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Guía rápida: Ingreso de material</DialogTitle>
-            <DialogDescription>
-              Esta pantalla registra recepciones físicas, no crea productos terminados.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
-            <p><strong>Qué hace:</strong> suma existencias al inventario (proveedor, factura, fecha e ítems). La orden de compra es opcional.</p>
-            <p>
-              <strong>Sin OC:</strong> elija tipo, material del catálogo y la cantidad física que entra (kg reales).
-              No hay tope de pedido.
-            </p>
-            <p>
-              <strong>Con OC:</strong> elija la línea de la OC, tipo, material y cantidad. La cantidad no puede superar
-              lo pendiente de esa línea; al guardar se actualiza el avance de la orden.
-            </p>
-            <p><strong>Flujo por línea:</strong> si no existe el material, use <strong>+ Nuevo material</strong>. Se guarda un borrador y al volver puede seguir con el mismo proveedor.</p>
-            <p><strong>Importante:</strong> el stock del material no se carga al crear el SKU; las cantidades reales entran solo por esta recepción (u otros flujos de inventario autorizados). Esta pantalla no reemplaza el maestro de productos.</p>
-            <p><strong>Orden recomendado:</strong> 1) Producto terminado, 2) Materiales insumo (maestro, stock en cero), 3) Ingreso de material cuando llegue físicamente.</p>
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={() => setHelpOpen(false)}>
-              Entendido
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+    <PurchaseReceiptNewPageView
+      saving={saving}
+      supplierComboOpen={supplierComboOpen}
+      setSupplierComboOpen={setSupplierComboOpen}
+      supplierOptions={supplierOptions}
+      supplierId={supplierId}
+      setSupplierId={setSupplierId}
+      selectedSupplier={selectedSupplier}
+      persistReceiptDraftAndGoToNewSupplier={persistReceiptDraftAndGoToNewSupplier}
+      invoiceNumber={invoiceNumber}
+      setInvoiceNumber={setInvoiceNumber}
+      notes={notes}
+      setNotes={setNotes}
+      receivedAtOpen={receivedAtOpen}
+      setReceivedAtOpen={setReceivedAtOpen}
+      receivedAtDateValue={receivedAtDateValue}
+      setReceivedAt={setReceivedAt}
+      todayDate={todayDate}
+      poComboOpen={poComboOpen}
+      setPoComboOpen={setPoComboOpen}
+      poListLoading={poListLoading}
+      purchaseOrderId={purchaseOrderId}
+      purchaseOrderDetail={purchaseOrderDetail}
+      selectedPurchaseOrderRow={selectedPurchaseOrderRow}
+      purchaseOrderOptions={purchaseOrderOptions}
+      clearPurchaseOrder={clearPurchaseOrder}
+      setPurchaseOrderId={setPurchaseOrderId}
+      navigateToNewPurchaseOrder={navigateToNewPurchaseOrder}
+      hasPurchaseOrder={hasPurchaseOrder}
+      fieldErrors={fieldErrors}
+      lineErrors={lineErrors}
+      freeLines={freeLines}
+      paginatedLineEntries={paginatedLineEntries}
+      showDimensionColumns={showDimensionColumns}
+      materialComboOpenRow={materialComboOpenRow}
+      setMaterialComboOpenRow={setMaterialComboOpenRow}
+      materialComboSearch={materialComboSearch}
+      setMaterialComboSearch={setMaterialComboSearch}
+      materialsForItemType={materialsForItemType}
+      updateFreeLine={updateFreeLine}
+      allowedUnitsByItemType={allowedUnitsByItemType}
+      removeFreeLine={removeFreeLine}
+      addFreeLine={addFreeLine}
+      reachedItemLimit={reachedItemLimit}
+      maxReceiptLines={MAX_RECEIPT_LINES}
+      goToCreateMaterialFromReceipt={goToCreateMaterialFromReceipt}
+      goToMaterialMaster={goToMaterialMaster}
+      linesPageCount={linesPageCount}
+      safeLinesPage={safeLinesPage}
+      setLinesPage={setLinesPage}
+      submit={submit}
+      estimatedNextReceiptId={estimatedNextReceiptId}
+      formatReceiptCode={formatReceiptCode}
+      formatPolLabel={formatPolLabel}
+      purchaseOrderStatusHint={purchaseOrderStatusHint}
+      confirmCreateOpen={confirmCreateOpen}
+      setConfirmCreateOpen={setConfirmCreateOpen}
+      confirmAndCreateReceipt={confirmAndCreateReceipt}
+      payloadLinesPreviewCount={payloadLinesPreviewCount}
+      duplicateDialogOpen={duplicateDialogOpen}
+      setDuplicateDialogOpen={setDuplicateDialogOpen}
+      duplicateMatches={duplicateMatches}
+      pendingPayload={pendingPayload}
+      persistReceipt={persistReceipt}
+    />
   )
 }

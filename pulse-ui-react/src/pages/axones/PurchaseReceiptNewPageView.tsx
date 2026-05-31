@@ -1186,7 +1186,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </DialogHeader>
             </div>
             <div className="px-8 pb-6">
-              <div className="overflow-hidden rounded-xl border border-primary/10 bg-card shadow-inner">
+              <div className="max-h-64 overflow-auto rounded-xl border border-primary/10 bg-card shadow-inner">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/50 hover:bg-muted/50">

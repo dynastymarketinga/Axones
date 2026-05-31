@@ -5,6 +5,12 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import {
+  formatMaterialIdentity,
+  formatOcLineReference,
+  formatPurchaseOrderBanner,
+  parseOcLineMeta,
+} from "@/lib/purchase-receipt-material-label"
 import type { LaravelPaginated, MaterialRow, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import {
   DOCUMENT_FORM_FIELD_ERRORS_AUTO_CLEAR_MS,
@@ -28,7 +34,12 @@ export type PurchaseOrderLineDetail = {
   quantity_received?: string | number
   unit?: string | null
   material_id?: number | null
-  material?: { id?: number; name?: string; sku?: string } | null
+  material?: {
+    id?: number
+    name?: string
+    sku?: string
+    supplier?: { name?: string | null } | null
+  } | null
 }
 
 export type PurchaseOrderDetailPayload = {
@@ -36,13 +47,14 @@ export type PurchaseOrderDetailPayload = {
   supplier_id: number
   code: string
   status: string
+  supplier?: { id?: number; name?: string | null } | null
   lines?: PurchaseOrderLineDetail[]
 }
 
 export type FreeLine = {
   purchase_order_line_id: string
   item_type: string
-  /** Texto libre; al guardar se busca en catálogo o se crea el material. */
+  /** Etiqueta visible (código · descripción · proveedor) del material del catálogo. */
   material_label: string
   material_id: string
   micras: string
@@ -148,12 +160,17 @@ function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
 
 function hydrateFreeLineMaterialLabel(line: FreeLine, materialsList: MaterialRow[]): FreeLine {
   const normalized = normalizeLineByBusinessRules(line)
-  if (normalized.material_label.trim()) return normalized
   const matId = normalized.material_id.trim()
   if (matId) {
     const mat = materialsList.find((m) => String(m.id) === matId)
     if (mat) {
-      return { ...normalized, material_label: mat.sku || mat.name || "" }
+      return {
+        ...normalized,
+        material_label: materialLabelFromRow(mat),
+        micras: mat.micras?.trim() || normalized.micras,
+        ancho_mm: mat.ancho?.trim() || normalized.ancho_mm,
+        unit: mat.unit?.trim() || normalized.unit,
+      }
     }
   }
   return normalized
@@ -176,10 +193,23 @@ export type ReceiptLineFieldErrors = {
   purchaseOrderLine?: string
 }
 
+function materialLabelFromRow(material: MaterialRow): string {
+  return formatMaterialIdentity({
+    sku: material.sku,
+    name: material.name,
+    supplierName: material.supplier?.name ?? null,
+  })
+}
+
+function materialsForReceiptItemType(materialsList: MaterialRow[], itemType: string): MaterialRow[] {
+  const area = mapItemTypeToInventoryArea(itemType)
+  return materialsList.filter((m) => normalizeKey(m.inventory_area) === normalizeKey(area))
+}
+
 function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: boolean): string | null {
   const hasPol = row.purchase_order_line_id.trim().length > 0
   const hasType = row.item_type.trim().length > 0
-  const materialLabel = row.material_label.trim()
+  const materialId = Number(row.material_id)
   const quantity = Number(row.quantity)
   const requiresDimensions = receiptLineRequiresDimensions(row.item_type)
   const micras = Number(row.micras)
@@ -190,10 +220,8 @@ function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: b
   if (!hasType) {
     return "Seleccione el tipo de ítem (Sustrato, Tinta, etc.) en cada fila."
   }
-  if (!materialLabel) {
-    return requirePurchaseOrderLine
-      ? "Escriba el material recibido. La columna de la OC es solo referencia."
-      : "Escriba el material recibido en cada fila."
+  if (!Number.isFinite(materialId) || materialId < 1) {
+    return "Seleccione un material del inventario. Si no existe, créelo en Materiales."
   }
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return "Indique cantidad recibida mayor que 0 (entrada física)."
@@ -235,66 +263,51 @@ function emptyLine(): FreeLine {
   }
 }
 
-function findMaterialByLabel(label: string, materialsList: MaterialRow[]): MaterialRow | undefined {
-  const nk = normalizeKey(label)
-  if (!nk) return undefined
-  return materialsList.find(
-    (m) => normalizeKey(m.sku) === nk || normalizeKey(m.name ?? "") === nk,
-  )
-}
-
-async function createMaterialForReceiptLine(
-  row: FreeLine,
-  supplierId: number | null,
-): Promise<MaterialRow> {
-  const label = row.material_label.trim()
-  const area = mapItemTypeToInventoryArea(row.item_type)
-  const unit = row.unit || "kg"
-  const baseSku = suggestSkuFromLabel(label)
-
-  const body: Record<string, unknown> = {
-    name: label.slice(0, 255),
-    inventory_area: area,
-    unit,
-    min_stock: 0,
-  }
-  if (supplierId != null && supplierId > 0) body.supplier_id = supplierId
-  if (area === "tintas") body.tinta_subarea = "laminacion"
-  if (receiptLineRequiresDimensions(row.item_type)) {
-    if (row.micras.trim()) body.micras = Number(row.micras)
-    if (row.ancho_mm.trim()) body.ancho = Number(row.ancho_mm)
-  }
-
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const sku = attempt === 0 ? baseSku : `${baseSku.slice(0, 58)}-${attempt + 1}`
-    try {
-      return await apiFetch<MaterialRow>("materials", {
-        method: "POST",
-        body: JSON.stringify({ ...body, sku }),
-      })
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 422 && attempt < 4) continue
-      throw e
-    }
-  }
-  throw new Error("No se pudo crear el material en inventario.")
-}
-
-async function resolveReceiptLineMaterialId(
-  row: FreeLine,
+function buildFreeLineFromPurchaseOrderLine(
+  pol: PurchaseOrderLineDetail,
   materialsList: MaterialRow[],
-  supplierId: number | null,
-): Promise<{ materialId: number; materialsList: MaterialRow[] }> {
-  const label = row.material_label.trim()
-  if (!label) throw new Error("Material vacío")
+  poSupplierName?: string | null,
+): FreeLine {
+  const rem = polRemainingQty(pol)
+  const parsed = parseOcLineMeta(pol.description)
+  const matId =
+    pol.material_id != null && pol.material_id !== undefined ? String(pol.material_id) : ""
+  const matFromList = matId ? materialsList.find((m) => String(m.id) === matId) : undefined
+  const matFromPol = pol.material
+  const inferredItemType = matFromList
+    ? inferUiItemTypeFromInventoryArea(matFromList.inventory_area)
+    : parsed.itemType || ""
+  const unitRaw = (pol.unit || matFromList?.unit || "kg").trim()
 
-  const existing = findMaterialByLabel(label, materialsList)
-  if (existing) {
-    return { materialId: existing.id, materialsList }
+  let material_id = ""
+  let material_label = ""
+  if (matFromList) {
+    material_id = String(matFromList.id)
+    material_label = materialLabelFromRow(matFromList)
+  } else if (matFromPol?.sku || matFromPol?.name) {
+    material_label = formatMaterialIdentity({
+      sku: matFromPol.sku,
+      name: matFromPol.name,
+      supplierName: matFromPol.supplier?.name ?? poSupplierName,
+    })
+  } else if (parsed.baseText) {
+    material_label = formatMaterialIdentity({
+      sku: parsed.baseText,
+      name: null,
+      supplierName: poSupplierName,
+    })
   }
 
-  const created = await createMaterialForReceiptLine(row, supplierId)
-  return { materialId: created.id, materialsList: [...materialsList, created] }
+  return normalizeLineByBusinessRules({
+    purchase_order_line_id: String(pol.id),
+    item_type: inferredItemType,
+    material_label,
+    material_id,
+    micras: matFromList?.micras?.trim() || parsed.micras,
+    ancho_mm: matFromList?.ancho?.trim() || parsed.ancho_mm,
+    quantity: String(rem),
+    unit: unitRaw || "kg",
+  })
 }
 
 function inferUiItemTypeFromInventoryArea(area: string): string {
@@ -303,50 +316,6 @@ function inferUiItemTypeFromInventoryArea(area: string): string {
   if (a === "quimicos") return "Químico"
   if (a === "miscelaneos") return "Misceláneo"
   return "Sustrato"
-}
-
-function parseOcLineMeta(description: string | null | undefined): {
-  itemType: string
-  micras: string
-  ancho_mm: string
-  baseText: string
-} {
-  const raw = (description ?? "").trim()
-  if (!raw) return { itemType: "", micras: "", ancho_mm: "", baseText: "" }
-  const parts = raw.split("|").map((p) => p.trim()).filter(Boolean)
-  const baseText = parts[0] ?? raw
-  let itemType = ""
-  let micras = ""
-  let ancho_mm = ""
-  for (const p of parts) {
-    const [kRaw, ...rest] = p.split(":")
-    const k = normalizeKey(kRaw ?? "")
-    const v = rest.join(":").trim()
-    if (!v) continue
-    if (k === "tipo") {
-      const tv = normalizeKey(v)
-      if (tv === "tinta") itemType = "Tinta"
-      else if (tv === "quimico" || tv === "químico") itemType = "Químico"
-      else if (tv === "otros") itemType = "Misceláneo"
-      else itemType = "Sustrato"
-    } else if (k.startsWith("micra")) {
-      micras = v
-    } else if (k.startsWith("ancho")) {
-      ancho_mm = v.replace(/[^\d.,]/g, "").replace(",", ".")
-    }
-  }
-  return { itemType, micras, ancho_mm, baseText }
-}
-
-/** Texto del ítem de OC en la tabla (solo descripción / material; la cantidad va en su columna). */
-function formatPolLabel(pol: PurchaseOrderLineDetail): string {
-  const desc = pol.description?.trim()
-  const meta = parseOcLineMeta(desc)
-  const head =
-    (pol.material?.sku && pol.material?.name)
-      ? `${pol.material.sku} — ${pol.material.name}`
-      : (meta.baseText || pol.material?.sku || "Ítem")
-  return head
 }
 
 function polRemainingQty(line: PurchaseOrderLineDetail): number {
@@ -435,6 +404,7 @@ export default function PurchaseReceiptNewPage() {
   const [purchaseOrderDetail, setPurchaseOrderDetail] = useState<PurchaseOrderDetailPayload | null>(null)
   const [poDetailLoading, setPoDetailLoading] = useState(false)
   const [poComboOpen, setPoComboOpen] = useState(false)
+  const [materialPickerOpenRow, setMaterialPickerOpenRow] = useState<number | null>(null)
   const [estimatedNextReceiptId, setEstimatedNextReceiptId] = useState<number | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateReceiptMatch[]>([])
@@ -547,36 +517,10 @@ export default function PurchaseReceiptNewPage() {
           toast.warning(`La OC tiene ${eligible.length} líneas pendientes. Se cargaron las primeras ${MAX_RECEIPT_LINES}.`)
         }
         const limited = eligible.slice(0, MAX_RECEIPT_LINES)
-        const nextLines: FreeLine[] = limited.map((pol) => {
-          const rem = polRemainingQty(pol)
-          const parsed = parseOcLineMeta(pol.description)
-          const matId =
-            pol.material_id != null && pol.material_id !== undefined
-              ? String(pol.material_id)
-              : ""
-          const mat = matId ? materials.find((m) => String(m.id) === matId) : undefined
-          const inferredItemType = mat
-            ? inferUiItemTypeFromInventoryArea(mat.inventory_area)
-            : (parsed.itemType || "")
-          const unitRaw = (pol.unit || mat?.unit || "kg").trim()
-          const materialLabel =
-            mat?.sku ||
-            mat?.name ||
-            parsed.baseText ||
-            pol.material?.sku ||
-            pol.material?.name ||
-            ""
-          return normalizeLineByBusinessRules({
-            purchase_order_line_id: String(pol.id),
-            item_type: inferredItemType,
-            material_label: materialLabel,
-            material_id: "",
-            micras: mat ? "" : parsed.micras,
-            ancho_mm: mat ? "" : parsed.ancho_mm,
-            quantity: String(rem),
-            unit: unitRaw || "kg",
-          })
-        })
+        const poSupplierName = d.supplier?.name ?? null
+        const nextLines: FreeLine[] = limited.map((pol) =>
+          buildFreeLineFromPurchaseOrderLine(pol, materials, poSupplierName),
+        )
         if (skipRemoteFreeLinesForPurchaseOrderRef.current === purchaseOrderId) {
           if (pendingRestoredFreeLinesRef.current) {
             setFreeLines(pendingRestoredFreeLinesRef.current)
@@ -753,6 +697,24 @@ export default function PurchaseReceiptNewPage() {
   }, [linesPageCount])
 
   useEffect(() => {
+    if (materials.length === 0) return
+    setFreeLines((prev) =>
+      prev.map((row) => {
+        if (row.material_id.trim()) {
+          return hydrateFreeLineMaterialLabel(row, materials)
+        }
+        const polId = row.purchase_order_line_id.trim()
+        if (!polId || !purchaseOrderDetail?.lines?.length) return row
+        const pol = purchaseOrderDetail.lines.find((ln) => String(ln.id) === polId)
+        if (!pol?.material_id) return row
+        const mat = materials.find((m) => m.id === pol.material_id)
+        if (!mat) return row
+        return hydrateFreeLineMaterialLabel({ ...row, material_id: String(mat.id) }, materials)
+      }),
+    )
+  }, [materials, purchaseOrderDetail])
+
+  useEffect(() => {
     return () => {
       if (fieldErrorsClearTimerRef.current != null) {
         window.clearTimeout(fieldErrorsClearTimerRef.current)
@@ -872,7 +834,6 @@ export default function PurchaseReceiptNewPage() {
     return Boolean(
       row.purchase_order_line_id.trim() ||
         row.item_type.trim() ||
-        row.material_label.trim() ||
         row.material_id.trim() ||
         row.quantity.trim() ||
         row.micras.trim() ||
@@ -922,7 +883,7 @@ export default function PurchaseReceiptNewPage() {
       const errs: ReceiptLineFieldErrors = {}
       if (msg.includes("línea de la orden")) errs.purchaseOrderLine = msg
       else if (msg.includes("tipo")) errs.material = msg
-      else if (msg.includes("material") || msg.includes("Escriba"))
+      else if (msg.includes("material") || msg.includes("inventario") || msg.includes("Materiales"))
         errs.material = msg
       else if (msg.includes("cantidad")) errs.quantity = msg
       else if (msg.includes("Micras") || msg.includes("Ancho")) {
@@ -1143,19 +1104,76 @@ export default function PurchaseReceiptNewPage() {
     setPoComboOpen(false)
   }
 
-  async function resolveReceiptLinesForSave(): Promise<FreeLine[]> {
-    let mats = materials
+  async function refreshMaterialsList() {
+    try {
+      const matRes = await apiFetch<LaravelPaginated<MaterialRow>>("materials", {
+        query: { per_page: 300, page: 1 },
+      })
+      setMaterials(matRes.data ?? [])
+    } catch {
+      /* mantener listado previo */
+    }
+  }
+
+  function openMaterialPicker(rowIndex: number) {
+    setMaterialPickerOpenRow(rowIndex)
+    void refreshMaterialsList()
+  }
+
+  function selectMaterialFromCatalog(rowIndex: number, material: MaterialRow) {
+    const row = freeLines[rowIndex]
+    const unitRaw = (material.unit || "kg").trim()
+    const allowed = allowedUnitsByItemType(row?.item_type ?? "Sustrato").map((u) => u.value)
+    const safeUnit = allowed.includes(unitRaw as (typeof allowed)[number]) ? unitRaw : "kg"
+    updateFreeLine(rowIndex, {
+      material_id: String(material.id),
+      material_label: materialLabelFromRow(material),
+      micras: material.micras?.trim() ?? "",
+      ancho_mm: material.ancho?.trim() ?? "",
+      unit: safeUnit,
+    })
+    setMaterialPickerOpenRow(null)
+  }
+
+  function formatOcLineLabel(pol: PurchaseOrderLineDetail): string {
+    return formatOcLineReference(
+      pol,
+      purchaseOrderDetail?.supplier?.name ?? selectedSupplier?.name ?? null,
+    )
+  }
+
+  function linkedPurchaseOrderBanner(): string | null {
+    if (purchaseOrderId == null || purchaseOrderId < 1) return null
+    return formatPurchaseOrderBanner({
+      code: purchaseOrderDetail?.code ?? selectedPurchaseOrderRow?.code,
+      supplierName:
+        purchaseOrderDetail?.supplier?.name ??
+        selectedPurchaseOrderRow?.supplier?.name ??
+        selectedSupplier?.name,
+      statusLabel: purchaseOrderStatusHint(
+        purchaseOrderDetail?.status ?? selectedPurchaseOrderRow?.status ?? "",
+      ),
+    })
+  }
+
+  function resolveReceiptLinesForSave(): FreeLine[] {
     const resolved: FreeLine[] = []
 
     for (const row of freeLines) {
       if (!receiptLineHasAnyValue(row)) continue
-      const { materialId, materialsList } = await resolveReceiptLineMaterialId(row, mats, supplierId)
-      mats = materialsList
-      resolved.push({ ...row, material_id: String(materialId) })
-    }
-
-    if (mats.length > materials.length) {
-      setMaterials(mats)
+      const materialId = Number(row.material_id)
+      if (!Number.isFinite(materialId) || materialId < 1) {
+        throw new Error("Seleccione un material del inventario. Si no existe, créelo en Materiales.")
+      }
+      const mat = materials.find((m) => m.id === materialId)
+      if (!mat) {
+        throw new Error("El material seleccionado ya no está en inventario. Recargue y elija de nuevo.")
+      }
+      resolved.push({
+        ...row,
+        material_id: String(materialId),
+        material_label: materialLabelFromRow(mat),
+      })
     }
 
     return resolved
@@ -1190,11 +1208,10 @@ export default function PurchaseReceiptNewPage() {
     setSaving(true)
     let resolvedLines: FreeLine[]
     try {
-      resolvedLines = await resolveReceiptLinesForSave()
+      resolvedLines = resolveReceiptLinesForSave()
     } catch (e) {
       setSaving(false)
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo registrar el material en inventario. Revise los datos e intente de nuevo.")
+      toast.error(e instanceof Error ? e.message : "Revise los materiales del inventario e intente de nuevo.")
       return
     }
 
@@ -1307,8 +1324,16 @@ export default function PurchaseReceiptNewPage() {
       submit={submit}
       estimatedNextReceiptId={estimatedNextReceiptId}
       formatReceiptCode={formatReceiptCode}
-      formatPolLabel={formatPolLabel}
+      formatOcLineLabel={formatOcLineLabel}
+      linkedPurchaseOrderBanner={linkedPurchaseOrderBanner()}
       purchaseOrderStatusHint={purchaseOrderStatusHint}
+      materials={materials}
+      materialsForReceiptItemType={materialsForReceiptItemType}
+      materialPickerOpenRow={materialPickerOpenRow}
+      setMaterialPickerOpenRow={setMaterialPickerOpenRow}
+      openMaterialPicker={openMaterialPicker}
+      selectMaterialFromCatalog={selectMaterialFromCatalog}
+      materialLabelFromRow={materialLabelFromRow}
       confirmCreateOpen={confirmCreateOpen}
       setConfirmCreateOpen={setConfirmCreateOpen}
       confirmAndCreateReceipt={confirmAndCreateReceipt}

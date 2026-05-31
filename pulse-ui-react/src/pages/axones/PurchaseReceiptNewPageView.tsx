@@ -60,7 +60,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -71,6 +71,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import type { MaterialRow } from "@/types/api"
 import {
   DOCUMENT_ROW_FIELD_CLASS,
   documentFieldIconClass,
@@ -179,8 +180,16 @@ export type PurchaseReceiptNewPageViewProps = {
   submit: (ev: React.FormEvent) => void
   estimatedNextReceiptId: number | null
   formatReceiptCode: (id: number | null | undefined) => string
-  formatPolLabel: (pol: PurchaseOrderLineDetail) => string
+  formatOcLineLabel: (pol: PurchaseOrderLineDetail) => string
+  linkedPurchaseOrderBanner: string | null
   purchaseOrderStatusHint: (status: string) => string
+  materials: MaterialRow[]
+  materialsForReceiptItemType: (materialsList: MaterialRow[], itemType: string) => MaterialRow[]
+  materialPickerOpenRow: number | null
+  setMaterialPickerOpenRow: (row: number | null) => void
+  openMaterialPicker: (rowIndex: number) => void
+  selectMaterialFromCatalog: (rowIndex: number, material: MaterialRow) => void
+  materialLabelFromRow: (material: MaterialRow) => string
   confirmCreateOpen: boolean
   setConfirmCreateOpen: (open: boolean) => void
   confirmAndCreateReceipt: () => Promise<void>
@@ -220,8 +229,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               Ingreso de material
             </h1>
             <p className="text-muted-foreground max-w-3xl text-sm leading-relaxed">
-              Punto de partida del stock: registre aquí las cantidades físicas que entran al
-              inventario (con factura; la orden de compra es opcional).
+              Registre aquí la entrada física al inventario. Flujo recomendado:{" "}
+              <strong>orden de compra</strong> (referencia opcional) →{" "}
+              <strong>material en catálogo</strong> → <strong>recepción</strong> (ingreso real).
             </p>
             <Alert className="border-primary/40 bg-gradient-to-r from-primary/12 via-primary/8 to-primary/5 shadow-sm">
               <Info className="h-5 w-5 text-primary" aria-hidden />
@@ -230,12 +240,17 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               </AlertTitle>
               <AlertDescription className="space-y-2 text-sm leading-relaxed text-foreground/90">
                 <p>
-                  <strong>Registra la entrada física al inventario.</strong> Lo guardado aquí suma stock
-                  real, queda trazado en movimientos y puede vincularse a una orden de compra.
+                  <strong>La orden de compra es opcional</strong> y solo orienta lo pedido;{" "}
+                  <strong>no mueve stock</strong>. El ingreso real ocurre aquí al registrar cantidades
+                  físicas con factura.
                 </p>
                 <p>
-                  Use <strong>cantidades reales</strong> (balanza o factura). Si elige una OC, el sistema
-                  actualiza lo recibido; si no, puede registrar una <strong>entrada directa</strong>.
+                  Elija cada material del <strong>inventario</strong> (código · descripción · proveedor).
+                  Si no existe, créelo primero en <strong>Materiales</strong> con el botón de la fila.
+                </p>
+                <p>
+                  Con OC vinculada, cada fila se asocia a la línea del pedido y actualiza lo recibido.
+                  Sin OC puede registrar una <strong>entrada directa</strong>.
                 </p>
               </AlertDescription>
             </Alert>
@@ -470,16 +485,17 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                 <TooltipTrigger asChild>
                   <Label className="inline-flex w-fit cursor-help items-center gap-1.5">
                     <ClipboardList className="size-3.5 text-primary" aria-hidden />
-                    Orden de compra (opcional)
+                    Referencia de orden de compra (opcional)
                   </Label>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-[22rem] space-y-2 text-left text-xs leading-relaxed">
                   <p>
-                    <strong>Sin OC:</strong> elija tipo, material y cantidad física (sin tope de pedido).
+                    <strong>Sin OC:</strong> entrada directa; elija material del inventario y cantidad
+                    física.
                   </p>
                   <p>
-                    <strong>Con OC:</strong> enlace cada fila a la línea del pedido; la cantidad no puede superar lo
-                    pendiente.
+                    <strong>Con OC:</strong> referencia informativa del pedido; aquí vincula material del
+                    catálogo y cantidad recibida por línea.
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -604,6 +620,19 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
             </div>
           </div>
 
+          {props.linkedPurchaseOrderBanner ? (
+            <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
+              <ClipboardList className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+              <div className="min-w-0">
+                <p className="font-medium text-foreground">Referencia de orden de compra</p>
+                <p className="text-muted-foreground mt-0.5 break-words">{props.linkedPurchaseOrderBanner}</p>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Informativa: el stock entra al registrar cantidades en las filas de abajo.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
           {props.supplierId && props.selectedSupplier ? (
             <div className="flex items-start gap-2.5 rounded-lg border border-primary/15 bg-muted/30 px-3 py-2.5 text-sm">
               <MapPin className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
@@ -649,8 +678,8 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                   </Badge>
                 </h2>
               <p className="text-muted-foreground text-xs">
-                Escriba el material recibido y la cantidad física por línea. Si no existe en inventario, se
-                creará al registrar. Las filas vacías se omiten al guardar.
+                Elija material del inventario (código · descripción · proveedor). Si no existe, use{" "}
+                <strong>Crear material</strong> antes de registrar.
               </p>
               </div>
               <div className="flex items-center gap-2">
@@ -714,7 +743,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                     <TableHead className="min-w-[210px]">
                       <span className="inline-flex items-center gap-1.5">
                         <Package className="size-3.5 text-primary" aria-hidden />
-                        Material *
+                        Material del inventario *
                       </span>
                     </TableHead>
                     {props.showDimensionColumns ? (
@@ -788,8 +817,8 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                       )}
                                       aria-hidden
                                     />
-                                    <div className="flex h-9 items-center rounded-md border border-white/60 bg-background/90 px-3 pl-10 text-sm font-medium shadow-sm">
-                                      {props.formatPolLabel(pol)}
+                                    <div className="flex min-h-9 items-center rounded-md border border-white/60 bg-background/90 px-3 pl-10 text-sm font-medium leading-snug shadow-sm">
+                                      <span className="line-clamp-2">{props.formatOcLineLabel(pol)}</span>
                                     </div>
                                   </div>
                                 )
@@ -836,33 +865,108 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                           </Select>
                         </TableCell>
                         <TableCell className="align-middle">
-                          <div className="group/field relative">
-                            <Package
-                              className={cn(
-                                documentFieldIconClass(Boolean(props.lineErrors[i]?.material), props.saving),
-                                "top-1/2 -translate-y-1/2",
-                              )}
-                              aria-hidden
-                            />
-                            <Input
-                              id={`receipt-line-${i}-material`}
-                              value={line.material_label}
-                              onChange={(ev) =>
-                                props.updateFreeLine(i, {
-                                  material_label: ev.target.value,
-                                  material_id: "",
-                                })
-                              }
-                              placeholder="Ej: BOPP transparente"
-                              disabled={props.saving}
-                              aria-label={`Material recibido, fila ${i + 1}`}
-                              className={cn(
-                                "pl-10",
-                                DOCUMENT_ROW_FIELD_CLASS,
-                                documentInvalidHighlightClass(Boolean(props.lineErrors[i]?.material)),
-                              )}
-                            />
-                          </div>
+                          <Popover
+                            open={props.materialPickerOpenRow === i}
+                            onOpenChange={(open) => props.setMaterialPickerOpenRow(open ? i : null)}
+                          >
+                            <div className="group/field relative">
+                              <Package
+                                className={cn(
+                                  documentFieldIconClass(Boolean(props.lineErrors[i]?.material), props.saving),
+                                  "top-1/2 -translate-y-1/2",
+                                )}
+                                aria-hidden
+                              />
+                              <PopoverAnchor asChild>
+                                <Button
+                                  id={`receipt-line-${i}-material`}
+                                  type="button"
+                                  variant="outline"
+                                  role="combobox"
+                                  aria-expanded={props.materialPickerOpenRow === i}
+                                  aria-label={`Material del inventario, fila ${i + 1}`}
+                                  disabled={props.saving}
+                                  onClick={() => props.openMaterialPicker(i)}
+                                  className={cn(
+                                    "h-9 w-full justify-between pl-10 pr-2 font-normal",
+                                    DOCUMENT_ROW_FIELD_CLASS,
+                                    documentInvalidHighlightClass(Boolean(props.lineErrors[i]?.material)),
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "truncate text-left text-sm",
+                                      !line.material_id && "text-muted-foreground",
+                                    )}
+                                  >
+                                    {line.material_id
+                                      ? line.material_label ||
+                                        (() => {
+                                          const mat = props.materials.find(
+                                            (m) => String(m.id) === line.material_id,
+                                          )
+                                          return mat
+                                            ? props.materialLabelFromRow(mat)
+                                            : "Material del inventario"
+                                        })()
+                                      : "Seleccione material del inventario…"}
+                                  </span>
+                                  <ChevronsUpDown className="ml-1 size-4 shrink-0 opacity-50" aria-hidden />
+                                </Button>
+                              </PopoverAnchor>
+                            </div>
+                            <PopoverContent
+                              className="w-[min(100vw-2rem,32rem)] min-w-[var(--radix-popover-trigger-width)] p-0"
+                              align="start"
+                              side="bottom"
+                              onOpenAutoFocus={(ev) => ev.preventDefault()}
+                            >
+                              <Command shouldFilter>
+                                <CommandInput placeholder="Buscar código, nombre o proveedor…" />
+                                <CommandList className="max-h-60">
+                                  <CommandEmpty>
+                                    Sin coincidencias. Cree el material en inventario e intente de nuevo.
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    <CommandItem
+                                      value="crear material en inventario"
+                                      onSelect={() => {
+                                        props.setMaterialPickerOpenRow(null)
+                                        props.goToCreateMaterialFromReceipt(i)
+                                      }}
+                                    >
+                                      <PackagePlus className="mr-2 size-4" aria-hidden />
+                                      Crear material en inventario
+                                    </CommandItem>
+                                    {props
+                                      .materialsForReceiptItemType(props.materials, line.item_type)
+                                      .map((m) => {
+                                        const label = props.materialLabelFromRow(m)
+                                        const search = [m.sku, m.name, m.supplier?.name, String(m.id)]
+                                          .filter(Boolean)
+                                          .join(" ")
+                                        return (
+                                          <CommandItem
+                                            key={m.id}
+                                            value={search}
+                                            onSelect={() => props.selectMaterialFromCatalog(i, m)}
+                                          >
+                                            <Check
+                                              className={cn(
+                                                "mr-2 h-4 w-4",
+                                                line.material_id === String(m.id) ? "opacity-100" : "opacity-0",
+                                              )}
+                                              aria-hidden
+                                            />
+                                            <span className="truncate text-sm">{label}</span>
+                                          </CommandItem>
+                                        )
+                                      })}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </TableCell>
                         {props.showDimensionColumns ? (
                           shouldShowDims ? (

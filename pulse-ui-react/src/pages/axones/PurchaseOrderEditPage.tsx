@@ -28,7 +28,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   formatDateTime,
@@ -56,7 +55,6 @@ type PurchaseOrderEditDetail = {
   ordered_at: string | null
   created_at?: string | null
   notes: string | null
-  tax_applies?: boolean
   manually_closed_at?: string | null
   supplier?: { id: number; name: string } | null
   lines?: Array<{
@@ -73,7 +71,6 @@ type PurchaseOrderEditDetail = {
 type EditBaseline = {
   notes: string
   orderedAt: string
-  taxApplies: boolean
   linesSnapshot: string
 }
 
@@ -141,7 +138,6 @@ export default function PurchaseOrderEditPage() {
   const [detail, setDetail] = useState<PurchaseOrderEditDetail | null>(null)
   const [notes, setNotes] = useState("")
   const [orderedAt, setOrderedAt] = useState("")
-  const [taxApplies, setTaxApplies] = useState(true)
   const [changeReason, setChangeReason] = useState("")
   const [lines, setLines] = useState<PoLineEditDraft[]>([emptyLine()])
   const [lineErrors, setLineErrors] = useState<Record<number, PoLineFieldErrors>>({})
@@ -162,19 +158,16 @@ export default function PurchaseOrderEditPage() {
         setDetail(data)
         const notesVal = (data.notes ?? "").trim()
         const ord = toDateInputValue(data.ordered_at)
-        const tax = data.tax_applies !== false
         const mappedLines =
           data.lines?.length && data.lines.length > 0
             ? data.lines.map((ln) => apiLineToDraft(ln))
             : [emptyLine()]
         setNotes(data.notes ?? "")
         setOrderedAt(ord)
-        setTaxApplies(tax)
         setLines(mappedLines)
         baselineRef.current = {
           notes: notesVal,
           orderedAt: ord,
-          taxApplies: tax,
           linesSnapshot: serializeLinesSnapshot(mappedLines),
         }
       } catch (e) {
@@ -205,7 +198,6 @@ export default function PurchaseOrderEditPage() {
     const changed =
       notesTrim !== base.notes ||
       orderedTrim !== base.orderedAt ||
-      taxApplies !== base.taxApplies ||
       linesSnapshot !== base.linesSnapshot
 
     if (!changed) {
@@ -241,7 +233,6 @@ export default function PurchaseOrderEditPage() {
         body: JSON.stringify({
           notes: notesTrim === "" ? null : notesTrim,
           ordered_at: orderedTrim === "" ? null : orderedTrim,
-          tax_applies: taxApplies,
           change_reason: reason,
           lines: payloadLines,
         }),
@@ -262,7 +253,7 @@ export default function PurchaseOrderEditPage() {
     } finally {
       setSaving(false)
     }
-  }, [detail, notes, orderedAt, taxApplies, changeReason, lines, navigate, listFrom])
+  }, [detail, notes, orderedAt, changeReason, lines, navigate, listFrom])
 
   if (!Number.isFinite(id) || id < 1) {
     return (
@@ -300,7 +291,7 @@ export default function PurchaseOrderEditPage() {
       <Alert className="border-primary/20 bg-primary/5">
         <Info className="size-5 text-primary" aria-hidden />
         <AlertDescription className="text-base">
-          Puede editar notas, fecha, impuesto y líneas del pedido. Las líneas con material recibido no se
+          Puede editar notas, fecha y líneas del pedido. Las líneas con material recibido no se
           pueden eliminar y su cantidad no puede quedar por debajo de lo recibido.
         </AlertDescription>
       </Alert>
@@ -402,18 +393,6 @@ export default function PurchaseOrderEditPage() {
                       className="h-12 pl-11 text-base"
                     />
                   </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-4 rounded-xl border px-5 py-4">
-                  <div className="space-y-1">
-                    <Label htmlFor="po-edit-tax" className="text-base">
-                      Aplica impuesto
-                    </Label>
-                    <p className="text-muted-foreground text-sm">
-                      Según lo acordado con el proveedor (solo referencia documental).
-                    </p>
-                  </div>
-                  <Switch id="po-edit-tax" checked={taxApplies} onCheckedChange={setTaxApplies} />
                 </div>
 
                 <div className="grid gap-2 lg:col-span-2">

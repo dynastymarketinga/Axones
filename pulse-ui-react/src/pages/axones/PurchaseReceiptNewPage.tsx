@@ -666,9 +666,6 @@ export default function PurchaseReceiptNewPage() {
     const suggestedName = (presetName || presetSku || selected?.name) ?? (resolvedType ? `${resolvedType} ` : "")
     const suggestedSku = (presetSku || selected?.sku || "").toUpperCase()
 
-    const dateRaw = receivedAt.trim().slice(0, 10)
-    const receivedOn = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : todayDate
-
     navigate("/materiales/nuevo", {
       state: {
         from: buildReceiptReturnPath(),
@@ -678,7 +675,6 @@ export default function PurchaseReceiptNewPage() {
           name: suggestedName,
           micras: row?.micras?.trim() ?? "",
           ancho: row?.ancho_mm?.trim() ?? "",
-          receivedOn,
           supplierId: supplierId != null && supplierId > 0 ? supplierId : null,
         },
       },

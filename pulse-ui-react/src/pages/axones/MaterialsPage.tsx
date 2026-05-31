@@ -378,17 +378,16 @@ export default function MaterialsPage() {
                   {showDimensions ? <TableHead>Micras</TableHead> : null}
                   {showDimensions ? <TableHead>Ancho (mm)</TableHead> : null}
                   <TableHead className="text-right tabular-nums">Stock</TableHead>
-                  <TableHead className="text-right tabular-nums">Mín.</TableHead>
                   <TableHead>Unidad</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <LoadingTableRow colSpan={showDimensions ? 10 : 8} />
+                  <LoadingTableRow colSpan={showDimensions ? 9 : 7} />
                 ) : !rows?.data.length ? (
                   <TableRow>
-                    <TableCell colSpan={showDimensions ? 10 : 8} className="text-muted-foreground">
+                    <TableCell colSpan={showDimensions ? 9 : 7} className="text-muted-foreground">
                       Sin materiales.
                     </TableCell>
                   </TableRow>
@@ -412,9 +411,6 @@ export default function MaterialsPage() {
                       {showDimensions ? <TableCell>{m.micras ?? "—"}</TableCell> : null}
                       {showDimensions ? <TableCell>{m.ancho ?? "—"}</TableCell> : null}
                       <TableCell className="text-right tabular-nums">{formatToTwoDecimals(m.quantity_on_hand)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatToTwoDecimals(m.min_stock)}
-                      </TableCell>
                       <TableCell className="whitespace-nowrap">{m.unit}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">

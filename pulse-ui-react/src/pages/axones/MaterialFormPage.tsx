@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
-import { Barcode, Boxes, Building2, CalendarDays, Check, ChevronDown, ChevronsUpDown, Layers, Package2, Ruler, ScanLine, StickyNote, Warehouse } from "lucide-react"
+import { Barcode, Boxes, Building2, Check, ChevronDown, ChevronsUpDown, Layers, Package2, Ruler, ScanLine, StickyNote, Warehouse } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Calendar as UiCalendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -73,33 +72,6 @@ const ROLES_THAT_OMIT_NO_SUPPLIER_REASON = [
 ] as const
 const FILTER_INPUT_CLASS = "border-primary/25 bg-background/90 focus-visible:ring-primary/40"
 
-function formatApiDateToDisplay(value: string): string {
-  const trimmed = value.trim()
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
-  if (!match) return "dd/mm/aaaa"
-  return `${match[3]}/${match[2]}/${match[1]}`
-}
-
-function parseApiDate(value: string): Date | undefined {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
-  if (!match) return undefined
-  const [, year, month, day] = match
-  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
-  if (
-    parsed.getFullYear() !== Number(year) ||
-    parsed.getMonth() !== Number(month) - 1 ||
-    parsed.getDate() !== Number(day)
-  ) return undefined
-  return parsed
-}
-
-function formatDateToApi(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
-}
-
 function normalizeDecimalInput(raw: string): string {
   const normalized = raw.replace(",", ".").replace(/[^0-9.]/g, "")
   const firstDot = normalized.indexOf(".")
@@ -146,7 +118,6 @@ export default function MaterialFormPage() {
   const [micras, setMicras] = useState("")
   const [ancho, setAncho] = useState("")
   const [notes, setNotes] = useState("")
-  const [receivedOn, setReceivedOn] = useState("")
   const [products, setProducts] = useState<ProductRecord[]>([])
   const [clients, setClients] = useState<ClientRecord[]>([])
   const [productComboOpen, setProductComboOpen] = useState(false)
@@ -201,7 +172,6 @@ export default function MaterialFormPage() {
         name?: string
         micras?: string
         ancho?: string
-        receivedOn?: string
         supplierId?: number | null
       }
     } | null
@@ -213,9 +183,6 @@ export default function MaterialFormPage() {
     if (typeof p.name === "string") setName(p.name.trim())
     if (typeof p.micras === "string" && p.micras.trim()) setMicras(p.micras.trim())
     if (typeof p.ancho === "string" && p.ancho.trim()) setAncho(p.ancho.trim())
-    if (typeof p.receivedOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.receivedOn.trim())) {
-      setReceivedOn(p.receivedOn.trim())
-    }
     if (typeof p.supplierId === "number" && p.supplierId > 0) {
       setSupplierId(p.supplierId)
       setNoSupplier(false)
@@ -420,9 +387,7 @@ export default function MaterialFormPage() {
   )
 
   function buildPayloadByTab() {
-    const commonNotes = [notes.trim(), receivedOn ? `Fecha ingreso: ${receivedOn}` : null]
-      .filter(Boolean)
-      .join("\n")
+    const commonNotes = notes.trim() || null
 
     if (tab === "sustratos") {
       return {
@@ -435,7 +400,7 @@ export default function MaterialFormPage() {
         ancho: Number(ancho || "0"),
         ...(!isEdit ? { quantity_on_hand: 0 } : {}),
         product_ids: selectedProductIds,
-        notes: commonNotes || null,
+        notes: commonNotes,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
       }
@@ -1147,30 +1112,6 @@ export default function MaterialFormPage() {
           </Tabs>
 
           <div className="space-y-4 rounded-xl border border-primary/15 bg-background/60 p-4">
-            <div className="grid gap-2 md:grid-cols-1">
-              <Label htmlFor="material-received-on">Fecha de ingreso</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    id="material-received-on"
-                    type="button"
-                    variant="outline"
-                    className={cn("w-full justify-start text-left font-normal", FILTER_INPUT_CLASS)}
-                  >
-                    <CalendarDays className="mr-2 h-4 w-4 text-primary" />
-                    {formatApiDateToDisplay(receivedOn)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <UiCalendar
-                    mode="single"
-                    selected={parseApiDate(receivedOn)}
-                    onSelect={(date) => setReceivedOn(date ? formatDateToApi(date) : "")}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
             <div className="grid gap-2">
               <Label htmlFor="m-notes">Notas</Label>
               <div className="group/field relative">

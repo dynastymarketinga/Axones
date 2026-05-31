@@ -1729,7 +1729,7 @@ export default function PurchaseOrderNewPage() {
 
           <AlertDialogFooter className="po-confirm-footer border-t border-border/60 bg-muted/20">
             <AlertDialogCancel disabled={saving} className="min-w-[10rem]">
-              Revisar formulario
+              Cancelar
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={saving}

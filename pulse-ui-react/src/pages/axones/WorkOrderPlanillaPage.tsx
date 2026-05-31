@@ -123,6 +123,11 @@ import {
 import { getStoredUser } from "@/lib/auth-storage"
 import { isAxonesDeveloperSession } from "@/lib/axones-roles"
 import { cn } from "@/lib/utils"
+import {
+  formatMaterialCatalogLabel,
+  formatMaterialDimensionHint,
+  formatMaterialIdentity,
+} from "@/lib/purchase-receipt-material-label"
 import { otPlanillaFieldId, otPlanillaSustratoFieldId } from "@/lib/ot-planilla-field-a11y"
 import type {
   ClientOrderDetailRecord,
@@ -492,7 +497,47 @@ function materialInventoryComboLabel(materials: MaterialRow[], materialId: unkno
   const id = readString(materialId).trim()
   if (!id) return "Elegir material del inventario…"
   const m = materials.find((row) => String(row.id) === id)
-  return m ? `${m.sku} · ${m.name}` : id
+  if (!m) return id
+  return formatMaterialCatalogLabel({
+    sku: m.sku,
+    name: m.name,
+    supplierName: m.supplier?.name,
+    micras: m.micras,
+    ancho: m.ancho,
+    itemTypeKey: "sustrato",
+  })
+}
+
+function sustratoMaterialListParts(m: MaterialRow): {
+  identity: string
+  dims: string | null
+  search: string
+} {
+  const identity = formatMaterialIdentity({
+    sku: m.sku,
+    name: m.name,
+    supplierName: m.supplier?.name,
+  })
+  const dims = formatMaterialDimensionHint({
+    sku: m.sku,
+    name: m.name,
+    supplierName: m.supplier?.name,
+    micras: m.micras,
+    ancho: m.ancho,
+    itemTypeKey: "sustrato",
+  })
+  const catalog = formatMaterialCatalogLabel({
+    sku: m.sku,
+    name: m.name,
+    supplierName: m.supplier?.name,
+    micras: m.micras,
+    ancho: m.ancho,
+    itemTypeKey: "sustrato",
+  })
+  const search = [m.sku, m.name, m.supplier?.name, m.micras, m.ancho, catalog, String(m.id)]
+    .filter(Boolean)
+    .join(" ")
+  return { identity, dims, search }
 }
 
 /** Texto mostrado en el campo: texto libre, o etiqueta de inventario si hay `material_id`. */
@@ -3912,6 +3957,11 @@ export default function WorkOrderPlanillaPage() {
                                           data-field="sustratosImp"
                                           className="ot-input-unified h-9 min-w-0 pr-8 text-sm"
                                           value={sustratoVirgenDisplayValue(materials, r)}
+                                          title={
+                                            sustratoRowUsesCatalogMaterial(r)
+                                              ? sustratoVirgenDisplayValue(materials, r) || undefined
+                                              : undefined
+                                          }
                                           onFocus={() => {
                                             setSustratoImpPickerIdx(idx)
                                             void loadMaterials()
@@ -3946,7 +3996,7 @@ export default function WorkOrderPlanillaPage() {
                                       onOpenAutoFocus={(e) => e.preventDefault()}
                                     >
                                       <Command shouldFilter>
-                                        <CommandInput placeholder="Buscar por SKU o nombre…" />
+                                        <CommandInput placeholder="Buscar código, nombre, proveedor o medidas…" />
                                         <CommandList>
                                           <CommandEmpty>
                                             {materials.length === 0
@@ -3973,11 +4023,10 @@ export default function WorkOrderPlanillaPage() {
                                               Sin selección (solo texto libre abajo)
                                             </CommandItem>
                                             {materials.map((m) => {
-                                              const label = `${m.sku} · ${m.name}`
+                                              const { identity, dims, search } = sustratoMaterialListParts(m)
                                               const stockQty = parseDecimalKgString(m.quantity_on_hand)
                                               const stockLabel =
                                                 stockQty !== null ? `${formatKgForOtHint(stockQty)} kg` : null
-                                              const search = [m.sku, m.name, String(m.id)].filter(Boolean).join(" ")
                                               const pickedInv =
                                                 readString(r.material_id).trim() === String(m.id) &&
                                                 !readString(r.material_free_text).trim()
@@ -4006,18 +4055,27 @@ export default function WorkOrderPlanillaPage() {
                                                 >
                                                   <Check
                                                     className={cn(
-                                                      "mr-2 h-4 w-4",
+                                                      "mr-2 h-4 w-4 shrink-0",
                                                       pickedInv ? "opacity-100" : "opacity-0",
                                                     )}
                                                     aria-hidden
                                                   />
-                                                  <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                                                    <span className="truncate">{label}</span>
-                                                    {stockLabel != null ? (
-                                                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                                        {stockLabel}
-                                                      </span>
-                                                    ) : null}
+                                                  <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm">{identity}</p>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                      {dims ? (
+                                                        <p className="truncate text-xs text-muted-foreground">
+                                                          {dims}
+                                                        </p>
+                                                      ) : (
+                                                        <span />
+                                                      )}
+                                                      {stockLabel != null ? (
+                                                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                                                          {stockLabel}
+                                                        </span>
+                                                      ) : null}
+                                                    </div>
                                                   </div>
                                                 </CommandItem>
                                               )
@@ -4555,6 +4613,11 @@ export default function WorkOrderPlanillaPage() {
                                       data-field="sustratosLam"
                                       className="ot-input-unified h-9 min-w-0 pr-8 text-sm"
                                       value={sustratoVirgenDisplayValue(materials, r)}
+                                      title={
+                                        sustratoRowUsesCatalogMaterial(r)
+                                          ? sustratoVirgenDisplayValue(materials, r) || undefined
+                                          : undefined
+                                      }
                                       onFocus={() => {
                                         setSustratoLamPickerIdx(idx)
                                         void loadMaterials()
@@ -4589,7 +4652,7 @@ export default function WorkOrderPlanillaPage() {
                                   onOpenAutoFocus={(e) => e.preventDefault()}
                                 >
                                   <Command shouldFilter>
-                                    <CommandInput placeholder="Buscar por SKU o nombre…" />
+                                    <CommandInput placeholder="Buscar código, nombre, proveedor o medidas…" />
                                     <CommandList>
                                       <CommandEmpty>
                                         {materials.length === 0
@@ -4616,11 +4679,10 @@ export default function WorkOrderPlanillaPage() {
                                           Sin selección (solo texto libre abajo)
                                         </CommandItem>
                                         {materials.map((m) => {
-                                          const label = `${m.sku} · ${m.name}`
+                                          const { identity, dims, search } = sustratoMaterialListParts(m)
                                           const stockQty = parseDecimalKgString(m.quantity_on_hand)
                                           const stockLabel =
                                             stockQty !== null ? `${formatKgForOtHint(stockQty)} kg` : null
-                                          const search = [m.sku, m.name, String(m.id)].filter(Boolean).join(" ")
                                           const pickedInv =
                                             readString(r.material_id).trim() === String(m.id) &&
                                             !readString(r.material_free_text).trim()
@@ -4649,18 +4711,27 @@ export default function WorkOrderPlanillaPage() {
                                             >
                                               <Check
                                                 className={cn(
-                                                  "mr-2 h-4 w-4",
+                                                  "mr-2 h-4 w-4 shrink-0",
                                                   pickedInv ? "opacity-100" : "opacity-0",
                                                 )}
                                                 aria-hidden
                                               />
-                                              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                                                <span className="truncate">{label}</span>
-                                                {stockLabel != null ? (
-                                                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                                    {stockLabel}
-                                                  </span>
-                                                ) : null}
+                                              <div className="min-w-0 flex-1">
+                                                <p className="truncate text-sm">{identity}</p>
+                                                <div className="flex items-center justify-between gap-2">
+                                                  {dims ? (
+                                                    <p className="truncate text-xs text-muted-foreground">
+                                                      {dims}
+                                                    </p>
+                                                  ) : (
+                                                    <span />
+                                                  )}
+                                                  {stockLabel != null ? (
+                                                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                                                      {stockLabel}
+                                                    </span>
+                                                  ) : null}
+                                                </div>
                                               </div>
                                             </CommandItem>
                                           )

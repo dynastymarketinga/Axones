@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
-import { MaterialRequestDeliveryDialog } from "@/pages/axones/MaterialRequestDeliveryDialog"
+import { MaterialRequestInventoryResolutionCard } from "@/pages/axones/MaterialRequestInventoryResolutionCard"
 import { apiFetch, ApiError } from "@/lib/api"
+import type { MaterialRequestDispatchLine } from "@/lib/material-request-dispatch-utils"
 import type { ClientRecord, ProductRecord } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,14 +20,7 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
-type LineRow = {
-  id: number
-  material_id: number | null
-  description?: string | null
-  quantity_requested: string
-  quantity_dispatched: string
-  material?: { sku: string; name: string; unit: string; inventory_area?: string }
-}
+type LineRow = MaterialRequestDispatchLine
 
 type Detail = {
   id: number
@@ -74,8 +68,7 @@ export default function AreaRequestMaterialInsumosPage() {
 
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<Detail | null>(null)
-  const [approveOpen, setApproveOpen] = useState(false)
-  const [authorizing, setAuthorizing] = useState(false)
+  const [dispatching, setDispatching] = useState(false)
 
   const load = useCallback(async () => {
     if (!Number.isFinite(rid) || rid < 1) return
@@ -96,7 +89,14 @@ export default function AreaRequestMaterialInsumosPage() {
     void load()
   }, [load])
 
-  async function openApprovalFlow() {
+  async function handleApprove(payload: {
+    lines: Array<{
+      material_request_line_id: number
+      quantity: number
+      material_id?: number
+      bobina_ids?: number[]
+    }>
+  }) {
     if (!detail) return
     if (detail.status === "cancelled") {
       toast.error("La solicitud está cancelada.")
@@ -106,24 +106,27 @@ export default function AreaRequestMaterialInsumosPage() {
       toast.info("La solicitud ya está completamente recibida.")
       return
     }
-    if (detail.authorized_by == null) {
-      setAuthorizing(true)
-      try {
+
+    setDispatching(true)
+    try {
+      if (detail.authorized_by == null) {
         await apiFetch(`material-requests/${rid}/authorize`, { method: "POST" })
-        toast.success("Solicitud autorizada.")
-        await load()
-      } catch (e) {
-        if (e instanceof ApiError) toast.error(e.message)
-        else toast.error("No se pudo autorizar la solicitud.")
-        return
-      } finally {
-        setAuthorizing(false)
       }
+      await apiFetch(`material-requests/${rid}/dispatch`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+      toast.success("Aprobación aplicada. El inventario se rebajó.")
+      await load()
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo aplicar la aprobación.")
+    } finally {
+      setDispatching(false)
     }
-    setApproveOpen(true)
   }
 
-  const canApprove =
+  const showResolution =
     detail &&
     detail.status !== "cancelled" &&
     detail.status !== "dispatched"
@@ -161,21 +164,13 @@ export default function AreaRequestMaterialInsumosPage() {
           <div className="space-y-2">
             <h2 className="text-lg font-semibold tracking-tight">Solicitud de insumos #{rid}</h2>
             <p className="text-muted-foreground max-w-2xl text-sm">
-              Revise líneas y observaciones. Use <strong>Aprobar salida de inventario</strong> para cargar existencias,
-              seleccionar lo que sale y registrar la rebaja. No es un simple “despacho” en papel: la cantidad que
-              apruebe se descuenta del inventario.
+              Revise líneas y observaciones. En la sección inferior compare el pedido con el inventario,
+              asigne el SKU de salida y use <strong>Aprobar salida de inventario</strong> para registrar la rebaja.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" asChild>
-              <Link to="/solicitudes-area">Volver a solicitudes entre áreas</Link>
-            </Button>
-            {canApprove ? (
-              <Button type="button" disabled={authorizing || loading} onClick={() => void openApprovalFlow()}>
-                {authorizing ? "Autorizando…" : "Aprobar salida de inventario"}
-              </Button>
-            ) : null}
-          </div>
+          <Button type="button" variant="outline" asChild>
+            <Link to="/solicitudes-area">Volver a solicitudes entre áreas</Link>
+          </Button>
         </div>
 
         {loading ? (
@@ -295,7 +290,14 @@ export default function AreaRequestMaterialInsumosPage() {
                               </div>
                             )}
                           </TableCell>
-                          <TableCell className="align-middle font-medium tabular-nums">{ln.quantity_requested}</TableCell>
+                          <TableCell className="align-middle font-medium tabular-nums">
+                            {ln.quantity_requested}
+                            {ln.unit?.trim() || ln.material?.unit ? (
+                              <span className="text-muted-foreground ml-1 text-xs font-normal">
+                                {ln.unit?.trim() || ln.material?.unit}
+                              </span>
+                            ) : null}
+                          </TableCell>
                           <TableCell className="align-middle tabular-nums text-muted-foreground">
                             {ln.quantity_dispatched}
                           </TableCell>
@@ -310,6 +312,15 @@ export default function AreaRequestMaterialInsumosPage() {
               </div>
             </div>
 
+            {showResolution ? (
+              <MaterialRequestInventoryResolutionCard
+                detail={detail}
+                disabled={loading}
+                dispatching={dispatching}
+                onApprove={handleApprove}
+              />
+            ) : null}
+
             <p className="text-muted-foreground text-center text-xs">
               <Link className="text-primary underline-offset-4 hover:underline" to={`/solicitudes-material/${detail.id}`}>
                 Abrir la misma solicitud en el módulo de insumos
@@ -319,14 +330,6 @@ export default function AreaRequestMaterialInsumosPage() {
           </>
         )}
       </div>
-
-      <MaterialRequestDeliveryDialog
-        open={approveOpen}
-        requestId={rid}
-        variant="approval"
-        onOpenChange={setApproveOpen}
-        onDispatched={() => void load()}
-      />
     </div>
   )
 }

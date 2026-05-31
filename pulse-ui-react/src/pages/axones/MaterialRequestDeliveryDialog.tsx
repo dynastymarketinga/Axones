@@ -24,68 +24,18 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type LineRow = {
-  id: number
-  material_id: number | null
-  description?: string | null
-  quantity_requested: string
-  quantity_dispatched: string
-  material?: {
-    sku: string
-    name: string
-    unit: string
-    inventory_area?: string
-    quantity_on_hand?: string
-  }
-}
+import {
+  defaultApprovalQty,
+  lineRemaining,
+  maxApprovableQty,
+  stockOnHand,
+  usesBobinaPicker,
+  validateApprovalQty,
+  type BobinaDispatchRow,
+  type MaterialRequestDispatchLine,
+} from "@/lib/material-request-dispatch-utils"
 
-function lineRemaining(ln: LineRow): number {
-  const req = Number(ln.quantity_requested)
-  const dis = Number(ln.quantity_dispatched)
-  return Math.max(0, req - dis)
-}
-
-function stockOnHand(material: LineRow["material"]): number {
-  const n = Number(material?.quantity_on_hand ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
-/** Área material con bobinas registradas: se despacha por selección de bobina. */
-function usesBobinaPicker(ln: LineRow, bobinas: BobinaRow[]): boolean {
-  return ln.material?.inventory_area === "material" && bobinas.length > 0
-}
-
-function maxApprovableQty(ln: LineRow, bobinas: BobinaRow[]): number {
-  const rem = lineRemaining(ln)
-  if (rem <= 0) return 0
-  if (usesBobinaPicker(ln, bobinas)) return rem
-  const stock = stockOnHand(ln.material)
-  if (stock > 0) return Math.min(rem, stock)
-  return rem
-}
-
-function defaultApprovalQty(ln: LineRow, bobinas: BobinaRow[]): string {
-  const max = maxApprovableQty(ln, bobinas)
-  return max > 0 ? String(max) : ""
-}
-
-function validateApprovalQty(
-  ln: LineRow,
-  qn: number,
-  bobinas: BobinaRow[],
-): string | null {
-  const rem = lineRemaining(ln)
-  const unit = ln.material?.unit || "kg"
-  if (qn > rem + 0.0005) {
-    return `No puede aprobar más de lo pendiente (${rem.toFixed(3)} ${unit}).`
-  }
-  if (usesBobinaPicker(ln, bobinas)) return null
-  const stock = stockOnHand(ln.material)
-  if (ln.material_id != null && stock > 0 && qn > stock + 0.0005) {
-    return `Stock insuficiente: hay ${stock.toFixed(3)} ${unit} en inventario.`
-  }
-  return null
-}
+type LineRow = MaterialRequestDispatchLine
 
 type Detail = {
   id: number
@@ -102,13 +52,7 @@ type Detail = {
   lines: LineRow[]
 }
 
-type BobinaRow = {
-  id: number
-  code?: string | null
-  status: string
-  weight_kg: string | null
-  material_id?: number
-}
+type BobinaRow = BobinaDispatchRow
 
 type Props = {
   open: boolean
@@ -176,7 +120,7 @@ export function MaterialRequestDeliveryDialog({
       const q: Record<string, string> = {}
       for (const ln of lines) {
         const bobinas = bobinasMap[String(ln.id)] ?? []
-        q[String(ln.id)] = defaultApprovalQty(ln, bobinas)
+        q[String(ln.id)] = defaultApprovalQty(ln, ln.material, bobinas)
       }
       setQty(q)
     } catch (e) {
@@ -206,7 +150,7 @@ export function MaterialRequestDeliveryDialog({
     if (rem <= 0.0005) return false
     const lineKey = String(ln.id)
     const bobinas = bobinasByLine[lineKey] ?? []
-    if (usesBobinaPicker(ln, bobinas)) return false
+    if (usesBobinaPicker(ln.material?.inventory_area, bobinas)) return false
     return stockOnHand(ln.material) <= 0.0005
   }
 
@@ -228,7 +172,7 @@ export function MaterialRequestDeliveryDialog({
       .map((ln) => {
         const lineKey = String(ln.id)
         const bobinas = bobinasByLine[lineKey] ?? []
-        if (usesBobinaPicker(ln, bobinas)) {
+        if (usesBobinaPicker(ln.material?.inventory_area, bobinas)) {
           const sel = selectedBobinaIds[lineKey] ?? {}
           const ids = Object.keys(sel)
             .filter((k) => sel[k])
@@ -262,7 +206,7 @@ export function MaterialRequestDeliveryDialog({
       const pending = pendingLinesNeedingInput()
       const needsBobinas = pending.some((ln) => {
         const bobinas = bobinasByLine[String(ln.id)] ?? []
-        return usesBobinaPicker(ln, bobinas)
+        return usesBobinaPicker(ln.material?.inventory_area, bobinas)
       })
       toast.error(
         needsBobinas
@@ -281,7 +225,14 @@ export function MaterialRequestDeliveryDialog({
       const ln = detail.lines.find((l) => l.id === entry.material_request_line_id)
       if (!ln) continue
       const bobinas = bobinasByLine[String(ln.id)] ?? []
-      const err = validateApprovalQty(ln, entry.quantity, bobinas)
+      const err = validateApprovalQty(
+        lineRemaining(ln),
+        entry.quantity,
+        ln.material?.unit || "kg",
+        stockOnHand(ln.material),
+        usesBobinaPicker(ln.material?.inventory_area, bobinas),
+        ln.material_id != null,
+      )
       if (err) {
         toast.error(err)
         return
@@ -401,9 +352,13 @@ export function MaterialRequestDeliveryDialog({
                     const rem = lineRemaining(ln)
                     const lineKey = String(ln.id)
                     const bobinas = bobinasByLine[lineKey] ?? []
-                    const bobinaPicker = usesBobinaPicker(ln, bobinas)
+                    const bobinaPicker = usesBobinaPicker(ln.material?.inventory_area, bobinas)
                     const stock = stockOnHand(ln.material)
-                    const maxQty = maxApprovableQty(ln, bobinas)
+                    const maxQty = maxApprovableQty(
+                      rem,
+                      stock,
+                      bobinaPicker,
+                    )
                     const enteredQty = Number(qty[lineKey] ?? 0)
                     const qtyOverPending = !bobinaPicker && enteredQty - rem > 0.0005
                     const qtyOverStock =

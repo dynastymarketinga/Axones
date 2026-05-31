@@ -155,7 +155,7 @@ class MaterialRequestService
     }
 
     /**
-     * @param  list<array{material_request_line_id: int, quantity: string|float, bobina_ids?: list<int>|null}>  $lines
+     * @param  list<array{material_request_line_id: int, quantity: string|float, material_id?: int|null, bobina_ids?: list<int>|null}>  $lines
      */
     public function dispatch(MaterialRequest $materialRequest, array $lines, User $user): MaterialRequest
     {
@@ -215,10 +215,18 @@ class MaterialRequestService
                 }
 
                 if ($mrl->material_id === null) {
-                    $mrl->quantity_dispatched = bcadd((string) $mrl->quantity_dispatched, $qty, 3);
-                    $mrl->save();
+                    $resolvedMaterialId = isset($lineInput['material_id']) ? (int) $lineInput['material_id'] : null;
+                    if ($resolvedMaterialId === null || $resolvedMaterialId < 1) {
+                        throw ValidationException::withMessages([
+                            "lines.$idx.material_id" => ['Indique el material de inventario del que sale esta línea.'],
+                        ]);
+                    }
 
-                    continue;
+                    $resolved = Material::query()->whereKey($resolvedMaterialId)->lockForUpdate()->firstOrFail();
+                    $this->assertDispatchableInventoryArea($resolved, $idx);
+
+                    $mrl->material_id = $resolved->getKey();
+                    $mrl->save();
                 }
 
                 $material = Material::query()->whereKey($mrl->material_id)->lockForUpdate()->firstOrFail();
@@ -369,6 +377,27 @@ class MaterialRequestService
                 $mr->fresh()->load(['lines.material', 'workOrder']),
             );
         });
+    }
+
+    /** @return list<string> */
+    private function dispatchAllowedInventoryAreas(): array
+    {
+        return [
+            InventoryArea::Material->value,
+            InventoryArea::Tintas->value,
+            InventoryArea::CementerioTintas->value,
+            InventoryArea::Quimicos->value,
+            InventoryArea::Miscelaneos->value,
+        ];
+    }
+
+    private function assertDispatchableInventoryArea(Material $material, int $idx): void
+    {
+        if (! in_array($material->inventory_area, $this->dispatchAllowedInventoryAreas(), true)) {
+            throw ValidationException::withMessages([
+                "lines.$idx.material_id" => ['El material no pertenece a un área de inventario despachable.'],
+            ]);
+        }
     }
 
     /** Código de área para el tablero entre áreas (debe coincidir con opciones de la UI). */

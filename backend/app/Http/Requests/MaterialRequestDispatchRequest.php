@@ -20,6 +20,7 @@ class MaterialRequestDispatchRequest extends FormRequest
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.material_request_line_id' => ['required', 'integer', 'exists:material_request_lines,id'],
             'lines.*.quantity' => ['required', 'numeric', 'min:0.001'],
+            'lines.*.material_id' => ['nullable', 'integer', 'exists:materials,id'],
             'lines.*.bobina_ids' => ['nullable', 'array'],
             'lines.*.bobina_ids.*' => ['integer', 'distinct', 'exists:bobinas,id'],
         ];

@@ -171,7 +171,7 @@ class MaterialRequestSolicitudFormTest extends TestCase
         ], $h)->assertUnprocessable();
     }
 
-    public function test_dispatch_free_text_line_without_inventory_movement(): void
+    public function test_dispatch_free_text_line_requires_material_id(): void
     {
         $user = User::factory()->create();
         $h = $this->auth($user);
@@ -204,18 +204,72 @@ class MaterialRequestSolicitudFormTest extends TestCase
 
         $this->postJson('/api/material-requests/'.$mr->json('id').'/authorize', [], $h)->assertOk();
 
-        $out = $this->postJson('/api/material-requests/'.$mr->json('id').'/dispatch', [
+        $this->postJson('/api/material-requests/'.$mr->json('id').'/dispatch', [
             'lines' => [
                 ['material_request_line_id' => $line0, 'quantity' => 10],
                 ['material_request_line_id' => $line1, 'quantity' => 3],
             ],
+        ], $h)->assertUnprocessable();
+
+        $mat->refresh();
+        $this->assertEquals('100.000', (string) $mat->quantity_on_hand);
+    }
+
+    public function test_dispatch_free_text_line_with_resolved_material_rebates_stock(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $catalog = Material::query()->create([
+            'sku' => 'M-S3',
+            'name' => 'Stock',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $catalog->forceFill(['quantity_on_hand' => 100])->save();
+
+        $misc = Material::query()->create([
+            'sku' => 'MISC-TRAPOS',
+            'name' => 'Trapos almacén',
+            'inventory_area' => 'miscelaneos',
+            'unit' => 'paq',
+            'min_stock' => 0,
+        ]);
+        $misc->forceFill(['quantity_on_hand' => 20])->save();
+
+        $mr = $this->postJson('/api/material-requests', [
+            'notes' => 'Sin OT',
+            'lines' => [
+                ['material_id' => $catalog->id, 'quantity_requested' => 10],
+                ['description' => 'Trapos', 'quantity_requested' => 3, 'unit' => 'paq'],
+            ],
+        ], $h)->assertCreated();
+
+        $line0 = $mr->json('lines.0.id');
+        $line1 = $mr->json('lines.1.id');
+
+        $this->postJson('/api/material-requests/'.$mr->json('id').'/authorize', [], $h)->assertOk();
+
+        $out = $this->postJson('/api/material-requests/'.$mr->json('id').'/dispatch', [
+            'lines' => [
+                ['material_request_line_id' => $line0, 'quantity' => 10],
+                [
+                    'material_request_line_id' => $line1,
+                    'material_id' => $misc->id,
+                    'quantity' => 3,
+                ],
+            ],
         ], $h)->assertOk()->assertJsonPath('status', MaterialRequestStatus::Dispatched->value)
-            ->assertJsonPath('lines.1.quantity_dispatched', '3.000');
+            ->assertJsonPath('lines.1.quantity_dispatched', '3.000')
+            ->assertJsonPath('lines.1.material_id', $misc->id);
 
         $this->assertEquals($user->id, $out->json('dispatched_by'));
 
-        $mat->refresh();
-        $this->assertEquals('90.000', (string) $mat->quantity_on_hand);
+        $catalog->refresh();
+        $misc->refresh();
+        $this->assertEquals('90.000', (string) $catalog->quantity_on_hand);
+        $this->assertEquals('17.000', (string) $misc->quantity_on_hand);
     }
 
     public function test_dispatch_without_work_order_rebates_stock(): void

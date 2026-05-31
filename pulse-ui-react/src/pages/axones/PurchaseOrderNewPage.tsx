@@ -1670,56 +1670,52 @@ export default function PurchaseOrderNewPage() {
 
       <AlertDialog open={confirmCreateOpen} onOpenChange={setConfirmCreateOpen}>
         <AlertDialogContent className="po-detail-dialog po-confirm-dialog flex flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">
-          <div className="po-detail-dialog-header shrink-0 px-6 py-5">
-            <div className="flex items-center gap-3">
+          <div className="po-detail-dialog-header shrink-0 px-8 pb-6 pt-7">
+            <div className="flex items-start gap-4">
               <div
-                className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20"
+                className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20"
                 aria-hidden
               >
-                <ShoppingCart className="size-[1.125rem]" />
+                <ShoppingCart className="size-6" />
               </div>
-              <div className="min-w-0 flex-1">
-                <AlertDialogTitle className="text-lg">¿Crear orden de compra?</AlertDialogTitle>
-                <AlertDialogDescription className="px-0 py-0 text-sm text-muted-foreground">
+              <div className="min-w-0 flex-1 space-y-1">
+                <AlertDialogTitle className="text-xl font-semibold tracking-tight">
+                  ¿Crear orden de compra?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="px-0 py-0 text-base text-muted-foreground">
                   Confirme los datos antes de registrar la solicitud.
                 </AlertDialogDescription>
               </div>
             </div>
           </div>
 
-          <div className="px-6 pb-5">
+          <div className="px-8 pb-7">
             <div className="po-confirm-code-hero">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Código de orden
               </span>
-              <span className="po-code-pill px-3 py-1 text-[0.9375rem]">{code.trim() || "—"}</span>
+              <span className="po-confirm-code-value">{code.trim() || "—"}</span>
             </div>
 
-            <div className="po-confirm-stats mt-3">
+            <div className="po-confirm-stats mt-4">
               <div className="po-confirm-stat-chip">
-                <Building2 className="size-4 shrink-0" aria-hidden />
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Proveedor
-                </span>
-                <span className="line-clamp-2 w-full text-xs font-semibold leading-tight text-foreground">
+                <Building2 aria-hidden />
+                <span className="po-confirm-stat-label">Proveedor</span>
+                <span className="po-confirm-stat-value line-clamp-2 w-full">
                   {selectedSupplier?.name?.trim() || "—"}
                 </span>
               </div>
               <div className="po-confirm-stat-chip">
-                <ClipboardList className="size-4 shrink-0" aria-hidden />
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Líneas
-                </span>
-                <span className="text-xs font-semibold text-foreground">
+                <ClipboardList aria-hidden />
+                <span className="po-confirm-stat-label">Líneas</span>
+                <span className="po-confirm-stat-value">
                   {formatPoLinesCount(payloadLinesPreviewCount)}
                 </span>
               </div>
               <div className="po-confirm-stat-chip">
-                <CalendarIcon className="size-4 shrink-0" aria-hidden />
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Pedido
-                </span>
-                <span className="text-xs font-semibold tabular-nums text-foreground">
+                <CalendarIcon aria-hidden />
+                <span className="po-confirm-stat-label">Pedido</span>
+                <span className="po-confirm-stat-value tabular-nums">
                   {formatDateInputDisplay(orderedAt)}
                 </span>
               </div>
@@ -1731,11 +1727,13 @@ export default function PurchaseOrderNewPage() {
             </p>
           </div>
 
-          <AlertDialogFooter className="border-t border-border/60 bg-muted/20 px-6 py-4">
-            <AlertDialogCancel disabled={saving}>Revisar formulario</AlertDialogCancel>
+          <AlertDialogFooter className="po-confirm-footer border-t border-border/60 bg-muted/20">
+            <AlertDialogCancel disabled={saving} className="min-w-[10rem]">
+              Revisar formulario
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={saving}
-              className="bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:ring-primary"
+              className="min-w-[10rem] bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:ring-primary"
               onClick={(ev) => {
                 ev.preventDefault()
                 void executeCreatePurchaseOrder()

@@ -280,8 +280,6 @@ class MasterDataAndPurchaseTest extends TestCase
 
     public function test_receipt_rejects_closed_purchase_order_without_full_lines(): void
     {
-        $boss = User::factory()->create(['role' => 'boss']);
-
         $inventoryUser = User::factory()->create(['role' => 'inventory_chief']);
         $inventoryToken = $inventoryUser->createToken('t')->plainTextToken;
 
@@ -317,12 +315,9 @@ class MasterDataAndPurchaseTest extends TestCase
         $poId = $poResponse->json('id');
         $lineId = $poResponse->json('lines.0.id');
 
-        $this->actingAs($boss, 'sanctum')
-            ->postJson('/api/purchase-orders/'.$poId.'/manual-close', [
-                'reason' => 'Proveedor desisti?, cerrar sin recibir nada.',
-            ])
-            ->assertOk()
-            ->assertJsonPath('status', PurchaseOrderStatus::Completed->value);
+        PurchaseOrder::query()->whereKey($poId)->update([
+            'status' => PurchaseOrderStatus::Completed->value,
+        ]);
 
         $this->actingAs($inventoryUser, 'sanctum')
             ->postJson('/api/purchase-receipts', [

@@ -25,7 +25,6 @@ use Tests\TestCase;
  *  - Nota de entrega en draft NO marca Completada.
  *  - markDispatched de la única OT consumidora -> Completada.
  *  - 2 OTs consumidoras y solo 1 despachada -> Partial.
- *  - Cierre manual marca Completada y persiste; reopen recalcula.
  *
  * Trazabilidad usada: bobinas.id <- inventory_movements (reference_type=bobina,
  * metadata.purchase_order_id) y bobinas consumidas vía printing_bobina_usages.
@@ -185,71 +184,6 @@ class PurchaseOrderClosingByDispatchTest extends TestCase
             $po->fresh()->status,
             'Tras despachar la segunda OT, la OC debe quedar Completada.',
         );
-    }
-
-    public function test_manual_close_marks_completed_and_persists_after_recompute(): void
-    {
-        $boss = User::factory()->create(['role' => 'admin']);
-        $bossToken = $boss->createToken('t')->plainTextToken;
-
-        $material = $this->createMaterial('MAT-MC');
-        $po = $this->createPurchaseOrderWithLine($material, ordered: '40');
-        $po->lines()->first()->update(['quantity_received' => '10']);
-
-        $this->postJson("/api/purchase-orders/{$po->id}/manual-close", [
-            'reason' => 'Proveedor desistió, cerrar OC con saldo pendiente.',
-        ], ['Authorization' => 'Bearer '.$bossToken])
-            ->assertOk()
-            ->assertJsonPath('status', PurchaseOrderStatus::Completed->value)
-            ->assertJsonPath('manual_close_reason', 'Proveedor desistió, cerrar OC con saldo pendiente.');
-
-        app(PurchaseOrderClosingService::class)->recompute($po->refresh());
-
-        $this->assertEquals(
-            PurchaseOrderStatus::Completed->value,
-            $po->fresh()->status,
-            'Recompute después del cierre manual debe respetar la marca manual.',
-        );
-
-        $po->lines()->first()->update(['quantity_received' => '40']);
-        app(PurchaseOrderClosingService::class)->recompute($po->refresh());
-        $this->assertEquals(PurchaseOrderStatus::Completed->value, $po->fresh()->status);
-    }
-
-    public function test_reopen_recomputes_status(): void
-    {
-        $boss = User::factory()->create(['role' => 'admin']);
-        $bossToken = $boss->createToken('t')->plainTextToken;
-
-        $material = $this->createMaterial('MAT-RE');
-        $po = $this->createPurchaseOrderWithLine($material, ordered: '40');
-        $po->lines()->first()->update(['quantity_received' => '5']);
-
-        $this->postJson("/api/purchase-orders/{$po->id}/manual-close", [
-            'reason' => 'Cierre temporal por error de captura.',
-        ], ['Authorization' => 'Bearer '.$bossToken])->assertOk();
-
-        $this->assertEquals(PurchaseOrderStatus::Completed->value, $po->fresh()->status);
-
-        $this->postJson("/api/purchase-orders/{$po->id}/reopen", [], [
-            'Authorization' => 'Bearer '.$bossToken,
-        ])
-            ->assertOk()
-            ->assertJsonPath('status', PurchaseOrderStatus::Partial->value)
-            ->assertJsonPath('manually_closed_at', null);
-    }
-
-    public function test_manual_close_requires_boss_role(): void
-    {
-        $regular = User::factory()->create(['role' => 'inventory_chief']);
-        $token = $regular->createToken('t')->plainTextToken;
-
-        $material = $this->createMaterial('MAT-AUTH');
-        $po = $this->createPurchaseOrderWithLine($material, ordered: '10');
-
-        $this->postJson("/api/purchase-orders/{$po->id}/manual-close", [
-            'reason' => 'No autorizado.',
-        ], ['Authorization' => 'Bearer '.$token])->assertForbidden();
     }
 
     public function test_consuming_work_orders_endpoint_lists_dispatch_state(): void

@@ -1,31 +1,61 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { PackageOpen } from "lucide-react"
-import { Link } from "react-router-dom"
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  ClipboardList,
+  Filter,
+  Hash,
+  Layers,
+  Package,
+  PackageOpen,
+  RefreshCw,
+  Scale,
+  Settings2,
+  Tag,
+  Truck,
+} from "lucide-react"
 import { toast } from "sonner"
 
-import { apiFetch, ApiError } from "@/lib/api"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import {
-  AXONES_INVENTORY_PAGE_CLASS,
-  AxonesPageHeader,
-  AxonesTableCard,
-} from "@/components/axones/inventory-page-layout"
-import { LoadingTableRow } from "@/components/axones/LoadingStates"
-import { labelInventoryArea } from "@/lib/inventory-area-labels"
-import type { LaravelPaginated, MaterialRow } from "@/types/api"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+  CatalogTableHead,
+  CatalogTableHeadRight,
+} from "@/components/axones/CatalogTableHead"
+import {
+  catalogPaginationOutlineButtonClass,
+  catalogPaginationSelectTriggerClass,
+} from "@/components/axones/catalog-list-classes"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
+import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { ReasonModal } from "@/components/axones/ReasonModal"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { apiFetch, ApiError } from "@/lib/api"
+import { labelInventoryArea } from "@/lib/inventory-area-labels"
+import { getMaterialAreaPillClass } from "@/lib/material-area-theme"
+import { cn } from "@/lib/utils"
+import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import "./materials-list.css"
+
+const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
 type ReturnRow = {
   id: number
@@ -46,15 +76,25 @@ function returnStatusLabel(status: string): string {
   return status
 }
 
+function viewHint(tab: "pending" | "history"): string {
+  if (tab === "pending") {
+    return "Las devoluciones registradas desde otros flujos aparecerán aquí hasta que se acepte el ingreso."
+  }
+  return "Devoluciones ya aceptadas e ingresadas al inventario. Las pendientes están en la pestaña Pendientes."
+}
+
 export default function InventoryReturnsPage() {
-  /** Solo pendientes en la vista principal; aceptadas solo en «Historial». */
   const [listTab, setListTab] = useState<"pending" | "history">("pending")
   const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ReturnRow> | null>(null)
   const [reasonModalOpen, setReasonModalOpen] = useState(false)
   const [pendingAcceptId, setPendingAcceptId] = useState<number | null>(null)
   const [lastReason, setLastReason] = useState("")
+
+  const isHistoryTab = listTab === "history"
+  const colCount = isHistoryTab ? 9 : 8
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -65,7 +105,7 @@ export default function InventoryReturnsPage() {
         {
           query: {
             page,
-            per_page: 20,
+            per_page: perPage,
             status: statusFilter,
           },
         },
@@ -78,7 +118,7 @@ export default function InventoryReturnsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, listTab])
+  }, [page, perPage, listTab])
 
   useEffect(() => {
     void load()
@@ -99,228 +139,297 @@ export default function InventoryReturnsPage() {
   }
 
   const showInitialSkeleton = loading && rows === null
-  const colCount = listTab === "history" ? 9 : 8
 
   return (
-    <div className={AXONES_INVENTORY_PAGE_CLASS}>
-      <AxonesPageHeader
+    <div className="mat-list-shell">
+      <CatalogPageShell
         title="Devoluciones a inventario"
-        description="Pendiente hasta aceptar ingreso."
-      />
-
-      {showInitialSkeleton ? (
-        <AxonesTableCard>
-          <div className="border-b p-4">
-            <div className="h-9 max-w-md animate-pulse rounded-md bg-muted" />
-          </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>OT</TableHead>
-                  <TableHead>Material</TableHead>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead>Cantidad</TableHead>
-                  <TableHead>Área destino</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <LoadingTableRow colSpan={9} />
-              </TableBody>
-            </Table>
-          </div>
-        </AxonesTableCard>
-      ) : (
-        <>
-          <Tabs
-            value={listTab}
-            onValueChange={(v) => {
-              setListTab(v as "pending" | "history")
-              setPage(1)
-            }}
-            className="w-full"
+        subtitle="Pendiente hasta aceptar ingreso."
+        icon={PackageOpen}
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            className={cn("shadow-sm", catalogPaginationOutlineButtonClass)}
+            disabled={loading}
+            onClick={() => void load()}
           >
-            <AxonesTableCard>
-              <div className="border-b p-4">
-                <div className="flex flex-wrap items-end justify-between gap-4">
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground text-xs font-medium">Vista</p>
-                    <TabsList className="h-auto min-h-10 w-full max-w-md flex-wrap justify-start gap-1">
-                      <TabsTrigger value="pending" className="text-xs sm:text-sm">
-                        Pendientes
-                      </TabsTrigger>
-                      <TabsTrigger value="history" className="text-xs sm:text-sm">
-                        Historial
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
-                  <Button type="button" variant="secondary" onClick={() => void load()}>
-                    Actualizar
-                  </Button>
-                </div>
-              </div>
+            <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} aria-hidden />
+            Actualizar
+          </Button>
+        }
+      >
+        <AxonesInventoryModuleNav active="devoluciones" variant="catalog" />
 
-              <TabsContent value={listTab} className="m-0 border-0 p-0 shadow-none outline-none">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
+        {showInitialSkeleton ? (
+          <div className="space-y-4">
+            <PageLoadingBlock />
+            <PageLoadingBlock />
+          </div>
+        ) : (
+          <>
+            <Tabs
+              value={listTab}
+              onValueChange={(v) => {
+                setListTab(v as "pending" | "history")
+                setPage(1)
+              }}
+              className="w-full"
+            >
+              <TabsList className="mat-view-tab-list">
+                <TabsTrigger value="pending" className="mat-view-tab-trigger">
+                  Pendientes
+                </TabsTrigger>
+                <TabsTrigger value="history" className="mat-view-tab-trigger">
+                  Historial
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            <div className="mat-filter-bar space-y-4 p-4 md:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Filter className="size-4 text-primary" aria-hidden />
+                <p className="text-sm font-medium">Filtrar listado</p>
+              </div>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {viewHint(listTab)}
+              </p>
+            </div>
+
+            <div className="mat-table-wrap overflow-x-auto">
+              <Table className="min-w-[880px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <CatalogTableHead icon={Hash} className="w-16">
+                      ID
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Tag}>Tipo</CatalogTableHead>
+                    <CatalogTableHead icon={ClipboardList}>OT</CatalogTableHead>
+                    <CatalogTableHead icon={Package}>Material</CatalogTableHead>
+                    <CatalogTableHead icon={Truck} className="min-w-[8rem]">
+                      Proveedor
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Scale} className="text-right">
+                      Cantidad
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Layers}>Área destino</CatalogTableHead>
+                    {isHistoryTab ? (
+                      <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
+                    ) : null}
+                    <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
+                      Acciones
+                    </CatalogTableHeadRight>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <LoadingTableRow colSpan={colCount} />
+                  ) : !rows?.data.length ? (
                     <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>OT</TableHead>
-                      <TableHead>Material</TableHead>
-                      <TableHead>Proveedor</TableHead>
-                      <TableHead>Cantidad</TableHead>
-                      <TableHead>Área destino</TableHead>
-                      {listTab === "history" ? <TableHead>Estado</TableHead> : null}
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {loading ? (
-                        <LoadingTableRow colSpan={colCount} />
-                      ) : !rows?.data.length ? (
-                        <TableRow>
-                          <TableCell colSpan={colCount} className="p-0">
-                            <div className="flex flex-col items-center justify-center gap-4 px-4 py-16 text-center">
-                              <div className="bg-muted/70 text-muted-foreground rounded-full p-3">
-                                <PackageOpen className="h-8 w-8" aria-hidden />
-                              </div>
-                              <div className="max-w-sm space-y-2">
-                                <p className="text-foreground text-sm font-medium">
-                                  {listTab === "pending"
-                                    ? "Sin devoluciones pendientes"
-                                    : "Sin registros en el historial"}
-                                </p>
-                                <p className="text-muted-foreground text-xs leading-relaxed">
-                                  {listTab === "pending" ? (
-                                    "Las devoluciones registradas desde otros flujos aparecerán aquí hasta que se acepte el ingreso."
-                                  ) : (
-                                    <>
-                                      Las devoluciones aceptadas aparecen aquí. Las pendientes están en la pestaña{" "}
-                                      <button
-                                        type="button"
-                                        className="text-primary font-medium underline"
-                                        onClick={() => {
-                                          setListTab("pending")
-                                          setPage(1)
-                                        }}
-                                      >
-                                        Pendientes
-                                      </button>
-                                      .
-                                    </>
-                                  )}
-                                </p>
-                              </div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        rows.data.map((r) => {
-                          const isRechazada = r.destination_area === "bobinas_rechazadas"
-                          return (
-                          <TableRow
-                            key={r.id}
-                            className={
-                              isRechazada
-                                ? "bg-rose-50/70 dark:bg-rose-950/25"
-                                : "bg-emerald-50/50 dark:bg-emerald-950/20"
-                            }
-                          >
-                            <TableCell>{r.id}</TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={isRechazada ? "destructive" : "outline"}
-                                className={
-                                  isRechazada
-                                    ? "font-semibold"
-                                    : "border-emerald-600/50 bg-emerald-600 text-white hover:bg-emerald-600 dark:border-emerald-500"
-                                }
-                              >
-                                {isRechazada ? "Rechazada" : "Buena"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              {r.work_order?.code ?? r.work_order_id ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              {r.material
-                                ? `${r.material.sku} · ${r.material.name}`
-                                : "—"}
-                            </TableCell>
-                            <TableCell
-                              className="text-muted-foreground max-w-[10rem] truncate"
-                              title={r.material?.supplier?.name ?? undefined}
-                            >
-                              {r.material?.supplier?.name?.trim()
-                                ? r.material.supplier.name
-                                : "—"}
-                            </TableCell>
-                            <TableCell>{r.quantity}</TableCell>
-                            <TableCell>{labelInventoryArea(r.destination_area)}</TableCell>
-                            {listTab === "history" ? (
-                              <TableCell>{returnStatusLabel(r.status)}</TableCell>
-                            ) : null}
-                            <TableCell className="text-right">
-                              <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
-                                {listTab === "pending" && r.status === "pending" ? (
-                                  <Button
+                      <TableCell colSpan={colCount} className="p-0">
+                        <div className="mat-empty-state">
+                          <div className="mat-empty-state__icon">
+                            <PackageOpen className="size-8" aria-hidden />
+                          </div>
+                          <div className="max-w-sm space-y-2">
+                            <p className="text-foreground text-sm font-medium">
+                              {listTab === "pending"
+                                ? "Sin devoluciones pendientes"
+                                : "Sin registros en el historial"}
+                            </p>
+                            <p className="text-muted-foreground text-xs leading-relaxed">
+                              {listTab === "pending" ? (
+                                viewHint("pending")
+                              ) : (
+                                <>
+                                  Las devoluciones aceptadas aparecen aquí. Las pendientes están en la
+                                  pestaña{" "}
+                                  <button
                                     type="button"
-                                    size="sm"
-                                    variant="secondary"
+                                    className="text-primary font-medium underline underline-offset-4"
                                     onClick={() => {
-                                      setPendingAcceptId(r.id)
-                                      setReasonModalOpen(true)
+                                      setListTab("pending")
+                                      setPage(1)
                                     }}
                                   >
-                                    Aceptar ingreso
-                                  </Button>
-                                ) : null}
-                              </div>
+                                    Pendientes
+                                  </button>
+                                  .
+                                </>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.data.map((r) => {
+                      const isRechazada = r.destination_area === "bobinas_rechazadas"
+                      const areaPillClass = getMaterialAreaPillClass(r.destination_area)
+                      return (
+                        <TableRow
+                          key={r.id}
+                          data-ret-kind={isRechazada ? "rejected" : "good"}
+                          className="border-b"
+                        >
+                          <TableCell className="p-3 align-middle tabular-nums text-muted-foreground">
+                            {r.id}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle">
+                            <span
+                              className={cn(
+                                "mat-ret-badge",
+                                isRechazada ? "mat-ret-badge--rejected" : "mat-ret-badge--good",
+                              )}
+                            >
+                              {isRechazada ? "Rechazada" : "Buena"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="p-3 align-middle font-medium">
+                            {r.work_order?.code ?? r.work_order_id ?? "—"}
+                          </TableCell>
+                          <TableCell className="max-w-[14rem] p-3 align-middle">
+                            {r.material ? (
+                              <span className="block truncate">
+                                <span className="mat-sku-pill mr-2">{r.material.sku}</span>
+                                <span className="font-semibold">{r.material.name}</span>
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "max-w-[10rem] truncate p-3 align-middle",
+                              r.material?.supplier?.name?.trim()
+                                ? "font-medium"
+                                : "text-muted-foreground",
+                            )}
+                            title={r.material?.supplier?.name ?? undefined}
+                          >
+                            {r.material?.supplier?.name?.trim()
+                              ? r.material.supplier.name
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle text-right tabular-nums font-semibold">
+                            {r.quantity}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle whitespace-nowrap">
+                            <span className={cn("mat-area-pill", areaPillClass)}>
+                              {labelInventoryArea(r.destination_area)}
+                            </span>
+                          </TableCell>
+                          {isHistoryTab ? (
+                            <TableCell className="p-3 align-middle text-sm">
+                              {returnStatusLabel(r.status)}
                             </TableCell>
-                          </TableRow>
-                          )
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </TabsContent>
-            </AxonesTableCard>
-          </Tabs>
-
-          {rows && rows.last_page > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Página {rows.current_page} de {rows.last_page} · {rows.total}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                >
-                  Siguiente
-                </Button>
-              </div>
+                          ) : null}
+                          <TableCell className="p-3 align-middle text-right">
+                            {!isHistoryTab && r.status === "pending" ? (
+                              <button
+                                type="button"
+                                className="mat-action-accept"
+                                onClick={() => {
+                                  setPendingAcceptId(r.id)
+                                  setReasonModalOpen(true)
+                                }}
+                              >
+                                <CheckCircle2 className="size-3.5" aria-hidden />
+                                Aceptar ingreso
+                              </button>
+                            ) : null}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          ) : null}
-        </>
-      )}
+
+            {rows ? (
+              <div className="mat-pagination-bar">
+                <div className="mat-pagination-meta">
+                  <p className="text-sm">
+                    {rows.total === 0 ? (
+                      "Sin resultados con los filtros actuales."
+                    ) : (
+                      <>
+                        Mostrando <strong>{rows.from ?? 0}</strong> a <strong>{rows.to ?? 0}</strong> de{" "}
+                        <strong>{rows.total}</strong> registros
+                      </>
+                    )}
+                  </p>
+                  {rows.last_page > 1 ? (
+                    <p className="text-muted-foreground text-xs">
+                      Página {rows.current_page} de {rows.last_page}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="mat-pagination-controls">
+                  {rows.last_page > 1 ? (
+                    <span className="mat-page-indicator">
+                      {rows.current_page} / {rows.last_page}
+                    </span>
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-sm">Por página</span>
+                    <Select
+                      value={String(perPage)}
+                      onValueChange={(v) => {
+                        setPerPage(Number(v))
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="returns-per-page"
+                        className={cn(
+                          "h-9 w-[4.75rem] text-sm",
+                          catalogPaginationSelectTriggerClass,
+                        )}
+                        aria-label="Registros por página"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PER_PAGE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt} value={String(opt)}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+                      disabled={rows.current_page <= 1 || loading}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      type="button"
+                    >
+                      <ChevronLeft className="mr-1 size-4" aria-hidden />
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+                      disabled={rows.current_page >= rows.last_page || loading}
+                      onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                      type="button"
+                    >
+                      Siguiente
+                      <ChevronRight className="ml-1 size-4" aria-hidden />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </CatalogPageShell>
 
       <ReasonModal
         open={reasonModalOpen}

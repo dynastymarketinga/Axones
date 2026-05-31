@@ -85,6 +85,7 @@ const AREA_PILL_CLASS: Record<string, string> = {
   tintas: "mat-area-pill--tintas",
   quimicos: "mat-area-pill--quimicos",
   miscelaneos: "mat-area-pill--miscelaneos",
+  bobinas_rechazadas: "mat-area-pill--rejected",
 }
 
 export function getMaterialAreaPillClass(inventoryArea: string): string {

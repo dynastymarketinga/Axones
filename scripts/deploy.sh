@@ -3,12 +3,19 @@
 set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/var/www/axones}"
+SPA_DIST="$APP_ROOT/pulse-ui-react/dist"
+SPA_PUBLIC="$APP_ROOT/backend/public/axones"
+
 cd "$APP_ROOT"
 
 echo "==> Axones deploy $(date -Iseconds) en $APP_ROOT"
 
 git fetch origin main
 git reset --hard origin/main
+
+DEPLOY_COMMIT="$(git rev-parse HEAD)"
+DEPLOY_COMMIT_SHORT="$(git rev-parse --short HEAD)"
+echo "==> Commit desplegado: $DEPLOY_COMMIT_SHORT ($DEPLOY_COMMIT)"
 
 cd "$APP_ROOT/backend"
 composer install --no-dev --optimize-autoloader --no-interaction
@@ -21,4 +28,34 @@ cd "$APP_ROOT/pulse-ui-react"
 npm ci --no-audit --no-fund
 npm run build:deploy
 
-echo "==> Deploy completado OK"
+if [ ! -f "$SPA_DIST/index.html" ]; then
+  echo "ERROR: no se generó $SPA_DIST/index.html" >&2
+  exit 1
+fi
+
+MAIN_BUNDLE="$(ls -1 "$SPA_DIST/assets/index-"*.js 2>/dev/null | head -1 || true)"
+if [ -z "$MAIN_BUNDLE" ]; then
+  echo "ERROR: no se encontró bundle JS en $SPA_DIST/assets/" >&2
+  exit 1
+fi
+
+if ! grep -q "µm" "$MAIN_BUNDLE"; then
+  echo "ADVERTENCIA: el bundle no contiene la cadena µm (¿build desactualizado?)" >&2
+fi
+
+BUILD_INFO="$SPA_DIST/build-info.json"
+printf '{"commit":"%s","commit_short":"%s","built_at":"%s"}\n' \
+  "$DEPLOY_COMMIT" "$DEPLOY_COMMIT_SHORT" "$(date -Iseconds)" > "$BUILD_INFO"
+
+echo "==> Publicando SPA: $SPA_DIST -> $SPA_PUBLIC"
+mkdir -p "$SPA_PUBLIC"
+rsync -a --delete "$SPA_DIST/" "$SPA_PUBLIC/"
+
+echo "==> Bundle activo: $(basename "$MAIN_BUNDLE")"
+echo "==> Verificar en producción: /axones/build-info.json"
+
+if command -v systemctl >/dev/null 2>&1; then
+  sudo systemctl reload nginx 2>/dev/null || true
+fi
+
+echo "==> Deploy completado OK ($DEPLOY_COMMIT_SHORT)"

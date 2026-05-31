@@ -94,10 +94,12 @@ import "./purchase-order-list.css"
 
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
-type ViewTab = "pending" | "history"
+type ViewTab = "pending" | "history" | "inactive"
 
 function parseViewTab(raw: string | null): ViewTab {
-  return raw === "history" ? "history" : "pending"
+  if (raw === "history") return "history"
+  if (raw === "inactive") return "inactive"
+  return "pending"
 }
 
 /** Botones de acción en fila: colores distintos por función */
@@ -187,6 +189,7 @@ export default function PurchaseOrdersPage() {
   const [viewTab, setViewTab] = useState<ViewTab>(() => parseViewTab(searchParams.get("tab")))
 
   const isHistoryTab = viewTab === "history"
+  const isInactiveTab = viewTab === "inactive"
   const tableColSpan = isHistoryTab ? 8 : 6
 
   const [loading, setLoading] = useState(true)
@@ -222,6 +225,7 @@ export default function PurchaseOrdersPage() {
     if (qApi.trim()) params.set("q", qApi.trim())
     if (isBoss && visibility !== "active") params.set("visibility", visibility)
     if (viewTab === "history") params.set("tab", "history")
+    if (viewTab === "inactive") params.set("tab", "inactive")
     const qs = params.toString()
     return `${location.pathname}${qs ? `?${qs}` : ""}`
   }, [location.pathname, page, status, supplierId, qApi, isBoss, visibility, viewTab])
@@ -250,6 +254,7 @@ export default function PurchaseOrdersPage() {
     if (qApi.trim()) next.set("q", qApi.trim())
     if (isBoss && visibility !== "active") next.set("visibility", visibility)
     if (viewTab === "history") next.set("tab", "history")
+    if (viewTab === "inactive") next.set("tab", "inactive")
     setSearchParams(next, { replace: true })
   }, [page, setSearchParams, status, supplierId, qApi, visibility, isBoss, viewTab])
 
@@ -277,7 +282,11 @@ export default function PurchaseOrdersPage() {
       const sid =
         supplierId !== "all" ? Number(supplierId) : undefined
       const st = status !== "all" ? status : undefined
-      const vis = isBoss ? visibility : "active"
+      const vis = isBoss
+        ? isInactiveTab
+          ? "inactive"
+          : visibility
+        : "active"
       const data = await apiFetch<LaravelPaginated<PurchaseOrderRow>>(
         "purchase-orders",
         {
@@ -288,7 +297,11 @@ export default function PurchaseOrdersPage() {
             status: st,
             q: qApi.trim() || undefined,
             visibility: vis === "active" ? undefined : vis,
-            has_receipts: isHistoryTab ? "true" : "false",
+            has_receipts: isInactiveTab
+              ? undefined
+              : isHistoryTab
+                ? "true"
+                : "false",
           },
         },
       )
@@ -300,7 +313,7 @@ export default function PurchaseOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, supplierId, status, qApi, visibility, isBoss, isHistoryTab])
+  }, [page, perPage, supplierId, status, qApi, visibility, isBoss, isHistoryTab, isInactiveTab])
 
   useEffect(() => {
     void load()
@@ -351,19 +364,25 @@ export default function PurchaseOrdersPage() {
           deactivation_reason: reason,
         }),
       })
-      toast.success("Orden desactivada.")
+      toast.success("Orden desactivada. Consulte la pestaña Desactivadas.")
       setDeactivateOpen(false)
       setDeactivatePo(null)
       setDeactivateReason("")
       setSelectedRowId((cur) => (cur === deactivatePo.id ? null : cur))
-      await load()
+      if (isBoss) {
+        setViewTab("inactive")
+        setVisibility("inactive")
+        setPage(1)
+      } else {
+        await load()
+      }
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo desactivar la orden.")
     } finally {
       setDeactivateSaving(false)
     }
-  }, [deactivatePo, deactivateReason, load])
+  }, [deactivatePo, deactivateReason, load, isBoss])
 
   const submitReactivate = useCallback(async () => {
     if (!reactivatePo) return
@@ -386,14 +405,20 @@ export default function PurchaseOrdersPage() {
       setReactivatePo(null)
       setReactivateReason("")
       setSelectedRowId((cur) => (cur === reactivatePo.id ? null : cur))
-      await load()
+      if (isInactiveTab) {
+        setViewTab("pending")
+        setVisibility("active")
+        setPage(1)
+      } else {
+        await load()
+      }
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo reactivar la orden.")
     } finally {
       setReactivateSaving(false)
     }
-  }, [reactivatePo, reactivateReason, load])
+  }, [reactivatePo, reactivateReason, load, isInactiveTab])
 
   return (
     <div className="po-list-shell">
@@ -442,7 +467,8 @@ export default function PurchaseOrdersPage() {
               <div className="space-y-1.5">
                 <DialogTitle className="text-xl">Desactivar orden {deactivatePo?.code ?? ""}</DialogTitle>
                 <DialogDescription className="text-sm leading-relaxed">
-                  Esta acción oculta la orden del listado operativo y bloquea nuevas recepciones.
+                  La orden dejará de mostrarse en Sin recepción / Con recepción y pasará a la pestaña
+                  Desactivadas. No se podrán registrar nuevas recepciones.
                 </DialogDescription>
               </div>
             </div>
@@ -468,7 +494,7 @@ export default function PurchaseOrdersPage() {
               <div className="po-deactivate-panel text-sm leading-relaxed">
                 <p className="font-semibold text-destructive">Qué ocurre</p>
                 <ul className="text-muted-foreground mt-2 list-disc space-y-1 pl-4">
-                  <li>Dejará de mostrarse para el equipo en el listado habitual.</li>
+                  <li>Dejará de mostrarse en las pestañas operativas (Sin / Con recepción).</li>
                   <li>No se podrán registrar recepciones contra esta orden.</li>
                 </ul>
               </div>
@@ -575,19 +601,30 @@ export default function PurchaseOrdersPage() {
           <Tabs
             value={viewTab}
             onValueChange={(value) => {
-              setViewTab(parseViewTab(value))
+              const tab = parseViewTab(value)
+              setViewTab(tab)
+              if (tab === "inactive") {
+                setVisibility("inactive")
+              } else if (visibility === "inactive") {
+                setVisibility("active")
+              }
               setPage(1)
               setSelectedRowId(null)
             }}
             className="w-full"
           >
-            <TabsList className="po-tab-list h-auto w-full justify-start sm:w-auto">
+            <TabsList className="po-tab-list h-auto w-full flex-wrap justify-start sm:w-auto">
               <TabsTrigger value="pending" className="po-tab-trigger text-xs sm:text-sm">
                 Sin recepción
               </TabsTrigger>
               <TabsTrigger value="history" className="po-tab-trigger text-xs sm:text-sm">
                 Con recepción
               </TabsTrigger>
+              {isBoss ? (
+                <TabsTrigger value="inactive" className="po-tab-trigger text-xs sm:text-sm">
+                  Desactivadas
+                </TabsTrigger>
+              ) : null}
             </TabsList>
           </Tabs>
 
@@ -710,7 +747,7 @@ export default function PurchaseOrdersPage() {
               }}
               className="min-w-0 md:col-span-5"
             />
-            {isBoss ? (
+            {isBoss && !isInactiveTab ? (
               <CatalogLabeledField label="Mostrar en listado" className="md:col-span-4">
                 <Select
                   value={visibility}
@@ -732,7 +769,12 @@ export default function PurchaseOrdersPage() {
             ) : null}
             </div>
             <p className="text-muted-foreground text-xs leading-relaxed">
-              {isHistoryTab ? (
+              {isInactiveTab ? (
+                <>
+                  Órdenes retiradas del listado operativo. Puede ver el detalle, imprimir y{" "}
+                  <span className="font-medium">reactivar</span> con motivo registrado en auditoría.
+                </>
+              ) : isHistoryTab ? (
                 <>
                   Órdenes que ya tienen al menos una recepción de entrada. Puede seguir recibiendo
                   material desde{" "}
@@ -745,6 +787,14 @@ export default function PurchaseOrdersPage() {
                 <>
                   Órdenes aún sin recepción registrada. Al vincular la primera recepción, la orden
                   pasa a la pestaña <span className="font-medium">Con recepción</span>.
+                  {isBoss ? (
+                    <>
+                      {" "}
+                      Las desactivadas se consultan en{" "}
+                      <span className="font-medium">Desactivadas</span> o con el filtro «Solo
+                      desactivadas».
+                    </>
+                  ) : null}
                 </>
               )}
               {!isBoss ? (
@@ -792,9 +842,11 @@ export default function PurchaseOrdersPage() {
                 ) : !rows?.data.length ? (
                   <TableRow>
                     <TableCell colSpan={tableColSpan} className="text-muted-foreground">
-                      {isHistoryTab
-                        ? "Aún no hay órdenes con recepción registrada."
-                        : "Sin órdenes pendientes de recepción."}
+                      {isInactiveTab
+                        ? "No hay órdenes desactivadas con los filtros actuales."
+                        : isHistoryTab
+                          ? "Aún no hay órdenes con recepción registrada."
+                          : "Sin órdenes pendientes de recepción."}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -805,10 +857,11 @@ export default function PurchaseOrdersPage() {
                     <TableRow
                       key={r.id}
                       data-selected={selectedRowId === r.id ? "true" : "false"}
+                      data-inactive={inactive ? "true" : undefined}
                       className={cn(
                         "border-b transition-colors",
-                        inactive && "opacity-75",
-                        selectedRowId === r.id && "bg-primary/5",
+                        inactive && "po-row-inactive",
+                        !inactive && selectedRowId === r.id && "bg-primary/5",
                       )}
                     >
                       <TableCell className="p-3 align-middle tabular-nums text-muted-foreground">
@@ -818,7 +871,7 @@ export default function PurchaseOrdersPage() {
                         <span className="inline-flex flex-wrap items-center gap-2">
                           <span className="po-code-pill">{r.code}</span>
                           {inactive ? (
-                            <Badge variant="secondary" className="text-[10px] font-normal uppercase">
+                            <Badge className="po-badge-inactive text-[10px] uppercase">
                               Inactiva
                             </Badge>
                           ) : null}
@@ -875,7 +928,7 @@ export default function PurchaseOrdersPage() {
                             <Eye className="h-4 w-4" />
                             <span className="sr-only">Ver detalle</span>
                           </button>
-                          {!inactive && !isHistoryTab ? (
+                          {!inactive && !isHistoryTab && !isInactiveTab ? (
                             <Link
                               to={`/ordenes-compra/${r.id}/editar`}
                               state={{ from }}
@@ -888,7 +941,7 @@ export default function PurchaseOrdersPage() {
                               <span className="sr-only">Editar</span>
                             </Link>
                           ) : null}
-                          {inactive && isBoss ? (
+                          {inactive && isBoss && (isInactiveTab || visibility !== "active") ? (
                             <button
                               type="button"
                               className={poActionReactivateClass}
@@ -904,7 +957,7 @@ export default function PurchaseOrdersPage() {
                               <span className="sr-only">Reactivar</span>
                             </button>
                           ) : null}
-                          {!inactive && !isHistoryTab ? (
+                          {!inactive && !isHistoryTab && !isInactiveTab ? (
                             <button
                               type="button"
                               className={poActionDeactivateClass}

@@ -65,6 +65,44 @@
   box-shadow: inset 3px 0 0 rgb(var(--po-accent));
 }
 
+.po-table-wrap tbody tr.po-row-inactive {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--destructive) / 0.14) 0%,
+    hsl(var(--destructive) / 0.05) 42%,
+    transparent 100%
+  );
+  box-shadow: inset 4px 0 0 hsl(var(--destructive) / 0.85);
+}
+
+.po-table-wrap tbody tr.po-row-inactive:hover {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--destructive) / 0.2) 0%,
+    hsl(var(--destructive) / 0.08) 48%,
+    hsl(var(--destructive) / 0.03) 100%
+  );
+}
+
+.po-table-wrap tbody tr.po-row-inactive[data-selected="true"] {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--destructive) / 0.22) 0%,
+    hsl(var(--destructive) / 0.1) 55%,
+    hsl(var(--destructive) / 0.04) 100%
+  );
+  box-shadow: inset 4px 0 0 hsl(var(--destructive));
+}
+
+.po-badge-inactive {
+  border: 1px solid hsl(var(--destructive) / 0.5);
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  box-shadow: 0 1px 2px hsl(var(--destructive) / 0.35);
+}
+
 .po-code-pill {
   display: inline-flex;
   align-items: center;

@@ -25,8 +25,11 @@ const INVENTORY_MODULE_NAV: {
 
 export function AxonesInventoryModuleNav({
   active,
+  variant = "default",
 }: {
   active: AxonesInventoryModuleNavKey
+  /** «catalog» alinea pestañas con el listado estandarizado (Órdenes de compra / Materiales). */
+  variant?: "default" | "catalog"
 }) {
   const session = getStoredUser()
   const items = INVENTORY_MODULE_NAV.filter((it) =>
@@ -34,10 +37,16 @@ export function AxonesInventoryModuleNav({
   )
   if (items.length === 0) return null
 
+  const isCatalog = variant === "catalog"
+
   return (
     <nav
       aria-label="Módulos de inventario"
-      className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 rounded-lg bg-muted/60 p-1"
+      className={cn(
+        isCatalog
+          ? "mat-tab-list h-auto w-full flex-wrap justify-start sm:w-auto"
+          : "flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 rounded-lg bg-muted/60 p-1",
+      )}
     >
       {items.map((it) => {
         const isActive = it.key === active
@@ -46,12 +55,15 @@ export function AxonesInventoryModuleNav({
             key={it.key}
             to={`/${it.routeKey}`}
             className={cn(
-              "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium ring-offset-background transition-all",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              "sm:text-sm",
-              isActive
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+              isCatalog
+                ? cn("mat-tab-link", isActive && "mat-tab-link--active")
+                : cn(
+                    "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium ring-offset-background transition-all sm:text-sm",
+                    isActive
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                  ),
             )}
           >
             {it.title}

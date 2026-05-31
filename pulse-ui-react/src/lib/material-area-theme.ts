@@ -79,3 +79,14 @@ const FORM_TAB_THEME: Record<MaterialFormTab, MaterialAreaTheme> = {
 export function getMaterialFormTabTheme(tab: MaterialFormTab): MaterialAreaTheme {
   return FORM_TAB_THEME[tab]
 }
+
+const AREA_PILL_CLASS: Record<string, string> = {
+  material: "mat-area-pill--material",
+  tintas: "mat-area-pill--tintas",
+  quimicos: "mat-area-pill--quimicos",
+  miscelaneos: "mat-area-pill--miscelaneos",
+}
+
+export function getMaterialAreaPillClass(inventoryArea: string): string {
+  return AREA_PILL_CLASS[inventoryArea] ?? ""
+}

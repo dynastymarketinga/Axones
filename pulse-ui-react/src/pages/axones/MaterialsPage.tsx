@@ -2,23 +2,42 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { ChevronDown, Search } from "lucide-react"
+import {
+  Barcode,
+  Boxes,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Layers,
+  Package,
+  Pencil,
+  Plus,
+  Scale,
+  Settings2,
+  SlidersHorizontal,
+  Tag,
+  Truck,
+} from "lucide-react"
 import { toast } from "sonner"
 
-import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, MaterialRow } from "@/types/api"
+import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
-  AXONES_INVENTORY_FILTER_INPUT_CLASS,
-  AXONES_INVENTORY_PAGE_CLASS,
-  AxonesInventoryModuleNav,
-  AxonesPageHeader,
-  AxonesTableCard,
-} from "@/components/axones/inventory-page-layout"
+  CatalogTableHead,
+  CatalogTableHeadRight,
+} from "@/components/axones/CatalogTableHead"
+import {
+  catalogPaginationOutlineButtonClass,
+  catalogPaginationSelectTriggerClass,
+  catalogSelectTriggerClass,
+} from "@/components/axones/catalog-list-classes"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -27,16 +46,23 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { getMaterialAreaTheme, getMaterialsListTabTheme } from "@/lib/material-area-theme"
+import { apiFetch, ApiError } from "@/lib/api"
+import {
+  getMaterialAreaPillClass,
+  getMaterialsListTabTheme,
+} from "@/lib/material-area-theme"
 import { cn } from "@/lib/utils"
+import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import "./materials-list.css"
+
+const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
 const AREAS = [
   { value: "all", label: "Todos" },
@@ -80,13 +106,34 @@ function areaLabel(area: string) {
   return area
 }
 
+function areaFilterHint(area: AreaValue): string {
+  if (area === "material") {
+    return "Sustratos (films y láminas). El stock se expresa en la unidad registrada (kg, m, etc.)."
+  }
+  if (area === "tintas") {
+    return "Tintas por subárea (laminación, superficie…). Use «Más filtros» para acotar por subárea."
+  }
+  if (area === "quimicos") {
+    return "Químicos de proceso (adhesivos, catalizadores, solventes…)."
+  }
+  if (area === "miscelaneos") {
+    return "Insumos varios que no son sustrato, tinta ni químico de proceso."
+  }
+  return "Catálogo de insumos con stock por área. No incluye producto terminado: el terminado se declara en Corte."
+}
+
 function formatToTwoDecimals(value: string | number | null | undefined) {
   const n = Number(String(value ?? "0").replace(",", "."))
   if (!Number.isFinite(n)) return "0.00"
   return n.toFixed(2)
 }
 
-const SEARCH_DEBOUNCE_MS = 350
+function parseStock(value: string | number | null | undefined): number {
+  const n = Number(String(value ?? "0").replace(",", "."))
+  return Number.isFinite(n) ? n : 0
+}
+
+const SEARCH_DEBOUNCE_MS = 320
 
 function isAbortError(e: unknown): boolean {
   if (e instanceof DOMException && e.name === "AbortError") return true
@@ -94,8 +141,10 @@ function isAbortError(e: unknown): boolean {
 }
 
 export default function MaterialsPage() {
-  const [q, setQ] = useState("")
-  const [debouncedQ, setDebouncedQ] = useState("")
+  const [qInput, setQInput] = useState("")
+  const [qApi, setQApi] = useState("")
+  const qDebounceRef = useRef<number | null>(null)
+
   const [activeArea, setActiveArea] = useState<AreaValue>("all")
   const [sortPreset, setSortPreset] = useState<SortPreset>("name_asc")
   const [stockState, setStockState] = useState<StockState>("all")
@@ -104,25 +153,30 @@ export default function MaterialsPage() {
   const [stockMax, setStockMax] = useState("")
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<MaterialRow> | null>(null)
   const loadAbortRef = useRef<AbortController | null>(null)
 
   const showDimensions = activeArea === "material"
   const showTintaSubareaFilter = activeArea === "all" || activeArea === "tintas"
+  const tableColSpan = showDimensions ? 9 : 7
 
   const { sortBy, sortDir } = SORT_PRESET_MAP[sortPreset]
 
   useEffect(() => {
-    const id = window.setTimeout(() => {
-      setDebouncedQ(q.trim())
+    if (qDebounceRef.current) window.clearTimeout(qDebounceRef.current)
+    qDebounceRef.current = window.setTimeout(() => {
+      setQApi(qInput.trim())
     }, SEARCH_DEBOUNCE_MS)
-    return () => window.clearTimeout(id)
-  }, [q])
+    return () => {
+      if (qDebounceRef.current) window.clearTimeout(qDebounceRef.current)
+    }
+  }, [qInput])
 
   useEffect(() => {
     setPage(1)
-  }, [debouncedQ])
+  }, [qApi])
 
   const load = useCallback(async () => {
     loadAbortRef.current?.abort()
@@ -134,9 +188,9 @@ export default function MaterialsPage() {
         "materials",
         {
           query: {
-            q: debouncedQ || undefined,
+            q: qApi || undefined,
             page,
-            per_page: 30,
+            per_page: perPage,
             inventory_area: activeArea !== "all" ? activeArea : undefined,
             sort_by: sortBy,
             sort_dir: sortDir,
@@ -158,7 +212,7 @@ export default function MaterialsPage() {
     } finally {
       if (!ac.signal.aborted) setLoading(false)
     }
-  }, [page, debouncedQ, activeArea, sortBy, sortDir, stockState, tintaSubarea, stockMin, stockMax])
+  }, [page, perPage, qApi, activeArea, sortBy, sortDir, stockState, tintaSubarea, stockMin, stockMax])
 
   useEffect(() => {
     void load()
@@ -166,73 +220,83 @@ export default function MaterialsPage() {
 
   const showInitialSkeleton = loading && rows === null
 
+  const hasActiveFilters =
+    qApi.trim() !== "" ||
+    stockState !== "all" ||
+    sortPreset !== "name_asc" ||
+    tintaSubarea !== "all" ||
+    stockMin.trim() !== "" ||
+    stockMax.trim() !== ""
+
   return (
-    <div className={AXONES_INVENTORY_PAGE_CLASS}>
-      <AxonesPageHeader
+    <div className="mat-list-shell">
+      <CatalogPageShell
         title="Materiales (insumos)"
-        description="Sustratos, tintas, químicos y misceláneos con stock por área. No incluye producto terminado: el terminado se declara en Corte."
-        actions={
-          <Button asChild>
-            <Link to="/materiales/nuevo">Nuevo material</Link>
+        subtitle="Sustratos, tintas, químicos y misceláneos con stock por área. No incluye producto terminado: el terminado se declara en Corte."
+        icon={Boxes}
+        action={
+          <Button type="button" asChild className="shadow-sm">
+            <Link to="/materiales/nuevo">
+              <Plus className="mr-2 size-4" aria-hidden />
+              Nuevo material
+            </Link>
           </Button>
         }
-      />
-
-      <AxonesInventoryModuleNav active="materiales" />
-
-      <Tabs
-        value={activeArea}
-        onValueChange={(value) => {
-          setActiveArea(value as AreaValue)
-          if (value !== "all" && value !== "tintas") {
-            setTintaSubarea("all")
-          }
-          setPage(1)
-        }}
-        className="w-full"
       >
-        <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
-          {AREAS.map((a) => (
-            <TabsTrigger
-              key={a.value}
-              value={a.value}
-              className={cn("text-xs sm:text-sm", getMaterialsListTabTheme(a.value).tabTriggerClass)}
-            >
-              {a.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+        <AxonesInventoryModuleNav active="materiales" variant="catalog" />
 
-      {showInitialSkeleton ? (
-        <div className="space-y-4">
-          <PageLoadingBlock />
-          <PageLoadingBlock />
-        </div>
-      ) : (
-        <>
-          <AxonesTableCard>
-            <div className="border-b p-4">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="grid gap-2 md:col-span-1">
-                  <Label htmlFor="mat-q">Buscar</Label>
-                  <div className="group/field relative">
-                    <Search
-                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary"
-                      aria-hidden
-                    />
-                    <Input
-                      id="mat-q"
-                      placeholder="Código o nombre…"
-                      value={q}
-                      className={cn("min-w-0 pl-10", AXONES_INVENTORY_FILTER_INPUT_CLASS)}
-                      onChange={(ev) => setQ(ev.target.value)}
-                      autoComplete="off"
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Estado de stock</Label>
+        {showInitialSkeleton ? (
+          <div className="space-y-4">
+            <PageLoadingBlock />
+            <PageLoadingBlock />
+          </div>
+        ) : (
+          <>
+            <Tabs
+              value={activeArea}
+              onValueChange={(value) => {
+                setActiveArea(value as AreaValue)
+                if (value !== "all" && value !== "tintas") {
+                  setTintaSubarea("all")
+                }
+                setPage(1)
+              }}
+              className="w-full"
+            >
+              <TabsList className="mat-area-tab-list">
+                {AREAS.map((a) => (
+                  <TabsTrigger
+                    key={a.value}
+                    value={a.value}
+                    className={cn(
+                      "mat-area-tab-trigger",
+                      getMaterialsListTabTheme(a.value).tabTriggerClass,
+                    )}
+                  >
+                    {a.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+
+            <div className="mat-filter-bar space-y-4 p-4 md:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Filter className="size-4 text-primary" aria-hidden />
+                <p className="text-sm font-medium">Filtrar listado</p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-12">
+                <CatalogSearchField
+                  id="mat-q"
+                  placeholder="Código o nombre…"
+                  value={qInput}
+                  onChange={(ev) => {
+                    setPage(1)
+                    setQInput(ev.target.value)
+                  }}
+                  className="min-w-0 md:col-span-5"
+                />
+                <CatalogLabeledField label="Estado de stock" className="md:col-span-3">
                   <Select
                     value={stockState}
                     onValueChange={(value) => {
@@ -240,8 +304,8 @@ export default function MaterialsPage() {
                       setPage(1)
                     }}
                   >
-                    <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                      <SelectValue />
+                    <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                      <SelectValue placeholder="Todos" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todos</SelectItem>
@@ -250,9 +314,8 @@ export default function MaterialsPage() {
                       <SelectItem value="ok">OK</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Ordenar lista</Label>
+                </CatalogLabeledField>
+                <CatalogLabeledField label="Ordenar lista" className="md:col-span-4">
                   <Select
                     value={sortPreset}
                     onValueChange={(value) => {
@@ -260,8 +323,8 @@ export default function MaterialsPage() {
                       setPage(1)
                     }}
                   >
-                    <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                      <SelectValue />
+                    <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                      <SelectValue placeholder="Nombre (A → Z)" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="name_asc">Nombre (A → Z)</SelectItem>
@@ -272,26 +335,34 @@ export default function MaterialsPage() {
                       <SelectItem value="stock_desc">Stock (mayor primero)</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
+                </CatalogLabeledField>
               </div>
 
-              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="mt-4">
+              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
                 <CollapsibleTrigger asChild>
-                  <Button type="button" variant="ghost" size="sm" className="-ml-2 gap-1 text-muted-foreground">
-                    <ChevronDown className={cn("h-4 w-4 transition-transform", advancedOpen && "rotate-180")} />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="-ml-2 gap-1.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <SlidersHorizontal className="size-4" aria-hidden />
                     Más filtros
+                    <ChevronDown
+                      className={cn("size-4 transition-transform", advancedOpen && "rotate-180")}
+                      aria-hidden
+                    />
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-3">
                   <div
                     className={cn(
-                      "grid gap-4",
+                      "grid gap-3",
                       showTintaSubareaFilter ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2",
                     )}
                   >
                     {showTintaSubareaFilter ? (
-                      <div className="grid gap-2">
-                        <Label>Subárea (tintas)</Label>
+                      <CatalogLabeledField label="Subárea (tintas)">
                         <Select
                           value={tintaSubarea}
                           onValueChange={(value) => {
@@ -299,8 +370,8 @@ export default function MaterialsPage() {
                             setPage(1)
                           }}
                         >
-                          <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                            <SelectValue />
+                          <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                            <SelectValue placeholder="Todas" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">Todas</SelectItem>
@@ -310,49 +381,50 @@ export default function MaterialsPage() {
                             <SelectItem value="laminacion_nueva">Laminación nueva</SelectItem>
                           </SelectContent>
                         </Select>
-                      </div>
+                      </CatalogLabeledField>
                     ) : null}
-                    <div className="grid gap-2">
-                      <Label htmlFor="stock-min">Stock mín. (cantidad)</Label>
+                    <CatalogLabeledField label="Stock mín. (cantidad)" htmlFor="stock-min">
                       <Input
                         id="stock-min"
                         type="number"
                         min="0"
                         step="0.001"
-                        className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
+                        className={cn("h-11 font-normal", catalogSelectTriggerClass)}
                         value={stockMin}
                         onChange={(ev) => {
                           setStockMin(ev.target.value)
                           setPage(1)
                         }}
                       />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="stock-max">Stock máx. (cantidad)</Label>
+                    </CatalogLabeledField>
+                    <CatalogLabeledField label="Stock máx. (cantidad)" htmlFor="stock-max">
                       <Input
                         id="stock-max"
                         type="number"
                         min="0"
                         step="0.001"
-                        className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
+                        className={cn("h-11 font-normal", catalogSelectTriggerClass)}
                         value={stockMax}
                         onChange={(ev) => {
                           setStockMax(ev.target.value)
                           setPage(1)
                         }}
                       />
-                    </div>
+                    </CatalogLabeledField>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mat-filter-actions">
                 <Button
                   type="button"
                   variant="outline"
+                  size="sm"
+                  className={cn("h-9", catalogPaginationOutlineButtonClass)}
+                  disabled={!hasActiveFilters}
                   onClick={() => {
-                    setQ("")
-                    setDebouncedQ("")
+                    setQInput("")
+                    setQApi("")
                     setSortPreset("name_asc")
                     setStockState("all")
                     setTintaSubarea("all")
@@ -365,96 +437,198 @@ export default function MaterialsPage() {
                   Limpiar filtros
                 </Button>
               </div>
+
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {areaFilterHint(activeArea)}
+              </p>
             </div>
 
-            <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead className="min-w-[8rem]">Proveedor</TableHead>
-                  <TableHead>Área</TableHead>
-                  {showDimensions ? <TableHead>Micras</TableHead> : null}
-                  {showDimensions ? <TableHead>Ancho (mm)</TableHead> : null}
-                  <TableHead className="text-right tabular-nums">Stock</TableHead>
-                  <TableHead>Unidad</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <LoadingTableRow colSpan={showDimensions ? 9 : 7} />
-                ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={showDimensions ? 9 : 7} className="text-muted-foreground">
-                      Sin materiales.
-                    </TableCell>
+            <div className="mat-table-wrap overflow-x-auto">
+              <Table className="min-w-[760px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <CatalogTableHead icon={Barcode}>SKU</CatalogTableHead>
+                    <CatalogTableHead icon={Tag}>Nombre</CatalogTableHead>
+                    <CatalogTableHead icon={Truck} className="min-w-[8rem]">
+                      Proveedor
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Layers}>Área</CatalogTableHead>
+                    {showDimensions ? (
+                      <CatalogTableHead icon={SlidersHorizontal}>Micras</CatalogTableHead>
+                    ) : null}
+                    {showDimensions ? (
+                      <CatalogTableHead icon={SlidersHorizontal}>Ancho (mm)</CatalogTableHead>
+                    ) : null}
+                    <CatalogTableHead icon={Package} className="text-right">
+                      Stock
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Scale}>Unidad</CatalogTableHead>
+                    <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
+                      Acciones
+                    </CatalogTableHeadRight>
                   </TableRow>
-                ) : (
-                  rows.data.map((m) => {
-                    const areaTheme = getMaterialAreaTheme(m.inventory_area)
-                    return (
-                    <TableRow key={m.id} className={cn(areaTheme.rowClass, "[&>td]:bg-inherit")}>
-                      <TableCell className="font-mono text-sm">{m.sku}</TableCell>
-                      <TableCell className="max-w-[14rem] font-medium">{m.name}</TableCell>
-                      <TableCell
-                        className={cn(
-                          "max-w-[12rem] truncate",
-                          m.supplier?.name?.trim() ? "" : "text-muted-foreground",
-                        )}
-                        title={m.supplier?.name?.trim() || undefined}
-                      >
-                        {m.supplier?.name?.trim() ? m.supplier.name : "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">{areaLabel(m.inventory_area)}</TableCell>
-                      {showDimensions ? <TableCell>{m.micras ?? "—"}</TableCell> : null}
-                      {showDimensions ? <TableCell>{m.ancho ?? "—"}</TableCell> : null}
-                      <TableCell className="text-right tabular-nums">{formatToTwoDecimals(m.quantity_on_hand)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{m.unit}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="outline" asChild>
-                            <Link to={`/materiales/${m.id}/editar`}>Editar</Link>
-                          </Button>
-                        </div>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <LoadingTableRow colSpan={tableColSpan} />
+                  ) : !rows?.data.length ? (
+                    <TableRow>
+                      <TableCell colSpan={tableColSpan} className="text-muted-foreground">
+                        Sin materiales.
                       </TableCell>
                     </TableRow>
-                    )
-                  })
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    rows.data.map((m) => {
+                      const stock = parseStock(m.quantity_on_hand)
+                      const areaPillClass = getMaterialAreaPillClass(m.inventory_area)
+                      return (
+                        <TableRow
+                          key={m.id}
+                          data-mat-area={m.inventory_area}
+                          className="border-b"
+                        >
+                          <TableCell className="p-3 align-middle">
+                            <span className="mat-sku-pill">{m.sku}</span>
+                          </TableCell>
+                          <TableCell className="max-w-[14rem] p-3 align-middle font-semibold">
+                            {m.name}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "max-w-[12rem] truncate p-3 align-middle",
+                              m.supplier?.name?.trim() ? "font-medium" : "text-muted-foreground",
+                            )}
+                            title={m.supplier?.name?.trim() || undefined}
+                          >
+                            {m.supplier?.name?.trim() ? m.supplier.name : "—"}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle whitespace-nowrap">
+                            <span className={cn("mat-area-pill", areaPillClass)}>
+                              {areaLabel(m.inventory_area)}
+                            </span>
+                          </TableCell>
+                          {showDimensions ? (
+                            <TableCell className="p-3 align-middle tabular-nums">
+                              {m.micras ?? "—"}
+                            </TableCell>
+                          ) : null}
+                          {showDimensions ? (
+                            <TableCell className="p-3 align-middle tabular-nums">
+                              {m.ancho ?? "—"}
+                            </TableCell>
+                          ) : null}
+                          <TableCell
+                            className={cn(
+                              "p-3 align-middle text-right tabular-nums font-semibold",
+                              stock <= 0 && "text-destructive",
+                            )}
+                          >
+                            {formatToTwoDecimals(m.quantity_on_hand)}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle whitespace-nowrap">
+                            {m.unit}
+                          </TableCell>
+                          <TableCell className="p-3 align-middle text-right">
+                            <Link
+                              to={`/materiales/${m.id}/editar`}
+                              className="mat-action-edit"
+                              title="Editar material"
+                            >
+                              <Pencil className="size-3.5" aria-hidden />
+                              Editar
+                            </Link>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          </AxonesTableCard>
 
-          {rows && rows.last_page > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Página {rows.current_page} de {rows.last_page} · {rows.total}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                >
-                  Siguiente
-                </Button>
+            {rows ? (
+              <div className="mat-pagination-bar">
+                <div className="mat-pagination-meta">
+                  <p className="text-sm">
+                    {rows.total === 0 ? (
+                      "Sin resultados con los filtros actuales."
+                    ) : (
+                      <>
+                        Mostrando <strong>{rows.from ?? 0}</strong> a <strong>{rows.to ?? 0}</strong> de{" "}
+                        <strong>{rows.total}</strong> registros
+                      </>
+                    )}
+                  </p>
+                  {rows.last_page > 1 ? (
+                    <p className="text-muted-foreground text-xs">
+                      Página {rows.current_page} de {rows.last_page}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="mat-pagination-controls">
+                  {rows.last_page > 1 ? (
+                    <span className="mat-page-indicator">
+                      {rows.current_page} / {rows.last_page}
+                    </span>
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-sm">Por página</span>
+                    <Select
+                      value={String(perPage)}
+                      onValueChange={(v) => {
+                        setPerPage(Number(v))
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="materials-per-page"
+                        className={cn(
+                          "h-9 w-[4.75rem] text-sm",
+                          catalogPaginationSelectTriggerClass,
+                        )}
+                        aria-label="Registros por página"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PER_PAGE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt} value={String(opt)}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+                      disabled={rows.current_page <= 1 || loading}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      type="button"
+                    >
+                      <ChevronLeft className="mr-1 size-4" aria-hidden />
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
+                      disabled={rows.current_page >= rows.last_page || loading}
+                      onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                      type="button"
+                    >
+                      Siguiente
+                      <ChevronRight className="ml-1 size-4" aria-hidden />
+                    </Button>
+                  </div>
+                </div>
               </div>
-            </div>
-          ) : null}
-        </>
-      )}
+            ) : null}
+          </>
+        )}
+      </CatalogPageShell>
     </div>
   )
 }

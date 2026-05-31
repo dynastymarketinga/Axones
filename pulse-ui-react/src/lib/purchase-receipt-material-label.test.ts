@@ -8,6 +8,8 @@ import {
   formatOcLineReceiptProgress,
   formatOcLineReference,
   formatPurchaseOrderBanner,
+  formatPurchaseOrderOptionSecondary,
+  formatPurchaseOrderSelectorLabels,
   parseOcLineMeta,
 } from "@/lib/purchase-receipt-material-label"
 
@@ -122,6 +124,45 @@ describe("formatOcLineReceiptProgress", () => {
         unit: "kg",
       }),
     ).toBe("Pedido 500,000 · Recibido 400,000 · Pendiente 100,000 kg")
+  })
+})
+
+describe("formatPurchaseOrderSelectorLabels", () => {
+  it("muestra código proveedor estado y avance", () => {
+    const result = formatPurchaseOrderSelectorLabels({
+      code: "OC-2026-331",
+      supplierName: "valeria prueba",
+      statusLabel: "Abierta",
+      linesCount: 3,
+      receiptProgressLabel: "0,000 / 500,000 kg",
+      receiptsCount: 0,
+    })
+    expect(result.primary).toBe("OC-2026-331 · valeria prueba · Abierta")
+    expect(result.secondary).toBe("0,000 / 500,000 kg · 3 artículos")
+  })
+
+  it("incluye recepciones previas en secundaria", () => {
+    const result = formatPurchaseOrderSelectorLabels({
+      code: "OC-2026-328",
+      supplierName: "Proveedor",
+      statusLabel: "Parcial",
+      linesCount: 1,
+      receiptProgressLabel: "400,000 / 500,000 kg",
+      receiptsCount: 2,
+    })
+    expect(result.secondary).toBe("400,000 / 500,000 kg · 1 artículo · 2 recepciones")
+  })
+})
+
+describe("formatPurchaseOrderOptionSecondary", () => {
+  it("lista estado avance y artículos", () => {
+    expect(
+      formatPurchaseOrderOptionSecondary({
+        statusLabel: "Abierta",
+        receiptProgressLabel: "0,000 / 500,000 kg",
+        linesCount: 2,
+      }),
+    ).toBe("Abierta · 0,000 / 500,000 kg · 2 artículos")
   })
 })
 

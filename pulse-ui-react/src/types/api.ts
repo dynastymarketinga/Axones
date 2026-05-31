@@ -78,6 +78,7 @@ export type PurchaseOrderRow = {
   manual_close_reason?: string | null
   /** Resumen pedido vs recibido para listado (ej. "400,000 / 500,000 kg"). */
   receipt_progress_label?: string | null
+}
 
 /** PATCH /client-orders/:id: notes, status, lines, client_id (client_id con reglas: orden abierta, líneas y OT en API). */
 export type ClientOrderRow = {

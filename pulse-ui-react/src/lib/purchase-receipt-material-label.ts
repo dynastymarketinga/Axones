@@ -178,3 +178,84 @@ export function formatPurchaseOrderBanner(input: {
   ].filter(Boolean)
   return segments.join(MATERIAL_IDENTITY_SEP) || "Orden de compra"
 }
+
+export type PurchaseOrderOptionLabelInput = {
+  code?: string | null
+  supplierName?: string | null
+  statusLabel?: string | null
+  linesCount?: number | null
+  receiptProgressLabel?: string | null
+  receiptsCount?: number | null
+}
+
+/** Línea principal del selector de OC: código · proveedor. */
+export function formatPurchaseOrderOptionPrimary(input: PurchaseOrderOptionLabelInput): string {
+  const code = (input.code ?? "").trim()
+  const supplier = (input.supplierName ?? "").trim()
+  if (code && supplier) return `${code}${MATERIAL_IDENTITY_SEP}${supplier}`
+  return code || supplier || "Orden de compra"
+}
+
+/** Línea secundaria: estado · avance · artículos · recepciones previas. */
+export function formatPurchaseOrderOptionSecondary(input: PurchaseOrderOptionLabelInput): string {
+  const parts: string[] = []
+  const status = (input.statusLabel ?? "").trim()
+  if (status) parts.push(status)
+  const progress = (input.receiptProgressLabel ?? "").trim()
+  if (progress) parts.push(progress)
+  const linesCount = input.linesCount
+  if (linesCount != null && linesCount > 0) {
+    parts.push(linesCount === 1 ? "1 artículo" : `${linesCount} artículos`)
+  }
+  const receiptsCount = input.receiptsCount
+  if (receiptsCount != null && receiptsCount > 0) {
+    parts.push(receiptsCount === 1 ? "1 recepción" : `${receiptsCount} recepciones`)
+  }
+  return parts.join(MATERIAL_IDENTITY_SEP)
+}
+
+/** Etiquetas del botón seleccionado: principal incluye estado; secundaria omite estado. */
+export function formatPurchaseOrderSelectorLabels(input: PurchaseOrderOptionLabelInput): {
+  primary: string
+  secondary: string | null
+  title: string
+} {
+  const status = (input.statusLabel ?? "").trim()
+  const primaryBase = formatPurchaseOrderOptionPrimary(input)
+  const primary = status ? `${primaryBase}${MATERIAL_IDENTITY_SEP}${status}` : primaryBase
+
+  const secondaryParts: string[] = []
+  const progress = (input.receiptProgressLabel ?? "").trim()
+  if (progress) secondaryParts.push(progress)
+  const linesCount = input.linesCount
+  if (linesCount != null && linesCount > 0) {
+    secondaryParts.push(linesCount === 1 ? "1 artículo" : `${linesCount} artículos`)
+  }
+  const receiptsCount = input.receiptsCount
+  if (receiptsCount != null && receiptsCount > 0) {
+    secondaryParts.push(receiptsCount === 1 ? "1 recepción" : `${receiptsCount} recepciones`)
+  }
+  const secondary = secondaryParts.length ? secondaryParts.join(MATERIAL_IDENTITY_SEP) : null
+
+  return {
+    primary,
+    secondary,
+    title: secondary ? `${primary}${MATERIAL_IDENTITY_SEP}${secondary}` : primary,
+  }
+}
+
+/** Texto de búsqueda para el combobox de OC. */
+export function purchaseOrderOptionSearchValue(input: PurchaseOrderOptionLabelInput): string {
+  return [
+    input.code,
+    input.supplierName,
+    input.statusLabel,
+    input.receiptProgressLabel,
+    input.linesCount != null ? String(input.linesCount) : null,
+    input.receiptsCount != null ? String(input.receiptsCount) : null,
+    formatPurchaseOrderOptionPrimary(input),
+    formatPurchaseOrderOptionSecondary(input),
+  ]
+    .filter(Boolean)
+    .join(" ")
+}

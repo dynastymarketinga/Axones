@@ -76,8 +76,13 @@ import {
   formatMaterialDimensionHint,
   formatMaterialIdentity,
   formatOcLineReceiptProgress,
+  formatPurchaseOrderOptionPrimary,
+  formatPurchaseOrderOptionSecondary,
+  formatPurchaseOrderSelectorLabels,
+  purchaseOrderOptionSearchValue,
+  type PurchaseOrderOptionLabelInput,
 } from "@/lib/purchase-receipt-material-label"
-import type { MaterialRow } from "@/types/api"
+import type { MaterialRow, PurchaseOrderRow } from "@/types/api"
 import {
   DOCUMENT_ROW_FIELD_CLASS,
   documentFieldIconClass,
@@ -113,13 +118,7 @@ type SupplierOption = {
   address?: string | null
 }
 
-type PurchaseOrderOption = {
-  id: number
-  code?: string | null
-  status: string
-  supplier_id: number
-  supplier?: { name?: string | null } | null
-}
+type PurchaseOrderOption = PurchaseOrderRow
 
 type UnitOption = {
   value: string
@@ -224,6 +223,42 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
   }, [props.freeLines])
 
   const primaryItemTypeMeta = PURCHASE_ITEM_TYPE_META[primaryItemTypeKey]
+
+  const selectedPurchaseOrderLabels = useMemo(() => {
+    if (!props.purchaseOrderId) return null
+    const row = props.selectedPurchaseOrderRow
+    const detail = props.purchaseOrderDetail
+    if (!row && !detail) {
+      return formatPurchaseOrderSelectorLabels({
+        code: "…",
+        statusLabel: "",
+      })
+    }
+    return formatPurchaseOrderSelectorLabels({
+      code: detail?.code ?? row?.code,
+      supplierName: detail?.supplier?.name ?? row?.supplier?.name,
+      statusLabel: props.purchaseOrderStatusHint(detail?.status ?? row?.status ?? ""),
+      linesCount: row?.lines_count,
+      receiptProgressLabel: row?.receipt_progress_label,
+      receiptsCount: row?.receipts_count,
+    })
+  }, [
+    props.purchaseOrderId,
+    props.purchaseOrderDetail,
+    props.purchaseOrderStatusHint,
+    props.selectedPurchaseOrderRow,
+  ])
+
+  function purchaseOrderOptionLabelFromRow(po: PurchaseOrderOption): PurchaseOrderOptionLabelInput {
+    return {
+      code: po.code,
+      supplierName: po.supplier?.name,
+      statusLabel: props.purchaseOrderStatusHint(po.status),
+      linesCount: po.lines_count,
+      receiptProgressLabel: po.receipt_progress_label,
+      receiptsCount: po.receipts_count,
+    }
+  }
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -508,7 +543,10 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               <div className="flex items-center gap-2">
                 <div className="group/field relative min-w-0 flex-1">
                   <ClipboardList
-                    className={cn(documentFieldIconClass(purchaseOrderHasError, props.saving), "top-1/2 -translate-y-1/2")}
+                    className={cn(
+                      documentFieldIconClass(purchaseOrderHasError, props.saving),
+                      props.purchaseOrderId ? "top-3" : "top-1/2 -translate-y-1/2",
+                    )}
                     aria-hidden
                   />
                   <Popover open={props.poComboOpen} onOpenChange={props.setPoComboOpen}>
@@ -520,64 +558,98 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         aria-expanded={props.poComboOpen}
                         disabled={props.saving || props.poListLoading}
                         className={cn(
-                          "h-9 w-full justify-between pl-10 pr-3 font-normal",
+                          "w-full justify-between pl-10 pr-3 font-normal",
+                          props.purchaseOrderId ? "min-h-9 h-auto py-1.5" : "h-9",
                           "border-primary/25 bg-background/90 shadow-sm",
                           documentInvalidHighlightClass(purchaseOrderHasError),
                         )}
+                        title={selectedPurchaseOrderLabels?.title}
                       >
-                        <span className={cn("truncate text-left", !props.purchaseOrderId && "text-muted-foreground")}>
-                          {props.poListLoading
-                            ? "Cargando ordenes..."
-                            : props.purchaseOrderId
-                              ? `${props.purchaseOrderDetail?.code ?? props.selectedPurchaseOrderRow?.code ?? "..."} · ${props.purchaseOrderStatusHint(
-                                  props.purchaseOrderDetail?.status ?? props.selectedPurchaseOrderRow?.status ?? "",
-                                )}`
-                              : "Entrada directa (sin OC)..."}
-                        </span>
+                        {props.poListLoading ? (
+                          <span className="truncate text-left text-muted-foreground">Cargando ordenes...</span>
+                        ) : props.purchaseOrderId && selectedPurchaseOrderLabels ? (
+                          <span className="min-w-0 flex-1 text-left">
+                            <span className="block truncate text-sm font-medium leading-snug">
+                              {selectedPurchaseOrderLabels.primary}
+                            </span>
+                            {selectedPurchaseOrderLabels.secondary ? (
+                              <span className="text-muted-foreground block truncate text-xs leading-snug">
+                                {selectedPurchaseOrderLabels.secondary}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="truncate text-left text-muted-foreground">
+                            Entrada directa (sin OC)...
+                          </span>
+                        )}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" align="start">
+                  <PopoverContent
+                    className="w-[min(100vw-2rem,28rem)] min-w-[var(--radix-popover-trigger-width)] p-0"
+                    align="start"
+                  >
                     <Command shouldFilter>
-                      <CommandInput placeholder="Buscar por codigo OC..." />
-                      <CommandList className="max-h-60">
+                      <CommandInput placeholder="Buscar código OC, proveedor o avance…" />
+                      <CommandList className="max-h-72">
                         <CommandEmpty>
                           {props.poListLoading
                             ? "Cargando ordenes de compra..."
                             : "No hay ordenes abiertas. Use 'Sin orden de compra' para entrada directa."}
                         </CommandEmpty>
                         <CommandGroup>
-                          <CommandItem value="sin orden de compra entrada directa" onSelect={() => props.clearPurchaseOrder()}>
+                          <CommandItem
+                            value="sin orden de compra entrada directa inventario"
+                            onSelect={() => props.clearPurchaseOrder()}
+                          >
                             <Check
-                              className={cn("mr-2 h-4 w-4", !props.purchaseOrderId ? "opacity-100" : "opacity-0")}
+                              className={cn(
+                                "mr-2 h-4 w-4 shrink-0",
+                                !props.purchaseOrderId ? "opacity-100" : "opacity-0",
+                              )}
                               aria-hidden
                             />
-                            <span className="font-medium">Sin orden de compra</span>
-                            <span className="text-muted-foreground ml-2 text-xs">Entrada directa al inventario</span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">Sin orden de compra</p>
+                              <p className="text-muted-foreground text-xs">
+                                Entrada directa — sin vincular pedido
+                              </p>
+                            </div>
                           </CommandItem>
-                          {props.purchaseOrderOptions.map((po) => (
-                            <CommandItem
-                              key={po.id}
-                              value={`${po.code ?? ""} ${po.supplier?.name ?? ""} ${po.status}`}
-                              onSelect={() => {
-                                props.setPurchaseOrderId(po.id)
-                                if (po.supplier_id > 0 && po.supplier_id !== props.supplierId) {
-                                  props.setSupplierId(po.supplier_id)
-                                }
-                                props.setPoComboOpen(false)
-                              }}
-                            >
-                              <Check
-                                className={cn("mr-2 h-4 w-4", props.purchaseOrderId === po.id ? "opacity-100" : "opacity-0")}
-                                aria-hidden
-                              />
-                              <span className="truncate">{po.code}</span>
-                              <span className="text-muted-foreground ml-2 truncate text-xs">
-                                {props.purchaseOrderStatusHint(po.status)}
-                                {po.supplier?.name ? ` · ${po.supplier.name}` : ""}
-                              </span>
-                            </CommandItem>
-                          ))}
+                          {props.purchaseOrderOptions.map((po) => {
+                            const labelInput = purchaseOrderOptionLabelFromRow(po)
+                            const primary = formatPurchaseOrderOptionPrimary(labelInput)
+                            const secondary = formatPurchaseOrderOptionSecondary(labelInput)
+                            const search = purchaseOrderOptionSearchValue(labelInput)
+                            return (
+                              <CommandItem
+                                key={po.id}
+                                value={search}
+                                onSelect={() => {
+                                  props.setPurchaseOrderId(po.id)
+                                  if (po.supplier_id > 0 && po.supplier_id !== props.supplierId) {
+                                    props.setSupplierId(po.supplier_id)
+                                  }
+                                  props.setPoComboOpen(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4 shrink-0",
+                                    props.purchaseOrderId === po.id ? "opacity-100" : "opacity-0",
+                                  )}
+                                  aria-hidden
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium">{primary}</p>
+                                  {secondary ? (
+                                    <p className="text-muted-foreground truncate text-xs">{secondary}</p>
+                                  ) : null}
+                                </div>
+                              </CommandItem>
+                            )
+                          })}
                         </CommandGroup>
                       </CommandList>
                     </Command>

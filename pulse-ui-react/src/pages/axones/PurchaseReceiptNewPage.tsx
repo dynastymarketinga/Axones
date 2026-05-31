@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import {
+  formatMaterialCatalogLabel,
   formatMaterialIdentity,
   formatOcLineReference,
   formatPurchaseOrderBanner,
@@ -166,7 +167,7 @@ function hydrateFreeLineMaterialLabel(line: FreeLine, materialsList: MaterialRow
     if (mat) {
       return {
         ...normalized,
-        material_label: materialLabelFromRow(mat),
+        material_label: materialLabelFromRow(mat, normalized.item_type),
         micras: mat.micras?.trim() || normalized.micras,
         ancho_mm: mat.ancho?.trim() || normalized.ancho_mm,
         unit: mat.unit?.trim() || normalized.unit,
@@ -193,11 +194,14 @@ export type ReceiptLineFieldErrors = {
   purchaseOrderLine?: string
 }
 
-function materialLabelFromRow(material: MaterialRow): string {
-  return formatMaterialIdentity({
+function materialLabelFromRow(material: MaterialRow, itemType?: string): string {
+  return formatMaterialCatalogLabel({
     sku: material.sku,
     name: material.name,
     supplierName: material.supplier?.name ?? null,
+    micras: material.micras,
+    ancho: material.ancho,
+    itemTypeKey: receiptUiLabelToItemTypeKey(itemType ?? "Sustrato"),
   })
 }
 
@@ -206,7 +210,11 @@ function materialsForReceiptItemType(materialsList: MaterialRow[], itemType: str
   return materialsList.filter((m) => normalizeKey(m.inventory_area) === normalizeKey(area))
 }
 
-function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: boolean): string | null {
+function receiptLineValidationMessage(
+  row: FreeLine,
+  requirePurchaseOrderLine: boolean,
+  purchaseOrderLines?: PurchaseOrderLineDetail[] | null,
+): string | null {
   const hasPol = row.purchase_order_line_id.trim().length > 0
   const hasType = row.item_type.trim().length > 0
   const materialId = Number(row.material_id)
@@ -231,6 +239,18 @@ function receiptLineValidationMessage(row: FreeLine, requirePurchaseOrderLine: b
     (!Number.isFinite(micras) || micras <= 0 || !Number.isFinite(ancho) || ancho <= 0)
   ) {
     return "En Sustrato indique Micras y Ancho mayores que 0."
+  }
+  if (requirePurchaseOrderLine && row.purchase_order_line_id.trim()) {
+    const pol = purchaseOrderLines?.find(
+      (ln) => String(ln.id) === row.purchase_order_line_id.trim(),
+    )
+    if (pol) {
+      const pending = polRemainingQty(pol)
+      if (quantity > pending + 0.0001) {
+        const unit = (row.unit || pol.unit || "kg").trim() || "kg"
+        return `La cantidad no puede superar lo pendiente (${pending.toLocaleString("es-VE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${unit}).`
+      }
+    }
   }
   return null
 }
@@ -283,7 +303,7 @@ function buildFreeLineFromPurchaseOrderLine(
   let material_label = ""
   if (matFromList) {
     material_id = String(matFromList.id)
-    material_label = materialLabelFromRow(matFromList)
+    material_label = materialLabelFromRow(matFromList, inferredItemType)
   } else if (matFromPol?.sku || matFromPol?.name) {
     material_label = formatMaterialIdentity({
       sku: matFromPol.sku,
@@ -878,7 +898,7 @@ export default function PurchaseReceiptNewPage() {
 
     for (const i of editedRowIndexes) {
       const row = freeLines[i]
-      const msg = receiptLineValidationMessage(row, hasPurchaseOrder)
+      const msg = receiptLineValidationMessage(row, hasPurchaseOrder, purchaseOrderDetail?.lines)
       if (!msg) continue
       const errs: ReceiptLineFieldErrors = {}
       if (msg.includes("línea de la orden")) errs.purchaseOrderLine = msg
@@ -955,8 +975,16 @@ export default function PurchaseReceiptNewPage() {
   }
 
   const payloadLinesPreviewCount = useMemo(
-    () => freeLines.filter((row) => receiptLineValidationMessage(row, purchaseOrderId != null && purchaseOrderId > 0) === null && receiptLineHasAnyValue(row)).length,
-    [freeLines, purchaseOrderId],
+    () =>
+      freeLines.filter(
+        (row) =>
+          receiptLineValidationMessage(
+            row,
+            purchaseOrderId != null && purchaseOrderId > 0,
+            purchaseOrderDetail?.lines,
+          ) === null && receiptLineHasAnyValue(row),
+      ).length,
+    [freeLines, purchaseOrderDetail?.lines, purchaseOrderId],
   )
 
   function saveReceiptDraftToSession(): boolean {
@@ -1127,7 +1155,7 @@ export default function PurchaseReceiptNewPage() {
     const safeUnit = allowed.includes(unitRaw as (typeof allowed)[number]) ? unitRaw : "kg"
     updateFreeLine(rowIndex, {
       material_id: String(material.id),
-      material_label: materialLabelFromRow(material),
+      material_label: materialLabelFromRow(material, row?.item_type ?? "Sustrato"),
       micras: material.micras?.trim() ?? "",
       ancho_mm: material.ancho?.trim() ?? "",
       unit: safeUnit,
@@ -1172,7 +1200,7 @@ export default function PurchaseReceiptNewPage() {
       resolved.push({
         ...row,
         material_id: String(materialId),
-        material_label: materialLabelFromRow(mat),
+        material_label: materialLabelFromRow(mat, row.item_type),
       })
     }
 

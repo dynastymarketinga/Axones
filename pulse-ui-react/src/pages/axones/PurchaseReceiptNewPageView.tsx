@@ -71,6 +71,12 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import {
+  formatMaterialCatalogLabel,
+  formatMaterialDimensionHint,
+  formatMaterialIdentity,
+  formatOcLineReceiptProgress,
+} from "@/lib/purchase-receipt-material-label"
 import type { MaterialRow } from "@/types/api"
 import {
   DOCUMENT_ROW_FIELD_CLASS,
@@ -189,7 +195,7 @@ export type PurchaseReceiptNewPageViewProps = {
   setMaterialPickerOpenRow: (row: number | null) => void
   openMaterialPicker: (rowIndex: number) => void
   selectMaterialFromCatalog: (rowIndex: number, material: MaterialRow) => void
-  materialLabelFromRow: (material: MaterialRow) => string
+  materialLabelFromRow: (material: MaterialRow, itemType?: string) => string
   confirmCreateOpen: boolean
   setConfirmCreateOpen: (open: boolean) => void
   confirmAndCreateReceipt: () => Promise<void>
@@ -817,8 +823,11 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                       )}
                                       aria-hidden
                                     />
-                                    <div className="flex min-h-9 items-center rounded-md border border-white/60 bg-background/90 px-3 pl-10 text-sm font-medium leading-snug shadow-sm">
+                                    <div className="flex min-h-9 flex-col justify-center gap-0.5 rounded-md border border-white/60 bg-background/90 px-3 pl-10 py-1.5 text-sm font-medium leading-snug shadow-sm">
                                       <span className="line-clamp-2">{props.formatOcLineLabel(pol)}</span>
+                                      <span className="text-xs font-normal text-muted-foreground">
+                                        {formatOcLineReceiptProgress(pol)}
+                                      </span>
                                     </div>
                                   </div>
                                 )
@@ -898,6 +907,19 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                       "truncate text-left text-sm",
                                       !line.material_id && "text-muted-foreground",
                                     )}
+                                    title={
+                                      line.material_id
+                                        ? line.material_label ||
+                                          (() => {
+                                            const mat = props.materials.find(
+                                              (m) => String(m.id) === line.material_id,
+                                            )
+                                            return mat
+                                              ? props.materialLabelFromRow(mat, line.item_type)
+                                              : undefined
+                                          })()
+                                        : undefined
+                                    }
                                   >
                                     {line.material_id
                                       ? line.material_label ||
@@ -906,7 +928,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                             (m) => String(m.id) === line.material_id,
                                           )
                                           return mat
-                                            ? props.materialLabelFromRow(mat)
+                                            ? props.materialLabelFromRow(mat, line.item_type)
                                             : "Material del inventario"
                                         })()
                                       : "Seleccione material del inventario…"}
@@ -941,8 +963,36 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                     {props
                                       .materialsForReceiptItemType(props.materials, line.item_type)
                                       .map((m) => {
-                                        const label = props.materialLabelFromRow(m)
-                                        const search = [m.sku, m.name, m.supplier?.name, String(m.id)]
+                                        const typeKey = receiptUiLabelToItemTypeKey(line.item_type)
+                                        const identity = formatMaterialIdentity({
+                                          sku: m.sku,
+                                          name: m.name,
+                                          supplierName: m.supplier?.name,
+                                        })
+                                        const dimHint = formatMaterialDimensionHint({
+                                          sku: m.sku,
+                                          name: m.name,
+                                          supplierName: m.supplier?.name,
+                                          micras: m.micras,
+                                          ancho: m.ancho,
+                                          itemTypeKey: typeKey,
+                                        })
+                                        const search = [
+                                          m.sku,
+                                          m.name,
+                                          m.supplier?.name,
+                                          m.micras,
+                                          m.ancho,
+                                          formatMaterialCatalogLabel({
+                                            sku: m.sku,
+                                            name: m.name,
+                                            supplierName: m.supplier?.name,
+                                            micras: m.micras,
+                                            ancho: m.ancho,
+                                            itemTypeKey: typeKey,
+                                          }),
+                                          String(m.id),
+                                        ]
                                           .filter(Boolean)
                                           .join(" ")
                                         return (
@@ -953,12 +1003,19 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                           >
                                             <Check
                                               className={cn(
-                                                "mr-2 h-4 w-4",
+                                                "mr-2 h-4 w-4 shrink-0",
                                                 line.material_id === String(m.id) ? "opacity-100" : "opacity-0",
                                               )}
                                               aria-hidden
                                             />
-                                            <span className="truncate text-sm">{label}</span>
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-sm">{identity}</p>
+                                              {dimHint ? (
+                                                <p className="truncate text-xs text-muted-foreground">
+                                                  {dimHint}
+                                                </p>
+                                              ) : null}
+                                            </div>
                                           </CommandItem>
                                         )
                                       })}

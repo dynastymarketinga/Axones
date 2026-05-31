@@ -20,6 +20,7 @@ import {
   Pencil,
   Printer,
   RotateCcw,
+  Scale,
   Settings2,
   ShoppingCart,
   Truck,
@@ -91,6 +92,15 @@ import {
   PurchaseOrderStatusBadge,
 } from "@/pages/axones/purchase-order-shared"
 import "./purchase-order-list.css"
+
+function partialReceiptProgressTooltip(label: string | null | undefined): string | undefined {
+  if (!label) return undefined
+  const slashIdx = label.indexOf(" / ")
+  if (slashIdx === -1) return undefined
+  const received = label.slice(0, slashIdx).trim()
+  const rest = label.slice(slashIdx + 3).trim()
+  return `Recibido ${received} de ${rest} pedidos`
+}
 
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
 
@@ -190,7 +200,8 @@ export default function PurchaseOrdersPage() {
 
   const isHistoryTab = viewTab === "history"
   const isInactiveTab = viewTab === "inactive"
-  const tableColSpan = isHistoryTab ? 8 : 6
+  const showReceiptProgressCol = !isInactiveTab
+  const tableColSpan = (isHistoryTab ? 8 : 6) + (showReceiptProgressCol ? 1 : 0)
 
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<PurchaseOrderRow> | null>(
@@ -815,6 +826,11 @@ export default function PurchaseOrdersPage() {
                   <CatalogTableHead icon={CircleDot} className="po-col-status">
                     Estado
                   </CatalogTableHead>
+                  {showReceiptProgressCol ? (
+                    <CatalogTableHead icon={Scale} className="hidden whitespace-nowrap md:table-cell">
+                      Recibido / Pedido
+                    </CatalogTableHead>
+                  ) : null}
                   <CatalogTableHead icon={Layers} className="po-col-articles text-right">
                     Artículos
                   </CatalogTableHead>
@@ -881,12 +897,29 @@ export default function PurchaseOrdersPage() {
                         {r.supplier?.name ?? `#${r.supplier_id}`}
                       </TableCell>
                       <TableCell className="po-col-status p-3 align-middle">
-                        <PurchaseOrderStatusBadge
-                          status={r.status}
-                          manuallyClosedAt={r.manually_closed_at ?? null}
-                          prominent
-                        />
+                        <div className="flex flex-col gap-1">
+                          <PurchaseOrderStatusBadge
+                            status={r.status}
+                            manuallyClosedAt={r.manually_closed_at ?? null}
+                            prominent
+                            title={
+                              r.status === "partial"
+                                ? partialReceiptProgressTooltip(r.receipt_progress_label)
+                                : undefined
+                            }
+                          />
+                          {r.status === "partial" && r.receipt_progress_label ? (
+                            <span className="text-muted-foreground text-xs tabular-nums md:hidden">
+                              {r.receipt_progress_label}
+                            </span>
+                          ) : null}
+                        </div>
                       </TableCell>
+                      {showReceiptProgressCol ? (
+                        <TableCell className="hidden p-3 align-middle tabular-nums text-sm md:table-cell">
+                          {r.receipt_progress_label ?? "—"}
+                        </TableCell>
+                      ) : null}
                       <TableCell className="po-col-articles p-3 align-middle text-right tabular-nums font-semibold">
                         {r.lines_count ?? "—"}
                       </TableCell>

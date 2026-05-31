@@ -202,6 +202,20 @@ export function PurchaseOrderDetailSheet({
                                   ? formatQuantityEs(ln.quantity_received)
                                   : "0,000"}
                               </p>
+                              {(() => {
+                                const ordered = Number(ln.quantity_ordered ?? 0)
+                                const received = Number(ln.quantity_received ?? 0)
+                                const pending = Math.max(
+                                  0,
+                                  ordered - (Number.isFinite(received) ? received : 0),
+                                )
+                                const unit = ln.unit ?? "kg"
+                                return pending > 0.0001 ? (
+                                  <p className="mt-1 text-xs font-semibold tabular-nums text-amber-700 dark:text-amber-400">
+                                    Pendiente: {formatQuantityEs(pending)} {unit}
+                                  </p>
+                                ) : null
+                              })()}
                             </div>
                           </div>
                         </li>

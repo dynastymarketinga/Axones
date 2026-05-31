@@ -136,11 +136,13 @@ export function PurchaseOrderStatusBadge({
   manuallyClosedAt,
   compact,
   prominent,
+  title,
 }: {
   status: string
   manuallyClosedAt?: string | null
   compact?: boolean
   prominent?: boolean
+  title?: string
 }) {
   const normalized = status === "cancelled" ? "completed" : status
   const label = purchaseOrderStatusLabel(status)
@@ -186,6 +188,7 @@ export function PurchaseOrderStatusBadge({
           shellClass,
           "border-amber-500/35 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300",
         )}
+        title={title}
       >
         <Loader2 className={cn("shrink-0 animate-spin", prominent ? "size-4" : compact ? "size-3" : "size-3.5")} aria-hidden />
         <span>{label}</span>

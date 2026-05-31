@@ -75,6 +75,22 @@ class MasterDataAndPurchaseTest extends TestCase
         $po = PurchaseOrder::query()->find($poResponse->json('id'));
         $this->assertEquals(PurchaseOrderStatus::Partial->value, $po->status);
         $this->assertEquals('40.000', (string) $po->lines->first()->quantity_received);
+
+        $index = $this->getJson('/api/purchase-orders?has_receipts=true&per_page=100', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+
+        $row = collect($index->json('data'))->firstWhere('id', $po->id);
+        $this->assertNotNull($row);
+        $this->assertSame('40,000 / 100,000 kg', $row['receipt_progress_label']);
+        $this->assertArrayNotHasKey('lines', $row);
+
+        $pendingIndex = $this->getJson('/api/purchase-orders?has_receipts=false&per_page=100', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+        $this->assertFalse(
+            collect($pendingIndex->json('data'))->contains('id', $po->id),
+        );
     }
 
     public function test_receipt_without_purchase_order_updates_stock(): void

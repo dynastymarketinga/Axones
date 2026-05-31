@@ -16,6 +16,7 @@ use App\Models\PurchaseOrderLine;
 use App\Models\WorkOrder;
 use App\Services\PurchaseOrderClosingService;
 use App\Support\BossAccess;
+use App\Support\PurchaseOrderReceiptProgress;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -81,10 +82,22 @@ class PurchaseOrderController extends Controller
         }
 
         $query
+            ->with(['lines:id,purchase_order_id,quantity_ordered,quantity_received,unit'])
             ->withCount(['receipts as receipts_count' => $linkedReceiptsFilter])
             ->withMax(['receipts as last_receipt_at' => $linkedReceiptsFilter], 'received_at');
 
-        return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
+        $paginator = $query->paginate(min((int) $request->query('per_page', 20), 100));
+        $paginator->getCollection()->transform(function (PurchaseOrder $po) {
+            $po->setAttribute(
+                'receipt_progress_label',
+                PurchaseOrderReceiptProgress::label($po->lines),
+            );
+            $po->unsetRelation('lines');
+
+            return $po;
+        });
+
+        return response()->json($paginator);
     }
 
     public function store(StorePurchaseOrderRequest $request): JsonResponse

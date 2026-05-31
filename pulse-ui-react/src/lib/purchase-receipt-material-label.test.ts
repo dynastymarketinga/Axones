@@ -2,7 +2,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  formatMaterialCatalogLabel,
+  formatMaterialDimensionHint,
   formatMaterialIdentity,
+  formatOcLineReceiptProgress,
   formatOcLineReference,
   formatPurchaseOrderBanner,
   parseOcLineMeta,
@@ -40,6 +43,47 @@ describe("formatMaterialIdentity", () => {
   })
 })
 
+describe("formatMaterialCatalogLabel", () => {
+  it("añade micras y ancho solo para sustrato", () => {
+    expect(
+      formatMaterialCatalogLabel({
+        sku: "857757",
+        name: "bopp 23",
+        supplierName: "valeria prueba",
+        micras: "20",
+        ancho: "1000",
+        itemTypeKey: "sustrato",
+      }),
+    ).toBe("857757 · bopp 23 · valeria prueba · 20 µm · 1000 mm")
+  })
+
+  it("no añade dimensiones para tinta", () => {
+    expect(
+      formatMaterialCatalogLabel({
+        sku: "TINTA-01",
+        name: "Cyan",
+        supplierName: "Proveedor",
+        micras: "20",
+        ancho: "1000",
+        itemTypeKey: "tinta",
+      }),
+    ).toBe("TINTA-01 · Cyan · Proveedor")
+  })
+})
+
+describe("formatMaterialDimensionHint", () => {
+  it("retorna null para químico", () => {
+    expect(
+      formatMaterialDimensionHint({
+        sku: "Q",
+        micras: "20",
+        ancho: "100",
+        itemTypeKey: "quimico",
+      }),
+    ).toBeNull()
+  })
+})
+
 describe("formatOcLineReference", () => {
   it("usa material del catálogo con proveedor de línea", () => {
     expect(
@@ -57,13 +101,27 @@ describe("formatOcLineReference", () => {
     ).toBe("BIOPET-400X-4005 · BOPP transparente · Víctor")
   })
 
-  it("usa descripción parseada y proveedor de cabecera OC", () => {
+  it("incluye dimensiones de descripción para sustrato", () => {
     expect(
       formatOcLineReference(
-        { description: "BOPP transparente | Tipo: sustrato" },
+        {
+          description: "BOPP | Tipo: sustrato | Micras: 20 | Ancho: 520mm",
+        },
         "Millennium",
       ),
-    ).toBe("BOPP transparente · Millennium")
+    ).toBe("BOPP · Millennium · 20 µm · 520 mm")
+  })
+})
+
+describe("formatOcLineReceiptProgress", () => {
+  it("muestra pedido recibido y pendiente", () => {
+    expect(
+      formatOcLineReceiptProgress({
+        quantity_ordered: "500",
+        quantity_received: "400",
+        unit: "kg",
+      }),
+    ).toBe("Pedido 500,000 · Recibido 400,000 · Pendiente 100,000 kg")
   })
 })
 

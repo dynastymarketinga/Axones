@@ -15,7 +15,12 @@ export default defineConfig(({ mode }) => {
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["brand/*.png"],
+      devOptions: {
+        enabled: true,
+        navigateFallback: "/axones/index.html",
+      },
       manifest: {
+        id: "/axones/",
         name: "Axones",
         short_name: "Axones",
         description: "Sistema de producción e inventario Axones",
@@ -31,11 +36,13 @@ export default defineConfig(({ mode }) => {
             src: "brand/pwa-192.png",
             sizes: "192x192",
             type: "image/png",
+            purpose: "any",
           },
           {
             src: "brand/pwa-512.png",
             sizes: "512x512",
             type: "image/png",
+            purpose: "any",
           },
           {
             src: "brand/pwa-512.png",

@@ -9,6 +9,7 @@
     "dev:share": "concurrently -k -n vite,tunnel -c cyan,magenta \"npm run dev\" \"npm run dev:tunnel\"",
     "build": "tsc -b && vite build",
     "build:deploy": "vite build",
+    "pwa:icons": "node scripts/generate-pwa-icons.mjs",
     "build:cf": "npm run build && node scripts/prep-cloudflare-subpath.mjs",
     "lint": "eslint .",
     "preview": "vite preview",

@@ -26,7 +26,7 @@ No cambia con este despliegue: sigue usando el subpath `/axones/`.
 | `10.0.0.2` | IP del SERVIDOR en la red de la fábrica |
 | `axones` | Nombre corto que quieres escribir en la barra de direcciones |
 
-Sin esa línea, `https://axones/...` no resuelve. Con ella, puedes abrir `https://axones/auth/basic/login` en lugar de `http://10.0.0.2/axones/...`.
+Sin esa línea, el navegador muestra **DNS_PROBE_FINISHED_NXDOMAIN** si escribes solo `axones` en la barra. Con la línea, usa **`http://axones/auth/basic/login`** o **`https://axones/...`** (si Apache tiene SSL).
 
 **Windows** (Bloc de notas **como administrador**): abre  
 `C:\Windows\System32\drivers\etc\hosts`  
@@ -74,7 +74,32 @@ systemctl status apache2 2>/dev/null || systemctl status httpd 2>/dev/null
 which nginx 2>/dev/null
 ```
 
-Si usas **Apache**, hay que adaptar el VirtualHost (equivalente a la plantilla Nginx). Mientras tanto puedes seguir entrando por **`http://10.0.0.2/axones/`** (o la nueva ruta tras el deploy: `http://10.0.0.2/` si Apache ya apunta el `DocumentRoot` a `backend/public`).
+Tu SERVIDOR usa **Apache** (`apache2` en el puerto 80). Plantilla:
+
+```bash
+cd /var/www/axones
+git pull origin main
+sudo cp scripts/apache/axones.conf.example /etc/apache2/sites-available/axones.conf
+sudo a2enmod rewrite ssl headers
+sudo a2ensite axones.conf   # si choca con otro sitio: sudo apache2ctl -S y fusiona a mano
+sudo apache2ctl configtest
+sudo systemctl reload apache2
+```
+
+El archivo `backend/public/.htaccess` (en el repo) hace:
+
+- redirigir `/axones/...` → `/...`
+- servir la SPA (`index.html`) en rutas como `/auth/...`
+- dejar `/api` y `/panel` en Laravel
+
+**Entrada tras el deploy:** `http://10.0.0.2/auth/basic/login` (ya no uses solo `/axones/`; esa carpeta ya no existe).
+
+Comprobar en el servidor:
+
+```bash
+ls -la /var/www/axones/backend/public/index.html
+curl -sI http://127.0.0.1/auth/basic/login | head -5
+```
 
 ### Solo si tienes Nginx
 

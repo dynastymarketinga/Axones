@@ -5,6 +5,9 @@
 
     RewriteEngine On
 
+    # URL antigua con prefijo /axones/ → misma ruta sin prefijo
+    RewriteRule ^axones/?(.*)$ /$1 [R=301,L]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
@@ -18,8 +21,18 @@
     RewriteCond %{REQUEST_URI} (.+)/$
     RewriteRule ^ %1 [L,R=301]
 
-    # Send Requests To Front Controller...
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^ index.php [L]
+    # Laravel: API, panel y health
+    RewriteRule ^api(?:/.*)?$ index.php [L,NC]
+    RewriteRule ^panel(?:/.*)?$ index.php [L,NC]
+    RewriteRule ^up$ index.php [L,NC]
+
+    # Archivos estáticos del build (assets, brand, sw, index.html)
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # SPA React: cualquier otra ruta → index.html
+    RewriteRule ^ index.html [L]
 </IfModule>

@@ -66,6 +66,7 @@ echo "==> Verificar en producción: /build-info.json (https://axones/build-info.
 
 if command -v systemctl >/dev/null 2>&1; then
   sudo systemctl reload nginx 2>/dev/null || true
+  sudo systemctl reload apache2 2>/dev/null || true
 fi
 
 echo "==> Deploy completado OK ($DEPLOY_COMMIT_SHORT)"

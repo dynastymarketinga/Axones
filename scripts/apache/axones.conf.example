@@ -1,0 +1,54 @@
+# Axones — Apache (tu servidor usa apache2 en :80, no Nginx)
+#
+# 1) Ver sitio actual:
+#    sudo apache2ctl -S
+#    grep -r axones /etc/apache2/sites-enabled/ /etc/apache2/conf-enabled/ 2>/dev/null
+#
+# 2) Copiar y activar (ajusta rutas si tu DocumentRoot es otro):
+#    sudo cp /var/www/axones/scripts/apache/axones.conf.example /etc/apache2/sites-available/axones.conf
+#    sudo a2enmod rewrite ssl headers
+#    sudo a2ensite axones.conf
+#    sudo apache2ctl configtest
+#    sudo systemctl reload apache2
+#
+# Si ya existe otro VirtualHost en :80, fusiona estas reglas o desactiva el sitio duplicado.
+
+<VirtualHost *:80>
+    ServerName 10.0.0.2
+    ServerAlias axones
+    ServerAdmin webmaster@localhost
+
+    DocumentRoot /var/www/axones/backend/public
+
+    <Directory /var/www/axones/backend/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/axones-error.log
+    CustomLog ${APACHE_LOG_DIR}/axones-access.log combined
+</VirtualHost>
+
+# HTTPS (certificado: sudo bash scripts/setup-https-selfsigned.sh 10.0.0.2 axones)
+<IfModule mod_ssl.c>
+<VirtualHost *:443>
+    ServerName 10.0.0.2
+    ServerAlias axones
+
+    DocumentRoot /var/www/axones/backend/public
+
+    SSLEngine on
+    SSLCertificateFile      /etc/ssl/axones/axones-fullchain.pem
+    SSLCertificateKeyFile   /etc/ssl/private/axones.key
+
+    <Directory /var/www/axones/backend/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/axones-ssl-error.log
+    CustomLog ${APACHE_LOG_DIR}/axones-ssl-access.log combined
+</VirtualHost>
+</IfModule>

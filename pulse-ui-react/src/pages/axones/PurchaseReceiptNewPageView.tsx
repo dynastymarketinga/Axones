@@ -159,7 +159,8 @@ export type PurchaseReceiptNewPageViewProps = {
   selectedPurchaseOrderRow: PurchaseOrderOption | null
   purchaseOrderOptions: PurchaseOrderOption[]
   clearPurchaseOrder: () => void
-  setPurchaseOrderId: (id: number | null) => void
+  selectPurchaseOrder: (po: PurchaseOrderOption) => void
+  poDetailLoading: boolean
   navigateToNewPurchaseOrder: () => void
   hasPurchaseOrder: boolean
   fieldErrors: ReceiptFieldErrors
@@ -626,13 +627,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                               <CommandItem
                                 key={po.id}
                                 value={search}
-                                onSelect={() => {
-                                  props.setPurchaseOrderId(po.id)
-                                  if (po.supplier_id > 0 && po.supplier_id !== props.supplierId) {
-                                    props.setSupplierId(po.supplier_id)
-                                  }
-                                  props.setPoComboOpen(false)
-                                }}
+                                onSelect={() => props.selectPurchaseOrder(po)}
                               >
                                 <Check
                                   className={cn(
@@ -906,7 +901,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                               })()
                             ) : (
                               <div className="flex h-9 min-w-0 items-center truncate rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground">
-                                Seleccione OC arriba para cargar items...
+                                {props.poDetailLoading
+                                  ? "Cargando líneas de la OC..."
+                                  : "Esta OC no tiene cantidad pendiente por recibir."}
                               </div>
                             )}
                           </TableCell>

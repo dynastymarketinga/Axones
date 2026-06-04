@@ -13,6 +13,7 @@ import {
   formatOcLineReference,
   formatPurchaseOrderBanner,
   parseOcLineMeta,
+  purchaseOrderHasPendingReceiptQuantity,
 } from "@/lib/purchase-receipt-material-label"
 import type { LaravelPaginated, MaterialRow, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import {
@@ -417,6 +418,8 @@ export default function PurchaseReceiptNewPage() {
   const [lineErrors, setLineErrors] = useState<Record<number, ReceiptLineFieldErrors>>({})
   const fieldErrorsClearTimerRef = useRef<number | null>(null)
   const prevSupplierRef = useRef<number | null>(null)
+  /** Evita limpiar la OC cuando el cambio de proveedor viene de elegir una OC de otro proveedor. */
+  const skipSupplierResetForPoRef = useRef(false)
   /** Si coincide con `purchaseOrderId`, no reemplazar `freeLines` con la hidratación de la API (p. ej. tras restaurar borrador). */
   const skipRemoteFreeLinesForPurchaseOrderRef = useRef<number | null>(null)
   const pendingRestoredFreeLinesRef = useRef<FreeLine[] | null>(null)
@@ -480,9 +483,13 @@ export default function PurchaseReceiptNewPage() {
 
   useEffect(() => {
     if (prevSupplierRef.current !== null && prevSupplierRef.current !== supplierId) {
-      setPurchaseOrderId(null)
-      setPurchaseOrderDetail(null)
-      setFreeLines([emptyLine()])
+      if (skipSupplierResetForPoRef.current) {
+        skipSupplierResetForPoRef.current = false
+      } else {
+        setPurchaseOrderId(null)
+        setPurchaseOrderDetail(null)
+        setFreeLines([emptyLine()])
+      }
     }
     prevSupplierRef.current = supplierId
   }, [supplierId])
@@ -494,7 +501,9 @@ export default function PurchaseReceiptNewPage() {
         query: { per_page: 100, page: 1 },
       })
       const eligible = sortPurchaseOrdersForReceipt(
-        res.data.filter(isPurchaseOrderReceiptEligible),
+        res.data.filter(
+          (po) => isPurchaseOrderReceiptEligible(po) && purchaseOrderHasPendingReceiptQuantity(po),
+        ),
         supplierId,
       )
       setPurchaseOrderOptions(eligible)
@@ -548,8 +557,15 @@ export default function PurchaseReceiptNewPage() {
             setFreeLines(pendingRestoredFreeLinesRef.current)
             pendingRestoredFreeLinesRef.current = null
           }
+        } else if (eligible.length === 0) {
+          toast.warning(
+            "Esta orden de compra no tiene cantidad pendiente por recibir. Elija otra OC o use entrada directa (sin OC).",
+          )
+          setPurchaseOrderId(null)
+          setPurchaseOrderDetail(null)
+          setFreeLines([emptyLine()])
         } else {
-          setFreeLines(nextLines.length ? nextLines : [emptyLine()])
+          setFreeLines(nextLines)
         }
       } catch {
         if (!cancelled) {
@@ -1118,6 +1134,18 @@ export default function PurchaseReceiptNewPage() {
     })
   }
 
+  const selectPurchaseOrder = useCallback(
+    (po: PurchaseOrderRow) => {
+      if (po.supplier_id > 0 && po.supplier_id !== supplierId) {
+        skipSupplierResetForPoRef.current = true
+        setSupplierId(po.supplier_id)
+      }
+      setPurchaseOrderId(po.id)
+      setPoComboOpen(false)
+    },
+    [supplierId],
+  )
+
   function clearPurchaseOrder() {
     setPurchaseOrderId(null)
     setPurchaseOrderDetail(null)
@@ -1332,7 +1360,8 @@ export default function PurchaseReceiptNewPage() {
       selectedPurchaseOrderRow={selectedPurchaseOrderRow}
       purchaseOrderOptions={purchaseOrderOptions}
       clearPurchaseOrder={clearPurchaseOrder}
-      setPurchaseOrderId={setPurchaseOrderId}
+      selectPurchaseOrder={selectPurchaseOrder}
+      poDetailLoading={poDetailLoading}
       navigateToNewPurchaseOrder={navigateToNewPurchaseOrder}
       hasPurchaseOrder={hasPurchaseOrder}
       fieldErrors={fieldErrors}

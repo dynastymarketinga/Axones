@@ -12,6 +12,8 @@ import {
   formatPurchaseOrderOptionSecondary,
   formatPurchaseOrderSelectorLabels,
   parseOcLineMeta,
+  parseReceiptProgressLabel,
+  purchaseOrderHasPendingReceiptQuantity,
 } from "@/lib/purchase-receipt-material-label"
 
 describe("formatMaterialIdentity", () => {
@@ -177,6 +179,30 @@ describe("formatPurchaseOrderOptionSecondary", () => {
         linesCount: 2,
       }),
     ).toBe("Abierta · 0,000 / 500,000 kg · 2 artículos")
+  })
+})
+
+describe("parseReceiptProgressLabel", () => {
+  it("parsea avance recibido vs pedido", () => {
+    expect(parseReceiptProgressLabel("100,000 / 100,000 kg")).toEqual({
+      received: 100,
+      ordered: 100,
+    })
+    expect(parseReceiptProgressLabel("0,000 / 1.500,000 kg")).toEqual({
+      received: 0,
+      ordered: 1500,
+    })
+  })
+})
+
+describe("purchaseOrderHasPendingReceiptQuantity", () => {
+  it("detecta OC sin pendiente", () => {
+    expect(
+      purchaseOrderHasPendingReceiptQuantity({ receipt_progress_label: "100,000 / 100,000 kg" }),
+    ).toBe(false)
+    expect(
+      purchaseOrderHasPendingReceiptQuantity({ receipt_progress_label: "50,000 / 100,000 kg" }),
+    ).toBe(true)
   })
 })
 

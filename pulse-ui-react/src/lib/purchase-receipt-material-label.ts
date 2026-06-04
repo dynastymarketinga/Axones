@@ -250,6 +250,34 @@ export function formatPurchaseOrderSelectorLabels(input: PurchaseOrderOptionLabe
   }
 }
 
+/** Parsea avance tipo "400,000 / 500,000 kg" del listado de OC. */
+export function parseReceiptProgressLabel(
+  label: string | null | undefined,
+): { received: number; ordered: number } | null {
+  const raw = (label ?? "").trim()
+  if (!raw) return null
+  const match = raw.match(/^([\d.,]+)\s*\/\s*([\d.,]+)/)
+  if (!match) return null
+  const received = parseReceiptProgressNumber(match[1])
+  const ordered = parseReceiptProgressNumber(match[2])
+  if (!Number.isFinite(received) || !Number.isFinite(ordered)) return null
+  return { received, ordered }
+}
+
+function parseReceiptProgressNumber(value: string): number {
+  const normalized = value.replace(/\./g, "").replace(",", ".")
+  return Number(normalized)
+}
+
+/** Indica si la OC aún tiene cantidad pendiente por recibir (según resumen del listado). */
+export function purchaseOrderHasPendingReceiptQuantity(po: {
+  receipt_progress_label?: string | null
+}): boolean {
+  const parsed = parseReceiptProgressLabel(po.receipt_progress_label)
+  if (!parsed) return true
+  return parsed.ordered > parsed.received + 0.0001
+}
+
 /** Texto de búsqueda para el combobox de OC. */
 export function purchaseOrderOptionSearchValue(input: PurchaseOrderOptionLabelInput): string {
   return [

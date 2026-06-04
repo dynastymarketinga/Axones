@@ -2,13 +2,23 @@ import { Download } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>
 }
 
-export function PwaInstallPrompt() {
+type PwaInstallPromptProps = {
+  /** header: solo escritorio (barra). login: visible también en móvil/tablet. */
+  variant?: "header" | "login"
+  className?: string
+}
+
+export function PwaInstallPrompt({
+  variant = "header",
+  className,
+}: PwaInstallPromptProps = {}) {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(
     null,
   )
@@ -43,9 +53,14 @@ export function PwaInstallPrompt() {
   return (
     <Button
       type="button"
-      variant="outline"
-      size="sm"
-      className="hidden gap-1.5 sm:inline-flex"
+      variant={variant === "login" ? "secondary" : "outline"}
+      size={variant === "login" ? "default" : "sm"}
+      className={cn(
+        "gap-1.5",
+        variant === "header" && "hidden sm:inline-flex",
+        variant === "login" && "inline-flex w-full",
+        className,
+      )}
       onClick={async () => {
         await installEvent.prompt()
         const choice = await installEvent.userChoice

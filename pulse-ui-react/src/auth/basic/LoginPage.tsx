@@ -1,5 +1,6 @@
 import { AxonesBrandMark } from "@/components/axones/AxonesBrandMark"
 import { LoginForm } from "@/components/login-form"
+import { PwaInstallPrompt } from "@/components/pwa-install-prompt"
 
 export default function LoginPage() {
   return (
@@ -10,6 +11,14 @@ export default function LoginPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Axones</h1>
         </div>
         <LoginForm />
+        <div className="mt-6 space-y-2">
+          <PwaInstallPrompt variant="login" />
+          <p className="text-center text-xs text-muted-foreground">
+            También puedes usar el menú del navegador →{" "}
+            <span className="font-medium text-foreground">Instalar aplicación</span> o{" "}
+            <span className="font-medium text-foreground">Añadir a la pantalla de inicio</span>.
+          </p>
+        </div>
       </div>
     </div>
   )

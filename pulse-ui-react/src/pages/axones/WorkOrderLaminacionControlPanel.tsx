@@ -40,6 +40,7 @@ import {
   MES_PRODUCTION_SAVE_CONFIG,
   MES_SAVE_BLOCKED_MESSAGE,
 } from "@/lib/mes-timer-guards"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -855,9 +856,9 @@ export default function WorkOrderLaminacionControlPanel({
       toast.error("No se pudo preparar la vista previa.")
       return
     }
-    const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
-      String(workOrderId),
-    )}/laminacion/temporizador/vista-previa${previewHash}`
+    const url = appAbsoluteUrl(
+      `/ordenes-trabajo/${encodeURIComponent(String(workOrderId))}/laminacion/temporizador/vista-previa${previewHash}`,
+    )
     window.open(url, "_blank", "noopener,noreferrer")
   }
 

@@ -28,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { ApiError, apiFetch } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
 import { cn } from "@/lib/utils"
@@ -103,7 +104,9 @@ export default function ReportsInventoryPage() {
       from,
       to,
     })
-    const url = `${window.location.origin}/axones/reportes/inventario/bobinas-rechazadas/vista-previa?${params.toString()}`
+    const url = appAbsoluteUrl(
+      `/reportes/inventario/bobinas-rechazadas/vista-previa?${params.toString()}`,
+    )
     const popup = window.open(url, "_blank")
     if (!popup) toast.error("El navegador bloqueó la ventana emergente de vista previa.")
   }, [from, to])

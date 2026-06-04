@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Certificado autofirmado para Axones en red local (ej. 10.0.0.2).
-# Permite https://10.0.0.2/axones/ y activa «Instalar aplicación» en Chrome/Android
+# Permite https://axones/ (SPA en /) y activa «Instalar aplicación» en Chrome/Android
 # tras aceptar la advertencia de seguridad una vez (o instalar el CA en tablets).
 #
 # Uso en el SERVIDOR (como root o con sudo):
 #   cd /var/www/axones
 #   sudo bash scripts/setup-https-selfsigned.sh
-#   sudo bash scripts/setup-https-selfsigned.sh 10.0.0.2 axones.local
+#   sudo bash scripts/setup-https-selfsigned.sh 10.0.0.2 axones
 #
 set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/var/www/axones}"
 PRIMARY_IP="${1:-10.0.0.2}"
-EXTRA_NAME="${2:-axones.local}"
+EXTRA_NAME="${2:-axones}"
 SSL_DIR="/etc/ssl/axones"
 KEY_PATH="/etc/ssl/private/axones.key"
 CRT_PATH="${SSL_DIR}/axones.crt"
@@ -74,21 +74,26 @@ echo "    $KEY_PATH"
 NGINX_SITE="/etc/nginx/sites-available/axones"
 NGINX_EXAMPLE="$APP_ROOT/scripts/nginx/axones-https.conf.example"
 
-if [[ -f "$NGINX_EXAMPLE" ]] && [[ ! -f "$NGINX_SITE" ]]; then
-  cp "$NGINX_EXAMPLE" "$NGINX_SITE"
-  echo "==> Copiado $NGINX_SITE (revísalo: php-fpm socket, server_name)"
-fi
-
-if [[ -f "$NGINX_SITE" ]]; then
-  ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/axones 2>/dev/null || true
-  nginx -t
-  systemctl reload nginx
-  echo "==> Nginx recargado"
+if command -v nginx >/dev/null 2>&1 && [[ -d /etc/nginx/sites-available ]]; then
+  if [[ -f "$NGINX_EXAMPLE" ]] && [[ ! -f "$NGINX_SITE" ]]; then
+    cp "$NGINX_EXAMPLE" "$NGINX_SITE"
+    echo "==> Copiado $NGINX_SITE (revísalo: php-fpm socket, server_name)"
+  fi
+  if [[ -f "$NGINX_SITE" ]]; then
+    ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/axones 2>/dev/null || true
+    nginx -t
+    systemctl reload nginx
+    echo "==> Nginx recargado"
+  fi
+else
+  echo "==> Nginx no instalado: certificado listo en /etc/ssl/axones/"
+  echo "    Configura HTTPS en Apache (u otro servidor) o: sudo apt install nginx"
+  echo "    Ver scripts/DEPLOY_URLS.md"
 fi
 
 ENV_FILE="$APP_ROOT/backend/.env"
 if [[ -f "$ENV_FILE" ]]; then
-  HTTPS_URL="https://${PRIMARY_IP}"
+  HTTPS_URL="https://${EXTRA_NAME}"
   if grep -q '^APP_URL=' "$ENV_FILE"; then
     sed -i "s|^APP_URL=.*|APP_URL=${HTTPS_URL}|" "$ENV_FILE"
   else
@@ -113,13 +118,12 @@ fi
 
 cat <<EOF
 
-==> Listo. Prueba en el navegador:
-    https://${PRIMARY_IP}/axones/auth/basic/login
+==> Listo. Prueba en el navegador (añade en hosts: ${PRIMARY_IP}  ${EXTRA_NAME}):
+    https://${EXTRA_NAME}/auth/basic/login
 
 1) Acepta la advertencia «No es seguro» (certificado autofirmado) o instala axones.crt como CA en la tablet.
 2) Menú ⋮ → debería aparecer «Instalar aplicación» o usa «Agregar a la pantalla principal».
-3) Iconos PWA: https://${PRIMARY_IP}/axones/brand/pwa-192.png
-
-Opcional en cada PC/tablet (hosts):  ${PRIMARY_IP}  ${EXTRA_NAME}
+3) Iconos PWA: https://${EXTRA_NAME}/brand/pwa-192.png
+4) URLs antiguas /axones/... redirigen solas si Nginx usa axones-https.conf.example actualizado.
 
 EOF

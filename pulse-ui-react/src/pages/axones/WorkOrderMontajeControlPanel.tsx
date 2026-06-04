@@ -5,6 +5,7 @@ import type { ReactNode } from "react"
 import { toast } from "sonner"
 import { MesOperativoEstadoCard, MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -1006,11 +1007,9 @@ export default function WorkOrderMontajeControlPanel({
       toast.error("No se pudo guardar la vista previa en el navegador.")
       return
     }
-    // Abrir dentro del sistema (SPA) bajo /axones (basename del router)
-    // usando una pestaña nueva para mantener la pantalla operativa abierta.
-    const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
-      String(workOrderId),
-    )}/montaje/temporizador/vista-previa`
+    const url = appAbsoluteUrl(
+      `/ordenes-trabajo/${encodeURIComponent(String(workOrderId))}/montaje/temporizador/vista-previa`,
+    )
     window.open(url, "_blank", "noopener,noreferrer")
   }
 

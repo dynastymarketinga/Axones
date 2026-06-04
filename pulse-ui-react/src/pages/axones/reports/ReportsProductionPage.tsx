@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { ApiError, apiDownloadFile, apiFetch } from "@/lib/api"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -85,7 +86,7 @@ export default function ReportsProductionPage() {
 
   const openPlantPreviewWindow = useCallback(() => {
     const params = new URLSearchParams({ view: "planta", from, to })
-    const url = `${window.location.origin}/axones/reportes/produccion/vista-previa?${params.toString()}`
+    const url = appAbsoluteUrl(`/reportes/produccion/vista-previa?${params.toString()}`)
     const popup = window.open(url, "_blank")
     if (!popup) toast.error("El navegador bloqueó la ventana emergente de vista previa.")
   }, [from, to])
@@ -100,7 +101,7 @@ export default function ReportsProductionPage() {
         const id = (otOverride ?? woId).trim()
         if (id) params.set("ot", id)
       }
-      const url = `${window.location.origin}/axones/reportes/produccion/vista-previa?${params.toString()}`
+      const url = appAbsoluteUrl(`/reportes/produccion/vista-previa?${params.toString()}`)
       const popup = window.open(url, "_blank")
       if (!popup) toast.error("El navegador bloqueó la ventana emergente de vista previa.")
     },

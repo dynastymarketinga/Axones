@@ -1,6 +1,8 @@
 import { createBrowserRouter, Navigate, useParams } from "react-router-dom"
 import type { ReactElement } from "react"
 
+import { appRouterBasename } from "@/lib/app-base-path"
+
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
 import LoginPage from "@/auth/basic/LoginPage"
@@ -345,7 +347,8 @@ export const router = createBrowserRouter(
       ],
     },
   ],
-  {
-    basename: "/axones",
-  }
+  (() => {
+    const basename = appRouterBasename()
+    return basename ? { basename } : {}
+  })()
 )

@@ -1,6 +1,12 @@
 # Axones — Nginx con HTTPS (copiar a /etc/nginx/sites-available/axones)
 #
-# 1) Generar certificado: sudo bash scripts/setup-https-selfsigned.sh
+# SPA en la raíz (/auth/..., /ordenes-trabajo/...). Rutas antiguas /axones/* redirigen a /*.
+#
+# Antes de activar, revisa otros sitios en el mismo servidor:
+#   ls -la /etc/nginx/sites-enabled/
+#   sudo nginx -T 2>/dev/null | grep -E 'server_name|listen '
+#
+# 1) Generar certificado: sudo bash scripts/setup-https-selfsigned.sh 10.0.0.2 axones
 #    o Certbot: sudo bash scripts/setup-https-certbot.sh axones.tudominio.com
 # 2) sudo ln -sf /etc/nginx/sites-available/axones /etc/nginx/sites-enabled/
 # 3) sudo nginx -t && sudo systemctl reload nginx
@@ -12,11 +18,15 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
-# Redirigir HTTP → HTTPS
+# HTTP → HTTPS (misma ruta; /axones/ legacy se reescribe en el bloque 443)
 server {
     listen 80;
     listen [::]:80;
-    server_name 10.0.0.2 axones.local;
+    server_name axones 10.0.0.2;
+
+    location ^~ /axones/ {
+        rewrite ^/axones/?(.*)$ https://axones/$1 permanent;
+    }
 
     return 301 https://$host$request_uri;
 }
@@ -24,12 +34,11 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name 10.0.0.2 axones.local;
+    server_name axones 10.0.0.2;
 
     root /var/www/axones/backend/public;
-    index index.php;
+    index index.php index.html;
 
-    # Rutas generadas por setup-https-selfsigned.sh o Certbot
     ssl_certificate     /etc/ssl/axones/axones-fullchain.pem;
     ssl_certificate_key /etc/ssl/private/axones.key;
 
@@ -42,21 +51,9 @@ server {
 
     client_max_body_size 32M;
 
-    # SPA React (build en public/axones)
-    location /axones/ {
-        try_files $uri $uri/ /axones/index.html;
-    }
-
-    # Manifest / service worker (MIME correcto para PWA)
-    location ~* ^/axones/.*\.(webmanifest|json)$ {
-        try_files $uri =404;
-        add_header Cache-Control "public, max-age=300";
-        default_type application/manifest+json;
-    }
-
-    location = /axones/manifest.webmanifest {
-        try_files $uri =404;
-        default_type application/manifest+json;
+    # URL antigua: http(s)://10.0.0.2/axones/... o https://axones/axones/... → sin prefijo
+    location ^~ /axones/ {
+        rewrite ^/axones/?(.*)$ /$1 permanent;
     }
 
     # API Laravel
@@ -68,8 +65,27 @@ server {
         try_files $uri $uri/ /index.php?$query_string;
     }
 
-    location / {
+    # Panel Laravel (Blade), si se usa
+    location ^~ /panel {
         try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # PWA
+    location = /manifest.webmanifest {
+        try_files $uri =404;
+        default_type application/manifest+json;
+        add_header Cache-Control "public, max-age=300";
+    }
+
+    location ~* \.(webmanifest)$ {
+        try_files $uri =404;
+        default_type application/manifest+json;
+        add_header Cache-Control "public, max-age=300";
+    }
+
+    # SPA React (build en public/, base /)
+    location / {
+        try_files $uri $uri/ /index.html;
     }
 
     location ~ \.php$ {

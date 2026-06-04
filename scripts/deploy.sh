@@ -4,7 +4,7 @@ set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/var/www/axones}"
 SPA_DIST="$APP_ROOT/pulse-ui-react/dist"
-SPA_PUBLIC="$APP_ROOT/backend/public/axones"
+SPA_PUBLIC="$APP_ROOT/backend/public"
 
 cd "$APP_ROOT"
 
@@ -49,10 +49,20 @@ printf '{"commit":"%s","commit_short":"%s","built_at":"%s"}\n' \
 
 echo "==> Publicando SPA: $SPA_DIST -> $SPA_PUBLIC"
 mkdir -p "$SPA_PUBLIC"
-rsync -a --delete "$SPA_DIST/" "$SPA_PUBLIC/"
+rsync -a --delete \
+  --exclude 'index.php' \
+  --exclude 'robots.txt' \
+  --exclude '.htaccess' \
+  "$SPA_DIST/" "$SPA_PUBLIC/"
+
+LEGACY_SPA="$APP_ROOT/backend/public/axones"
+if [ -d "$LEGACY_SPA" ]; then
+  echo "==> Eliminando carpeta legacy $LEGACY_SPA"
+  rm -rf "$LEGACY_SPA"
+fi
 
 echo "==> Bundle activo: $(basename "$MAIN_BUNDLE")"
-echo "==> Verificar en producción: /axones/build-info.json"
+echo "==> Verificar en producción: /build-info.json (https://axones/build-info.json con hosts)"
 
 if command -v systemctl >/dev/null 2>&1; then
   sudo systemctl reload nginx 2>/dev/null || true

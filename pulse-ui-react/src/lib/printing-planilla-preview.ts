@@ -1,3 +1,4 @@
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import {
   IMP_ACTUAL_KEY,
   IMP_ESTADO_KEY,
@@ -546,9 +547,9 @@ export function persistPrintingPlanillaPreview(payload: PrintingPlanillaPreviewP
 }
 
 export function openPrintingPlanillaPreviewWindow(workOrderId: number): void {
-  const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
-    String(workOrderId),
-  )}/impresion/planilla/vista-previa`
+  const url = appAbsoluteUrl(
+    `/ordenes-trabajo/${encodeURIComponent(String(workOrderId))}/impresion/planilla/vista-previa`,
+  )
   window.open(url, "_blank", "noopener,noreferrer")
 }
 

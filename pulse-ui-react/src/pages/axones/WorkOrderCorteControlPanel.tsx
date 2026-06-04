@@ -14,6 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -957,9 +958,9 @@ export default function WorkOrderCorteControlPanel({
       toast.error("No se pudo preparar la vista previa.")
       return
     }
-    const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
-      String(workOrderId),
-    )}/corte/temporizador/vista-previa${previewHash}`
+    const url = appAbsoluteUrl(
+      `/ordenes-trabajo/${encodeURIComponent(String(workOrderId))}/corte/temporizador/vista-previa${previewHash}`,
+    )
     window.open(url, "_blank", "noopener,noreferrer")
   }
 

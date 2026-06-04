@@ -7,20 +7,23 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "")
   const laravelTarget =
     env.LARAVEL_DEV_URL || env.VITE_LARAVEL_DEV_URL || "http://127.0.0.1:8000"
+  // Dev: /axones/ (localhost:5173). Producción (build:deploy): / → https://axones/auth/...
+  const appBase = mode === "production" ? "/" : "/axones/"
+  const spaIndex = `${appBase}index.html`
 
   return {
-  base: "/axones/",
+  base: appBase,
   plugins: [
     react(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["brand/*.png"],
       devOptions: {
-        enabled: true,
-        navigateFallback: "/axones/index.html",
+        enabled: mode !== "production",
+        navigateFallback: spaIndex,
       },
       manifest: {
-        id: "/axones/",
+        id: appBase,
         name: "Axones",
         short_name: "Axones",
         description: "Sistema de producción e inventario Axones",
@@ -28,8 +31,8 @@ export default defineConfig(({ mode }) => {
         background_color: "#ffffff",
         display: "standalone",
         orientation: "any",
-        start_url: "/axones/",
-        scope: "/axones/",
+        start_url: appBase,
+        scope: appBase,
         lang: "es",
         icons: [
           {
@@ -53,7 +56,7 @@ export default defineConfig(({ mode }) => {
         ],
       },
       workbox: {
-        navigateFallback: "/axones/index.html",
+        navigateFallback: spaIndex,
         navigateFallbackDenylist: [/^\/api/],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
@@ -62,11 +65,12 @@ export default defineConfig(({ mode }) => {
     {
       name: "redirect-root-to-base",
       configureServer(server) {
+        if (mode === "production") return
         server.middlewares.use((req, res, next) => {
           const url = req.url || "/"
           if (url === "/" || url === "/index.html") {
             res.statusCode = 302
-            res.setHeader("Location", "/axones/")
+            res.setHeader("Location", appBase)
             res.end()
             return
           }

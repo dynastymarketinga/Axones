@@ -54,4 +54,4 @@ if [[ -f "$ENV_FILE" ]]; then
   php artisan optimize --no-interaction
 fi
 
-echo "==> Listo: https://${DOMAIN}/axones/"
+echo "==> Listo: https://${DOMAIN}/auth/basic/login"

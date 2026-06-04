@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { ApiError, apiDownloadFile, apiFetch } from "@/lib/api"
 
 import {
@@ -184,7 +185,9 @@ export default function ReportsWorkOrderSummaryPage() {
     const id = woId.trim()
     if (!id) return
     const params = new URLSearchParams({ work_order_id: id })
-    const url = `${window.location.origin}/axones/reportes/resumen-ordenes-trabajo/vista-previa?${params.toString()}`
+    const url = appAbsoluteUrl(
+      `/reportes/resumen-ordenes-trabajo/vista-previa?${params.toString()}`,
+    )
     const popup = window.open(url, "_blank")
     if (!popup) toast.error("El navegador bloqueó la ventana emergente de vista previa.")
   }, [woId])

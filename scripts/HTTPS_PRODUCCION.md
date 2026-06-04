@@ -4,63 +4,58 @@ Axones en `http://10.0.0.2` **no** puede mostrar el botón **Instalar aplicació
 
 En HTTP solo verás **Agregar a la pantalla principal** (mismo icono, otro nombre en el menú).
 
-## Opción A — Red local con IP `10.0.0.2` (certificado autofirmado)
+URLs recomendadas tras el despliegue con base `/`: ver también `scripts/DEPLOY_URLS.md`.
+
+## Opción A — Red local (certificado autofirmado)
 
 Ideal si el servidor solo se usa en la fábrica / Wi‑Fi interna.
 
-### En el servidor Linux (SSH)
+### En el servidor Linux
 
 ```bash
 cd /var/www/axones
 git pull origin main
-sudo bash scripts/setup-https-selfsigned.sh 10.0.0.2 axones.local
+sudo bash scripts/setup-https-selfsigned.sh 10.0.0.2 axones
 ```
 
 El script:
 
-1. Crea certificado en `/etc/ssl/axones/` (válido para IP `10.0.0.2` y nombre `axones.local`).
-2. Instala sitio Nginx `axones-https.conf` si no existe.
-3. Actualiza `APP_URL=https://10.0.0.2` en `backend/.env`.
+1. Crea certificado en `/etc/ssl/axones/` (válido para IP `10.0.0.2` y nombre `axones`).
+2. Instala sitio Nginx si no existe (`scripts/nginx/axones-https.conf.example`).
+3. Actualiza `APP_URL` y dominios Sanctum en `backend/.env`.
 
 ### En PC y tablets
 
-1. Abre **`https://10.0.0.2/axones/auth/basic/login`** (con **https**, no http).
-2. La primera vez: **Avanzado → Continuar** (certificado autofirmado).
-3. Menú ⋮ → **Instalar aplicación** o **Agregar a la pantalla principal**.
+1. En **hosts**: `10.0.0.2  axones`
+2. Abre **`https://axones/auth/basic/login`**
+3. La primera vez: **Avanzado → Continuar** (certificado autofirmado).
+4. Menú ⋮ → **Instalar aplicación** o **Agregar a la pantalla principal**.
 
-Opcional: en cada tablet, archivo `hosts` o DNS interno:
-
-```text
-10.0.0.2  axones.local
-```
-
-y usar `https://axones.local/axones/`.
+URLs antiguas `http://10.0.0.2/axones/...` redirigen automáticamente a `https://axones/...` (sin `/axones/` en la ruta).
 
 ### Icono PWA
 
-Tras el deploy, comprueba que cargan:
+Tras el deploy, comprueba:
 
-- `https://10.0.0.2/axones/manifest.webmanifest`
-- `https://10.0.0.2/axones/brand/pwa-192.png`
-- `https://10.0.0.2/axones/build-info.json`
+- `https://axones/manifest.webmanifest`
+- `https://axones/brand/pwa-192.png`
+- `https://axones/build-info.json`
 
-## Opción B — Dominio público (Let's Encrypt, sin advertencia)
+## Opción B — Dominio público (Let's Encrypt)
 
-Si tienes un dominio (ej. `axones.tuempresa.com`) apuntando al servidor:
+Si tienes un dominio apuntando al servidor:
 
 ```bash
 cd /var/www/axones
 sudo CERTBOT_EMAIL=tu@correo.com bash scripts/setup-https-certbot.sh axones.tuempresa.com
 ```
 
-Usuarios entran a `https://axones.tuempresa.com/axones/` sin advertencia y con **Instalar aplicación**.
-
 ## Ajustes en `backend/.env` (servidor)
 
 ```env
-APP_URL=https://10.0.0.2
-FRONTEND_URL=https://10.0.0.2
-SANCTUM_STATEFUL_DOMAINS=10.0.0.2,axones.local,localhost,127.0.0.1
+APP_URL=https://axones
+FRONTEND_URL=https://axones
+SANCTUM_STATEFUL_DOMAINS=10.0.0.2,axones,localhost,127.0.0.1
 ```
 
 Tras cambiar:
@@ -74,6 +69,7 @@ php artisan optimize
 ## Comprobar Nginx
 
 ```bash
+ls -la /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl status nginx
 ```
@@ -85,8 +81,8 @@ Plantilla: `scripts/nginx/axones-https.conf.example`
 
 | URL | Instalar aplicación | Agregar a pantalla principal |
 |-----|---------------------|------------------------------|
-| `http://10.0.0.2/axones/` | No | Sí |
-| `https://10.0.0.2/axones/` (autofirmado) | Sí*, tras aceptar cert | Sí |
-| `https://dominio.com/axones/` (Let's Encrypt) | Sí | Sí |
+| `http://10.0.0.2/axones/` (legacy) | No | Sí → redirige a HTTPS sin `/axones/` |
+| `https://axones/auth/...` (autofirmado) | Sí*, tras aceptar cert | Sí |
+| `https://dominio.com/` (Let's Encrypt) | Sí | Sí |
 
 \* En tablets corporativas puedes instalar el `.crt` como autoridad de confianza para no ver la advertencia.

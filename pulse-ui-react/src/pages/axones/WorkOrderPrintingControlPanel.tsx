@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { MesOperativoEstadoCard, MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
+import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -1007,11 +1008,9 @@ export default function WorkOrderPrintingControlPanel({
       toast.error("No se pudo guardar la vista previa en el navegador.")
       return
     }
-    // Abrir dentro del sistema (SPA) bajo /axones (basename del router)
-    // usando una pestaña nueva para mantener la pantalla operativa abierta.
-    const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
-      String(workOrderId),
-    )}/impresion/temporizador/vista-previa`
+    const url = appAbsoluteUrl(
+      `/ordenes-trabajo/${encodeURIComponent(String(workOrderId))}/impresion/temporizador/vista-previa`,
+    )
     window.open(url, "_blank", "noopener,noreferrer")
   }
 
@@ -1063,9 +1062,9 @@ export default function WorkOrderPrintingControlPanel({
       toast.error("No se pudo guardar la vista previa en el navegador.")
       return
     }
-    const url = `${window.location.origin}/axones/ordenes-trabajo/${encodeURIComponent(
-      String(workOrderId),
-    )}/impresion/desperdicio/vista-previa`
+    const url = appAbsoluteUrl(
+      `/ordenes-trabajo/${encodeURIComponent(String(workOrderId))}/impresion/desperdicio/vista-previa`,
+    )
     window.open(url, "_blank", "noopener,noreferrer")
   }
 

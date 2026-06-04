@@ -9,6 +9,7 @@ use App\Models\MaterialRequest;
 use App\Models\User;
 use App\Models\WorkOrder;
 use App\Services\AreaRequestService;
+use App\Services\PlanillaSustratoMaterialRequestSyncService;
 use App\Services\ProductionNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -64,6 +65,57 @@ class AreaRequestConsolidationTest extends TestCase
         $ids = collect($resp->json('data'))->pluck('id')->all();
 
         $this->assertSame([$insumos->id], $ids);
+    }
+
+    public function test_insumos_origin_filter_separates_manual_and_ot_planilla(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $wo = $this->createWorkOrder($user, 'OT-FILT-1');
+
+        $manualMr = MaterialRequest::query()->create([
+            'status' => MaterialRequestStatus::Pending->value,
+            'requested_by' => $user->id,
+            'notes' => 'Pedido manual de prueba',
+        ]);
+        $manualAr = AreaRequest::query()->create([
+            'area' => 'almacen',
+            'title' => 'Solicitud de insumos #'.$manualMr->id,
+            'status' => AreaRequestStatus::Pending->value,
+            'material_request_id' => $manualMr->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $otMr = MaterialRequest::query()->create([
+            'status' => MaterialRequestStatus::Pending->value,
+            'requested_by' => $user->id,
+            'work_order_id' => $wo->id,
+            'originating_area' => 'impresion',
+            'notes' => PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER.' OT '.$wo->code.' — Impresión',
+        ]);
+        $otAr = AreaRequest::query()->create([
+            'area' => 'impresion',
+            'title' => 'OT '.$wo->code.' — Impresión (sustratos)',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'material_request_id' => $otMr->id,
+            'requested_by' => $user->id,
+        ]);
+
+        $manualIds = collect(
+            $this->getJson('/api/area-requests?insumos_only=1&insumos_origin=manual', $h)
+                ->assertOk()
+                ->json('data'),
+        )->pluck('id')->all();
+
+        $otIds = collect(
+            $this->getJson('/api/area-requests?insumos_only=1&insumos_origin=ot_planilla', $h)
+                ->assertOk()
+                ->json('data'),
+        )->pluck('id')->all();
+
+        $this->assertSame([$manualAr->id], $manualIds);
+        $this->assertSame([$otAr->id], $otIds);
     }
 
     public function test_saved_broadcast_supersedes_older_pending_coordination(): void

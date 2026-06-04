@@ -8,11 +8,14 @@ export type MesProductionTimerOpsBlockProps = {
   effectiveSec: number
   deadSec: number
   demountSec: number
+  /** Segundos de arranque acumulados (OT o turno). Si se omite, no se muestra el cuadro. */
+  arranqueSec?: number
   totalSec: number
   kgHora: string
   horaArranque: string
   timerShowsOtAccumulated?: boolean
   timerRunning: boolean
+  arranqueRunning?: boolean
   demountRunning?: boolean
   timerActionFlags: MesTimerActionFlags
   onRequestTimerConfirm: (key: MesTimerConfirmKey) => void
@@ -20,6 +23,8 @@ export type MesProductionTimerOpsBlockProps = {
   canFinalizeOrder: boolean
   areaFinalizada: boolean
   areaLabel: MesTimerAreaKey
+  /** Si false, solo se muestra la cara del cronómetro (sin botonera). */
+  showTimerActions?: boolean
 }
 
 /** Cara del cronómetro + botonera multi-fase (Montaje, Impresión, Laminación, Corte). */
@@ -28,11 +33,13 @@ export function MesProductionTimerOpsBlock({
   effectiveSec,
   deadSec,
   demountSec,
+  arranqueSec,
   totalSec,
   kgHora,
   horaArranque,
   timerShowsOtAccumulated,
   timerRunning,
+  arranqueRunning,
   demountRunning,
   timerActionFlags,
   onRequestTimerConfirm,
@@ -40,9 +47,10 @@ export function MesProductionTimerOpsBlock({
   canFinalizeOrder,
   areaFinalizada,
   areaLabel,
+  showTimerActions = true,
 }: MesProductionTimerOpsBlockProps) {
   return (
-    <div className="mes-timer-grid">
+    <div className={showTimerActions ? "mes-timer-grid" : "mes-timer-grid mes-timer-grid--face-only"}>
       <MesTimerFace
         elapsedLabel={formatTimerHms(effectiveSec)}
         elapsedCaption={
@@ -60,19 +68,23 @@ export function MesProductionTimerOpsBlock({
         totalMetricLive={timerRunning}
         kgHora={kgHora}
         horaArranque={horaArranque}
+        arranqueHms={arranqueSec != null ? formatTimerHms(arranqueSec) : undefined}
+        arranqueMetricLive={arranqueRunning}
         demountHms={formatTimerHms(demountSec)}
         demountMetricLive={demountRunning}
       />
-      <div className="mes-timer-actions w-full min-w-0">
-        <WorkOrderMesTimerActionStack
-          flags={timerActionFlags}
-          onRequestConfirm={onRequestTimerConfirm}
-          onPreview={onPreviewTimerReport}
-          canFinalizeOrder={canFinalizeOrder}
-          areaFinalizada={areaFinalizada}
-          areaLabel={areaLabel}
-        />
-      </div>
+      {showTimerActions ? (
+        <div className="mes-timer-actions w-full min-w-0">
+          <WorkOrderMesTimerActionStack
+            flags={timerActionFlags}
+            onRequestConfirm={onRequestTimerConfirm}
+            onPreview={onPreviewTimerReport}
+            canFinalizeOrder={canFinalizeOrder}
+            areaFinalizada={areaFinalizada}
+            areaLabel={areaLabel}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

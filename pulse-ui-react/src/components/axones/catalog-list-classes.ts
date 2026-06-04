@@ -15,6 +15,14 @@ export const catalogActionButtonClass =
 export const catalogFilterPanelClass =
   "rounded-xl border border-primary/20 bg-card/90 p-4 shadow-sm ring-1 ring-black/[0.04] dark:bg-card/70 dark:ring-white/[0.06]"
 
+/** Panel de filtros superiores en bandejas MES (impresión, laminación, corte). */
+export const mesBandejaFilterPanelClass =
+  "overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/[0.08] via-card/98 to-violet-500/[0.07] shadow-md ring-1 ring-primary/12 dark:from-primary/[0.14] dark:via-card/92 dark:to-violet-500/[0.1]"
+
+/** Select/input con filtro activo (no «Todos» / vacío). */
+export const mesBandejaFilterActiveControlClass =
+  "border-primary/45 bg-primary/[0.06] ring-1 ring-primary/15"
+
 /** Shell de filtros estandarizado en páginas de reportes (modelo Desperdicio). */
 export const reportFiltersPanelClass =
   "overflow-hidden rounded-2xl border border-primary/25 shadow-md bg-gradient-to-br from-primary/[0.07] via-card to-card ring-1 ring-primary/10 dark:from-primary/[0.12] dark:via-card/95 dark:to-card/90"

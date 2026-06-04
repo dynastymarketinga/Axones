@@ -21,7 +21,6 @@ import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
   CatalogTableBodyCellContent,
@@ -255,7 +254,6 @@ export default function ProductsPage() {
       title="Especificaciones de producto"
       subtitle="Plantilla técnico-comercial por cliente (CPE, MPS, tipo de impresión, estructura). Se elige al crear una orden de trabajo. No es inventario ni producto terminado."
       icon={Package}
-      headerExtras={<WorkOrderStageBadge current="especificacion" className="pt-1" />}
       action={
         <Button type="button" asChild>
           <Link to="/productos/form" state={{ from }}>

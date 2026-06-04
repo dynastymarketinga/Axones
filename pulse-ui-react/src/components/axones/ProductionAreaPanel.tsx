@@ -1,7 +1,11 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
+
+import { TintasPaneHead } from "@/components/axones/TintasPaneHead"
+import { cn } from "@/lib/utils"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
@@ -40,6 +44,16 @@ function segmentLabel(t: string): string {
   return t
 }
 
+const CHEMICAL_LABELS: Record<string, string> = {
+  alcohol: "Alcohol",
+  metoxil: "Metoxil",
+  npa: "NPA",
+}
+
+function chemicalLabel(type: string): string {
+  return CHEMICAL_LABELS[type] ?? type
+}
+
 function formatHms(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds))
   const h = Math.floor(s / 3600)
@@ -58,6 +72,10 @@ type OpenSeg = {
 
 type AreaPath = "montaje" | "printing" | "laminacion" | "corte" | "tintas"
 
+function supportsInkConsumables(areaPath: AreaPath): boolean {
+  return areaPath === "printing" || areaPath === "tintas"
+}
+
 export type ProductionAreaPanelProps = {
   workOrderId: number
   title: string
@@ -66,6 +84,10 @@ export type ProductionAreaPanelProps = {
   usageMode: "montaje" | "bobina" | "none"
   /** Solo laminación: campos de solvente en resumen */
   laminacionSolvent?: boolean
+  /** Layout premium unificado (solo área tintas). */
+  presentation?: "default" | "tintas-premium"
+  /** Columna derecha: formulario de mezcla. */
+  mixColumn?: ReactNode
 }
 
 type InkLineDraft = {
@@ -89,8 +111,13 @@ export function ProductionAreaPanel({
   areaPath,
   usageMode,
   laminacionSolvent,
+  presentation = "default",
+  mixColumn,
 }: ProductionAreaPanelProps) {
   const base = `work-orders/${workOrderId}/${areaPath}`
+  /** El área Tintas no registra tiempos MES en planta. */
+  const showTimer = areaPath !== "tintas"
+  const tintasPremium = presentation === "tintas-premium" && areaPath === "tintas"
 
   const [loading, setLoading] = useState(true)
   const [state, setState] = useState<Record<string, unknown> | null>(null)
@@ -147,7 +174,7 @@ export function ProductionAreaPanel({
           )
         }
       }
-      if (areaPath === "printing") {
+      if (supportsInkConsumables(areaPath)) {
         const inks = (data.ink_control_lines as unknown[]) ?? []
         setInkLines(
           inks.length
@@ -236,9 +263,10 @@ export function ProductionAreaPanel({
   }, [])
 
   useEffect(() => {
+    if (!showTimer) return
     const id = window.setInterval(() => setTick((t) => t + 1), 1000)
     return () => window.clearInterval(id)
-  }, [])
+  }, [showTimer])
 
   const openSeg = state?.open_time_segment as OpenSeg | null | undefined
   const totals = state?.time_totals_seconds as
@@ -389,7 +417,7 @@ export function ProductionAreaPanel({
   }
 
   async function saveConsumables() {
-    if (areaPath !== "printing") return
+    if (!supportsInkConsumables(areaPath)) return
     const ink_lines = inkLines
       .filter((L) => L.material_id.trim() !== "")
       .map((L, idx) => ({
@@ -417,11 +445,15 @@ export function ProductionAreaPanel({
       notes: r.notes.trim() || null,
     }))
     try {
-      await apiFetch(`work-orders/${workOrderId}/printing/consumables`, {
+      const consumablesPath =
+        areaPath === "tintas"
+          ? `work-orders/${workOrderId}/tintas/consumables`
+          : `work-orders/${workOrderId}/printing/consumables`
+      await apiFetch(consumablesPath, {
         method: "PUT",
         body: JSON.stringify({ ink_lines, chemical_usages }),
       })
-      toast.success("Tintas y químicos actualizados.")
+      toast.success("Consumo de tintas y químicos guardado.")
       void load()
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -430,6 +462,313 @@ export function ProductionAreaPanel({
   }
 
   const recent = (state?.time_segments_recent as OpenSeg[]) ?? []
+
+  const inkConsumablesBlock =
+    supportsInkConsumables(areaPath) && state ? (
+      <>
+        {tintasPremium ? (
+          <TintasPaneHead
+            variant="consumo"
+            title="Consumo de tintas y químicos"
+            description="Registre tintas del almacén o cementerio y los químicos de la OT. Al guardar se reemplazan todas las líneas de consumo."
+          />
+        ) : null}
+        {!tintasPremium ? (
+          <p className="text-muted-foreground text-xs">
+            Registre tintas del almacén o cementerio y los químicos de la OT. Al guardar se
+            reemplazan todas las líneas de consumo.
+          </p>
+        ) : null}
+        {inkLines.map((L, i) => (
+          <div
+            key={i}
+            className={cn(
+              "grid gap-2 rounded-lg border p-3 md:grid-cols-12",
+              tintasPremium && "tintas-ink-row",
+            )}
+          >
+            <div className="md:col-span-4">
+              <Label className="text-xs">Tinta / cementerio</Label>
+              <Select
+                value={L.material_id || undefined}
+                onValueChange={(v) =>
+                  setInkLines((rows) =>
+                    rows.map((r, j) => (j === i ? { ...r, material_id: v } : r)),
+                  )
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Material…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tintaMaterials.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      {m.sku} — {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-xs">Original kg</Label>
+              <Input
+                inputMode="decimal"
+                value={L.quantity_original_kg}
+                onChange={(ev) =>
+                  setInkLines((rows) =>
+                    rows.map((r, j) =>
+                      j === i ? { ...r, quantity_original_kg: ev.target.value } : r,
+                    ),
+                  )
+                }
+              />
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-xs">Solventada kg</Label>
+              <Input
+                inputMode="decimal"
+                value={L.quantity_solventada_kg}
+                onChange={(ev) =>
+                  setInkLines((rows) =>
+                    rows.map((r, j) =>
+                      j === i ? { ...r, quantity_solventada_kg: ev.target.value } : r,
+                    ),
+                  )
+                }
+              />
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-xs">Devolución kg</Label>
+              <Input
+                inputMode="decimal"
+                value={L.quantity_return_kg}
+                onChange={(ev) =>
+                  setInkLines((rows) =>
+                    rows.map((r, j) =>
+                      j === i ? { ...r, quantity_return_kg: ev.target.value } : r,
+                    ),
+                  )
+                }
+              />
+            </div>
+            <div className="md:col-span-2 flex items-end gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setInkLines((rows) => rows.filter((_, j) => j !== i))}
+              >
+                Quitar
+              </Button>
+            </div>
+            <div className="md:col-span-12">
+              <Input
+                placeholder="Notas línea"
+                value={L.notes}
+                onChange={(ev) =>
+                  setInkLines((rows) =>
+                    rows.map((r, j) => (j === i ? { ...r, notes: ev.target.value } : r)),
+                  )
+                }
+              />
+            </div>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            setInkLines((rows) => [
+              ...rows,
+              {
+                material_id: "",
+                quantity_original_kg: "",
+                quantity_solventada_kg: "",
+                quantity_return_kg: "",
+                notes: "",
+              },
+            ])
+          }
+        >
+          Añadir línea de tinta
+        </Button>
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Químicos</p>
+          {chemRows.map((r, i) => (
+            <div
+              key={r.chemical_type}
+              className={cn(
+                "grid gap-2 rounded-md border p-2 md:grid-cols-4",
+                tintasPremium && "tintas-chem-row",
+              )}
+            >
+              <div className="font-medium">{chemicalLabel(r.chemical_type)}</div>
+              <Input
+                placeholder="Cargado kg"
+                inputMode="decimal"
+                value={r.quantity_loaded_kg}
+                onChange={(ev) =>
+                  setChemRows((rows) =>
+                    rows.map((x, j) =>
+                      j === i ? { ...x, quantity_loaded_kg: ev.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <Input
+                placeholder="Devuelto kg"
+                inputMode="decimal"
+                value={r.quantity_return_kg}
+                onChange={(ev) =>
+                  setChemRows((rows) =>
+                    rows.map((x, j) =>
+                      j === i ? { ...x, quantity_return_kg: ev.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <Input
+                placeholder="Notas"
+                value={r.notes}
+                onChange={(ev) =>
+                  setChemRows((rows) =>
+                    rows.map((x, j) => (j === i ? { ...x, notes: ev.target.value } : x)),
+                  )
+                }
+              />
+            </div>
+          ))}
+        </div>
+        <Button
+          type="button"
+          className={cn(tintasPremium && "tintas-save-consumo")}
+          onClick={() => void saveConsumables()}
+        >
+          Guardar consumo
+        </Button>
+      </>
+    ) : null
+
+  const summaryBlock =
+    state ? (
+      <>
+        {!tintasPremium ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Resumen de área</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-2">
+                  <Label>% Merma</Label>
+                  <Input
+                    inputMode="decimal"
+                    value={scrapPct}
+                    onChange={(ev) => setScrapPct(ev.target.value)}
+                  />
+                </div>
+                {laminacionSolvent ? (
+                  <div className="grid gap-2">
+                    <Label>Solvente (kg)</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={solventKg}
+                      onChange={(ev) => setSolventKg(ev.target.value)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+              {laminacionSolvent ? (
+                <div className="grid gap-2">
+                  <Label>Notas solvente</Label>
+                  <Textarea
+                    rows={2}
+                    value={solventNotes}
+                    onChange={(ev) => setSolventNotes(ev.target.value)}
+                  />
+                </div>
+              ) : null}
+              <div className="grid gap-2">
+                <Label>Notas generales</Label>
+                <Textarea
+                  rows={3}
+                  value={summaryNotes}
+                  onChange={(ev) => setSummaryNotes(ev.target.value)}
+                />
+              </div>
+              <Button type="button" variant="secondary" onClick={() => void saveSummary()}>
+                Guardar resumen
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="tintas-workspace__summary-inner space-y-3">
+            <p className="text-sm font-semibold text-violet-950/90">Resumen de área</p>
+            <div className="grid gap-3 lg:grid-cols-[minmax(8rem,10rem)_1fr_auto] lg:items-end">
+              <div className="grid gap-2">
+                <Label className="text-xs">% Merma</Label>
+                <Input
+                  inputMode="decimal"
+                  className="h-9 bg-white/90"
+                  value={scrapPct}
+                  onChange={(ev) => setScrapPct(ev.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label className="text-xs">Notas generales</Label>
+                <Textarea
+                  rows={2}
+                  className="min-h-[2.5rem] resize-y bg-white/90"
+                  value={summaryNotes}
+                  onChange={(ev) => setSummaryNotes(ev.target.value)}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-9 shrink-0 border-violet-200 bg-white/90"
+                onClick={() => void saveSummary()}
+              >
+                Guardar resumen
+              </Button>
+            </div>
+          </div>
+        )}
+      </>
+    ) : null
+
+  if (tintasPremium) {
+    return (
+      <>
+        {scrapHigh ? (
+          <Alert variant="destructive" className="mx-4 mt-3 rounded-lg">
+            <AlertTitle>Merma elevada</AlertTitle>
+            <AlertDescription>
+              El % de merma registrado ({scrapVal}%) alcanza o supera el umbral de aviso (
+              {SCRAP_WARN_PERCENT}%).
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {loading && !state ? (
+          <p className="text-muted-foreground px-5 py-8 text-center text-sm">Cargando…</p>
+        ) : null}
+        {state ? (
+          <>
+            <div className="tintas-workspace__main">
+              <div className="tintas-workspace__pane tintas-workspace__pane--consumo space-y-4">
+                {inkConsumablesBlock}
+              </div>
+              <div className="tintas-workspace__pane tintas-workspace__pane--mezcla">
+                {mixColumn}
+              </div>
+            </div>
+            <div className="tintas-workspace__summary">{summaryBlock}</div>
+          </>
+        ) : null}
+      </>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -445,7 +784,7 @@ export function ProductionAreaPanel({
         </Button>
       </div>
 
-      {mountOver ? (
+      {showTimer && mountOver ? (
         <Alert variant="destructive">
           <AlertTitle>Montaje prolongado</AlertTitle>
           <AlertDescription>
@@ -471,125 +810,129 @@ export function ProductionAreaPanel({
 
       {state ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {(["mount", "production", "downtime"] as const).map((k) => (
-              <Card key={k}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Tiempo {segmentLabel(k)}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="font-mono text-lg">
-                  {formatHms(Number(totals?.[k] ?? 0))}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Temporizador</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {openSeg && !openSeg.ended_at ? (
-                <div className="rounded-lg border bg-muted/40 p-4">
-                  <p className="text-sm font-medium">
-                    Activo: {segmentLabel(openSeg.segment_type)}
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    Desde {openSeg.started_at} · Operador:{" "}
-                    {openSeg.user?.name ?? "—"}
-                  </p>
-                  <p className="mt-2 font-mono text-2xl tabular-nums">
-                    {formatHms(openElapsedSec)}
-                  </p>
-                  <Button
-                    type="button"
-                    className="mt-3"
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => void stopSegment()}
-                  >
-                    Detener segmento
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-sm">
-                  No hay segmento abierto. Inicie montaje, desmontaje, producción o tiempo
-                  muerto.
-                </p>
-              )}
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Código máquina (opcional)</Label>
-                  <Input
-                    value={machineCode}
-                    onChange={(ev) => setMachineCode(ev.target.value)}
-                    placeholder="ej. IMP-01"
-                  />
-                </div>
-                <div className="grid gap-2 md:col-span-2">
-                  <Label>Notas al iniciar</Label>
-                  <Input
-                    value={startNotes}
-                    onChange={(ev) => setStartNotes(ev.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {SEGMENT_TYPES.map((t) => (
-                  <Button
-                    key={t}
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={Boolean(openSeg && !openSeg.ended_at)}
-                    onClick={() => void startSegment(t)}
-                  >
-                    Iniciar {segmentLabel(t)}
-                  </Button>
+          {showTimer ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {(["mount", "production", "downtime"] as const).map((k) => (
+                  <Card key={k}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">
+                        Tiempo {segmentLabel(k)}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="font-mono text-lg">
+                      {formatHms(Number(totals?.[k] ?? 0))}
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
-            </CardContent>
-          </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                Últimos segmentos de tiempo
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Inicio</TableHead>
-                    <TableHead>Fin</TableHead>
-                    <TableHead>Usuario</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recent.slice(0, 20).map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>{segmentLabel(r.segment_type)}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {String(r.started_at ?? "").slice(0, 19)}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {r.ended_at
-                          ? String(r.ended_at).slice(0, 19)
-                          : "…"}
-                      </TableCell>
-                      <TableCell>{r.user?.name ?? "—"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Temporizador</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {openSeg && !openSeg.ended_at ? (
+                    <div className="rounded-lg border bg-muted/40 p-4">
+                      <p className="text-sm font-medium">
+                        Activo: {segmentLabel(openSeg.segment_type)}
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        Desde {openSeg.started_at} · Operador:{" "}
+                        {openSeg.user?.name ?? "—"}
+                      </p>
+                      <p className="mt-2 font-mono text-2xl tabular-nums">
+                        {formatHms(openElapsedSec)}
+                      </p>
+                      <Button
+                        type="button"
+                        className="mt-3"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => void stopSegment()}
+                      >
+                        Detener segmento
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">
+                      No hay segmento abierto. Inicie montaje, desmontaje, producción o tiempo
+                      muerto.
+                    </p>
+                  )}
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label>Código máquina (opcional)</Label>
+                      <Input
+                        value={machineCode}
+                        onChange={(ev) => setMachineCode(ev.target.value)}
+                        placeholder="ej. IMP-01"
+                      />
+                    </div>
+                    <div className="grid gap-2 md:col-span-2">
+                      <Label>Notas al iniciar</Label>
+                      <Input
+                        value={startNotes}
+                        onChange={(ev) => setStartNotes(ev.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {SEGMENT_TYPES.map((t) => (
+                      <Button
+                        key={t}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={Boolean(openSeg && !openSeg.ended_at)}
+                        onClick={() => void startSegment(t)}
+                      >
+                        Iniciar {segmentLabel(t)}
+                      </Button>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Últimos segmentos de tiempo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Inicio</TableHead>
+                        <TableHead>Fin</TableHead>
+                        <TableHead>Usuario</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recent.slice(0, 20).map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>{segmentLabel(r.segment_type)}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {String(r.started_at ?? "").slice(0, 19)}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {r.ended_at
+                              ? String(r.ended_at).slice(0, 19)
+                              : "…"}
+                          </TableCell>
+                          <TableCell>{r.user?.name ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
 
           {usageMode !== "none" ? (
             <Card>
@@ -731,268 +1074,23 @@ export function ProductionAreaPanel({
             </Card>
           ) : null}
 
-          {areaPath === "printing" ? (
+          {inkConsumablesBlock ? (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">
-                  Tintas, cementerio y químicos (impresión)
+                  {areaPath === "tintas"
+                    ? "Consumo de tintas y químicos"
+                    : "Tintas, cementerio y químicos (impresión)"}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-muted-foreground text-xs">
-                  Líneas de tinta (material en áreas tintas / cementerio). Al
-                  guardar se reemplazan todas las líneas de esta OT.
-                </p>
-                {inkLines.map((L, i) => (
-                  <div
-                    key={i}
-                    className="grid gap-2 rounded-lg border p-3 md:grid-cols-12"
-                  >
-                    <div className="md:col-span-4">
-                      <Label className="text-xs">Tinta / cementerio</Label>
-                      <Select
-                        value={L.material_id || undefined}
-                        onValueChange={(v) =>
-                          setInkLines((rows) =>
-                            rows.map((r, j) =>
-                              j === i ? { ...r, material_id: v } : r,
-                            ),
-                          )
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Material…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {tintaMaterials.map((m) => (
-                            <SelectItem key={m.id} value={String(m.id)}>
-                              {m.sku} — {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label className="text-xs">Original kg</Label>
-                      <Input
-                        inputMode="decimal"
-                        value={L.quantity_original_kg}
-                        onChange={(ev) =>
-                          setInkLines((rows) =>
-                            rows.map((r, j) =>
-                              j === i
-                                ? {
-                                    ...r,
-                                    quantity_original_kg: ev.target.value,
-                                  }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label className="text-xs">Solventada kg</Label>
-                      <Input
-                        inputMode="decimal"
-                        value={L.quantity_solventada_kg}
-                        onChange={(ev) =>
-                          setInkLines((rows) =>
-                            rows.map((r, j) =>
-                              j === i
-                                ? {
-                                    ...r,
-                                    quantity_solventada_kg: ev.target.value,
-                                  }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label className="text-xs">Devolución kg</Label>
-                      <Input
-                        inputMode="decimal"
-                        value={L.quantity_return_kg}
-                        onChange={(ev) =>
-                          setInkLines((rows) =>
-                            rows.map((r, j) =>
-                              j === i
-                                ? { ...r, quantity_return_kg: ev.target.value }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                    <div className="md:col-span-2 flex items-end gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setInkLines((rows) =>
-                            rows.filter((_, j) => j !== i),
-                          )
-                        }
-                      >
-                        Quitar
-                      </Button>
-                    </div>
-                    <div className="md:col-span-12">
-                      <Input
-                        placeholder="Notas línea"
-                        value={L.notes}
-                        onChange={(ev) =>
-                          setInkLines((rows) =>
-                            rows.map((r, j) =>
-                              j === i ? { ...r, notes: ev.target.value } : r,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() =>
-                    setInkLines((rows) => [
-                      ...rows,
-                      {
-                        material_id: "",
-                        quantity_original_kg: "",
-                        quantity_solventada_kg: "",
-                        quantity_return_kg: "",
-                        notes: "",
-                      },
-                    ])
-                  }
-                >
-                  Añadir línea de tinta
-                </Button>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Químicos</p>
-                  {chemRows.map((r, i) => (
-                    <div
-                      key={r.chemical_type}
-                      className="grid gap-2 rounded-md border p-2 md:grid-cols-4"
-                    >
-                      <div className="font-medium capitalize">
-                        {r.chemical_type}
-                      </div>
-                      <Input
-                        placeholder="Cargado kg"
-                        inputMode="decimal"
-                        value={r.quantity_loaded_kg}
-                        onChange={(ev) =>
-                          setChemRows((rows) =>
-                            rows.map((x, j) =>
-                              j === i
-                                ? {
-                                    ...x,
-                                    quantity_loaded_kg: ev.target.value,
-                                  }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
-                      <Input
-                        placeholder="Devuelto kg"
-                        inputMode="decimal"
-                        value={r.quantity_return_kg}
-                        onChange={(ev) =>
-                          setChemRows((rows) =>
-                            rows.map((x, j) =>
-                              j === i
-                                ? {
-                                    ...x,
-                                    quantity_return_kg: ev.target.value,
-                                  }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
-                      <Input
-                        placeholder="Notas"
-                        value={r.notes}
-                        onChange={(ev) =>
-                          setChemRows((rows) =>
-                            rows.map((x, j) =>
-                              j === i ? { ...x, notes: ev.target.value } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                <Button type="button" onClick={() => void saveConsumables()}>
-                  Guardar tintas y químicos
-                </Button>
-              </CardContent>
+              <CardContent className="space-y-4">{inkConsumablesBlock}</CardContent>
             </Card>
           ) : null}
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Resumen de área</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="grid gap-2">
-                  <Label>% Merma</Label>
-                  <Input
-                    inputMode="decimal"
-                    value={scrapPct}
-                    onChange={(ev) => setScrapPct(ev.target.value)}
-                  />
-                </div>
-                {laminacionSolvent ? (
-                  <div className="grid gap-2">
-                    <Label>Solvente (kg)</Label>
-                    <Input
-                      inputMode="decimal"
-                      value={solventKg}
-                      onChange={(ev) => setSolventKg(ev.target.value)}
-                    />
-                  </div>
-                ) : null}
-              </div>
-              {laminacionSolvent ? (
-                <div className="grid gap-2">
-                  <Label>Notas solvente</Label>
-                  <Textarea
-                    rows={2}
-                    value={solventNotes}
-                    onChange={(ev) => setSolventNotes(ev.target.value)}
-                  />
-                </div>
-              ) : null}
-              <div className="grid gap-2">
-                <Label>Notas generales</Label>
-                <Textarea
-                  rows={3}
-                  value={summaryNotes}
-                  onChange={(ev) => setSummaryNotes(ev.target.value)}
-                />
-              </div>
-              <Button type="button" variant="secondary" onClick={() => void saveSummary()}>
-                Guardar resumen
-              </Button>
-            </CardContent>
-          </Card>
+          {summaryBlock}
         </>
       ) : null}
-      {/* tick evita optimización que elimine lectura de temporizador */}
-      <span className="sr-only">{tick}</span>
+      {showTimer ? <span className="sr-only">{tick}</span> : null}
     </div>
   )
 }

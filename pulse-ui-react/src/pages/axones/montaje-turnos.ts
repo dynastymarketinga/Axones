@@ -68,6 +68,12 @@ export type MontajeTurnoEntry = {
   ayudante: string
   supervisor: string
   observaciones: string
+  /** Kg producidos en el turno (planilla / reportes). */
+  kgProduccion?: string
+  /** Merma en kg del turno. */
+  mermaKg?: string
+  /** Metraje registrado en montaje (opcional). */
+  metrajeKg?: string
   timer: MontajeTurnTimer
 }
 
@@ -158,6 +164,20 @@ export function shiftDemountSeconds(timer: MontajeTurnTimer, nowMs: number): num
     timer.demountLastResumeAtMs,
     nowMs,
   )
+}
+
+/** Arranque acumulado (turnos cerrados + turno actual, con tramo en curso). */
+export function cumulativeArranqueSeconds(
+  cerrados: MontajeTurnoEntry[],
+  actual: MontajeTurnoEntry | null,
+  nowMs: number,
+): number {
+  let sum = 0
+  for (const t of cerrados) {
+    sum += t.timer.arranqueAccSec
+  }
+  if (!actual) return sum
+  return sum + shiftArranqueSeconds(actual.timer, nowMs)
 }
 
 /** Desmontaje acumulado (turnos cerrados + turno actual, con tramo en curso). */
@@ -361,6 +381,9 @@ export function normalizeMontajeTurno(raw: unknown): MontajeTurnoEntry | null {
     ayudante: readString(o.ayudante),
     supervisor: readString(o.supervisor),
     observaciones: readString(o.observaciones),
+    kgProduccion: readString(o.kgProduccion),
+    mermaKg: readString(o.mermaKg),
+    metrajeKg: readString(o.metrajeKg ?? o.metraje),
     timer: parseTimer(o.timer),
   }
 }
@@ -455,6 +478,9 @@ export function montajeTurnoToMirror(t: MontajeTurnoEntry): Record<string, unkno
     montAyudante: t.ayudante,
     montSupervisor: t.supervisor,
     montObservaciones: t.observaciones,
+    montKgProduccion: t.kgProduccion ?? "",
+    montMermaKg: t.mermaKg ?? "",
+    montMetraje: t.metrajeKg ?? "",
     ...timerToLegacyFlat(t.timer),
   }
 }
@@ -470,6 +496,9 @@ export function clearMontajeShiftMirrorKeysOnly(): Record<string, unknown> {
     montObservaciones: "",
     montAcumuladoProducidoKg: "",
     montRegistrosTurnos: "",
+    montKgProduccion: "",
+    montMermaKg: "",
+    montMetraje: "",
   }
 }
 
@@ -480,9 +509,25 @@ export function clearMontajeMirrorKeys(): Record<string, unknown> {
   }
 }
 
+function hydrateMontajeTurnoKgFromMirror(
+  turno: MontajeTurnoEntry,
+  form: Record<string, unknown>,
+): MontajeTurnoEntry {
+  const kg = readString(turno.kgProduccion).trim()
+  const merma = readString(turno.mermaKg).trim()
+  const metraje = readString(turno.metrajeKg).trim()
+  return {
+    ...turno,
+    kgProduccion: kg || readString(form.montKgProduccion),
+    mermaKg: merma || readString(form.montMermaKg),
+    metrajeKg: metraje || readString(form.montMetraje),
+  }
+}
+
 export function bootstrapMontajeFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   const turnos = parseMontajeTurnos(mergedForm[MON_TURNOS_KEY])
-  const actual = resolveMontajeTurnoActual(mergedForm)
+  const rawActual = resolveMontajeTurnoActual(mergedForm)
+  const actual = rawActual ? hydrateMontajeTurnoKgFromMirror(rawActual, mergedForm) : null
   const estado = readEstadoArea(mergedForm[MON_ESTADO_KEY])
 
   let next: Record<string, unknown> = {
@@ -502,8 +547,11 @@ export function bootstrapMontajeFormState(mergedForm: Record<string, unknown>): 
 }
 
 export function sumProduccionKg(t: MontajeTurnoEntry): number {
-  void t
-  return 0
+  return readNumber(t.kgProduccion)
+}
+
+export function sumMermaKg(t: MontajeTurnoEntry): number {
+  return readNumber(t.mermaKg)
 }
 
 export type JsonAccumulatedMontaje = {

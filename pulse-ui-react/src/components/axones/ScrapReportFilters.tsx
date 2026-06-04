@@ -9,6 +9,7 @@ import {
 } from "@/components/axones/reports/ReportFiltersPanel"
 import { ReportPeriodFields } from "@/components/axones/reports/ReportPeriodFields"
 import { ReportWorkOrderCodeField } from "@/components/axones/reports/ReportWorkOrderCodeField"
+import type { ReportFiltersTheme } from "@/pages/axones/reports/report-identities"
 import type { ClientRecord, ProductRecord } from "@/types/api"
 
 type ScrapReportFiltersProps = {
@@ -31,6 +32,7 @@ type ScrapReportFiltersProps = {
   selectedClientLabel: string
   selectedProductLabel: string
   listLoading?: boolean
+  theme: ReportFiltersTheme
 }
 
 export function ScrapReportFilters({
@@ -53,6 +55,7 @@ export function ScrapReportFilters({
   selectedClientLabel,
   selectedProductLabel,
   listLoading = false,
+  theme,
 }: ScrapReportFiltersProps) {
   const hasClient = clientFilter !== "all"
   const hasProduct = productFilter !== "all"
@@ -93,10 +96,11 @@ export function ScrapReportFilters({
 
   return (
     <ReportFiltersPanel
-      subtitle="Fechas, cliente, producto u orden por código — se aplican al instante"
+      subtitle="Fechas, cliente, producto u OT — merma por tipo de film"
       loading={listLoading}
       activeFilterCount={activeCount}
       chips={chips.length > 0 ? chips : undefined}
+      theme={theme}
       onClearAll={
         activeCount > 0
           ? () => {

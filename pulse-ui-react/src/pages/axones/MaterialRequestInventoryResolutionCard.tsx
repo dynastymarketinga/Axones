@@ -5,6 +5,7 @@ import { Check, CircleCheck, PackageSearch, Search } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import {
   defaultApprovalQty,
   INVENTORY_RESOLUTION_TABS,
@@ -198,7 +199,7 @@ export function MaterialRequestInventoryResolutionCard({
         }
         next[ln.id] = {
           material: materialRow,
-          quantity: rem > 0 ? String(rem) : "",
+          quantity: rem > 0 ? formatQuantityDisplay(rem) : "",
           bobinaIds: [],
         }
         const area = (ln.material.inventory_area ?? "material") as InventoryResolutionTab
@@ -343,7 +344,7 @@ export function MaterialRequestInventoryResolutionCard({
           return null
         }
         if (total > rem + 0.0005) {
-          toast.error(`La selección de rollos excede lo pendiente (${rem.toFixed(3)} ${unit}).`)
+          toast.error(`La selección de rollos excede lo pendiente (${formatQuantityDisplay(rem)} ${unit}).`)
           return null
         }
         const entry: {
@@ -481,7 +482,7 @@ export function MaterialRequestInventoryResolutionCard({
                   enoughStock ? "text-emerald-700 dark:text-emerald-300" : "text-foreground",
                 )}
               >
-                {stock.toFixed(3)} {m.unit}
+                {formatQuantityDisplay(stock)} {m.unit}
               </span>
             </span>
           </span>
@@ -524,7 +525,7 @@ export function MaterialRequestInventoryResolutionCard({
             enoughStock && "text-emerald-700 dark:text-emerald-300",
           )}
         >
-          {stock.toFixed(3)}
+          {formatQuantityDisplay(stock)}
         </TableCell>
         <TableCell className="text-muted-foreground pr-3 text-xs">{m.unit}</TableCell>
       </TableRow>
@@ -646,17 +647,17 @@ export function MaterialRequestInventoryResolutionCard({
                       <div>
                         <span className="block uppercase tracking-wide">Solicitado</span>
                         <span className="text-foreground font-semibold">
-                          {ln.quantity_requested} {lineUnit(ln)}
+                          {formatQuantityDisplay(ln.quantity_requested)} {lineUnit(ln)}
                         </span>
                       </div>
                       <div>
                         <span className="block uppercase tracking-wide">Aprobado</span>
-                        <span>{ln.quantity_dispatched}</span>
+                        <span>{formatQuantityDisplay(ln.quantity_dispatched)}</span>
                       </div>
                       <div>
                         <span className="block uppercase tracking-wide">Pendiente</span>
                         <span className="text-primary font-semibold">
-                          {rem.toFixed(3)} {lineUnit(ln)}
+                          {formatQuantityDisplay(rem)} {lineUnit(ln)}
                         </span>
                       </div>
                     </div>
@@ -671,7 +672,7 @@ export function MaterialRequestInventoryResolutionCard({
                         <p className="text-muted-foreground text-xs tabular-nums">
                           Stock disponible:{" "}
                           <span className="text-foreground font-medium">
-                            {stockOnHand(assignment.material).toFixed(3)}{" "}
+                            {formatQuantityDisplay(stockOnHand(assignment.material))}{" "}
                             {assignment.material.unit}
                           </span>
                         </p>
@@ -680,7 +681,7 @@ export function MaterialRequestInventoryResolutionCard({
                             <p className="text-xs text-muted-foreground">
                               Rollos seleccionados:{" "}
                               <span className="font-medium text-foreground">
-                                {selectedKg.toFixed(3)} kg
+                                {formatQuantityDisplay(selectedKg)} kg
                               </span>
                             </p>
                             <div className="max-h-32 overflow-auto rounded-md border bg-background/80 p-2">
@@ -693,7 +694,7 @@ export function MaterialRequestInventoryResolutionCard({
                                     #{b.id} {b.code ? `· ${b.code}` : ""}
                                   </span>
                                   <span className="text-muted-foreground">
-                                    {b.weight_kg ?? "—"} kg
+                                    {formatQuantityDisplay(b.weight_kg) || "—"} kg
                                   </span>
                                   <input
                                     type="checkbox"
@@ -722,7 +723,7 @@ export function MaterialRequestInventoryResolutionCard({
                           <Input
                             inputMode="decimal"
                             className="h-11 bg-background/90"
-                            placeholder={`Cantidad a aprobar (máx. ${rem.toFixed(3)} ${assignment.material.unit})`}
+                            placeholder={`Cantidad a aprobar (máx. ${formatQuantityDisplay(rem)} ${assignment.material.unit})`}
                             value={assignment.quantity}
                             onChange={(ev) => updateAssignmentQuantity(ln.id, ev.target.value)}
                             onClick={(ev) => ev.stopPropagation()}

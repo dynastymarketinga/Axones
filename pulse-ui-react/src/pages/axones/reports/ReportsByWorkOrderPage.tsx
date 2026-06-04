@@ -2,11 +2,12 @@
 
 import { useState } from "react"
 
-import { ReportFilterSection } from "@/components/axones/reports/ReportFilterSection"
-import { ReportFiltersPanel } from "@/components/axones/reports/ReportFiltersPanel"
-import { ReportWorkOrderPicker } from "@/components/axones/reports/ReportWorkOrderPicker"
-import { Button } from "@/components/ui/button"
+import { Boxes } from "lucide-react"
 
+import { Card, CardContent } from "@/components/ui/card"
+
+import { getReportIdentity } from "./ReportIdentityBanner"
+import { MaterialByOtReportFilters } from "./material-by-ot-report-filters"
 import { ReportPageShell, useReportRange } from "./report-shared"
 
 export default function ReportsByWorkOrderPage() {
@@ -15,54 +16,39 @@ export default function ReportsByWorkOrderPage() {
 
   return (
     <ReportPageShell
-      title="Reporte por orden de trabajo"
-      description="Resumen de material, despachos y usos por bobina vinculados a una OT (movimiento de orden §9)."
+      identityKey="material-ot"
+      title="Material por orden de trabajo"
+      description="Trazabilidad de almacén: despachos, usos de bobina y devoluciones vinculados a una OT (CSV)."
       showRange={false}
     >
-      <ReportFiltersPanel
-        subtitle="Seleccione la orden por código; la descarga es un único archivo CSV"
+      <MaterialByOtReportFilters
+        woId={woId}
+        onWoIdChange={setWoId}
+        loading={loading}
         activeFilterCount={woId.trim() ? 1 : 0}
-      >
-        <ReportFilterSection
-          title="Orden de trabajo"
-          accentClass="text-amber-800 dark:text-amber-200"
-          dotClass="bg-amber-500"
-          borderClass="border-amber-500/30 from-amber-500/[0.07]"
-        >
-          <ReportWorkOrderPicker
-            value={woId}
-            onValueChange={setWoId}
-            mode="search"
-            placeholder="Buscar por código OT…"
-            highlighted={!!woId.trim()}
-            className="max-w-xl"
-          />
-          <p className="text-muted-foreground mt-2 text-xs">
-            Debe existir en la base de datos. Si el código no es válido, el servidor devolverá un error.
-          </p>
-        </ReportFilterSection>
+        theme={getReportIdentity("material-ot").theme}
+        onDownload={() =>
+          void downloadCsv(
+            "reports/work-order-material-summary",
+            `work-order-material-summary-${woId}.csv`,
+            { work_order_id: Number(woId) },
+          )
+        }
+      />
 
-        <ReportFilterSection
-          title="Descarga"
-          accentClass="text-emerald-800 dark:text-emerald-200"
-          dotClass="bg-emerald-500"
-          borderClass="border-emerald-500/30 from-emerald-500/[0.07]"
-        >
-          <Button
-            type="button"
-            disabled={loading || !woId.trim()}
-            onClick={() =>
-              void downloadCsv(
-                "reports/work-order-material-summary",
-                `work-order-material-summary-${woId}.csv`,
-                { work_order_id: Number(woId) },
-              )
-            }
-          >
-            Resumen OT
-          </Button>
-        </ReportFilterSection>
-      </ReportFiltersPanel>
+      <Card className="border-dashed border-orange-500/35 bg-orange-500/[0.04]">
+        <CardContent className="flex gap-3 pt-6">
+          <Boxes className="mt-0.5 h-8 w-8 shrink-0 text-orange-600" aria-hidden />
+          <div className="space-y-2 text-sm">
+            <p className="font-semibold text-foreground">Descarga de inventario, no de planilla</p>
+            <p className="text-muted-foreground leading-relaxed">
+              El CSV incluye materiales despachados por solicitud, usos de bobina en áreas y devoluciones.
+              No incluye Kg de salida de producción ni tintas del módulo Tintas — para eso use{" "}
+              <strong className="text-foreground">Resumen de órdenes de trabajo</strong>.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </ReportPageShell>
   )
 }

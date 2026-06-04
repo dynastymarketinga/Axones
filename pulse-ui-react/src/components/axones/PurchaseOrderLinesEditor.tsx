@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 
 import { apiFetch } from "@/lib/api"
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -264,8 +265,8 @@ export function PurchaseOrderLinesEditor({
     updateLine(rowIndex, {
       material_id: String(material.id),
       description: material.sku || material.name || "",
-      micras: material.micras?.trim() ?? "",
-      ancho_mm: material.ancho?.trim() ?? "",
+      micras: formatMaterialDimensionDisplay(material.micras),
+      ancho_mm: formatMaterialDimensionDisplay(material.ancho),
       unit,
     })
     setMaterialPickerOpenRow(null)

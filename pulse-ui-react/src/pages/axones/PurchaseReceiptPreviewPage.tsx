@@ -12,6 +12,8 @@ import {
   authHeadersDownload,
   buildApiUrl,
 } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
@@ -191,10 +193,10 @@ export default function PurchaseReceiptPreviewPage() {
                       <TableCell>{line.material?.sku || "—"}</TableCell>
                       <TableCell>{line.material?.name || "—"}</TableCell>
                       <TableCell>{line.item_type || "—"}</TableCell>
-                      <TableCell>{line.quantity ?? "—"}</TableCell>
+                      <TableCell>{formatQuantityDisplay(line.quantity) || "—"}</TableCell>
                       <TableCell>{line.unit || "—"}</TableCell>
-                      <TableCell>{line.micras ?? "—"}</TableCell>
-                      <TableCell>{line.ancho_mm ?? "—"}</TableCell>
+                      <TableCell>{formatMaterialDimensionDisplay(line.micras) || "—"}</TableCell>
+                      <TableCell>{formatMaterialDimensionDisplay(line.ancho_mm) || "—"}</TableCell>
                     </TableRow>
                   ))
                 ) : (

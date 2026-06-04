@@ -9,6 +9,7 @@ import {
 
 import {
   buildMesBandFromTurnos,
+  deriveMesOperativoEstadoFromMes,
   mesBandFromAreaTimeSummary,
   mesBandejaCardClass,
   mesBandejaRowAccentClass,
@@ -18,6 +19,7 @@ import {
   type AreaTimeSummary,
   type MesBandejaMes,
   type MesBandejaWorkflow,
+  type MesOperativoEstado,
 } from "@/lib/mes-timer-band-shared"
 
 export { formatHmsFromSeconds } from "@/lib/mes-timer-band-shared"
@@ -45,6 +47,31 @@ function hasCorteMesActivity(form: Record<string, unknown> | null): boolean {
  * Estado MES para la bandeja de corte.
  * Incluye OT con datos MES aunque el tablero aún no esté en columna «corte».
  */
+export function corteMesBandFromForm(
+  form: Record<string, unknown> | null | undefined,
+  nowMs: number = Date.now(),
+): MesBandejaMes {
+  const f = form ?? null
+  const cerrados = f ? parseCorteTurnos(f[COR_TURNOS_KEY], f) : []
+  const actual = f ? parseCorteTurnoActual(f[COR_ACTUAL_KEY], f) : null
+  const estado = f ? readCorteEstadoArea(f[COR_ESTADO_KEY]) : "abierta"
+  return buildMesBandFromTurnos({
+    areaLabel: "Corte",
+    estado,
+    cerrados,
+    actual,
+    nowMs,
+    form: f,
+  })
+}
+
+export function deriveCorteOperativoEstado(
+  form: Record<string, unknown> | null | undefined,
+  nowMs: number = Date.now(),
+): MesOperativoEstado {
+  return deriveMesOperativoEstadoFromMes(corteMesBandFromForm(form, nowMs))
+}
+
 export function corteMesBandFromWorkOrderRow(row: CorteBandejaRow, nowMs: number): MesBandejaMes | null {
   if (row.area_time_summary) {
     const fromSegments = mesBandFromAreaTimeSummary(row.area_time_summary, nowMs, "Corte")
@@ -54,18 +81,7 @@ export function corteMesBandFromWorkOrderRow(row: CorteBandejaRow, nowMs: number
   const form = technicalFormFromRow(row)
   const bs = (row.board_stage ?? "").toLowerCase()
   if (bs !== "corte" && !hasCorteMesActivity(form)) return null
-
-  const cerrados = form ? parseCorteTurnos(form[COR_TURNOS_KEY], form) : []
-  const actual = form ? parseCorteTurnoActual(form[COR_ACTUAL_KEY], form) : null
-  const estado = form ? readCorteEstadoArea(form[COR_ESTADO_KEY]) : "abierta"
-  return buildMesBandFromTurnos({
-    areaLabel: "Corte",
-    estado,
-    cerrados,
-    actual,
-    nowMs,
-    form,
-  })
+  return corteMesBandFromForm(form, nowMs)
 }
 
 /**

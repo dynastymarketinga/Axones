@@ -27,6 +27,8 @@ import {
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import type { LaravelPaginated, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
@@ -1015,10 +1017,10 @@ export default function PurchaseReceiptsPage() {
                           <TableCell>{line.material?.sku || "—"}</TableCell>
                           <TableCell>{line.material?.name || "—"}</TableCell>
                           <TableCell>{line.item_type || "—"}</TableCell>
-                          <TableCell className="text-right tabular-nums">{line.quantity ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatQuantityDisplay(line.quantity) || "—"}</TableCell>
                           <TableCell>{line.unit || "—"}</TableCell>
-                          <TableCell className="text-right tabular-nums">{line.micras ?? "—"}</TableCell>
-                          <TableCell className="text-right tabular-nums">{line.ancho_mm ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatMaterialDimensionDisplay(line.micras) || "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatMaterialDimensionDisplay(line.ancho_mm) || "—"}</TableCell>
                         </TableRow>
                       ))
                     ) : (

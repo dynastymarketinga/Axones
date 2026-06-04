@@ -135,6 +135,19 @@ export function finalizeMesPhaseSlotsOnTimer<T extends MesPhaseTimerFields>(time
   }
 }
 
+export function cumulativeArranqueSeconds<T extends { timer: MesPhaseTimerFields }>(
+  cerrados: T[],
+  actual: T | null,
+  nowMs: number,
+): number {
+  let sum = 0
+  for (const t of cerrados) {
+    sum += t.timer.arranqueAccSec
+  }
+  if (!actual) return sum
+  return sum + shiftArranqueSeconds(actual.timer, nowMs)
+}
+
 export function cumulativeDemountSeconds<T extends { timer: MesPhaseTimerFields }>(
   cerrados: T[],
   actual: T | null,

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\OperationalAlertType;
 use App\Http\Controllers\Controller;
 use App\Models\OperationalAlert;
 use Illuminate\Http\JsonResponse;
@@ -32,8 +33,18 @@ class OperationalAlertController extends Controller
 
         if ($request->query('alert_type')) {
             $query->where('alert_type', $request->query('alert_type'));
+        } elseif (filter_var($request->query('warehouse_notifications'), FILTER_VALIDATE_BOOLEAN)
+            || $this->isWarehouseAlertRole((string) ($user->role ?? ''))) {
+            $query->whereIn('alert_type', OperationalAlertType::warehouseNotificationValues());
         } elseif (! filter_var($request->query('include_all'), FILTER_VALIDATE_BOOLEAN)) {
-            $query->materialOperational();
+            if ($this->hasFullAlertAccess((string) ($user->role ?? ''))) {
+                $query->whereIn('alert_type', array_merge(
+                    OperationalAlertType::materialOperationalValues(),
+                    OperationalAlertType::warehouseNotificationValues(),
+                ));
+            } else {
+                $query->materialOperational();
+            }
         }
 
         return response()->json($query->paginate(min((int) $request->query('per_page', 30), 100)));
@@ -126,5 +137,16 @@ class OperationalAlertController extends Controller
             'tintas' => 'tintas',
             default => null,
         };
+    }
+
+    private function isWarehouseAlertRole(string $role): bool
+    {
+        return in_array(strtolower(trim($role)), [
+            'inventory',
+            'inventario',
+            'inventory_chief',
+            'jefe_inventario',
+            'jefe_almacen',
+        ], true);
     }
 }

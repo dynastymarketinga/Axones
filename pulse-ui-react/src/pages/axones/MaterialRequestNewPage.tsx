@@ -34,6 +34,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Tooltip,
@@ -49,6 +56,36 @@ const DESKTOP_LINE_GRID =
 
 const MAX_ITEM_LINES = 10
 const ITEMS_PAGE_SIZE = 5
+
+/** Unidades permitidas al solicitar insumos (valor API → etiqueta). */
+export const MATERIAL_REQUEST_UNIT_OPTIONS = [
+  { value: "kg", label: "Kg" },
+  { value: "unidad", label: "Unidad" },
+  { value: "rollo", label: "Rollo" },
+] as const
+
+export type MaterialRequestUnit = (typeof MATERIAL_REQUEST_UNIT_OPTIONS)[number]["value"]
+
+function isMaterialRequestUnit(value: string): value is MaterialRequestUnit {
+  return MATERIAL_REQUEST_UNIT_OPTIONS.some((o) => o.value === value)
+}
+
+function materialRequestUnitLabel(value: string | null | undefined): string {
+  const v = (value ?? "").trim().toLowerCase()
+  return MATERIAL_REQUEST_UNIT_OPTIONS.find((o) => o.value === v)?.label ?? (v || "—")
+}
+
+function quantityPlaceholderForUnit(unit: string): string {
+  if (unit === "unidad") return "Ej. 1"
+  if (unit === "rollo") return "Ej. 2"
+  return "Ej. 50"
+}
+
+function quantityHintForUnit(unit: MaterialRequestUnit): string {
+  if (unit === "unidad") return "Piezas o botes (ej. 1 jabón)"
+  if (unit === "rollo") return "Número de rollos"
+  return "Kilogramos (ej. 50 kg de BOPP)"
+}
 
 const ROLE_LABELS: Record<string, string> = {
   boss: "Jefe / gerencia",
@@ -133,7 +170,7 @@ type DraftLine = {
   key: string
   description: string
   quantity_requested: string
-  unit: string
+  unit: MaterialRequestUnit
 }
 
 function newLine(): DraftLine {
@@ -141,7 +178,7 @@ function newLine(): DraftLine {
     key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     description: "",
     quantity_requested: "",
-    unit: "",
+    unit: "kg",
   }
 }
 
@@ -165,7 +202,7 @@ type ConfirmSummary = {
   lines: Array<{
     description: string
     quantity_requested: string
-    unit?: string
+    unit: string
   }>
 }
 
@@ -217,6 +254,48 @@ function ToneInput({
           hasError && "border-destructive focus-visible:ring-destructive/30",
         )}
       />
+    </div>
+  )
+}
+
+type ToneUnitSelectProps = {
+  value: MaterialRequestUnit
+  onChange: (value: MaterialRequestUnit) => void
+  className?: string
+}
+
+function ToneUnitSelect({ value, onChange, className }: ToneUnitSelectProps) {
+  const s = TONE_STYLES.emerald
+  const filled = value.length > 0
+
+  return (
+    <div className={cn("group relative min-w-0", className)}>
+      <Ruler
+        className={cn(
+          "pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2",
+          filled ? s.iconFilled : cn("text-muted-foreground/70", s.iconFocus),
+        )}
+        aria-hidden
+      />
+      <Select value={value} onValueChange={(v) => onChange(isMaterialRequestUnit(v) ? v : "kg")}>
+        <SelectTrigger
+          aria-label="Unidad de medida"
+          className={cn(
+            "h-11 w-full min-w-0 border-border/70 bg-background/80 pl-10 text-base transition-all duration-200 md:text-sm",
+            s.focus,
+            filled && s.filled,
+          )}
+        >
+          <SelectValue placeholder="Unidad" />
+        </SelectTrigger>
+        <SelectContent>
+          {MATERIAL_REQUEST_UNIT_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -318,25 +397,20 @@ function LineRow({ index, line, descError, qtyError, canRemove, onUpdate, onRemo
                 tone="amber"
                 icon={Hash}
                 value={line.quantity_requested}
-                placeholder="Cantidad"
+                placeholder={quantityPlaceholderForUnit(line.unit)}
                 inputMode="decimal"
                 hasError={qtyError}
                 aria-invalid={qtyError || undefined}
                 onChange={(v) => onUpdate({ quantity_requested: v })}
               />
+              <p className="text-muted-foreground text-xs leading-snug">{quantityHintForUnit(line.unit)}</p>
             </div>
             <div className="grid min-w-0 gap-1.5">
               <span className={cn("flex items-center gap-2 text-sm font-semibold", TONE_STYLES.emerald.label)}>
                 <Ruler className="h-4 w-4" aria-hidden />
-                Unid.
+                Unidad
               </span>
-              <ToneInput
-                tone="emerald"
-                icon={Ruler}
-                value={line.unit}
-                placeholder="kg, litro…"
-                onChange={(v) => onUpdate({ unit: v })}
-              />
+              <ToneUnitSelect value={line.unit} onChange={(unit) => onUpdate({ unit })} />
             </div>
           </div>
         </div>
@@ -368,19 +442,13 @@ function LineRow({ index, line, descError, qtyError, canRemove, onUpdate, onRemo
         tone="amber"
         icon={Hash}
         value={line.quantity_requested}
-        placeholder="Cantidad"
+        placeholder={quantityPlaceholderForUnit(line.unit)}
         inputMode="decimal"
         hasError={qtyError}
         aria-invalid={qtyError || undefined}
         onChange={(v) => onUpdate({ quantity_requested: v })}
       />
-      <ToneInput
-        tone="emerald"
-        icon={Ruler}
-        value={line.unit}
-        placeholder="kg"
-        onChange={(v) => onUpdate({ unit: v })}
-      />
+      <ToneUnitSelect value={line.unit} onChange={(unit) => onUpdate({ unit })} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -536,7 +604,7 @@ export default function MaterialRequestNewPage() {
         return {
           description: desc,
           quantity_requested: qty,
-          ...(ln.unit.trim() ? { unit: ln.unit.trim() } : {}),
+          unit: ln.unit || "kg",
         }
       })
       .filter(Boolean) as ConfirmSummary["lines"]
@@ -582,7 +650,7 @@ export default function MaterialRequestNewPage() {
     setLineErrorsByKey(lineErrs)
 
     if (!ok) {
-      toast.error("Complete observaciones, descripción y cantidad en cada ítem. Unidad es opcional.")
+      toast.error("Complete observaciones, descripción y cantidad en cada ítem.")
       return false
     }
 
@@ -619,6 +687,7 @@ export default function MaterialRequestNewPage() {
       })
       setConfirmOpen(false)
       toast.success("Solicitud de insumos enviada.")
+      window.dispatchEvent(new Event("alerts:refresh"))
       navigate("/solicitudes-material", { replace: true })
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -718,7 +787,10 @@ export default function MaterialRequestNewPage() {
                       Ítems solicitados
                     </Label>
                     <p className="text-muted-foreground mt-1 text-sm">
-                      Descripción y cantidad obligatorias. Unidad opcional. Máximo {MAX_ITEM_LINES} ítems
+                      Describa el material, escriba la cantidad y elija la unidad. Por defecto es{" "}
+                      <strong className="text-foreground font-medium">Kg</strong> (la cantidad son kilogramos).
+                      Para piezas sueltas use <strong className="text-foreground font-medium">Unidad</strong>.
+                      Máximo {MAX_ITEM_LINES} ítems
                       {ITEMS_PAGE_SIZE < MAX_ITEM_LINES ? ` (${ITEMS_PAGE_SIZE} por página)` : ""}.
                     </p>
                     <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">
@@ -754,7 +826,7 @@ export default function MaterialRequestNewPage() {
                     <span className="text-muted-foreground text-center text-sm font-semibold">#</span>
                     <ColumnHeader tone="violet" icon={ClipboardList} label="Descripción *" />
                     <ColumnHeader tone="amber" icon={Hash} label="Cant. *" align="center" />
-                    <ColumnHeader tone="emerald" icon={Ruler} label="Unid." align="center" />
+                    <ColumnHeader tone="emerald" icon={Ruler} label="Unidad" align="center" />
                     <span className="sr-only">Eliminar</span>
                   </div>
 
@@ -907,17 +979,10 @@ export default function MaterialRequestNewPage() {
                           <Hash className="h-3.5 w-3.5 opacity-80" aria-hidden />
                           {ln.quantity_requested}
                         </span>
-                        {ln.unit ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/12 px-3 py-1 text-sm text-emerald-950 dark:text-emerald-100">
-                            <Ruler className="h-3.5 w-3.5 opacity-80" aria-hidden />
-                            {ln.unit}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-3 py-1 text-xs">
-                            <Ruler className="h-3.5 w-3.5 opacity-60" aria-hidden />
-                            Sin unidad
-                          </span>
-                        )}
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/12 px-3 py-1 text-sm text-emerald-950 dark:text-emerald-100">
+                          <Ruler className="h-3.5 w-3.5 opacity-80" aria-hidden />
+                          {materialRequestUnitLabel(ln.unit)}
+                        </span>
                       </div>
                     </li>
                   ))}

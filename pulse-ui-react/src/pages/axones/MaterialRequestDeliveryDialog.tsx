@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -392,19 +393,19 @@ export function MaterialRequestDeliveryDialog({
                             </div>
                           )}
                         </TableCell>
-                        <TableCell>{ln.quantity_requested}</TableCell>
-                        <TableCell>{ln.quantity_dispatched}</TableCell>
-                        <TableCell>{rem.toFixed(3)}</TableCell>
+                        <TableCell>{formatQuantityDisplay(ln.quantity_requested)}</TableCell>
+                        <TableCell>{formatQuantityDisplay(ln.quantity_dispatched)}</TableCell>
+                        <TableCell>{formatQuantityDisplay(rem)}</TableCell>
                         <TableCell className="min-w-[280px]">
                           {bobinaPicker ? (
                             <div className="space-y-2">
                               <div className="text-xs text-muted-foreground">
                                 Seleccione rollos (sumatoria kg). Seleccionado:{" "}
-                                <span className="font-medium">{selectedKg.toFixed(3)} kg</span>
+                                <span className="font-medium">{formatQuantityDisplay(selectedKg)} kg</span>
                               </div>
                               {overSelected ? (
                                 <div className="text-xs text-destructive">
-                                  La selección excede lo pendiente ({rem.toFixed(3)} kg).
+                                  La selección excede lo pendiente ({formatQuantityDisplay(rem)} kg).
                                 </div>
                               ) : null}
                               <div className="max-h-40 overflow-auto rounded-md border p-2">
@@ -458,31 +459,31 @@ export function MaterialRequestDeliveryDialog({
                                 <p className="text-xs text-muted-foreground">
                                   Sin rollos con código registrados. Stock en sistema:{" "}
                                   <span className="font-medium text-foreground">
-                                    {stock.toFixed(3)} {ln.material.unit || "kg"}
+                                    {formatQuantityDisplay(stock)} {ln.material.unit || "kg"}
                                   </span>
                                   {rem > stock + 0.0005 && stock > 0 ? (
                                     <span className="block text-amber-800 dark:text-amber-200">
-                                      Pendiente {rem.toFixed(3)} kg — puede aprobar hasta{" "}
-                                      {maxQty.toFixed(3)} kg ahora (parcial).
+                                      Pendiente {formatQuantityDisplay(rem)} kg — puede aprobar hasta{" "}
+                                      {formatQuantityDisplay(maxQty)} kg ahora (parcial).
                                     </span>
                                   ) : null}
                                 </p>
                               ) : null}
                               {qtyOverPending ? (
                                 <p className="text-xs text-destructive">
-                                  Supera lo pendiente ({rem.toFixed(3)}).
+                                  Supera lo pendiente ({formatQuantityDisplay(rem)}).
                                 </p>
                               ) : null}
                               {qtyOverStock ? (
                                 <p className="text-xs text-destructive">
-                                  Supera el stock disponible ({stock.toFixed(3)}).
+                                  Supera el stock disponible ({formatQuantityDisplay(stock)}).
                                 </p>
                               ) : null}
                               <Input
                                 inputMode="decimal"
                                 placeholder={
                                   rem > 0
-                                    ? `Máx. ${maxQty.toFixed(3)} ${ln.material?.unit || "kg"}`
+                                    ? `Máx. ${formatQuantityDisplay(maxQty)} ${ln.material?.unit || "kg"}`
                                     : ""
                                 }
                                 value={qty[lineKey] ?? ""}

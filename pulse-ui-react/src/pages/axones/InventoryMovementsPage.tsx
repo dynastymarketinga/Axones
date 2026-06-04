@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiDownloadFile, apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import type { InventoryMovementRow, LaravelPaginated } from "@/types/api"
 import {
   AXONES_INVENTORY_FILTER_INPUT_CLASS,
@@ -358,19 +359,25 @@ export default function InventoryMovementsPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Entradas</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold">{summary?.entries_total ?? "0.000"}</CardContent>
+          <CardContent className="text-2xl font-semibold tabular-nums">
+            {formatQuantityDisplay(summary?.entries_total) || "0"}
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Salidas</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold">{summary?.exits_total ?? "0.000"}</CardContent>
+          <CardContent className="text-2xl font-semibold tabular-nums">
+            {formatQuantityDisplay(summary?.exits_total) || "0"}
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Ajustes manuales</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold">{summary?.adjustment_total ?? "0.000"}</CardContent>
+          <CardContent className="text-2xl font-semibold tabular-nums">
+            {formatQuantityDisplay(summary?.adjustment_total) || "0"}
+          </CardContent>
         </Card>
         <Card className={adjustmentAlertClass}>
           <CardHeader className="pb-2">
@@ -397,7 +404,9 @@ export default function InventoryMovementsPage() {
             topMaterials.slice(0, 5).map((item, index) => (
               <div key={`${item.material_id ?? "none"}-${index}`} className="flex items-center justify-between border-b pb-1 last:border-b-0">
                 <span className="truncate pr-3">{item.sku} · {item.name}</span>
-                <span className="font-medium whitespace-nowrap">{item.total_qty} {item.unit}</span>
+                <span className="font-medium whitespace-nowrap tabular-nums">
+                  {formatQuantityDisplay(item.total_qty)} {item.unit}
+                </span>
               </div>
             ))
           )}
@@ -444,8 +453,8 @@ export default function InventoryMovementsPage() {
                       : "—"}
                   </TableCell>
                   <TableCell>{m.material?.inventory_area ?? "—"}</TableCell>
-                  <TableCell>
-                    {m.quantity} {m.material?.unit ?? ""}
+                  <TableCell className="tabular-nums">
+                    {formatQuantityDisplay(m.quantity)} {m.material?.unit ?? ""}
                   </TableCell>
                   <TableCell className="max-w-[240px]">
                     <div className="flex items-center gap-2">

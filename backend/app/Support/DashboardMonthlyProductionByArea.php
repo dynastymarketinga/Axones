@@ -57,6 +57,7 @@ final class DashboardMonthlyProductionByArea
             }
 
             self::accumulatePrinting($form, $buckets, $oldest, $now);
+            self::accumulateMontaje($form, $buckets, $oldest, $now);
             self::accumulateLaminacion($form, $buckets, $oldest, $now);
             self::accumulateCorte($form, $buckets, $oldest, $now);
         }
@@ -125,6 +126,55 @@ final class DashboardMonthlyProductionByArea
                 $buckets[$monthKey]['impresion'] += self::printingTurnSalidaKg($turn);
             }
         }
+    }
+
+    /**
+     * @param  array<string, array{montaje: float, impresion: float, laminacion: float, corte: float, tintas: float}>  $buckets
+     * @param  array<string, mixed>  $form
+     */
+    private static function accumulateMontaje(array $form, array &$buckets, Carbon $oldest, Carbon $now): void
+    {
+        foreach ((array) ($form['montTurnosMontaje'] ?? []) as $turn) {
+            if (! is_array($turn)) {
+                continue;
+            }
+            $closedAt = isset($turn['closed_at']) ? trim((string) $turn['closed_at']) : '';
+            if ($closedAt === '') {
+                continue;
+            }
+            $monthKey = self::monthKeyForTimestamp($closedAt, $oldest, $now);
+            if ($monthKey === null) {
+                continue;
+            }
+            $buckets[$monthKey]['montaje'] += self::montajeTurnProduccionKg($turn);
+        }
+
+        $actual = $form['montTurnoActual'] ?? null;
+        if (is_array($actual)) {
+            $when = trim((string) ($actual['closed_at'] ?? ''));
+            if ($when === '') {
+                $when = trim((string) ($actual['started_at'] ?? ''));
+            }
+            if ($when !== '') {
+                $monthKey = self::monthKeyForTimestamp($when, $oldest, $now);
+                if ($monthKey !== null) {
+                    $buckets[$monthKey]['montaje'] += self::montajeTurnProduccionKg($actual);
+                }
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $turn
+     */
+    private static function montajeTurnProduccionKg(array $turn): float
+    {
+        $kg = self::readKg($turn['kgProduccion'] ?? null);
+        if ($kg > 0.0005) {
+            return $kg;
+        }
+
+        return self::readKg($turn['montKgProduccion'] ?? null);
     }
 
     /**

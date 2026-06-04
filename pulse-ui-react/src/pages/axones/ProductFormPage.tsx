@@ -9,7 +9,6 @@ import { AXONES_INVENTORY_FILTER_INPUT_CLASS } from "@/components/axones/invento
 import { apiFetch, ApiError } from "@/lib/api"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
 import { InlineSpinner } from "@/components/axones/LoadingStates"
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -287,9 +286,7 @@ export default function ProductFormPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       <h1 className="sr-only">{isEdit ? "Editar especificación" : "Nueva especificación"}</h1>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <WorkOrderStageBadge current="especificacion" className="pt-1" />
-        <div className="flex shrink-0 justify-end gap-2">
+      <div className="flex justify-end gap-2">
           <Button
             type="button"
             variant="secondary"
@@ -304,7 +301,6 @@ export default function ProductFormPage() {
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-        </div>
       </div>
 
       {loading ? (

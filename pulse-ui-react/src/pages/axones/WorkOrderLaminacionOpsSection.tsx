@@ -37,7 +37,6 @@ import {
   Printer,
   Recycle,
   ListChecks,
-  RotateCcw,
   Ruler,
   Sun,
   Timer,
@@ -55,6 +54,8 @@ import {
   MesStatTile,
   mesSectionTitle,
 } from "@/components/axones/mes"
+import { MesBobinaKgSlotCell } from "@/components/axones/MesBobinaKgSlotCell"
+import { isBobinaKgSlotFilled } from "@/lib/bobina-kg-slot"
 
 import { MES_TIMER_HELP_TEXT, MesProductionTimerOpsBlock } from "./mes-production-timer-ops-block"
 import {
@@ -63,12 +64,28 @@ import {
 } from "./mes-warehouse-return-section"
 import {
   allRejectedEntriesHaveMotivo,
-  countDevolucionRechazadaBobinas,
   hasSalidaBobinaMeta,
   normalizeSalidaBobinaLabelMeta,
   salidaBobinaLabelTooltipText,
-  sumRejectedEntryBobinas,
+  sumRejectedEntryKg,
 } from "./printing-turnos"
+import { sanitizePositiveDecimalInput } from "./purchase-document-form-ui"
+import { computeLamMaterialConsumo } from "./laminacion-turnos"
+import {
+  materialSpecificationsLabel,
+  rejectReasonLabel,
+  todayIsoDate,
+} from "./warehouse-return-helpers"
+import { normalizeScrapSubstrate, SCRAP_POLIETILENO } from "@/lib/scrap-substrate"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -253,11 +270,10 @@ type Props = {
   adhesivoConsumido?: number
   catalizadorConsumido?: number
   acetatoConsumido?: number
-  virgenRechazadasRaw?: string
-  virgenMaterialesBuenosRaw?: string
   devolucionBuenaRaw?: string
   devolucionRechazadaRaw?: string
   devolucionRechazadaMotivoRaw?: string
+  devolucionRechazadaKg?: number
   devolucionesPendienteAlmacen: boolean
   devolucionRechazada?: number
   warehouseReturn: MesWarehouseReturnPanelProps
@@ -278,6 +294,10 @@ type Props = {
   scrapTransparenteRaw: string
   scrapImpresoRaw: string
   scrapLaminadoRaw: string
+  scrapImpresoDestinoRaw: string
+  scrapLaminadoDestinoRaw: string
+  onSetScrapImpresoDestino: (v: string) => void
+  onSetScrapLaminadoDestino: (v: string) => void
   mermaCalc?: number
   refilPct?: number
   onEntradaImpresaChange: (idx: number, v: string) => void
@@ -292,8 +312,6 @@ type Props = {
   onSetCatalizadorSobro: (v: string) => void
   onSetAcetatoEntrada: (v: string) => void
   onSetAcetatoSobro: (v: string) => void
-  onSetVirgenRechazadas?: (v: string) => void
-  onSetVirgenMaterialesBuenos?: (v: string) => void
   onSetDevolucionBuena?: (v: string) => void
   onSetDevolucionRechazada?: (v: string) => void
   onSetScrapTransparente: (v: string) => void
@@ -340,10 +358,55 @@ type Props = {
   closedTurnos: LaminacionTurnoEntry[]
   canPreviewTimerReport: boolean
   onPreviewTimerReport: () => void
-  canResetAll: boolean
-  onResetAll: () => void
   /** Vista piso: solo play / parada / vista previa en el cronómetro. */
   simplifiedTimerActions?: boolean
+}
+
+function ScrapDestinoToggle({
+  idPrefix,
+  value,
+  onChange,
+  disabled,
+  label = "Destino (reporte)",
+  className,
+}: {
+  idPrefix: string
+  value: string
+  onChange: (v: string) => void
+  disabled: boolean
+  label?: string
+  className?: string
+}) {
+  const normalized =
+    normalizeScrapSubstrate(value) === SCRAP_POLIETILENO ? SCRAP_POLIETILENO : "bopp"
+  return (
+    <div className={cn("mes-scrap-destino space-y-1", className)}>
+      <Label id={`${idPrefix}-label`} className="mes-scrap-destino__label text-muted-foreground">
+        {label}
+      </Label>
+      <ToggleGroup
+        type="single"
+        aria-labelledby={`${idPrefix}-label`}
+        className="mes-scrap-toggle-group flex flex-wrap justify-start gap-1"
+        value={normalized}
+        onValueChange={(v) => {
+          if (!v || disabled) return
+          onChange(v)
+        }}
+        disabled={disabled}
+      >
+        <ToggleGroupItem value="bopp" className="mes-scrap-toggle-item mes-scrap-toggle-item--bopp h-7 px-2 text-xs">
+          BOPP
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value={SCRAP_POLIETILENO}
+          className="mes-scrap-toggle-item mes-scrap-toggle-item--pe h-7 px-2 text-xs"
+        >
+          Polietileno
+        </ToggleGroupItem>
+      </ToggleGroup>
+    </div>
+  )
 }
 
 function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
@@ -531,6 +594,16 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
   const doneEntradaVirgen =
     props.entradaVirgenBobinas.some((v) => num(v) > 0) ||
     props.entradaVirgenMeta.some((m) => hasMeta(m))
+  const adhesivoConsumido = computeLamMaterialConsumo(
+    props.adhesivoEntradaRaw,
+    props.adhesivoSobroRaw,
+  )
+  const catalizadorConsumido = computeLamMaterialConsumo(
+    props.catalizadorEntradaRaw,
+    props.catalizadorSobroRaw,
+  )
+  const acetatoConsumido = computeLamMaterialConsumo(props.acetatoEntradaRaw, props.acetatoSobroRaw)
+
   const doneAdhesivo =
     num(props.adhesivoEntradaRaw) > 0 ||
     num(props.catalizadorEntradaRaw) > 0 ||
@@ -540,15 +613,15 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
     props.salidaMeta.some((m) => hasSalidaBobinaMeta(m)) ||
     num(props.metrajeRaw) > 0
 
-  const rechBobinasFromEntries = sumRejectedEntryBobinas(props.warehouseReturn.draft.rechazadaEntries)
-  const rechBobinas =
-    rechBobinasFromEntries > 0
-      ? rechBobinasFromEntries
-      : countDevolucionRechazadaBobinas(props.devolucionRechazadaRaw, undefined)
-  const buenaDev = num(props.devolucionBuenaRaw)
+  const rechKgFromEntries = sumRejectedEntryKg(props.warehouseReturn.draft.rechazadaEntries)
+  const rechKg =
+    rechKgFromEntries > 0
+      ? rechKgFromEntries
+      : Math.max(0, props.devolucionRechazadaKg ?? 0)
+  const buenaDev = num(props.devolucionBuenaRaw ?? "")
   const autoDevoluciones =
-    (buenaDev > 0.01 || rechBobinas > 0) &&
-    (rechBobinas <= 0 || allRejectedEntriesHaveMotivo(props.warehouseReturn.draft.rechazadaEntries))
+    (buenaDev > 0.01 || rechKg > 0) &&
+    (rechKg <= 0 || allRejectedEntriesHaveMotivo(props.warehouseReturn.draft.rechazadaEntries))
   const doneDevoluciones = autoDevoluciones
 
   const doneScrap =
@@ -563,15 +636,14 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
     0,
     (props.totalEntradaImpresa ?? 0) - num(props.devolucionBuenaRaw),
   )
-  const consumidoVirgenKg = Math.max(
-    0,
-    (props.totalEntradaVirgen ?? 0) - num(props.virgenMaterialesBuenosRaw),
+  const consumidoVirgenKg = Math.max(0, (props.totalEntradaVirgen ?? 0) - buenaDev)
+  const buenaMaterialSelected = useMemo(
+    () =>
+      props.warehouseReturn.materialOptionsGood.find(
+        (m) => String(m.id) === props.warehouseReturn.draft.buenaMaterialId,
+      ),
+    [props.warehouseReturn.draft.buenaMaterialId, props.warehouseReturn.materialOptionsGood],
   )
-  const devolucionRechazadaCount = props.devolucionRechazada ?? rechBobinas
-  const devolucionRechazadaLabel =
-    devolucionRechazadaCount > 0
-      ? `${devolucionRechazadaCount} bobina${devolucionRechazadaCount === 1 ? "" : "s"}`
-      : "0 bobinas"
 
 
   const showPersonalTurnoSetup = !props.hasActiveTurno && !props.areaFinalizada
@@ -999,18 +1071,20 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
                       </div>
                     </div>
 
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="montaje-save-person-btn h-12 w-full gap-2 text-base font-semibold sm:w-auto sm:min-w-[12rem] sm:shrink-0"
-                      onClick={() =>
-                        props.onDraftPersonGuardar(props.draftStagingName, props.draftStagingRole)
-                      }
-                      disabled={props.readOnlyOps}
-                    >
-                      <UserPlus className="h-5 w-5 shrink-0" aria-hidden />
-                      Guardar persona
-                    </Button>
+                    <div className="flex justify-center">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="montaje-save-person-btn h-12 w-full max-w-xs gap-2 text-base font-semibold sm:w-auto sm:min-w-[12rem] sm:shrink-0"
+                        onClick={() =>
+                          props.onDraftPersonGuardar(props.draftStagingName, props.draftStagingRole)
+                        }
+                        disabled={props.readOnlyOps}
+                      >
+                        <UserPlus className="h-5 w-5 shrink-0" aria-hidden />
+                        Guardar persona
+                      </Button>
+                    </div>
                   </div>
 
                   {props.draftOperadorMissing ? (
@@ -1031,25 +1105,25 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
                     </div>
                   ) : null}
                 </div>
-
-                <div className="mt-5 flex justify-center border-t border-border/60 pt-5">
-                  <Button
-                    type="button"
-                    className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
-                    onClick={props.onIniciarTurno}
-                    disabled={props.readOnlyOps || props.draftOperadorMissing}
-                    title={
-                      props.draftOperadorMissing
-                        ? "Guarde al menos una persona con rol Operador en la cuadrilla"
-                        : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
-                    }
-                  >
-                    <CirclePlay className="h-5 w-5 shrink-0" aria-hidden />
-                    Iniciar turno
-                  </Button>
-                </div>
               </div>
             </MesSectionShell>
+          </div>
+
+          <div className="col-span-1 flex justify-center border-t border-border/60 pt-5 xl:col-span-2">
+            <Button
+              type="button"
+              className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
+              onClick={props.onIniciarTurno}
+              disabled={props.readOnlyOps || props.draftOperadorMissing}
+              title={
+                props.draftOperadorMissing
+                  ? "Guarde al menos una persona con rol Operador en la cuadrilla"
+                  : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+              }
+            >
+              <CirclePlay className="h-5 w-5 shrink-0" aria-hidden />
+              Iniciar turno
+            </Button>
           </div>
         </div>
       ) : null}
@@ -1350,6 +1424,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             canFinalizeOrder={props.canFinalizeOrder}
             areaFinalizada={props.areaFinalizada}
             areaLabel="laminacion"
+            showTimerActions={props.hasActiveTurno}
           />
         ) : null}
         {props.timerPaused && !props.pauseMotivoDialogOpen ? (
@@ -1444,46 +1519,41 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         bodyClassName="mes-section__body--flush"
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-9">
-          {props.entradaVirgenBobinas.map((val, idx) => (
-            <div key={`lam-vir-${idx}`} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label htmlFor={mk(`virgen-bobina-${idx}`)} className="ot-label">
-                  <span className="inline-flex items-center gap-1">
-                    <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                    {idx + 1}
-                  </span>
-                </Label>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant={hasMeta(props.entradaVirgenMeta[idx]) ? "default" : "outline"}
-                        className="h-5 w-5"
-                        onClick={() => props.onOpenVirgenLabel(idx)}
-                        disabled={inputDisabled}
-                        title={`Etiqueta bobina de entrada #${idx + 1}`}
-                      >
-                        <ArrowUpRight className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">{labelTooltipText(props.entradaVirgenMeta[idx])}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
+          {props.entradaVirgenBobinas.map((val, idx) => {
+            const filled = isBobinaKgSlotFilled(val) || hasMeta(props.entradaVirgenMeta[idx])
+            return (
+              <MesBobinaKgSlotCell
+                key={`lam-vir-${idx}`}
                 id={mk(`virgen-bobina-${idx}`)}
                 name={`lamEntradaVirgenBobinaKg_${idx + 1}`}
-                className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                inputMode="decimal"
+                slotNum={idx + 1}
                 value={val}
-                onChange={(e) => props.onEntradaVirgenChange(idx, e.target.value)}
-                placeholder="0"
-                disabled={inputDisabled}
+                filled={filled}
+                inputDisabled={inputDisabled}
+                onChange={(v) => props.onEntradaVirgenChange(idx, v)}
+                labelButton={
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant={hasMeta(props.entradaVirgenMeta[idx]) ? "default" : "outline"}
+                          className="h-5 w-5"
+                          onClick={() => props.onOpenVirgenLabel(idx)}
+                          disabled={inputDisabled}
+                          title={`Etiqueta bobina de entrada #${idx + 1}`}
+                        >
+                          <ArrowUpRight className="h-3 w-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{labelTooltipText(props.entradaVirgenMeta[idx])}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                }
               />
-            </div>
-          ))}
+            )
+          })}
         </div>
         <div className="mt-2">
           <MesStatTile
@@ -1491,41 +1561,6 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             value={`${props.totalEntradaVirgen.toFixed(2)} Kg`}
             icon={<Weight className="h-3.5 w-3.5" />}
           />
-        </div>
-      </MesSectionShell>
-
-      <MesSectionShell
-        title={mesSectionTitle(PackageCheck, "Ajustes virgen del turno")}
-        subtle
-        headerRight={<MesSectionHeaderExtras isDone={doneEntradaVirgen} />}
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            {fieldLabel(mk("virgen-rech"), PackageX, "Virgen rechazada (Kg)")}
-            <Input
-              id={mk("virgen-rech")}
-              name="lamEntradaVirgenRechazadasKg"
-              className="ot-input-unified h-9"
-              inputMode="decimal"
-              value={props.virgenRechazadasRaw ?? ""}
-              onChange={(e) => props.onSetVirgenRechazadas?.(e.target.value)}
-              disabled={inputDisabled}
-              placeholder="0"
-            />
-          </div>
-          <div className="space-y-1">
-            {fieldLabel(mk("virgen-buena"), PackageCheck, "Material bueno devuelto (Kg)")}
-            <Input
-              id={mk("virgen-buena")}
-              name="lamEntradaVirgenMaterialesBuenosKg"
-              className="ot-input-unified h-9"
-              inputMode="decimal"
-              value={props.virgenMaterialesBuenosRaw ?? ""}
-              onChange={(e) => props.onSetVirgenMaterialesBuenos?.(e.target.value)}
-              disabled={inputDisabled}
-              placeholder="0"
-            />
-          </div>
         </div>
       </MesSectionShell>
 
@@ -1543,7 +1578,9 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.adhesivoEntradaRaw}
-              onChange={(e) => props.onSetAdhesivoEntrada(e.target.value)}
+              onChange={(e) =>
+                props.onSetAdhesivoEntrada(sanitizePositiveDecimalInput(e.target.value, 3))
+              }
               disabled={inputDisabled}
               placeholder="0"
             />
@@ -1556,14 +1593,16 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.adhesivoSobroRaw}
-              onChange={(e) => props.onSetAdhesivoSobro(e.target.value)}
+              onChange={(e) =>
+                props.onSetAdhesivoSobro(sanitizePositiveDecimalInput(e.target.value, 3))
+              }
               disabled={inputDisabled}
               placeholder="0"
             />
           </div>
           <MesStatTile
             label="Adhesivo consumido"
-            value={`${fmtKg(props.adhesivoConsumido)} Kg`}
+            value={`${fmtKg(adhesivoConsumido)} Kg`}
             icon={<Beaker className="h-3.5 w-3.5" />}
           />
           <div className="space-y-1">
@@ -1574,7 +1613,9 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.catalizadorEntradaRaw}
-              onChange={(e) => props.onSetCatalizadorEntrada(e.target.value)}
+              onChange={(e) =>
+                props.onSetCatalizadorEntrada(sanitizePositiveDecimalInput(e.target.value, 3))
+              }
               disabled={inputDisabled}
               placeholder="0"
             />
@@ -1587,7 +1628,9 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.catalizadorSobroRaw}
-              onChange={(e) => props.onSetCatalizadorSobro(e.target.value)}
+              onChange={(e) =>
+                props.onSetCatalizadorSobro(sanitizePositiveDecimalInput(e.target.value, 3))
+              }
               disabled={inputDisabled}
               placeholder="0"
             />
@@ -1600,7 +1643,9 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.acetatoEntradaRaw}
-              onChange={(e) => props.onSetAcetatoEntrada(e.target.value)}
+              onChange={(e) =>
+                props.onSetAcetatoEntrada(sanitizePositiveDecimalInput(e.target.value, 3))
+              }
               disabled={inputDisabled}
               placeholder="0"
             />
@@ -1613,25 +1658,27 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               className="ot-input-unified h-9"
               inputMode="decimal"
               value={props.acetatoSobroRaw}
-              onChange={(e) => props.onSetAcetatoSobro(e.target.value)}
+              onChange={(e) =>
+                props.onSetAcetatoSobro(sanitizePositiveDecimalInput(e.target.value, 3))
+              }
               disabled={inputDisabled}
               placeholder="0"
             />
           </div>
           <MesStatTile
             label="Catalizador consumido"
-            value={`${fmtKg(props.catalizadorConsumido)} Kg`}
+            value={`${fmtKg(catalizadorConsumido)} Kg`}
             icon={<Droplets className="h-3.5 w-3.5" />}
           />
           <MesStatTile
             label="Acetato consumido"
-            value={`${fmtKg(props.acetatoConsumido)} Lt`}
+            value={`${fmtKg(acetatoConsumido)} Lt`}
             icon={<Droplets className="h-3.5 w-3.5" />}
           />
         </div>
         <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-          Consumo: adhesivo {fmtKg(props.adhesivoConsumido)} Kg · catalizador{" "}
-          {fmtKg(props.catalizadorConsumido)} Kg · acetato {fmtKg(props.acetatoConsumido)} Lt
+          Consumo: adhesivo {fmtKg(adhesivoConsumido)} Kg · catalizador{" "}
+          {fmtKg(catalizadorConsumido)} Kg · acetato {fmtKg(acetatoConsumido)} Lt
         </p>
       </MesSectionShell>
 
@@ -1642,48 +1689,43 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         bodyClassName="mes-section__body--flush"
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
-          {props.salidaBobinas.map((val, idx) => (
-            <div key={`lam-sal-${idx}`} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label htmlFor={mk(`salida-bobina-${idx}`)} className="ot-label">
-                  <span className="inline-flex items-center gap-1">
-                    <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                    {idx + 1}
-                  </span>
-                </Label>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant={hasSalidaBobinaMeta(props.salidaMeta[idx]) ? "default" : "outline"}
-                        className="h-5 w-5"
-                        onClick={() => props.onOpenSalidaLabel(idx)}
-                        disabled={inputDisabled}
-                        title={`Etiqueta bobina de salida #${idx + 1}`}
-                      >
-                        <ArrowUpRight className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {salidaBobinaLabelTooltipText(props.salidaMeta[idx])}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
+          {props.salidaBobinas.map((val, idx) => {
+            const filled = isBobinaKgSlotFilled(val) || hasSalidaBobinaMeta(props.salidaMeta[idx])
+            return (
+              <MesBobinaKgSlotCell
+                key={`lam-sal-${idx}`}
                 id={mk(`salida-bobina-${idx}`)}
                 name={`lamSalidaBobinaKg_${idx + 1}`}
-                className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                inputMode="decimal"
+                slotNum={idx + 1}
                 value={val}
-                onChange={(e) => props.onSalidaChange(idx, e.target.value)}
-                placeholder="0"
-                disabled={inputDisabled}
+                filled={filled}
+                inputDisabled={inputDisabled}
+                onChange={(v) => props.onSalidaChange(idx, v)}
+                labelButton={
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant={hasSalidaBobinaMeta(props.salidaMeta[idx]) ? "default" : "outline"}
+                          className="h-5 w-5"
+                          onClick={() => props.onOpenSalidaLabel(idx)}
+                          disabled={inputDisabled}
+                          title={`Etiqueta bobina de salida #${idx + 1}`}
+                        >
+                          <ArrowUpRight className="h-3 w-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {salidaBobinaLabelTooltipText(props.salidaMeta[idx])}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                }
               />
-            </div>
-          ))}
+            )
+          })}
         </div>
         <div className="mt-2 mes-stat-grid sm:grid-cols-2 lg:grid-cols-4">
           <MesStatTile label="N° bobinas" value={numBobinasSalida} icon={<Hash className="h-3.5 w-3.5" />} />
@@ -1721,21 +1763,28 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         onSetDevolucionBuena={(v) => props.onSetDevolucionBuena?.(v)}
         areaFlowLabel="Laminación → Almacén"
         fieldPrefix="lam"
+        operadorDefault={props.lamOperador}
         warehouseReturn={props.warehouseReturn}
       />
 
       <MesSectionShell
         title={mesSectionTitle(Recycle, "Desperdicio / refil del turno (Kg)")}
         subtle
+        className="mes-section--scrap-premium"
         headerRight={<MesSectionHeaderExtras isDone={doneScrap} />}
       >
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
+        <p className="text-muted-foreground mb-3 text-[11px] leading-snug">
+          El destino <span className="font-medium text-foreground">BOPP / Polietileno</span> aplica a impreso y laminado
+          en el inventario de desperdicio. <span className="font-medium text-foreground">Transparente</span> aplica cuando
+          el film es CPP / transparente.
+        </p>
+        <div className="mes-scrap-grid mes-scrap-grid--lam">
+          <div className="mes-scrap-field">
             {fieldLabel(mk("scrap-transparente"), Layers, "Transparente")}
             <Input
               id={mk("scrap-transparente")}
               name="lamScrapTransparenteKg"
-              className="ot-input-unified h-9"
+              className="ot-input-unified mes-scrap-input h-9"
               inputMode="decimal"
               value={props.scrapTransparenteRaw}
               onChange={(e) => props.onSetScrapTransparente(e.target.value)}
@@ -1743,12 +1792,12 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               disabled={inputDisabled}
             />
           </div>
-          <div>
+          <div className="mes-scrap-field">
             {fieldLabel(mk("scrap-impreso"), Printer, "Impreso")}
             <Input
               id={mk("scrap-impreso")}
               name="lamScrapImpresoKg"
-              className="ot-input-unified h-9"
+              className="ot-input-unified mes-scrap-input h-9"
               inputMode="decimal"
               value={props.scrapImpresoRaw}
               onChange={(e) => props.onSetScrapImpreso(e.target.value)}
@@ -1756,12 +1805,12 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               disabled={inputDisabled}
             />
           </div>
-          <div>
+          <div className="mes-scrap-field">
             {fieldLabel(mk("scrap-laminado"), PackageSearch, "Laminado")}
             <Input
               id={mk("scrap-laminado")}
               name="lamScrapLaminadoKg"
-              className="ot-input-unified h-9"
+              className="ot-input-unified mes-scrap-input h-9"
               inputMode="decimal"
               value={props.scrapLaminadoRaw}
               onChange={(e) => props.onSetScrapLaminado(e.target.value)}
@@ -1769,13 +1818,24 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               disabled={inputDisabled}
             />
           </div>
+          <ScrapDestinoToggle
+            idPrefix={mk("scrap-destino")}
+            value={props.scrapImpresoDestinoRaw || props.scrapLaminadoDestinoRaw || "bopp"}
+            onChange={(v) => {
+              props.onSetScrapImpresoDestino(v)
+              props.onSetScrapLaminadoDestino(v)
+            }}
+            disabled={inputDisabled}
+            label="Destino (reporte)"
+            className="mes-scrap-destino--lam-shared mes-scrap-destino-row"
+          />
+        </div>
+        <div className="mt-3 mes-stat-grid sm:grid-cols-2">
           <MesStatTile
             label="Total desperdicio"
             value={`${fmtKg(props.totalScrap)} Kg`}
             icon={<Trash2 className="h-3.5 w-3.5" />}
           />
-        </div>
-        <div className="mt-2 mes-stat-grid sm:grid-cols-2">
           <MesStatTile
             label="% refil (desperdicio / salida)"
             value={`${fmtKg(props.refilPct)} %`}
@@ -1789,72 +1849,169 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         subtle
         headerRight={<MesSectionHeaderExtras isDone={doneResumen} />}
       >
-        <div className="mes-stat-grid sm:grid-cols-2">
-          <MesStatTile
-            label="Bobinas impresas (entrada)"
-            value={`${fmtKg(props.totalEntradaImpresa)} Kg`}
-            icon={<Printer className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Devolución buena"
-            value={`${fmtKg(num(props.devolucionBuenaRaw))} Kg`}
-            icon={<PackageCheck className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Devolución rechazada"
-            value={devolucionRechazadaLabel}
-            icon={<PackageX className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Consumido impresas (aprox.)"
-            value={`${fmtKg(consumidoImpresasKg)} Kg`}
-            icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Bobinas virgen (entrada)"
-            value={`${fmtKg(props.totalEntradaVirgen)} Kg`}
-            icon={<Package className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Virgen rechazada"
-            value={`${fmtKg(num(props.virgenRechazadasRaw))} Kg`}
-            icon={<PackageX className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Material bueno devuelto"
-            value={`${fmtKg(num(props.virgenMaterialesBuenosRaw))} Kg`}
-            icon={<PackageCheck className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Consumido virgen (aprox.)"
-            value={`${fmtKg(consumidoVirgenKg)} Kg`}
-            icon={<Weight className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Total salida laminada"
-            value={`${fmtKg(props.totalSalida)} Kg`}
-            icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Total desperdicio"
-            value={`${fmtKg(props.totalScrap)} Kg`}
-            icon={<Trash2 className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Adhesivo consumido"
-            value={`${fmtKg(props.adhesivoConsumido)} Kg`}
-            icon={<Beaker className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Merma calculada"
-            value={`${fmtKg(props.mermaCalc)} Kg`}
-            icon={<Recycle className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="% refil (desperdicio / salida)"
-            value={`${fmtKg(props.refilPct)} %`}
-            icon={<PieChart className="h-3.5 w-3.5" />}
-          />
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Entradas y salida
+            </p>
+            <div className="mes-stat-grid sm:grid-cols-2 lg:grid-cols-4">
+              <MesStatTile
+                label="Bobinas impresas (entrada)"
+                value={`${fmtKg(props.totalEntradaImpresa)} Kg`}
+                icon={<Printer className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Bobinas virgen (entrada)"
+                value={`${fmtKg(props.totalEntradaVirgen)} Kg`}
+                icon={<Package className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Total salida laminada"
+                value={`${fmtKg(props.totalSalida)} Kg`}
+                icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Merma calculada"
+                value={`${fmtKg(props.mermaCalc)} Kg`}
+                icon={<Recycle className="h-3.5 w-3.5" />}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/40 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900 dark:text-emerald-200">
+              Devolución buena
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="h-8 text-xs">Material</TableHead>
+                  <TableHead className="h-8 text-xs">Especificaciones</TableHead>
+                  <TableHead className="h-8 text-xs text-right">Kilos total</TableHead>
+                  <TableHead className="h-8 text-xs">Motivo</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {buenaDev > 0.01 || props.warehouseReturn.draft.buenaMaterialId ? (
+                  <TableRow>
+                    <TableCell className="py-2 text-xs">
+                      {buenaMaterialSelected
+                        ? `${buenaMaterialSelected.sku} · ${buenaMaterialSelected.name}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="py-2 text-xs text-muted-foreground">
+                      {props.warehouseReturn.draft.buenaEspecificaciones.trim() || "—"}
+                    </TableCell>
+                    <TableCell className="py-2 text-right text-xs font-medium">
+                      {buenaDev > 0.01 ? `${buenaDev.toFixed(2)} Kg` : "0.00 Kg"}
+                    </TableCell>
+                    <TableCell className="py-2 text-xs">
+                      {props.warehouseReturn.draft.buenaMotivo.trim() || "—"}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-3 text-center text-xs text-muted-foreground">
+                      Sin devolución buena en este turno.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="rounded-lg border border-rose-200/80 bg-rose-50/40 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900 dark:text-rose-200">
+              Devolución mala
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="h-8 text-xs">Fecha bobina</TableHead>
+                  <TableHead className="h-8 text-xs">Creada</TableHead>
+                  <TableHead className="h-8 text-xs">Proveedor</TableHead>
+                  <TableHead className="h-8 text-xs">Operador</TableHead>
+                  <TableHead className="h-8 text-xs text-right">Kilos</TableHead>
+                  <TableHead className="h-8 text-xs">Motivo</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {props.warehouseReturn.draft.rechazadaEntries.filter((e) => num(e.kg) > 0).length >
+                0 ? (
+                  props.warehouseReturn.draft.rechazadaEntries
+                    .filter((e) => num(e.kg) > 0)
+                    .map((entry) => {
+                      const supplier = props.warehouseReturn.supplierOptions.find(
+                        (s) => String(s.id) === entry.proveedorId,
+                      )
+                      return (
+                        <TableRow key={entry.id}>
+                          <TableCell className="py-2 text-xs">{entry.fechaBobina || "—"}</TableCell>
+                          <TableCell className="py-2 text-xs">
+                            {entry.creadaFecha || todayIsoDate()}
+                          </TableCell>
+                          <TableCell className="py-2 text-xs">{supplier?.name ?? "—"}</TableCell>
+                          <TableCell className="py-2 text-xs">
+                            {entry.operador.trim() || props.lamOperador || "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-xs font-medium">
+                            {num(entry.kg).toFixed(2)} Kg
+                          </TableCell>
+                          <TableCell className="py-2 text-xs">
+                            {rejectReasonLabel(entry.motivo) || "—"}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                ) : rechKg > 0.01 ? (
+                  <TableRow>
+                    <TableCell colSpan={2} className="py-2 text-xs">
+                      —
+                    </TableCell>
+                    <TableCell className="py-2 text-xs">—</TableCell>
+                    <TableCell className="py-2 text-xs">{props.lamOperador || "—"}</TableCell>
+                    <TableCell className="py-2 text-right text-xs font-medium">
+                      {rechKg.toFixed(2)} Kg
+                    </TableCell>
+                    <TableCell className="py-2 text-xs">
+                      {rejectReasonLabel(props.devolucionRechazadaMotivoRaw ?? "") ||
+                        props.devolucionRechazadaMotivoRaw ||
+                        "—"}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-3 text-center text-xs text-muted-foreground">
+                      Sin devolución mala en este turno.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Consumos del turno
+            </p>
+            <div className="mes-stat-grid sm:grid-cols-2 lg:grid-cols-3">
+              <MesStatTile
+                label="Consumido impresas (aprox.)"
+                value={`${fmtKg(consumidoImpresasKg)} Kg`}
+                icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Consumido virgen (aprox.)"
+                value={`${fmtKg(consumidoVirgenKg)} Kg`}
+                icon={<Weight className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Adhesivo consumido"
+                value={`${fmtKg(adhesivoConsumido)} Kg`}
+                icon={<Beaker className="h-3.5 w-3.5" />}
+              />
+            </div>
+          </div>
         </div>
       </MesSectionShell>
 

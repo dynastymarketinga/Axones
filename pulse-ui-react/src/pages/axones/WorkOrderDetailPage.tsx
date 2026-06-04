@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { ArrowLeft, ClipboardList, Info } from "lucide-react"
@@ -19,6 +19,75 @@ import { WorkOrderMontajePlanillaSnapshot } from "@/pages/axones/WorkOrderMontaj
 import type { WorkOrderDetailRecord } from "@/types/api"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+const PRODUCTION_TABS = ["montaje", "printing", "laminacion", "tintas", "corte"] as const
+type ProductionTab = (typeof PRODUCTION_TABS)[number]
+
+function isProductionTab(value: string): value is ProductionTab {
+  return (PRODUCTION_TABS as readonly string[]).includes(value)
+}
+
+function defaultTabForRole(
+  role: string,
+  opts: {
+    isBoss: boolean
+    canUsePrintingOps: boolean
+    canUseMontajeOps: boolean
+    canUseLaminacionOps: boolean
+    canUseTintasOps: boolean
+  },
+): ProductionTab {
+  if (opts.canUsePrintingOps) return "printing"
+  if (opts.canUseMontajeOps) return "montaje"
+  if (opts.canUseLaminacionOps) return "laminacion"
+  if (opts.canUseTintasOps) return "tintas"
+  if (role === "corte") return "corte"
+  return "montaje"
+}
+
+function canAccessProductionTab(
+  tab: ProductionTab,
+  opts: {
+    canUsePrintingOps: boolean
+    canUseMontajeOps: boolean
+    canUseLaminacionOps: boolean
+    canUseTintasOps: boolean
+  },
+): boolean {
+  if (tab === "printing") return opts.canUsePrintingOps
+  if (tab === "montaje") return opts.canUseMontajeOps
+  if (tab === "laminacion") return opts.canUseLaminacionOps
+  if (tab === "tintas") return opts.canUseTintasOps
+  return true
+}
+
+function isFocusedProductionTab(tab: ProductionTab): boolean {
+  return tab === "printing" || tab === "laminacion" || tab === "montaje" || tab === "corte"
+}
+
+function tabLabel(tab: ProductionTab): string {
+  if (tab === "printing") return "Impresión"
+  if (tab === "laminacion") return "Laminación"
+  if (tab === "montaje") return "Montaje"
+  if (tab === "tintas") return "Tintas"
+  return "Corte"
+}
+
+function productionAreaListPath(tab: ProductionTab): string {
+  if (tab === "printing") return "/impresion"
+  if (tab === "laminacion") return "/laminacion"
+  if (tab === "montaje") return "/montaje"
+  if (tab === "corte") return "/corte"
+  return "/tintas"
+}
+
+function ProductionTabAccessNotice({ tab }: { tab: ProductionTab }) {
+  return (
+    <p className="text-muted-foreground rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm">
+      No tiene permiso para operar el área de <strong className="text-foreground">{tabLabel(tab)}</strong>.
+    </p>
+  )
+}
+
 export default function WorkOrderDetailPage() {
   const { woId } = useParams<{ woId: string }>()
   const id = Number(woId)
@@ -29,34 +98,80 @@ export default function WorkOrderDetailPage() {
   const canUseLaminacionOps = isBoss || role === "laminacion"
   const canUseTintasOps = isBoss || role === "tintas"
   const canUseMontajeOps = isBoss || role === "montaje" || role === "planificador" || role === "supervisor"
+  const accessOpts = useMemo(
+    () => ({ canUsePrintingOps, canUseMontajeOps, canUseLaminacionOps, canUseTintasOps }),
+    [canUseLaminacionOps, canUseMontajeOps, canUsePrintingOps, canUseTintasOps],
+  )
   const isPrintingOperator = role === "impresion" || role === "printing"
   const isLaminacionOperator = role === "laminacion"
   const isMontajeOperator = role === "montaje"
   const isCorteOperator = role === "corte"
-  const headerBackPath = isPrintingOperator
-    ? "/impresion"
-    : isLaminacionOperator
-      ? "/laminacion"
-      : isMontajeOperator
-        ? "/montaje"
-        : isCorteOperator
-          ? "/corte"
-          : "/ordenes-trabajo"
-  const [searchParams] = useSearchParams()
+  const isTintasOperator = role === "tintas"
+  const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = (searchParams.get("tab") ?? "").toLowerCase().trim()
-  const initialTab = (() => {
-    if (tabParam === "printing" && canUsePrintingOps) return "printing"
-    if (tabParam === "laminacion" && canUseLaminacionOps) return "laminacion"
-    if (tabParam === "tintas" && canUseTintasOps) return "tintas"
-    if (tabParam === "montaje" && canUseMontajeOps) return "montaje"
-    if (tabParam === "corte") return "corte"
-    if (canUsePrintingOps) return "printing"
-    if (canUseMontajeOps) return "montaje"
-    if (canUseLaminacionOps) return "laminacion"
-    if (canUseTintasOps) return "tintas"
-    if (role === "corte") return "corte"
-    return "montaje"
-  })()
+  const layoutParam = (searchParams.get("layout") ?? "").toLowerCase().trim()
+  const hasExplicitTab = isProductionTab(tabParam)
+  const fallbackTab = useMemo(
+    () => defaultTabForRole(role, { isBoss, ...accessOpts }),
+    [accessOpts, isBoss, role],
+  )
+  const activeTab: ProductionTab = hasExplicitTab ? tabParam : fallbackTab
+  const isTabbedLayout = layoutParam === "tabs" || !hasExplicitTab
+
+  const headerBackPath = hasExplicitTab
+    ? productionAreaListPath(activeTab)
+    : isPrintingOperator
+      ? "/impresion"
+      : isLaminacionOperator
+        ? "/laminacion"
+        : isMontajeOperator
+          ? "/montaje"
+          : isCorteOperator
+            ? "/corte"
+            : isTintasOperator
+              ? "/tintas"
+              : "/ordenes-trabajo"
+  const headerBackLabel = hasExplicitTab
+    ? tabLabel(activeTab)
+    : isPrintingOperator
+      ? "Área Impresión"
+      : isLaminacionOperator
+        ? "Área Laminación"
+        : isMontajeOperator
+          ? "Área Montaje"
+          : isCorteOperator
+            ? "Área Corte"
+            : isTintasOperator
+              ? "Tintas"
+              : "Órdenes de trabajo"
+
+  const setActiveTab = useCallback(
+    (tab: string) => {
+      if (!isProductionTab(tab)) return
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.set("tab", tab)
+          next.set("layout", "tabs")
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  const tabHasAccess = canAccessProductionTab(activeTab, accessOpts)
+  const isFocusedView =
+    hasExplicitTab &&
+    !isTabbedLayout &&
+    isFocusedProductionTab(activeTab) &&
+    tabHasAccess
+  const isPrintingFocusedView = isFocusedView && activeTab === "printing"
+  const isLaminacionFocusedView = isFocusedView && activeTab === "laminacion"
+  const isMontajeFocusedView = isFocusedView && activeTab === "montaje"
+  const isCorteFocusedView = isFocusedView && activeTab === "corte"
+
   const [loading, setLoading] = useState(true)
   const [order, setOrder] = useState<WorkOrderDetailRecord | null>(null)
 
@@ -94,14 +209,9 @@ export default function WorkOrderDetailPage() {
   const product = order?.product
   const code = order?.code ?? `OT #${id}`
   const form = (order?.technical_document?.form ?? {}) as Record<string, unknown>
-  const isPrintingFocusedView = tabParam === "printing" && canUsePrintingOps
-  const isLaminacionFocusedView = tabParam === "laminacion" && canUseLaminacionOps
-  const isMontajeFocusedView = tabParam === "montaje" && canUseMontajeOps
-  const isCorteFocusedView = tabParam === "corte"
   const showPrintingPrefill = isPrintingFocusedView && isBoss
   const showMontajePrefill = isMontajeFocusedView && isBoss
-  const showMasterDataOnProduction =
-    !isMontajeFocusedView && !isPrintingFocusedView && !isLaminacionFocusedView && !isCorteFocusedView
+  const showMasterDataOnProduction = !isFocusedView
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -111,15 +221,7 @@ export default function WorkOrderDetailPage() {
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm shadow-sm transition-colors hover:border-primary/25 hover:bg-muted/70"
         >
           <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-          {isPrintingOperator
-            ? "Área Impresión"
-            : isLaminacionOperator
-              ? "Área Laminación"
-              : isMontajeOperator
-                ? "Área Montaje"
-                : isCorteOperator
-                  ? "Área Corte"
-                  : "Órdenes de trabajo"}
+          {headerBackLabel}
         </Link>
       </div>
 
@@ -161,6 +263,11 @@ export default function WorkOrderDetailPage() {
                     Registre turno de planta, cronómetro y producción. Pulse <strong>Guardar</strong> para enviar al
                     sistema.
                   </>
+                ) : !tabHasAccess ? (
+                  <>
+                    La pestaña <strong>{tabLabel(activeTab)}</strong> está seleccionada, pero su rol no puede operar
+                    esta área.
+                  </>
                 ) : (
                   <>
                     Seleccione una pestaña de fase para temporizadores, consumos y mermas. Los datos se guardan en el
@@ -183,60 +290,71 @@ export default function WorkOrderDetailPage() {
           {showPrintingPrefill ? <WorkOrderPrintingPlanillaSnapshot form={form} /> : null}
           {showMontajePrefill ? <WorkOrderMontajePlanillaSnapshot form={form} /> : null}
 
-          {isPrintingFocusedView ? (
-            <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-          ) : isLaminacionFocusedView ? (
-            <WorkOrderLaminacionControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-          ) : isMontajeFocusedView ? (
-            <WorkOrderMontajeControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-          ) : isCorteFocusedView ? (
-            <WorkOrderCorteControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-          ) : (
-            <Tabs defaultValue={initialTab} className="w-full">
-              {initialTab !== "laminacion" && initialTab !== "corte" ? (
-                <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1">
-                  {canUseMontajeOps ? <TabsTrigger value="montaje">Montaje</TabsTrigger> : null}
-                  {canUsePrintingOps ? (
-                    <TabsTrigger value="printing">Impresión</TabsTrigger>
-                  ) : null}
-                  {canUseLaminacionOps ? (
-                    <TabsTrigger value="laminacion">Laminación</TabsTrigger>
-                  ) : null}
-                  {canUseTintasOps ? <TabsTrigger value="tintas">Tintas</TabsTrigger> : null}
-                  <TabsTrigger value="corte">Corte</TabsTrigger>
-                </TabsList>
+          {isFocusedView ? (
+            <>
+              {isPrintingFocusedView ? (
+                <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
               ) : null}
+              {isLaminacionFocusedView ? (
+                <WorkOrderLaminacionControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+              ) : null}
+              {isMontajeFocusedView ? (
+                <WorkOrderMontajeControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+              ) : null}
+              {isCorteFocusedView ? (
+                <WorkOrderCorteControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+              ) : null}
+            </>
+          ) : (
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1">
+                {canUseMontajeOps ? <TabsTrigger value="montaje">Montaje</TabsTrigger> : null}
+                <TabsTrigger value="printing">Impresión</TabsTrigger>
+                {canUseLaminacionOps ? <TabsTrigger value="laminacion">Laminación</TabsTrigger> : null}
+                {canUseTintasOps ? <TabsTrigger value="tintas">Tintas</TabsTrigger> : null}
+                <TabsTrigger value="corte">Corte</TabsTrigger>
+              </TabsList>
               <TabsContent value="montaje" className="mt-4">
                 {canUseMontajeOps ? (
                   <WorkOrderMontajeControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-                ) : null}
+                ) : (
+                  <ProductionTabAccessNotice tab="montaje" />
+                )}
               </TabsContent>
-              {canUsePrintingOps ? (
-                <TabsContent value="printing" className="mt-4">
-                  <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-                </TabsContent>
-              ) : null}
-              {canUseLaminacionOps ? (
-                <TabsContent value="laminacion" className="mt-4">
+              <TabsContent value="printing" className="mt-4">
+                {canUsePrintingOps ? (
+                  <>
+                    {isBoss ? <WorkOrderPrintingPlanillaSnapshot form={form} /> : null}
+                    <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+                  </>
+                ) : (
+                  <ProductionTabAccessNotice tab="printing" />
+                )}
+              </TabsContent>
+              <TabsContent value="laminacion" className="mt-4">
+                {canUseLaminacionOps ? (
                   <WorkOrderLaminacionControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-                </TabsContent>
-              ) : null}
-              {canUseTintasOps ? (
-                <TabsContent value="tintas" className="mt-4">
+                ) : (
+                  <ProductionTabAccessNotice tab="laminacion" />
+                )}
+              </TabsContent>
+              <TabsContent value="tintas" className="mt-4">
+                {canUseTintasOps ? (
                   <ProductionAreaPanel
                     workOrderId={id}
                     title="Tintas"
                     areaPath="tintas"
                     usageMode="none"
                   />
-                </TabsContent>
-              ) : null}
+                ) : (
+                  <ProductionTabAccessNotice tab="tintas" />
+                )}
+              </TabsContent>
               <TabsContent value="corte" className="mt-4">
                 <WorkOrderCorteControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
               </TabsContent>
             </Tabs>
           )}
-
         </>
       )}
     </div>

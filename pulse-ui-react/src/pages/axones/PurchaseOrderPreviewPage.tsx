@@ -8,6 +8,7 @@ import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityEs } from "@/pages/axones/purchase-order-shared"
 import { Button } from "@/components/ui/button"
 import { InlineSpinner } from "@/components/axones/LoadingStates"
 
@@ -80,15 +81,6 @@ function formatDateDMY(value: string | null | undefined): string {
     month: "2-digit",
     year: "numeric",
   }).format(d)
-}
-
-function formatQuantityEs(value: string | number | null | undefined): string {
-  const n = Number(value ?? 0)
-  if (!Number.isFinite(n)) return "0,00"
-  return new Intl.NumberFormat("es-VE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
 }
 
 function lineDescription(ln: NonNullable<PurchaseOrderPreviewDetail["lines"]>[0]): string {

@@ -76,7 +76,7 @@
             </section>
             <section class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 lg:col-span-2">
                 <h2 class="text-lg font-semibold text-slate-800 mb-3">Bobinas rechazadas (reporte)</h2>
-                <p class="text-sm text-slate-600 mb-3"><code class="rounded bg-slate-100 px-1">GET /api/reports/rejected-bobinas</code> — stock por material del área y bobinas registradas con OT (vía devolución).</p>
+                <p class="text-sm text-slate-600 mb-3"><code class="rounded bg-slate-100 px-1">GET /api/reports/rejected-bobinas-inventory</code> — stock por material del área y bobinas registradas con OT (vía devolución).</p>
                 <div id="rejected-bobinas-box" class="text-sm text-slate-500">—</div>
             </section>
         </div>
@@ -256,7 +256,7 @@
         }
 
         async function loadRejectedBobinas() {
-            const r = await api('{{ url('/api/reports/rejected-bobinas') }}');
+            const r = await api('{{ url('/api/reports/rejected-bobinas-inventory') }}');
             const j = await r.json();
             if (!r.ok) {
                 el('rejected-bobinas-box').innerHTML = '<p class="text-red-600">' + (j.message || 'Error') + '</p>';

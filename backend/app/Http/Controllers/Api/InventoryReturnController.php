@@ -43,6 +43,10 @@ class InventoryReturnController extends Controller
             $query->where('status', $status);
         }
 
+        if ($destinationArea = $request->query('destination_area')) {
+            $query->where('destination_area', $destinationArea);
+        }
+
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
     }
 
@@ -141,7 +145,7 @@ class InventoryReturnController extends Controller
                 'destination_area' => $return->destination_area,
                 'return_kind' => $isRejected ? 'rechazada' : 'buena',
             ],
-            'created_by' => $user?->getKey(),
+            'created_by' => $user ? (int) $user->getAuthIdentifier() : null,
         ]);
     }
 
@@ -157,6 +161,7 @@ class InventoryReturnController extends Controller
         if ($user === null || ! $user->canAcceptInventoryReturns()) {
             throw new AuthorizationException('No autorizado para aceptar devoluciones a inventario.');
         }
+        $userId = (int) $user->getAuthIdentifier();
 
         $reasonText = trim((string) $request->input('reason', ''));
         if ($reasonText === '') {
@@ -168,33 +173,38 @@ class InventoryReturnController extends Controller
             ]);
         }
 
-        $inventoryReturn = DB::transaction(function () use ($request, $inventoryReturn) {
+        $inventoryReturn = DB::transaction(function () use ($request, $inventoryReturn, $user, $userId) {
             $inventoryReturn->load('material');
             $material = $inventoryReturn->material;
-            if (! $material) {
+            $isRejectedWithoutMaterial =
+                ($inventoryReturn->destination_area === 'bobinas_rechazadas') && ! $material;
+
+            if (! $material && ! $isRejectedWithoutMaterial) {
                 throw ValidationException::withMessages([
                     'material_id' => ['Material no encontrado para esta devolución.'],
                 ]);
             }
 
-            $this->ledger->apply(
-                $material,
-                InventoryMovementType::In,
-                (string) $inventoryReturn->quantity,
-                $request->user(),
-                'inventory_return',
-                $inventoryReturn->getKey(),
-                [
-                    'note' => 'Ingreso por devolución aceptada',
-                    'reason_scope' => 'manual_adjustment',
-                    'reason_code' => 'inventory_return_accept',
-                    'reason_text' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
-                ],
-            );
+            if (! $isRejectedWithoutMaterial) {
+                $this->ledger->apply(
+                    $material,
+                    InventoryMovementType::In,
+                    (string) $inventoryReturn->quantity,
+                    $user,
+                    'inventory_return',
+                    $inventoryReturn->getKey(),
+                    [
+                        'note' => 'Ingreso por devolución aceptada',
+                        'reason_scope' => 'manual_adjustment',
+                        'reason_code' => 'inventory_return_accept',
+                        'reason_text' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
+                    ],
+                );
+            }
 
             $inventoryReturn->update([
                 'status' => 'accepted',
-                'accepted_by' => $request->user()->getKey(),
+                'accepted_by' => $userId,
                 'accepted_at' => now(),
                 'reason' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
             ]);

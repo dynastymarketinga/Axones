@@ -7,12 +7,30 @@ import {
   allRejectedEntriesHaveMotivo,
   countDevolucionRechazadaBobinas,
   countRejectedEntryBobinas,
+  countRejectedEntryKg,
   newWarehouseRejectedEntry,
   rejectedEntriesWithBobinas,
   sumRejectedEntryBobinas,
+  sumRejectedEntryKg,
   type WarehouseRejectedEntry,
   type WarehouseReturnDraft,
 } from "./printing-turnos"
+import {
+  buildGoodReturnReason,
+  buildRejectedReturnReason,
+  materialSpecificationsLabel,
+  rejectReasonLabel,
+  todayIsoDate,
+} from "./warehouse-return-helpers"
+
+function readNumber(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  if (typeof v === "string") {
+    const n = Number(v.trim().replace(",", "."))
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
 
 type InventoryReturnCreated = { id: number }
 
@@ -24,15 +42,6 @@ function readNumberString(v: unknown): string {
   if (typeof v === "number") return String(v)
   if (typeof v === "string") return v
   return ""
-}
-
-function readNumber(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v)) return v
-  if (typeof v === "string") {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
 }
 
 function toFiniteOrNull(v: unknown): number | null {
@@ -96,13 +105,25 @@ export function useMesWarehouseReturn(options: {
       hasBuena: boolean
       buenaKg: number
       hasRech: boolean
+      rechKg: number
       rechBobinas: number
       firstMotivo: string
     },
   ) => Record<string, unknown>
+  /** Operador por defecto en líneas de devolución mala. */
+  defaultOperador?: string
 }) {
-  const { workOrderId, workOrderCode, form, setForm, config, onSuccess, syncRejectedToTurn, patchAfterSubmit } =
-    options
+  const {
+    workOrderId,
+    workOrderCode,
+    form,
+    setForm,
+    config,
+    onSuccess,
+    syncRejectedToTurn,
+    patchAfterSubmit,
+    defaultOperador = "",
+  } = options
   const { keys } = config
 
   const [returnWarehouseOpen, setReturnWarehouseOpen] = useState(false)
@@ -115,23 +136,29 @@ export function useMesWarehouseReturn(options: {
   const [returnLoadingSuppliers, setReturnLoadingSuppliers] = useState(false)
   const [returnDraft, setReturnDraft] = useState<WarehouseReturnDraft>(() => ({
     buenaMaterialId: "",
+    buenaEspecificaciones: "",
+    buenaMotivo: "",
     bobinaCode: "",
     rechazadaEntries: [newWarehouseRejectedEntry()],
   }))
 
   const devolucionesPendienteAlmacen = useMemo(() => {
     const b = toFiniteOrNull(form[keys.devolucionBuenaKg]) ?? 0
-    const r = countDevolucionRechazadaBobinas(
-      form[keys.devolucionRechazadaBobinas],
-      form[keys.devolucionRechazadaKg],
-    )
+    const rKg = readNumber(form[keys.devolucionRechazadaKg])
+    const r =
+      rKg > 0
+        ? rKg
+        : countDevolucionRechazadaBobinas(
+            form[keys.devolucionRechazadaBobinas],
+            form[keys.devolucionRechazadaKg],
+          )
     if (b <= 0 && r <= 0) return false
     const envioMs = readNumber(form[keys.ultimoEnvioMs])
     const snapB = readString(form[keys.snapBuena])
     const snapR = readString(form[keys.snapRech])
     const curB = normalizeNumericString(form[keys.devolucionBuenaKg])
     const curR = normalizeNumericString(
-      readNumberString(form[keys.devolucionRechazadaBobinas]) || String(r),
+      readNumberString(form[keys.devolucionRechazadaKg]) || String(r),
     )
     if (envioMs <= 0) return true
     return curB !== snapB || curR !== snapR
@@ -150,16 +177,16 @@ export function useMesWarehouseReturn(options: {
       syncRejectedToTurn(entries)
       return
     }
-    const total = sumRejectedEntryBobinas(entries)
+    const totalKg = sumRejectedEntryKg(entries)
     const motivoOk = allRejectedEntriesHaveMotivo(entries)
     const firstMotivo =
       rejectedEntriesWithBobinas(entries).find((e) => e.motivo.trim())?.motivo.trim() ?? ""
     setForm((prev) => ({
       ...prev,
-      [keys.devolucionRechazadaKg]: "",
-      [keys.devolucionRechazadaBobinas]: total > 0 ? String(total) : "",
+      [keys.devolucionRechazadaKg]: totalKg > 0 ? normalizeNumericString(totalKg) : "",
+      [keys.devolucionRechazadaBobinas]: "",
       [keys.devolucionRechazadaMotivo]:
-        total > 0 && motivoOk ? firstMotivo : total > 0 ? readString(prev[keys.devolucionRechazadaMotivo]) : "",
+        totalKg > 0 && motivoOk ? firstMotivo : totalKg > 0 ? readString(prev[keys.devolucionRechazadaMotivo]) : "",
     }))
   }
 
@@ -184,7 +211,13 @@ export function useMesWarehouseReturn(options: {
   function addRejectedEntry() {
     setReturnDraft((prev) => ({
       ...prev,
-      rechazadaEntries: [...prev.rechazadaEntries, newWarehouseRejectedEntry()],
+      rechazadaEntries: [
+        ...prev.rechazadaEntries,
+        newWarehouseRejectedEntry({
+          operador: defaultOperador,
+          creadaFecha: todayIsoDate(),
+        }),
+      ],
     }))
   }
 
@@ -289,6 +322,7 @@ export function useMesWarehouseReturn(options: {
       hasBuena: boolean
       buenaKg: number
       hasRech: boolean
+      rechKg: number
       rechBobinas: number
       firstMotivo: string
     },
@@ -297,15 +331,15 @@ export function useMesWarehouseReturn(options: {
       ? normalizeNumericString(ctx.buenaKg)
       : normalizeNumericString(prev[keys.devolucionBuenaKg])
     const nextRech = ctx.hasRech
-      ? normalizeNumericString(ctx.rechBobinas)
-      : normalizeNumericString(prev[keys.devolucionRechazadaBobinas])
+      ? normalizeNumericString(ctx.rechKg)
+      : normalizeNumericString(prev[keys.devolucionRechazadaKg] ?? prev[keys.devolucionRechazadaBobinas])
     return {
       ...prev,
       ...(ctx.hasBuena ? { [keys.devolucionBuenaKg]: normalizeNumericString(ctx.buenaKg) } : null),
       ...(ctx.hasRech
         ? {
-            [keys.devolucionRechazadaKg]: "",
-            [keys.devolucionRechazadaBobinas]: normalizeNumericString(ctx.rechBobinas),
+            [keys.devolucionRechazadaKg]: normalizeNumericString(ctx.rechKg),
+            [keys.devolucionRechazadaBobinas]: "",
             [keys.devolucionRechazadaMotivo]: ctx.firstMotivo,
           }
         : null),
@@ -322,11 +356,12 @@ export function useMesWarehouseReturn(options: {
       readString(readNumberString(form[keys.devolucionBuenaKg])).trim().replace(",", "."),
     )
     const activeRejected = rejectedEntriesWithBobinas(returnDraft.rechazadaEntries)
+    const rechKg = sumRejectedEntryKg(returnDraft.rechazadaEntries)
     const rechBobinas = sumRejectedEntryBobinas(returnDraft.rechazadaEntries)
     const hasBuena = Number.isFinite(buenaKg) && buenaKg > 0
-    const hasRech = rechBobinas > 0
+    const hasRech = rechKg > 0
     if (!hasBuena && !hasRech) {
-      toast.error("Indique Kg en devolución buena y/o bobinas en devolución rechazada.")
+      toast.error("Indique kilos en devolución buena y/o en devolución mala (rechazada).")
       return
     }
 
@@ -335,17 +370,21 @@ export function useMesWarehouseReturn(options: {
       toast.error("Seleccione el material de la devolución buena.")
       return
     }
+    if (hasBuena && !returnDraft.buenaMotivo.trim()) {
+      toast.error("Indique el motivo de la devolución buena.")
+      return
+    }
     if (hasRech) {
       for (let i = 0; i < activeRejected.length; i++) {
         const entry = activeRejected[i]
         const lineN = i + 1
-        const entryBobinas = countRejectedEntryBobinas(entry.bobinas)
+        const entryKg = countRejectedEntryKg(entry.kg)
         if (!entry.motivo.trim()) {
-          toast.error(`Línea rechazada ${lineN}: seleccione un motivo.`)
+          toast.error(`Devolución mala ${lineN}: seleccione un motivo.`)
           return
         }
-        if (entryBobinas < 1) {
-          toast.error(`Línea rechazada ${lineN}: indique al menos 1 bobina.`)
+        if (entryKg < 0.001) {
+          toast.error(`Devolución mala ${lineN}: indique los kilos rechazados.`)
           return
         }
       }
@@ -362,6 +401,11 @@ export function useMesWarehouseReturn(options: {
       let createdBuenaId: number | null = null
       const createdRechIds: number[] = []
 
+      const buenaMaterial = returnMaterialOptionsGood.find((m) => m.id === buenaMaterialId)
+      const buenaSpecs =
+        returnDraft.buenaEspecificaciones.trim() ||
+        materialSpecificationsLabel(buenaMaterial)
+
       if (hasBuena) {
         const created = await apiFetch<InventoryReturnCreated>("inventory-returns", {
           method: "POST",
@@ -370,7 +414,11 @@ export function useMesWarehouseReturn(options: {
             work_order_id: workOrderId,
             destination_area: "material",
             quantity: buenaKg.toFixed(3),
-            reason: bobinaRef ? `Bobina/Ref: ${bobinaRef}` : null,
+            reason: buildGoodReturnReason({
+              motivo: returnDraft.buenaMotivo,
+              especificaciones: buenaSpecs,
+              bobinaRef,
+            }),
           }),
         })
         createdBuenaId = created.id
@@ -378,27 +426,30 @@ export function useMesWarehouseReturn(options: {
       }
 
       for (const entry of activeRejected) {
-        const entryBobinas = countRejectedEntryBobinas(entry.bobinas)
-        const rejectReasonLabel =
-          PRINTING_REJECT_REASONS.find((r) => r.id === entry.motivo)?.label ?? entry.motivo.trim()
-        const rejectObs = entry.obs.trim()
-        const provName = supplierLabel(entry.proveedorId)
-        const entryKg = toFiniteOrNull(entry.kg)
-        const reasonParts = [`Motivo: ${rejectReasonLabel}`]
-        if (entryKg != null && entryKg > 0.005) reasonParts.push(`Peso: ${entryKg.toFixed(3)} Kg`)
-        if (provName) reasonParts.push(`Proveedor: ${provName}`)
-        if (rejectObs) reasonParts.push(`Obs: ${rejectObs}`)
-        if (bobinaRef) reasonParts.push(`Bobina/Ref: ${bobinaRef}`)
+        const entryKg = countRejectedEntryKg(entry.kg)
+        const rejectLabel = rejectReasonLabel(entry.motivo)
+        const provName = supplierLabel(entry.proveedorId) || entry.proveedorId.trim()
+        const materialLabel =
+          returnMaterialOptionsBad.find((m) => String(m.id) === entry.materialId.trim())?.name?.trim() ||
+          entry.materialId.trim()
         const materialIdRaw = entry.materialId.trim()
-        const materialId = materialIdRaw ? Number(materialIdRaw) : null
+        const materialIdNum = materialIdRaw ? Number(materialIdRaw) : null
+        const materialId =
+          materialIdNum !== null && Number.isFinite(materialIdNum) && materialIdNum > 0 ? materialIdNum : null
         const created = await apiFetch<InventoryReturnCreated>("inventory-returns", {
           method: "POST",
           body: JSON.stringify({
             material_id: materialId,
             work_order_id: workOrderId,
             destination_area: "bobinas_rechazadas",
-            quantity: String(entryBobinas),
-            reason: [`${entryBobinas} bobina(s) rechazada(s)`, ...reasonParts].join(" · "),
+            quantity: entryKg.toFixed(3),
+            reason: buildRejectedReturnReason(entry, {
+              rejectReasonLabel: rejectLabel,
+              proveedorName: provName,
+              materialLabel,
+              bobinaRef,
+              operador: entry.operador.trim() || defaultOperador,
+            }),
           }),
         })
         createdRechIds.push(created.id)
@@ -407,20 +458,24 @@ export function useMesWarehouseReturn(options: {
 
       const titleBase = workOrderCode
       const rechSummaryLines = activeRejected.map((entry, i) => {
-        const entryBobinas = countRejectedEntryBobinas(entry.bobinas)
-        const rejectReasonLabel =
-          PRINTING_REJECT_REASONS.find((r) => r.id === entry.motivo)?.label ?? entry.motivo.trim()
-        const provName = supplierLabel(entry.proveedorId)
-        const entryKg = toFiniteOrNull(entry.kg)
+        const entryKg = countRejectedEntryKg(entry.kg)
+        const rejectLabel = rejectReasonLabel(entry.motivo)
+        const provName = supplierLabel(entry.proveedorId) || entry.proveedorId.trim()
+        const materialLabel =
+          returnMaterialOptionsBad.find((m) => String(m.id) === entry.materialId.trim())?.name?.trim() ||
+          entry.materialId.trim()
         const returnId = createdRechIds[i] ?? "—"
         const provPart = provName ? ` · Proveedor: ${provName}` : ""
-        const kgPart = entryKg != null && entryKg > 0.005 ? ` · ${entryKg.toFixed(3)} Kg` : ""
-        return `Devolución rechazada ${activeRejected.length > 1 ? `#${i + 1} ` : ""}${entryBobinas} bobina(s)${kgPart} · Motivo: ${rejectReasonLabel}${provPart} (return_id=${returnId})`
+        const materialPart = materialLabel ? ` · Material: ${materialLabel}` : ""
+        const opPart = entry.operador.trim() ? ` · Operador: ${entry.operador.trim()}` : ""
+        return `Devolución mala ${activeRejected.length > 1 ? `#${i + 1} ` : ""}${entryKg.toFixed(3)} Kg · Motivo: ${rejectLabel}${provPart}${materialPart}${opPart} (return_id=${returnId})`
       })
       const bodyLines = [
         `Origen: ${config.originArea}`,
         `OT: ${titleBase}`,
-        hasBuena ? `Devolución buena: ${buenaKg.toFixed(3)} Kg (return_id=${createdBuenaId ?? "—"})` : null,
+        hasBuena
+          ? `Devolución buena: ${buenaKg.toFixed(3)} Kg · ${buenaSpecs || "—"} · Motivo: ${returnDraft.buenaMotivo.trim()} (return_id=${createdBuenaId ?? "—"})`
+          : null,
         ...rechSummaryLines,
         bobinaRef ? `Bobina/Ref: ${bobinaRef}` : null,
         createdIds.length ? `IDs devoluciones: ${createdIds.join(", ")}` : null,
@@ -438,10 +493,12 @@ export function useMesWarehouseReturn(options: {
 
       const patchDev = patchAfterSubmit ?? defaultPatchAfterSubmit
       setForm((prev) =>
-        patchDev(prev, { hasBuena, buenaKg, hasRech, rechBobinas, firstMotivo }),
+        patchDev(prev, { hasBuena, buenaKg, hasRech, rechKg, rechBobinas, firstMotivo }),
       )
       setReturnDraft({
         buenaMaterialId: "",
+        buenaEspecificaciones: "",
+        buenaMotivo: "",
         bobinaCode: "",
         rechazadaEntries: [newWarehouseRejectedEntry()],
       })

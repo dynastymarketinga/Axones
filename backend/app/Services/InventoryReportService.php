@@ -11,11 +11,17 @@ use App\Models\LaminacionBobinaUsage;
 use App\Models\Material;
 use App\Models\MontajeMaterialUsage;
 use App\Models\PrintingBobinaUsage;
+use App\Models\PrintingChemicalUsage;
+use App\Models\PrintingInkControlLine;
 use App\Models\Product;
+use App\Models\Supplier;
 use App\Models\WorkOrder;
+use App\Models\WorkOrderLaminacionSummary;
 use App\Support\PlanillaScrapAggregator;
+use App\Support\ProductionTimeLiveAggregator;
 use App\Support\ScrapSubstrateCatalog;
 use App\Support\ScrapSubstrateGroup;
+use App\Support\WorkOrderProductionControlsAggregator;
 use Carbon\Carbon;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -25,6 +31,14 @@ use Illuminate\Support\Facades\Schema;
 
 class InventoryReportService
 {
+    /** Áreas con cronómetro MES en reportes de tiempo (Tintas no usa temporizador). */
+    private const PRODUCTION_TIME_AREA_TABLES = [
+        'printing' => 'printing_time_segments',
+        'corte' => 'corte_time_segments',
+        'laminacion' => 'laminacion_time_segments',
+        'montaje' => 'montaje_time_segments',
+    ];
+
     /**
      * Stock final del dia por material y area.
      *
@@ -140,7 +154,12 @@ class InventoryReportService
      *
      * @param  list<array<string, mixed>>  $rows
      */
-    public function rowsToCsv(array $rows): string
+    public function rowsToCsv(
+        array $rows,
+        string $delimiter = ',',
+        bool $excelFriendly = false,
+        ?string $title = null,
+    ): string
     {
         if ($rows === []) {
             return "no_data\n";
@@ -156,7 +175,14 @@ class InventoryReportService
         }
 
         $stream = fopen('php://temp', 'r+');
-        fputcsv($stream, $headers);
+        if ($excelFriendly) {
+            // Fuerza separador al abrir en Excel con configuración regional es-VE/es-ES.
+            fwrite($stream, "\xEF\xBB\xBF".'sep='.$delimiter."\r\n");
+        }
+        if ($title !== null && trim($title) !== '') {
+            fputcsv($stream, [trim($title)], $delimiter);
+        }
+        fputcsv($stream, $headers, $delimiter);
 
         foreach ($rows as $row) {
             $line = [];
@@ -169,7 +195,7 @@ class InventoryReportService
                 }
                 $line[] = $value;
             }
-            fputcsv($stream, $line);
+            fputcsv($stream, $line, $delimiter);
         }
 
         rewind($stream);
@@ -653,29 +679,280 @@ class InventoryReportService
     }
 
     /**
+     * Resumen de controles de producción por OT: consumibles y tiempos agregados de impresión, laminación y corte.
+     *
+     * @return array{
+     *   work_order: array<string, mixed>,
+     *   consumables: array<string, mixed>,
+     *   times: array<string, mixed>,
+     *   generated_at: string
+     * }
+     */
+    public function workOrderControlsSummary(int $workOrderId): array
+    {
+        $wo = WorkOrder::query()
+            ->with([
+                'client:id,name',
+                'product:id,name',
+                'clientOrder:id,code',
+            ])
+            ->findOrFail($workOrderId);
+
+        $controlAreas = [
+            'printing' => [
+                'label' => 'Impresión',
+                'time_table' => 'printing_time_segments',
+            ],
+            'laminacion' => [
+                'label' => 'Laminación',
+                'time_table' => 'laminacion_time_segments',
+            ],
+            'corte' => [
+                'label' => 'Corte',
+                'time_table' => 'corte_time_segments',
+            ],
+        ];
+
+        $printingBobinas = PrintingBobinaUsage::query()
+            ->where('work_order_id', $workOrderId)
+            ->with('material:id,sku,name,unit')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (PrintingBobinaUsage $u) => [
+                'id' => $u->getKey(),
+                'material_id' => $u->material_id,
+                'sku' => $u->material?->sku,
+                'name' => $u->material?->name,
+                'unit' => $u->material?->unit ?? 'kg',
+                'quantity_used_kg' => number_format((float) $u->quantity_used_kg, 3, '.', ''),
+                'quantity_finished_kg' => number_format((float) $u->quantity_finished_kg, 3, '.', ''),
+                'bobina_id' => $u->bobina_id,
+                'notes' => $u->notes,
+            ])
+            ->values()
+            ->all();
+
+        $printingInks = PrintingInkControlLine::query()
+            ->where('work_order_id', $workOrderId)
+            ->with('material:id,sku,name,unit')
+            ->orderBy('position')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (PrintingInkControlLine $line) => [
+                'id' => $line->getKey(),
+                'material_id' => $line->material_id,
+                'sku' => $line->material?->sku,
+                'name' => $line->material?->name,
+                'quantity_original_kg' => number_format((float) $line->quantity_original_kg, 3, '.', ''),
+                'quantity_solventada_kg' => number_format((float) $line->quantity_solventada_kg, 3, '.', ''),
+                'quantity_return_kg' => number_format((float) $line->quantity_return_kg, 3, '.', ''),
+                'quantity_consumed_kg' => $line->quantity_consumed_kg,
+                'notes' => $line->notes,
+            ])
+            ->values()
+            ->all();
+
+        $printingChemicals = PrintingChemicalUsage::query()
+            ->where('work_order_id', $workOrderId)
+            ->orderBy('chemical_type')
+            ->get()
+            ->map(fn (PrintingChemicalUsage $c) => [
+                'id' => $c->getKey(),
+                'chemical_type' => $c->chemical_type,
+                'quantity_loaded_kg' => number_format((float) $c->quantity_loaded_kg, 3, '.', ''),
+                'quantity_return_kg' => number_format((float) $c->quantity_return_kg, 3, '.', ''),
+                'quantity_consumed_kg' => $c->quantity_consumed_kg,
+                'notes' => $c->notes,
+            ])
+            ->values()
+            ->all();
+
+        $laminacionBobinas = LaminacionBobinaUsage::query()
+            ->where('work_order_id', $workOrderId)
+            ->with('material:id,sku,name,unit')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (LaminacionBobinaUsage $u) => [
+                'id' => $u->getKey(),
+                'material_id' => $u->material_id,
+                'sku' => $u->material?->sku,
+                'name' => $u->material?->name,
+                'unit' => $u->material?->unit ?? 'kg',
+                'quantity_used_kg' => number_format((float) $u->quantity_used_kg, 3, '.', ''),
+                'quantity_finished_kg' => number_format((float) $u->quantity_finished_kg, 3, '.', ''),
+                'bobina_id' => $u->bobina_id,
+                'notes' => $u->notes,
+            ])
+            ->values()
+            ->all();
+
+        $laminacionSummary = WorkOrderLaminacionSummary::query()
+            ->where('work_order_id', $workOrderId)
+            ->first();
+
+        $corteBobinas = CorteBobinaUsage::query()
+            ->where('work_order_id', $workOrderId)
+            ->with('material:id,sku,name,unit')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (CorteBobinaUsage $u) => [
+                'id' => $u->getKey(),
+                'material_id' => $u->material_id,
+                'sku' => $u->material?->sku,
+                'name' => $u->material?->name,
+                'unit' => $u->material?->unit ?? 'kg',
+                'quantity_used_kg' => number_format((float) $u->quantity_used_kg, 3, '.', ''),
+                'quantity_finished_kg' => number_format((float) $u->quantity_finished_kg, 3, '.', ''),
+                'bobina_id' => $u->bobina_id,
+                'notes' => $u->notes,
+            ])
+            ->values()
+            ->all();
+
+        $consumablesByArea = [
+            'printing' => [
+                'area' => 'printing',
+                'area_label' => $controlAreas['printing']['label'],
+                'bobina_usages' => $printingBobinas,
+                'ink_control_lines' => $printingInks,
+                'chemical_usages' => $printingChemicals,
+            ],
+            'laminacion' => [
+                'area' => 'laminacion',
+                'area_label' => $controlAreas['laminacion']['label'],
+                'bobina_usages' => $laminacionBobinas,
+                'solvent_quantity_kg' => $laminacionSummary !== null
+                    ? number_format((float) ($laminacionSummary->solvent_quantity_kg ?? 0), 3, '.', '')
+                    : '0.000',
+                'solvent_notes' => $laminacionSummary?->solvent_notes,
+            ],
+            'corte' => [
+                'area' => 'corte',
+                'area_label' => $controlAreas['corte']['label'],
+                'bobina_usages' => $corteBobinas,
+            ],
+        ];
+
+        $timesByArea = [];
+        $timeTotals = [
+            'production_seconds' => 0,
+            'downtime_seconds' => 0,
+            'mount_seconds' => 0,
+        ];
+
+        foreach ($controlAreas as $areaKey => $meta) {
+            $byType = $this->sumClosedTimeSegmentsForWorkOrder($meta['time_table'], $workOrderId);
+            $areaRow = [
+                'area' => $areaKey,
+                'area_label' => $meta['label'],
+                'production_seconds' => $byType['production'],
+                'downtime_seconds' => $byType['downtime'],
+                'mount_seconds' => $byType['mount'],
+                'total_seconds' => $byType['production'] + $byType['downtime'] + $byType['mount'],
+            ];
+            $timesByArea[] = $areaRow;
+            $timeTotals['production_seconds'] += $byType['production'];
+            $timeTotals['downtime_seconds'] += $byType['downtime'];
+            $timeTotals['mount_seconds'] += $byType['mount'];
+        }
+
+        $timeTotals['total_seconds'] = $timeTotals['production_seconds']
+            + $timeTotals['downtime_seconds']
+            + $timeTotals['mount_seconds'];
+
+        $totalAll = $timeTotals['total_seconds'];
+        $timeTotals['effective_percent'] = $totalAll > 0
+            ? number_format(round(($timeTotals['production_seconds'] / $totalAll) * 100, 2), 2, '.', '')
+            : '0.00';
+
+        return [
+            'work_order' => [
+                'id' => $wo->getKey(),
+                'code' => $wo->code,
+                'status' => $wo->status,
+                'client_id' => $wo->client_id,
+                'client_name' => $wo->client?->name,
+                'product_id' => $wo->product_id,
+                'product_name' => $wo->product?->name,
+                'client_order_id' => $wo->client_order_id,
+                'client_order_code' => $wo->clientOrder?->code,
+            ],
+            'production_summary' => WorkOrderProductionControlsAggregator::summarize($workOrderId),
+            'consumables' => [
+                'by_area' => $consumablesByArea,
+            ],
+            'times' => [
+                'by_area' => $timesByArea,
+                'totals' => $timeTotals,
+            ],
+            'generated_at' => now()->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{production: int, downtime: int, mount: int, demount: int}
+     */
+    private function sumClosedTimeSegmentsForWorkOrder(string $table, int $workOrderId): array
+    {
+        $driver = DB::connection()->getDriverName();
+        $secondsExpr = $driver === 'sqlite'
+            ? "(CAST(strftime('%s', {$table}.ended_at) AS INTEGER) - CAST(strftime('%s', {$table}.started_at) AS INTEGER))"
+            : "TIMESTAMPDIFF(SECOND, {$table}.started_at, {$table}.ended_at)";
+
+        $byType = [
+            'production' => 0,
+            'downtime' => 0,
+            'mount' => 0,
+            'demount' => 0,
+        ];
+
+        $rows = DB::table($table)
+            ->where('work_order_id', $workOrderId)
+            ->whereNotNull('ended_at')
+            ->select('segment_type')
+            ->selectRaw("SUM({$secondsExpr}) as total_seconds")
+            ->groupBy('segment_type')
+            ->get();
+
+        foreach ($rows as $row) {
+            $type = (string) $row->segment_type;
+            if (! array_key_exists($type, $byType)) {
+                continue;
+            }
+            $byType[$type] = (int) $row->total_seconds;
+        }
+
+        return $byType;
+    }
+
+    /**
      * Segundos de montaje/producción/tiempo muerto por área y máquina (PDF reportes de tiempos).
      *
-     * @return array{from: string, to: string, rows: list<array<string, mixed>>}
+     * @return array{from: string, to: string, rows: list<array<string, mixed>>, live?: bool, live_as_of?: string}
      */
-    public function productionTimesByArea(Carbon $from, Carbon $to): array
+    public function productionTimesByArea(Carbon $from, Carbon $to, bool $live = false): array
     {
-        $tables = [
-            'printing' => 'printing_time_segments',
-            'corte' => 'corte_time_segments',
-            'laminacion' => 'laminacion_time_segments',
-            'montaje' => 'montaje_time_segments',
-            'tintas' => 'tintas_time_segments',
-        ];
         $rows = [];
-        foreach ($tables as $area => $table) {
+        foreach (self::PRODUCTION_TIME_AREA_TABLES as $area => $table) {
             $rows = array_merge($rows, $this->sumClosedSegmentsForTable($table, $area, $from, $to));
         }
 
-        return [
+        if ($live) {
+            $rows = app(ProductionTimeLiveAggregator::class)->augmentAreaRows($rows, $from, $to);
+        }
+
+        $payload = [
             'from' => $from->toIso8601String(),
             'to' => $to->toIso8601String(),
             'rows' => $rows,
         ];
+
+        if ($live) {
+            $payload['live'] = true;
+            $payload['live_as_of'] = now()->toIso8601String();
+        }
+
+        return $payload;
     }
 
     /**
@@ -734,15 +1011,9 @@ class InventoryReportService
      *   }>
      * }
      */
-    public function workOrderTimeReportCandidates(Carbon $from, Carbon $to): array
+    public function workOrderTimeReportCandidates(Carbon $from, Carbon $to, bool $live = false): array
     {
-        $tables = [
-            'printing' => 'printing_time_segments',
-            'corte' => 'corte_time_segments',
-            'laminacion' => 'laminacion_time_segments',
-            'montaje' => 'montaje_time_segments',
-            'tintas' => 'tintas_time_segments',
-        ];
+        $tables = self::PRODUCTION_TIME_AREA_TABLES;
         $areaOrder = array_keys($tables);
         $driver = DB::connection()->getDriverName();
 
@@ -795,12 +1066,24 @@ class InventoryReportService
             }
         }
 
+        if ($live) {
+            $byWo = app(ProductionTimeLiveAggregator::class)->augmentByWorkOrder($byWo, $from, $to);
+        }
+
         if ($byWo === []) {
-            return [
+            $payload = [
                 'from' => $from->toIso8601String(),
                 'to' => $to->toIso8601String(),
                 'work_orders' => [],
             ];
+            if ($live) {
+                $payload['live'] = true;
+                $payload['live_as_of'] = now()->toIso8601String();
+                $payload['live_active'] = app(ProductionTimeLiveAggregator::class)
+                    ->collectLiveActiveEntries($from, $to);
+            }
+
+            return $payload;
         }
 
         $workOrders = WorkOrder::query()
@@ -843,11 +1126,24 @@ class InventoryReportService
 
         usort($out, fn (array $x, array $y): int => strcmp((string) $x['work_order_code'], (string) $y['work_order_code']));
 
-        return [
+        if ($live) {
+            $out = array_values(array_filter($out, fn (array $row): bool => (int) ($row['total_seconds'] ?? 0) > 0));
+        }
+
+        $payload = [
             'from' => $from->toIso8601String(),
             'to' => $to->toIso8601String(),
             'work_orders' => $out,
         ];
+
+        if ($live) {
+            $payload['live'] = true;
+            $payload['live_as_of'] = now()->toIso8601String();
+            $payload['live_active'] = app(ProductionTimeLiveAggregator::class)
+                ->collectLiveActiveEntries($from, $to);
+        }
+
+        return $payload;
     }
 
     /**
@@ -869,13 +1165,7 @@ class InventoryReportService
      */
     public function workOrderTimeReport(Carbon $from, Carbon $to, ?int $workOrderId = null): array
     {
-        $tables = [
-            'printing' => 'printing_time_segments',
-            'corte' => 'corte_time_segments',
-            'laminacion' => 'laminacion_time_segments',
-            'montaje' => 'montaje_time_segments',
-            'tintas' => 'tintas_time_segments',
-        ];
+        $tables = self::PRODUCTION_TIME_AREA_TABLES;
 
         $driver = DB::connection()->getDriverName();
 
@@ -1294,9 +1584,13 @@ class InventoryReportService
      *
      * @return array{total_kg: string, printing_kg: string, laminacion_kg: string, corte_kg: string}
      */
-    public function scrapKgTotalsForPeriod(Carbon $from, Carbon $to): array
-    {
-        $historyRows = $this->scrapHistoryKgRows($from, $to, null, null, 'all', null);
+    public function scrapKgTotalsForPeriod(
+        Carbon $from,
+        Carbon $to,
+        ?int $clientId = null,
+        ?int $productId = null,
+    ): array {
+        $historyRows = $this->scrapHistoryKgRows($from, $to, $clientId, $productId, 'all', null);
 
         $printing = 0.0;
         $laminacion = 0.0;
@@ -1318,6 +1612,48 @@ class InventoryReportService
             'printing_kg' => number_format($printing, 3, '.', ''),
             'laminacion_kg' => number_format($laminacion, 3, '.', ''),
             'corte_kg' => number_format($corte, 3, '.', ''),
+        ];
+    }
+
+    /**
+     * Resumen de desperdicio total (kg) por mes calendario dentro del rango.
+     *
+     * @return array{from: string, to: string, rows: list<array<string, mixed>>}
+     */
+    public function scrapMonthlySummary(
+        Carbon $from,
+        Carbon $to,
+        ?int $clientId = null,
+        ?int $productId = null,
+    ): array {
+        $rows = [];
+        $cursor = $from->copy()->startOfMonth();
+        $rangeEnd = $to->copy()->startOfMonth();
+
+        while ($cursor <= $rangeEnd) {
+            $monthStart = $cursor->copy()->startOfMonth()->startOfDay();
+            $monthEnd = $cursor->copy()->endOfMonth()->endOfDay();
+            $rangeFrom = $monthStart->greaterThan($from) ? $monthStart : $from->copy()->startOfDay();
+            $rangeTo = $monthEnd->lessThan($to) ? $monthEnd : $to->copy()->endOfDay();
+
+            $totals = $this->scrapKgTotalsForPeriod($rangeFrom, $rangeTo, $clientId, $productId);
+
+            $rows[] = [
+                'year_month' => $cursor->format('Y-m'),
+                'month_label' => $cursor->locale('es')->translatedFormat('F Y'),
+                'printing_kg' => $totals['printing_kg'],
+                'laminacion_kg' => $totals['laminacion_kg'],
+                'corte_kg' => $totals['corte_kg'],
+                'total_kg' => $totals['total_kg'],
+            ];
+
+            $cursor->addMonth();
+        }
+
+        return [
+            'from' => $from->toIso8601String(),
+            'to' => $to->toIso8601String(),
+            'rows' => $rows,
         ];
     }
 
@@ -1428,6 +1764,8 @@ class InventoryReportService
             $corM = $parseKg($form, 'corScrapMalCorteKg');
 
             $impDest = $this->resolveImpScrapImpresoDestino($form, $r->product_structure);
+            $lamImpDest = $this->resolveLamScrapImpresoDestino($form, $r->product_structure);
+            $lamLamDest = $this->resolveLamScrapLaminadoDestino($form, $r->product_structure);
 
             $refileResolved = $this->resolvedCorteBucketDestino($form, $r->product_structure, 'corScrapRefileDestino');
             $corImpresoResolved = $this->resolvedCorteBucketDestino($form, $r->product_structure, 'corScrapImpresoDestino');
@@ -1442,30 +1780,21 @@ class InventoryReportService
                 $corR_out = 0.0;
                 $corI_out = 0.0;
                 $corM_out = $globalSub === 'transparente' ? $corM : 0.0;
-            } elseif ($substrateGroup === 'poliestireno') {
-                $impT_out = 0.0;
-                $impI_out = $impDest === 'poliestireno' ? $impI : 0.0;
-                $lamT_out = 0.0;
-                $lamI_out = 0.0;
-                $lamL_out = 0.0;
-                $corR_out = 0.0;
-                $corI_out = 0.0;
-                $corM_out = $globalSub === 'poliestireno' ? $corM : 0.0;
             } elseif ($substrateGroup === 'bopp') {
                 $impT_out = 0.0;
                 $impI_out = $impDest === 'bopp' ? $impI : 0.0;
                 $lamT_out = 0.0;
-                $lamI_out = $lamI;
-                $lamL_out = $lamL;
+                $lamI_out = $lamImpDest === 'bopp' ? $lamI : 0.0;
+                $lamL_out = $lamLamDest === 'bopp' ? $lamL : 0.0;
                 $corR_out = $refileResolved === 'bopp' ? $corR : 0.0;
                 $corI_out = $corImpresoResolved === 'bopp' ? $corIkg : 0.0;
                 $corM_out = $globalSub === 'bopp' ? $corM : 0.0;
             } elseif ($substrateGroup === ScrapSubstrateGroup::POLIETILENO) {
                 $impT_out = 0.0;
-                $impI_out = 0.0;
+                $impI_out = ScrapSubstrateGroup::isPolietileno($impDest) ? $impI : 0.0;
                 $lamT_out = 0.0;
-                $lamI_out = $lamI;
-                $lamL_out = $lamL;
+                $lamI_out = ScrapSubstrateGroup::isPolietileno($lamImpDest) ? $lamI : 0.0;
+                $lamL_out = ScrapSubstrateGroup::isPolietileno($lamLamDest) ? $lamL : 0.0;
                 $corR_out = ScrapSubstrateGroup::isPolietileno($refileResolved) ? $corR : 0.0;
                 $corI_out = ScrapSubstrateGroup::isPolietileno($corImpresoResolved) ? $corIkg : 0.0;
                 $corM_out = ScrapSubstrateGroup::isPolietileno($globalSub) ? $corM : 0.0;
@@ -1509,7 +1838,7 @@ class InventoryReportService
     }
 
     /**
-     * Destino del scrap impreso en impresión (solo selección explícita en planilla: BOPP o poliestireno).
+     * Destino del scrap impreso en impresión (selección explícita en planilla: BOPP).
      *
      * @param  array<string, mixed>|null  $form
      */
@@ -1519,8 +1848,44 @@ class InventoryReportService
         if ($raw === 'bopp') {
             return 'bopp';
         }
-        if ($raw === 'poliestireno') {
-            return 'poliestireno';
+        if (ScrapSubstrateGroup::isPolietileno($raw) || $raw === 'poliestireno') {
+            return ScrapSubstrateGroup::POLIETILENO;
+        }
+
+        return null;
+    }
+
+    /**
+     * Destino del scrap impreso en laminación (BOPP / polietileno).
+     *
+     * @param  array<string, mixed>|null  $form
+     */
+    private function resolveLamScrapImpresoDestino(?array $form, ?string $productStructure): ?string
+    {
+        $raw = ScrapSubstrateCatalog::normalizeGroupId((string) (($form ?? [])['lamScrapImpresoDestino'] ?? ''));
+        if ($raw === 'bopp') {
+            return 'bopp';
+        }
+        if (ScrapSubstrateGroup::isPolietileno($raw) || $raw === 'poliestireno') {
+            return ScrapSubstrateGroup::POLIETILENO;
+        }
+
+        return null;
+    }
+
+    /**
+     * Destino del scrap laminado en laminación (BOPP / polietileno).
+     *
+     * @param  array<string, mixed>|null  $form
+     */
+    private function resolveLamScrapLaminadoDestino(?array $form, ?string $productStructure): ?string
+    {
+        $raw = ScrapSubstrateCatalog::normalizeGroupId((string) (($form ?? [])['lamScrapLaminadoDestino'] ?? ''));
+        if ($raw === 'bopp') {
+            return 'bopp';
+        }
+        if (ScrapSubstrateGroup::isPolietileno($raw) || $raw === 'poliestireno') {
+            return ScrapSubstrateGroup::POLIETILENO;
         }
 
         return null;
@@ -1556,20 +1921,6 @@ class InventoryReportService
             return false;
         }
 
-        if ($substrateGroup === 'poliestireno') {
-            if ($explicit === 'poliestireno') {
-                return true;
-            }
-            if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'poliestireno')) {
-                return true;
-            }
-            if ($resolvedImpDest === 'poliestireno' && $scrapResolved['imp_impreso'] > 0) {
-                return true;
-            }
-
-            return false;
-        }
-
         if ($substrateGroup === 'bopp') {
             if ($explicit === 'bopp') {
                 return true;
@@ -1578,6 +1929,14 @@ class InventoryReportService
                 return true;
             }
             if ($resolvedImpDest === 'bopp' && $scrapResolved['imp_impreso'] > 0) {
+                return true;
+            }
+            $lamImpDestBopp = $this->resolveLamScrapImpresoDestino($form, $productStructure);
+            $lamLamDestBopp = $this->resolveLamScrapLaminadoDestino($form, $productStructure);
+            if ($lamImpDestBopp === 'bopp' && $scrapResolved['lam_impreso'] > 0) {
+                return true;
+            }
+            if ($lamLamDestBopp === 'bopp' && $scrapResolved['lam_laminado'] > 0) {
                 return true;
             }
             if ($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino') === 'bopp') {
@@ -1598,6 +1957,17 @@ class InventoryReportService
                 return true;
             }
             if ($explicit === '' && ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, ScrapSubstrateGroup::POLIETILENO)) {
+                return true;
+            }
+            if (ScrapSubstrateGroup::isPolietileno($resolvedImpDest) && $scrapResolved['imp_impreso'] > 0) {
+                return true;
+            }
+            $lamImpDest = $this->resolveLamScrapImpresoDestino($form, $productStructure);
+            $lamLamDest = $this->resolveLamScrapLaminadoDestino($form, $productStructure);
+            if (ScrapSubstrateGroup::isPolietileno($lamImpDest) && $scrapResolved['lam_impreso'] > 0) {
+                return true;
+            }
+            if (ScrapSubstrateGroup::isPolietileno($lamLamDest) && $scrapResolved['lam_laminado'] > 0) {
                 return true;
             }
             if (ScrapSubstrateGroup::isPolietileno($this->resolvedCorteBucketDestino($form, $productStructure, 'corScrapRefileDestino'))) {
@@ -1654,7 +2024,10 @@ class InventoryReportService
     private function resolvedGlobalCorteSubstrate(?array $form, ?string $productStructure): ?string
     {
         $explicit = ScrapSubstrateGroup::normalizeSubstrateToken(($form ?? [])['corDesperdicioSustrato'] ?? null);
-        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'poliestireno' || $explicit === 'transparente') {
+        if ($explicit === 'poliestireno') {
+            $explicit = 'bopp';
+        }
+        if ($explicit === 'bopp' || ScrapSubstrateGroup::isPolietileno($explicit) || $explicit === 'transparente') {
             return $explicit;
         }
 
@@ -1666,9 +2039,6 @@ class InventoryReportService
         }
         if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, ScrapSubstrateGroup::POLIETILENO)) {
             return ScrapSubstrateGroup::POLIETILENO;
-        }
-        if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'poliestireno')) {
-            return 'poliestireno';
         }
         if (ScrapSubstrateCatalog::structureInferenceMatchesGroup($productStructure, 'transparente')) {
             return 'transparente';
@@ -1953,6 +2323,457 @@ class InventoryReportService
             'materials' => $materialRows,
             'bobinas' => $bobinas,
             'bobinas_total' => $total,
+        ];
+    }
+
+    /**
+     * Reporte descargable de bobinas rechazadas: número, proveedor, peso y motivo.
+     *
+     * @return array{from: string, to: string, supplier_id: int|null, rows: list<array<string, mixed>>}
+     */
+    public function rejectedBobinasReport(Carbon $from, Carbon $to, ?int $supplierId = null): array
+    {
+        $supplierName = null;
+        if ($supplierId !== null) {
+            $supplierName = Supplier::query()->whereKey($supplierId)->value('name');
+        }
+
+        $q = Bobina::query()
+            ->with([
+                'material.supplier:id,name',
+                'inventoryReturn:id,reason,accepted_at,created_at,work_order_id,status,material_id',
+                'inventoryReturn.workOrder:id,code',
+            ])
+            ->whereHas('material', fn ($m) => $m->where('inventory_area', InventoryArea::BobinasRechazadas->value))
+            ->whereHas('inventoryReturn', function ($r) use ($from, $to, $supplierId, $supplierName) {
+                $r->where(function ($dates) use ($from, $to) {
+                    $dates
+                        ->where(function ($accepted) use ($from, $to) {
+                            $accepted->where('status', 'accepted')
+                                ->whereNotNull('accepted_at')
+                                ->whereBetween('accepted_at', [$from, $to]);
+                        })
+                        ->orWhere(function ($pending) use ($from, $to) {
+                            $pending->where('status', 'pending')
+                                ->whereBetween('created_at', [$from, $to]);
+                        });
+                });
+                if ($supplierId !== null) {
+                    $r->where(function ($sub) use ($supplierId, $supplierName) {
+                        $sub->whereHas('material', fn ($m) => $m->where('supplier_id', $supplierId));
+                        if ($supplierName !== null && $supplierName !== '') {
+                            $sub->orWhere('reason', 'like', '%Proveedor: '.$supplierName.'%');
+                        }
+                    });
+                }
+            });
+
+        $rows = [];
+        $seenReturnIds = [];
+        foreach ($q->get()->sortBy([
+            fn (Bobina $b) => $b->inventoryReturn?->accepted_at?->timestamp ?? 0,
+            fn (Bobina $b) => $b->code,
+        ]) as $bobina) {
+            $ret = $bobina->inventoryReturn;
+            if ($ret === null) {
+                continue;
+            }
+            $seenReturnIds[] = (int) $ret->getKey();
+            $rows[] = $this->buildRejectedDisplayRow($ret, $bobina);
+        }
+
+        // Fallback: devoluciones rechazadas aceptadas sin bobina física creada.
+        $retQ = InventoryReturn::query()
+            ->with(['material.supplier:id,name', 'workOrder:id,code'])
+            ->where('destination_area', InventoryArea::BobinasRechazadas->value)
+            ->where(function ($dates) use ($from, $to) {
+                $dates
+                    ->where(function ($accepted) use ($from, $to) {
+                        $accepted->where('status', 'accepted')
+                            ->whereNotNull('accepted_at')
+                            ->whereBetween('accepted_at', [$from, $to]);
+                    })
+                    ->orWhere(function ($pending) use ($from, $to) {
+                        $pending->where('status', 'pending')
+                            ->whereBetween('created_at', [$from, $to]);
+                    });
+            });
+
+        if ($seenReturnIds !== []) {
+            $retQ->whereNotIn('id', $seenReturnIds);
+        }
+
+        if ($supplierId !== null) {
+            $retQ->where(function ($sub) use ($supplierId, $supplierName) {
+                $sub->whereHas('material', fn ($m) => $m->where('supplier_id', $supplierId));
+                if ($supplierName !== null && $supplierName !== '') {
+                    $sub->orWhere('reason', 'like', '%Proveedor: '.$supplierName.'%');
+                }
+            });
+        }
+
+        foreach ($retQ->get() as $ret) {
+            $rows[] = $this->buildRejectedDisplayRow($ret, null);
+        }
+
+        usort($rows, static function (array $a, array $b): int {
+            $da = (string) ($a['fecha_registro'] ?? '');
+            $db = (string) ($b['fecha_registro'] ?? '');
+            if ($da !== $db) {
+                return $db <=> $da;
+            }
+
+            return strcmp((string) ($a['numero_bobina'] ?? ''), (string) ($b['numero_bobina'] ?? ''));
+        });
+
+        return [
+            'from' => $from->toIso8601String(),
+            'to' => $to->toIso8601String(),
+            'supplier_id' => $supplierId,
+            'rows' => $rows,
+        ];
+    }
+
+    /**
+     * @return array{motivo: string, proveedor: string, operador: string, material: string, observacion: string, fecha_bobina: string}
+     */
+    private function parseRejectedBobinaReturnReason(?string $reason): array
+    {
+        $text = trim((string) $reason);
+        if ($text === '') {
+            return [
+                'motivo' => '',
+                'proveedor' => '',
+                'operador' => '',
+                'material' => '',
+                'observacion' => '',
+                'fecha_bobina' => '',
+            ];
+        }
+
+        $motivo = '';
+        $proveedor = '';
+        $operador = '';
+        $material = '';
+        $observacion = '';
+        $fechaBobina = '';
+
+        foreach (preg_split('/\s·\s/u', $text) ?: [] as $segment) {
+            $segment = trim($segment);
+            if ($segment === '') {
+                continue;
+            }
+            if (str_starts_with($segment, 'Motivo:')) {
+                $motivo = trim(substr($segment, strlen('Motivo:')));
+            } elseif (str_starts_with($segment, 'Proveedor:')) {
+                $proveedor = trim(substr($segment, strlen('Proveedor:')));
+            } elseif (str_starts_with($segment, 'Operador:')) {
+                $operador = trim(substr($segment, strlen('Operador:')));
+            } elseif (str_starts_with($segment, 'Material:')) {
+                $material = trim(substr($segment, strlen('Material:')));
+            } elseif (str_starts_with($segment, 'Obs:')) {
+                $observacion = trim(substr($segment, strlen('Obs:')));
+            } elseif (str_starts_with($segment, 'Fecha bobina:')) {
+                $fechaBobina = trim(substr($segment, strlen('Fecha bobina:')));
+            }
+        }
+
+        if ($motivo === '' && preg_match('/Motivo:\s*([^·]+)/u', $text, $m)) {
+            $motivo = trim($m[1]);
+        }
+        if ($proveedor === '' && preg_match('/Proveedor:\s*(.+)$/u', $text, $m)) {
+            $proveedor = trim($m[1]);
+        }
+        if ($operador === '' && preg_match('/Operador:\s*(.+)$/u', $text, $m)) {
+            $operador = trim($m[1]);
+        }
+        if ($material === '' && preg_match('/Material:\s*(.+)$/u', $text, $m)) {
+            $material = trim($m[1]);
+        }
+        if ($observacion === '' && preg_match('/Obs:\s*(.+)$/u', $text, $m)) {
+            $observacion = trim($m[1]);
+        }
+        if ($fechaBobina === '' && preg_match('/Fecha bobina:\s*([^·]+)/u', $text, $m)) {
+            $fechaBobina = trim($m[1]);
+        }
+
+        if ($motivo === '') {
+            $motivo = preg_replace('/^\d+\s+bobina\(s\)\s+rechazada\(s\)\s*·?\s*/u', '', $text) ?? $text;
+            $motivo = trim($motivo);
+        }
+
+        return [
+            'motivo' => $motivo,
+            'proveedor' => $proveedor,
+            'operador' => $operador,
+            'material' => $material,
+            'observacion' => $observacion,
+            'fecha_bobina' => $fechaBobina,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildRejectedDisplayRow(
+        InventoryReturn $ret,
+        ?Bobina $bobina,
+        ?string $fallbackCode = null,
+    ): array {
+        $parsed = $this->parseRejectedBobinaReturnReason($ret->reason);
+        $proveedor = trim((string) ($bobina?->material?->supplier?->name ?? ''));
+        if ($proveedor === '') {
+            $proveedor = $parsed['proveedor'];
+        }
+
+        $materialLabel = trim((string) ($bobina?->material?->name ?? ''));
+        if ($materialLabel === '') {
+            $materialLabel = $parsed['material'];
+        }
+
+        $fechaBobina = $parsed['fecha_bobina'] !== '' ? $parsed['fecha_bobina'] : null;
+        $fechaRegistro = $ret->accepted_at?->format('Y-m-d') ?? $ret->created_at?->format('Y-m-d');
+
+        $code = $bobina?->code;
+        if ($code === null || $code === '') {
+            $code = $fallbackCode;
+        }
+
+        return [
+            'numero_bobina' => $this->normalizeRejectedBobinaDisplayCode($code, (int) $ret->getKey()),
+            'proveedor' => $proveedor !== '' ? $proveedor : null,
+            'operador' => $parsed['operador'] !== '' ? $parsed['operador'] : null,
+            'material' => $materialLabel !== '' ? $materialLabel : null,
+            'peso_kg' => number_format((float) ($bobina?->weight_kg ?? $ret->quantity), 3, '.', ''),
+            'motivo' => $parsed['motivo'] !== '' ? $parsed['motivo'] : null,
+            'observacion' => $parsed['observacion'] !== '' ? $parsed['observacion'] : null,
+            'fecha_bobina' => $fechaBobina,
+            'fecha_registro' => $fechaRegistro,
+            'work_order_code' => $ret->workOrder?->code,
+        ];
+    }
+
+    private function normalizeRejectedBobinaDisplayCode(?string $code, int $returnId): string
+    {
+        if ($code === null || trim($code) === '') {
+            return 'SIN-BB-'.$returnId;
+        }
+        $code = trim($code);
+        if (preg_match('/^RET-(\d+)$/i', $code, $m)) {
+            return 'SIN-BB-'.$m[1];
+        }
+
+        return $code;
+    }
+
+    /**
+     * Resumen global de material producido (kg salida impresión, laminación y corte) en el período.
+     *
+     * @return array{
+     *   from: string,
+     *   to: string,
+     *   client_id: int|null,
+     *   totals: array<string, mixed>,
+     *   work_orders: list<array<string, mixed>>,
+     *   work_order_count: int
+     * }
+     */
+    public function productionMaterialSummary(Carbon $from, Carbon $to, ?int $clientId = null): array
+    {
+        $q = DB::table('work_orders as wo')
+            ->join('work_order_technical_documents as td', 'wo.id', '=', 'td.work_order_id')
+            ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id');
+        $this->applyScrapWorkOrderPeriodFilter($q, $from, $to);
+
+        if ($clientId !== null) {
+            $q->where('wo.client_id', $clientId);
+        }
+
+        $totals = [
+            'impreso_kg' => 0.0,
+            'laminado_kg' => 0.0,
+            'corte_kg' => 0.0,
+            'impreso_bobinas' => 0,
+            'laminado_bobinas' => 0,
+        ];
+
+        $workOrders = [];
+
+        foreach ($q->orderBy('wo.id')->get([
+            'wo.id as work_order_id',
+            'wo.code as work_order_code',
+            'wo.client_id',
+            'c.name as client_name',
+            'td.form as form_json',
+        ]) as $row) {
+            /** @var array<string, mixed>|null $form */
+            $form = null;
+            if ($row->form_json !== null) {
+                if (is_string($row->form_json)) {
+                    $decoded = json_decode($row->form_json, true);
+                    $form = is_array($decoded) ? $decoded : null;
+                } elseif (is_array($row->form_json)) {
+                    $form = $row->form_json;
+                }
+            }
+
+            $material = WorkOrderProductionControlsAggregator::materialTotalsFromForm($form);
+            $impKg = $material['impreso_kg'];
+            $lamKg = $material['laminado_kg'];
+            $corKg = $material['corte_kg'];
+
+            if ($impKg + $lamKg + $corKg < 0.0005) {
+                continue;
+            }
+
+            $totals['impreso_kg'] += $impKg;
+            $totals['laminado_kg'] += $lamKg;
+            $totals['corte_kg'] += $corKg;
+            $totals['impreso_bobinas'] += $material['impreso_bobinas'];
+            $totals['laminado_bobinas'] += $material['laminado_bobinas'];
+
+            $workOrders[] = [
+                'work_order_id' => (int) $row->work_order_id,
+                'work_order_code' => $row->work_order_code,
+                'client_id' => $row->client_id !== null ? (int) $row->client_id : null,
+                'client_name' => $row->client_name,
+                'material_impreso_kg' => number_format($impKg, 3, '.', ''),
+                'material_laminado_kg' => number_format($lamKg, 3, '.', ''),
+                'material_cortado_kg' => number_format($corKg, 3, '.', ''),
+                'impreso_bobinas' => $material['impreso_bobinas'],
+                'laminado_bobinas' => $material['laminado_bobinas'],
+            ];
+        }
+
+        $totalGeneral = $totals['impreso_kg'] + $totals['laminado_kg'] + $totals['corte_kg'];
+
+        return [
+            'from' => $from->toIso8601String(),
+            'to' => $to->toIso8601String(),
+            'client_id' => $clientId,
+            'totals' => [
+                'material_impreso_kg' => number_format($totals['impreso_kg'], 3, '.', ''),
+                'material_laminado_kg' => number_format($totals['laminado_kg'], 3, '.', ''),
+                'material_cortado_kg' => number_format($totals['corte_kg'], 3, '.', ''),
+                'total_general_kg' => number_format($totalGeneral, 3, '.', ''),
+                'impreso_bobinas' => $totals['impreso_bobinas'],
+                'laminado_bobinas' => $totals['laminado_bobinas'],
+            ],
+            'work_orders' => $workOrders,
+            'work_order_count' => count($workOrders),
+        ];
+    }
+
+    /**
+     * Resumen de consumibles (tintas, químicos laminación, entradas de material) por período.
+     *
+     * @return array{
+     *   from: string,
+     *   to: string,
+     *   client_id: int|null,
+     *   totals: array<string, mixed>,
+     *   work_orders: list<array<string, mixed>>,
+     *   work_order_count: int
+     * }
+     */
+    public function consumablesSummary(Carbon $from, Carbon $to, ?int $clientId = null): array
+    {
+        $q = DB::table('work_orders as wo')
+            ->join('work_order_technical_documents as td', 'wo.id', '=', 'td.work_order_id')
+            ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id');
+        $this->applyScrapWorkOrderPeriodFilter($q, $from, $to);
+
+        if ($clientId !== null) {
+            $q->where('wo.client_id', $clientId);
+        }
+
+        $sumKeys = [
+            'tintas_original_kg',
+            'tintas_solventadas_kg',
+            'tintas_alcohol_kg',
+            'tintas_metoxil_kg',
+            'tintas_npa_kg',
+            'lam_adhesivo_sobra_kg',
+            'lam_catalizador_sobra_kg',
+            'lam_acetato_sobra_lt',
+            'lam_adhesivo_consumido_kg',
+            'lam_catalizador_consumido_kg',
+            'lam_acetato_consumido_lt',
+            'impresion_entrada_kg',
+            'laminacion_virgen_entrada_kg',
+        ];
+
+        $totals = array_fill_keys($sumKeys, 0.0);
+        $workOrders = [];
+
+        foreach ($q->orderBy('wo.id')->get([
+            'wo.id as work_order_id',
+            'wo.code as work_order_code',
+            'wo.client_id',
+            'c.name as client_name',
+        ]) as $row) {
+            $woId = (int) $row->work_order_id;
+            $raw = WorkOrderProductionControlsAggregator::consumablesTotals($woId);
+
+            if (array_sum($raw) < 0.0005) {
+                continue;
+            }
+
+            foreach ($sumKeys as $key) {
+                $totals[$key] += $raw[$key];
+            }
+
+            $workOrders[] = [
+                'work_order_id' => $woId,
+                'work_order_code' => $row->work_order_code,
+                'client_id' => $row->client_id !== null ? (int) $row->client_id : null,
+                'client_name' => $row->client_name,
+                'tintas_original_kg' => number_format($raw['tintas_original_kg'], 3, '.', ''),
+                'tintas_solventadas_kg' => number_format($raw['tintas_solventadas_kg'], 3, '.', ''),
+                'tintas_alcohol_kg' => number_format($raw['tintas_alcohol_kg'], 3, '.', ''),
+                'tintas_metoxil_kg' => number_format($raw['tintas_metoxil_kg'], 3, '.', ''),
+                'tintas_npa_kg' => number_format($raw['tintas_npa_kg'], 3, '.', ''),
+                'lam_adhesivo_sobra_kg' => number_format($raw['lam_adhesivo_sobra_kg'], 3, '.', ''),
+                'lam_catalizador_sobra_kg' => number_format($raw['lam_catalizador_sobra_kg'], 3, '.', ''),
+                'lam_acetato_sobra_lt' => number_format($raw['lam_acetato_sobra_lt'], 3, '.', ''),
+                'lam_adhesivo_consumido_kg' => number_format($raw['lam_adhesivo_consumido_kg'], 3, '.', ''),
+                'lam_catalizador_consumido_kg' => number_format($raw['lam_catalizador_consumido_kg'], 3, '.', ''),
+                'lam_acetato_consumido_lt' => number_format($raw['lam_acetato_consumido_lt'], 3, '.', ''),
+                'impresion_entrada_kg' => number_format($raw['impresion_entrada_kg'], 3, '.', ''),
+                'laminacion_virgen_entrada_kg' => number_format($raw['laminacion_virgen_entrada_kg'], 3, '.', ''),
+            ];
+        }
+
+        $lamConsumibleKg = $totals['lam_adhesivo_consumido_kg'] + $totals['lam_catalizador_consumido_kg'];
+
+        return [
+            'from' => $from->toIso8601String(),
+            'to' => $to->toIso8601String(),
+            'client_id' => $clientId,
+            'totals' => [
+                'tintas' => [
+                    'total_original_kg' => number_format($totals['tintas_original_kg'], 3, '.', ''),
+                    'total_solventadas_kg' => number_format($totals['tintas_solventadas_kg'], 3, '.', ''),
+                    'alcohol_kg' => number_format($totals['tintas_alcohol_kg'], 3, '.', ''),
+                    'metoxil_kg' => number_format($totals['tintas_metoxil_kg'], 3, '.', ''),
+                    'npa_kg' => number_format($totals['tintas_npa_kg'], 3, '.', ''),
+                ],
+                'laminacion' => [
+                    'adhesivo_sobra_kg' => number_format($totals['lam_adhesivo_sobra_kg'], 3, '.', ''),
+                    'catalizador_sobra_kg' => number_format($totals['lam_catalizador_sobra_kg'], 3, '.', ''),
+                    'acetato_sobra_lt' => number_format($totals['lam_acetato_sobra_lt'], 3, '.', ''),
+                    'adhesivo_consumido_kg' => number_format($totals['lam_adhesivo_consumido_kg'], 3, '.', ''),
+                    'catalizador_consumido_kg' => number_format($totals['lam_catalizador_consumido_kg'], 3, '.', ''),
+                    'acetato_consumido_lt' => number_format($totals['lam_acetato_consumido_lt'], 3, '.', ''),
+                    'total_consumible_kg' => number_format($lamConsumibleKg, 3, '.', ''),
+                    'material_virgen_entrada_kg' => number_format($totals['laminacion_virgen_entrada_kg'], 3, '.', ''),
+                ],
+                'impresion' => [
+                    'material_consumido_kg' => number_format($totals['impresion_entrada_kg'], 3, '.', ''),
+                ],
+            ],
+            'work_orders' => $workOrders,
+            'work_order_count' => count($workOrders),
         ];
     }
 }

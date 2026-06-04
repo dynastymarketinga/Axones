@@ -3,8 +3,7 @@
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
-import { MesSectionShell } from "@/components/axones/mes"
+import { MesOperativoEstadoCard, MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
@@ -39,7 +38,10 @@ import {
   mesTimerConfirmNeedsActiveTurno,
   type MesTimerConfirmKey,
 } from "./mes-timer-actions"
-import { PRINTING_CONTROL_SAVED_EVENT } from "@/lib/printing-mes-band-status"
+import {
+  derivePrintingOperativoEstado,
+  PRINTING_CONTROL_SAVED_EVENT,
+} from "@/lib/printing-mes-band-status"
 import { openPrintingPlanillaPreviewFromSource } from "@/lib/printing-planilla-preview"
 import {
   canSaveProductionAreaForm,
@@ -77,15 +79,25 @@ import {
   type PrintingTurnTimer,
   allRejectedEntriesHaveMotivo,
   countRejectedEntryBobinas,
+  countRejectedEntryKg,
   newWarehouseRejectedEntry,
   normalizeSalidaBobinaLabelMeta,
   rejectedEntriesWithBobinas,
+  sanitizeBobinaKgSlotInput,
   sumRejectedEntryBobinas,
+  sumRejectedEntryKg,
   type WarehouseRejectedEntry,
   type WarehouseReturnDraft,
 } from "./printing-turnos"
+import {
+  buildGoodReturnReason,
+  buildRejectedReturnReason,
+  materialSpecificationsLabel,
+  rejectReasonLabel,
+  todayIsoDate,
+} from "./warehouse-return-helpers"
 import "./work-order-planilla.css"
-import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, RotateCcw, Save, Sparkles, Users } from "lucide-react"
+import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
 
@@ -560,23 +572,28 @@ export default function WorkOrderPrintingControlPanel({
   const scrapImpreso = readNumber(form.impScrapImpresoKg)
   const totalScrap = scrapTransparente + scrapImpreso
   const devolucionBuena = readNumber(form.impDevolucionBuenaKg)
+  const devolucionRechazadaKg = readNumber(form.impDevolucionRechazadaKg)
   const devolucionRechazadaBobinas = countDevolucionRechazadaBobinas(
     form.impDevolucionRechazadaBobinas,
     form.impDevolucionRechazadaKg,
   )
   const devolucionesPendienteAlmacen = useMemo(() => {
     const b = toFiniteOrNull(form.impDevolucionBuenaKg) ?? 0
-    const r = countDevolucionRechazadaBobinas(
-      form.impDevolucionRechazadaBobinas,
-      form.impDevolucionRechazadaKg,
-    )
+    const rKg = readNumber(form.impDevolucionRechazadaKg)
+    const r =
+      rKg > 0
+        ? rKg
+        : countDevolucionRechazadaBobinas(
+            form.impDevolucionRechazadaBobinas,
+            form.impDevolucionRechazadaKg,
+          )
     if (b <= 0 && r <= 0) return false
     const envioMs = readNumber(form.impDevolucionesAlmacenUltimoEnvioMs)
     const snapB = readString(form.impDevolucionesAlmacenSnapBuena)
     const snapR = readString(form.impDevolucionesAlmacenSnapRech)
     const curB = normalizeNumericString(form.impDevolucionBuenaKg)
     const curR = normalizeNumericString(
-      readNumberString(form.impDevolucionRechazadaBobinas) || String(r),
+      readNumberString(form.impDevolucionRechazadaKg) || String(r),
     )
     if (envioMs <= 0) return true
     return curB !== snapB || curR !== snapR
@@ -592,8 +609,6 @@ export default function WorkOrderPrintingControlPanel({
   const summaryPrinting = productionSummary?.printing
   const historicalBobinaUsages = summaryPrinting?.bobina_usages ?? []
   const historicalSegments = summaryPrinting?.time_segments_recent ?? []
-  const useBobinaHistorical = historicalBobinaUsages.length > 0
-  const hasHistoricalPrinting = useBobinaHistorical || historicalSegments.length > 0
   const historicalEntrada = historicalBobinaUsages.reduce(
     (acc, row) => acc + readNumber(row.quantity_used_kg),
     0,
@@ -607,32 +622,36 @@ export default function WorkOrderPrintingControlPanel({
   ).length
   const inferredHistoricalTurns =
     historicalTurns > 0 ? historicalTurns : historicalEntrada > 0 || historicalSalida > 0 ? 1 : 0
+  const planillaProducidoKg = readNumber(form.kgSalidaImp ?? prefill.kgSalidaImp)
+  const planillaEntradaKg = readNumber(form.kgIngresadoImp ?? prefill.kgIngresadoImp)
   const formProducedBaseline = readNumber(form.impAcumuladoProducidoKg)
-  const producidoAcumuladoKg = useBobinaHistorical
-    ? historicalSalida
-    : Math.max(formProducedBaseline, jsonAccum.producidoKg)
+  const mesProducidoKg = Math.max(formProducedBaseline, jsonAccum.producidoKg)
+  const mesEntradaKg = jsonAccum.entradaKg
+  const producidoAcumuladoKg = Math.max(mesProducidoKg, historicalSalida, planillaProducidoKg)
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
-  const turnosRegistrados = useBobinaHistorical ? inferredHistoricalTurns : jsonAccum.turnosRegistrados
-  const totalEntradaAcumulada = useBobinaHistorical ? historicalEntrada : jsonAccum.entradaKg
+  const turnosRegistrados = Math.max(
+    jsonAccum.turnosRegistrados,
+    inferredHistoricalTurns,
+    planillaProducidoKg > 0 || planillaEntradaKg > 0 ? 1 : 0,
+  )
+  const totalEntradaAcumulada = Math.max(mesEntradaKg, historicalEntrada, planillaEntradaKg)
   const formScrapAcumulado = readNumber(form.impScrapAcumuladoKg)
-  const totalScrapAcumulado = useBobinaHistorical
-    ? formScrapAcumulado > 0
-      ? formScrapAcumulado
-      : totalScrap
-    : Math.max(formScrapAcumulado, jsonAccum.scrapKg, totalScrap)
+  const totalScrapAcumulado = Math.max(formScrapAcumulado, jsonAccum.scrapKg, totalScrap)
   const hasOpenHistoricalProductionSegment =
     summaryPrinting?.open_time_segment?.segment_type === "production" &&
     !summaryPrinting?.open_time_segment?.ended_at
   const formUltimoTurnoLabel = hasActiveTurno
     ? "Turno en curso"
     : jsonAccum.ultimoCierreLabel
-  const ultimoTurnoLabel = hasHistoricalPrinting
-    ? hasOpenHistoricalProductionSegment
+  const ultimoTurnoLabel = hasActiveTurno
+    ? formUltimoTurnoLabel
+    : hasOpenHistoricalProductionSegment
       ? "Turno en ejecución"
       : inferredHistoricalTurns > 0
         ? "Turno cerrado"
-        : "Sin producción previa"
-    : formUltimoTurnoLabel
+        : planillaProducidoKg > 0 || planillaEntradaKg > 0
+          ? "Datos de planilla"
+          : formUltimoTurnoLabel
 
   const [timerTick, setTimerTick] = useState(0)
   const [pauseReason, setPauseReason] = useState("")
@@ -646,7 +665,6 @@ export default function WorkOrderPrintingControlPanel({
   const [startTurnConfirmOpen, setStartTurnConfirmOpen] = useState(false)
   const [timerConfirm, setTimerConfirm] = useState<MesTimerConfirmKey | null>(null)
   const [takeoverConfirmOpen, setTakeoverConfirmOpen] = useState(false)
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
   const [finalizeOtConfirmOpen, setFinalizeOtConfirmOpen] = useState(false)
@@ -665,20 +683,22 @@ export default function WorkOrderPrintingControlPanel({
   const [returnLoadingSuppliers, setReturnLoadingSuppliers] = useState(false)
   const [returnDraft, setReturnDraft] = useState<WarehouseReturnDraft>(() => ({
     buenaMaterialId: "",
+    buenaEspecificaciones: "",
+    buenaMotivo: "",
     bobinaCode: "",
     rechazadaEntries: [newWarehouseRejectedEntry()],
   }))
 
   function syncRejectedEntriesToTurn(entries: WarehouseRejectedEntry[]) {
-    const total = sumRejectedEntryBobinas(entries)
+    const totalKg = sumRejectedEntryKg(entries)
     const motivoOk = allRejectedEntriesHaveMotivo(entries)
     const firstMotivo =
       rejectedEntriesWithBobinas(entries).find((e) => e.motivo.trim())?.motivo.trim() ?? ""
     patchActiveTurn((t) => ({
       ...t,
-      devolucionRechazadaKg: "",
-      devolucionRechazadaBobinas: total > 0 ? String(total) : "",
-      devolucionRechazadaMotivo: total > 0 && motivoOk ? firstMotivo : "",
+      devolucionRechazadaKg: totalKg > 0 ? normalizeNumericString(totalKg) : "",
+      devolucionRechazadaBobinas: "",
+      devolucionRechazadaMotivo: totalKg > 0 && motivoOk ? firstMotivo : "",
     }))
   }
 
@@ -703,9 +723,16 @@ export default function WorkOrderPrintingControlPanel({
   }
 
   function addRejectedEntry() {
+    const operador = readString(form.impOperador)
     setReturnDraft((prev) => ({
       ...prev,
-      rechazadaEntries: [...prev.rechazadaEntries, newWarehouseRejectedEntry()],
+      rechazadaEntries: [
+        ...prev.rechazadaEntries,
+        newWarehouseRejectedEntry({
+          operador,
+          creadaFecha: todayIsoDate(),
+        }),
+      ],
     }))
   }
 
@@ -756,6 +783,10 @@ export default function WorkOrderPrintingControlPanel({
   }, [form.impTimerPauses])
 
   const nowMs = Date.now() + timerTick * 0
+  const operativoEstado = useMemo(
+    () => derivePrintingOperativoEstado(form, nowMs),
+    [form, timerTick],
+  )
   const otEffectiveAccSec = useMemo(
     () => cumulativeEffectiveSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
@@ -1242,8 +1273,11 @@ export default function WorkOrderPrintingControlPanel({
         impScrapImpresoKg: normalizeNumericString(actualP?.scrapImpresoKg ?? src.impScrapImpresoKg),
         impScrapImpresoDestino: (() => {
           const d = readString(src.impScrapImpresoDestino).toLowerCase()
-          if (d === "poliestireno" || d === "transparente") return "poliestireno"
-          if (d === "bopp") return "bopp"
+          if (d === "bopp" || d === "polietileno" || d === "politerlero" || d === "poliestireno") {
+            return d === "polietileno" || d === "politerlero" || d === "poliestireno"
+              ? "polietileno"
+              : "bopp"
+          }
           return "bopp"
         })(),
         impScrapAcumuladoKg: normalizeNumericString(accFromJson.scrapKg),
@@ -1856,16 +1890,25 @@ export default function WorkOrderPrintingControlPanel({
       void loadReturnMaterials("material")
       void loadReturnMaterials("bobinas_rechazadas")
       void loadReturnSuppliers()
-      const turnBobinas = readNumberString(form.impDevolucionRechazadaBobinas)
+      const turnKg = readNumberString(form.impDevolucionRechazadaKg)
       const turnMotivo = readString(form.impDevolucionRechazadaMotivo)
-      if (turnBobinas.trim()) {
+      const operador = readString(form.impOperador)
+      if (turnKg.trim()) {
         setReturnDraft((prev) => {
           const entries =
             prev.rechazadaEntries.length > 0 ? prev.rechazadaEntries : [newWarehouseRejectedEntry()]
-          if (entries.length === 1 && !entries[0].bobinas.trim()) {
+          if (entries.length === 1 && !entries[0].kg.trim()) {
             return {
               ...prev,
-              rechazadaEntries: [{ ...entries[0], bobinas: turnBobinas, motivo: turnMotivo }],
+              rechazadaEntries: [
+                {
+                  ...entries[0],
+                  kg: turnKg,
+                  motivo: turnMotivo,
+                  operador: entries[0].operador.trim() || operador,
+                  creadaFecha: entries[0].creadaFecha.trim() || todayIsoDate(),
+                },
+              ],
             }
           }
           return prev
@@ -1873,7 +1916,7 @@ export default function WorkOrderPrintingControlPanel({
       }
     }
     devolucionesPendientePrevRef.current = devolucionesPendienteAlmacen
-  }, [devolucionesPendienteAlmacen, form.impDevolucionRechazadaBobinas, form.impDevolucionRechazadaMotivo, loadReturnMaterials, loadReturnSuppliers])
+  }, [devolucionesPendienteAlmacen, form.impDevolucionRechazadaKg, form.impDevolucionRechazadaMotivo, form.impOperador, loadReturnMaterials, loadReturnSuppliers])
 
   function handleReturnWarehouseOpenChange(open: boolean) {
     setReturnWarehouseOpen(open)
@@ -1882,15 +1925,24 @@ export default function WorkOrderPrintingControlPanel({
       void loadReturnMaterials("bobinas_rechazadas")
       void loadReturnSuppliers()
       setReturnDraft((prev) => {
-        const turnBobinas = readNumberString(form.impDevolucionRechazadaBobinas)
+        const turnKg = readNumberString(form.impDevolucionRechazadaKg)
         const turnMotivo = readString(form.impDevolucionRechazadaMotivo)
+        const operador = readString(form.impOperador)
         const entries =
           prev.rechazadaEntries.length > 0 ? prev.rechazadaEntries : [newWarehouseRejectedEntry()]
-        if (entries.length === 1 && !entries[0].bobinas.trim() && turnBobinas.trim()) {
+        if (entries.length === 1 && !entries[0].kg.trim() && turnKg.trim()) {
           return {
             ...prev,
             buenaMaterialId: prev.buenaMaterialId,
-            rechazadaEntries: [{ ...entries[0], bobinas: turnBobinas, motivo: turnMotivo }],
+            rechazadaEntries: [
+              {
+                ...entries[0],
+                kg: turnKg,
+                motivo: turnMotivo,
+                operador: entries[0].operador.trim() || operador,
+                creadaFecha: entries[0].creadaFecha.trim() || todayIsoDate(),
+              },
+            ],
           }
         }
         return prev
@@ -1903,11 +1955,12 @@ export default function WorkOrderPrintingControlPanel({
 
     const buenaKg = Number(readString(readNumberString(form.impDevolucionBuenaKg)).trim().replace(",", "."))
     const activeRejected = rejectedEntriesWithBobinas(returnDraft.rechazadaEntries)
+    const rechKg = sumRejectedEntryKg(returnDraft.rechazadaEntries)
     const rechBobinas = sumRejectedEntryBobinas(returnDraft.rechazadaEntries)
     const hasBuena = Number.isFinite(buenaKg) && buenaKg > 0
-    const hasRech = rechBobinas > 0
+    const hasRech = rechKg > 0
     if (!hasBuena && !hasRech) {
-      toast.error("Indique Kg en devolución buena y/o bobinas en devolución rechazada.")
+      toast.error("Indique kilos en devolución buena y/o en devolución mala (rechazada).")
       return
     }
 
@@ -1916,17 +1969,21 @@ export default function WorkOrderPrintingControlPanel({
       toast.error("Seleccione el material de la devolución buena.")
       return
     }
+    if (hasBuena && !returnDraft.buenaMotivo.trim()) {
+      toast.error("Indique el motivo de la devolución buena.")
+      return
+    }
     if (hasRech) {
       for (let i = 0; i < activeRejected.length; i++) {
         const entry = activeRejected[i]
         const lineN = i + 1
-        const entryBobinas = countRejectedEntryBobinas(entry.bobinas)
+        const entryKg = countRejectedEntryKg(entry.kg)
         if (!entry.motivo.trim()) {
-          toast.error(`Línea rechazada ${lineN}: seleccione un motivo.`)
+          toast.error(`Devolución mala ${lineN}: seleccione un motivo.`)
           return
         }
-        if (entryBobinas < 1) {
-          toast.error(`Línea rechazada ${lineN}: indique al menos 1 bobina.`)
+        if (entryKg < 0.001) {
+          toast.error(`Devolución mala ${lineN}: indique los kilos rechazados.`)
           return
         }
       }
@@ -1943,6 +2000,11 @@ export default function WorkOrderPrintingControlPanel({
       let createdBuenaId: number | null = null
       const createdRechIds: number[] = []
 
+      const buenaMaterial = returnMaterialOptionsGood.find((m) => m.id === buenaMaterialId)
+      const buenaSpecs =
+        returnDraft.buenaEspecificaciones.trim() ||
+        materialSpecificationsLabel(buenaMaterial)
+
       if (hasBuena) {
         const created = await apiFetch<InventoryReturnCreated>("inventory-returns", {
           method: "POST",
@@ -1951,7 +2013,11 @@ export default function WorkOrderPrintingControlPanel({
             work_order_id: workOrderId,
             destination_area: "material",
             quantity: buenaKg.toFixed(3),
-            reason: bobinaRef ? `Bobina/Ref: ${bobinaRef}` : null,
+            reason: buildGoodReturnReason({
+              motivo: returnDraft.buenaMotivo,
+              especificaciones: buenaSpecs,
+              bobinaRef,
+            }),
           }),
         })
         createdBuenaId = created.id
@@ -1959,27 +2025,30 @@ export default function WorkOrderPrintingControlPanel({
       }
 
       for (const entry of activeRejected) {
-        const entryBobinas = countRejectedEntryBobinas(entry.bobinas)
-        const rejectReasonLabel =
-          PRINTING_REJECT_REASONS.find((r) => r.id === entry.motivo)?.label ?? entry.motivo.trim()
-        const rejectObs = entry.obs.trim()
-        const provName = supplierLabel(entry.proveedorId)
-        const entryKg = toFiniteOrNull(entry.kg)
-        const reasonParts = [`Motivo: ${rejectReasonLabel}`]
-        if (entryKg != null && entryKg > 0.005) reasonParts.push(`Peso: ${entryKg.toFixed(3)} Kg`)
-        if (provName) reasonParts.push(`Proveedor: ${provName}`)
-        if (rejectObs) reasonParts.push(`Obs: ${rejectObs}`)
-        if (bobinaRef) reasonParts.push(`Bobina/Ref: ${bobinaRef}`)
+        const entryKg = countRejectedEntryKg(entry.kg)
+        const rejectLabel = rejectReasonLabel(entry.motivo)
+        const provName = supplierLabel(entry.proveedorId) || entry.proveedorId.trim()
+        const materialLabel =
+          returnMaterialOptionsBad.find((m) => String(m.id) === entry.materialId.trim())?.name?.trim() ||
+          entry.materialId.trim()
         const materialIdRaw = entry.materialId.trim()
-        const materialId = materialIdRaw ? Number(materialIdRaw) : null
+        const materialIdNum = materialIdRaw ? Number(materialIdRaw) : null
+        const materialId =
+          materialIdNum !== null && Number.isFinite(materialIdNum) && materialIdNum > 0 ? materialIdNum : null
         const created = await apiFetch<InventoryReturnCreated>("inventory-returns", {
           method: "POST",
           body: JSON.stringify({
             material_id: materialId,
             work_order_id: workOrderId,
             destination_area: "bobinas_rechazadas",
-            quantity: String(entryBobinas),
-            reason: [`${entryBobinas} bobina(s) rechazada(s)`, ...reasonParts].join(" · "),
+            quantity: entryKg.toFixed(3),
+            reason: buildRejectedReturnReason(entry, {
+              rejectReasonLabel: rejectLabel,
+              proveedorName: provName,
+              materialLabel,
+              bobinaRef,
+              operador: entry.operador.trim() || readString(form.impOperador),
+            }),
           }),
         })
         createdRechIds.push(created.id)
@@ -1988,20 +2057,24 @@ export default function WorkOrderPrintingControlPanel({
 
       const titleBase = readString(prefill.code) || `OT-${workOrderId}`
       const rechSummaryLines = activeRejected.map((entry, i) => {
-        const entryBobinas = countRejectedEntryBobinas(entry.bobinas)
-        const rejectReasonLabel =
-          PRINTING_REJECT_REASONS.find((r) => r.id === entry.motivo)?.label ?? entry.motivo.trim()
-        const provName = supplierLabel(entry.proveedorId)
-        const entryKg = toFiniteOrNull(entry.kg)
+        const entryKg = countRejectedEntryKg(entry.kg)
+        const rejectLabel = rejectReasonLabel(entry.motivo)
+        const provName = supplierLabel(entry.proveedorId) || entry.proveedorId.trim()
+        const materialLabel =
+          returnMaterialOptionsBad.find((m) => String(m.id) === entry.materialId.trim())?.name?.trim() ||
+          entry.materialId.trim()
         const returnId = createdRechIds[i] ?? "—"
         const provPart = provName ? ` · Proveedor: ${provName}` : ""
-        const kgPart = entryKg != null && entryKg > 0.005 ? ` · ${entryKg.toFixed(3)} Kg` : ""
-        return `Devolución rechazada ${activeRejected.length > 1 ? `#${i + 1} ` : ""}${entryBobinas} bobina(s)${kgPart} · Motivo: ${rejectReasonLabel}${provPart} (return_id=${returnId})`
+        const materialPart = materialLabel ? ` · Material: ${materialLabel}` : ""
+        const opPart = entry.operador.trim() ? ` · Operador: ${entry.operador.trim()}` : ""
+        return `Devolución mala ${activeRejected.length > 1 ? `#${i + 1} ` : ""}${entryKg.toFixed(3)} Kg · Motivo: ${rejectLabel}${provPart}${materialPart}${opPart} (return_id=${returnId})`
       })
       const bodyLines = [
         `Origen: Impresión`,
         `OT: ${titleBase}`,
-        hasBuena ? `Devolución buena: ${buenaKg.toFixed(3)} Kg (return_id=${createdBuenaId ?? "—"})` : null,
+        hasBuena
+          ? `Devolución buena: ${buenaKg.toFixed(3)} Kg · ${buenaSpecs || "—"} · Motivo: ${returnDraft.buenaMotivo.trim()} (return_id=${createdBuenaId ?? "—"})`
+          : null,
         ...rechSummaryLines,
         bobinaRef ? `Bobina/Ref: ${bobinaRef}` : null,
         createdIds.length ? `IDs devoluciones: ${createdIds.join(", ")}` : null,
@@ -2024,15 +2097,15 @@ export default function WorkOrderPrintingControlPanel({
             ? normalizeNumericString(buenaKg)
             : normalizeNumericString(prev.impDevolucionBuenaKg)
           const nextRech = hasRech
-            ? normalizeNumericString(rechBobinas)
-            : normalizeNumericString(prev.impDevolucionRechazadaBobinas)
+            ? normalizeNumericString(rechKg)
+            : normalizeNumericString(prev.impDevolucionRechazadaKg)
           return {
             ...prev,
             ...(hasBuena ? { impDevolucionBuenaKg: normalizeNumericString(buenaKg) } : null),
             ...(hasRech
               ? {
-                  impDevolucionRechazadaKg: "",
-                  impDevolucionRechazadaBobinas: normalizeNumericString(rechBobinas),
+                  impDevolucionRechazadaKg: normalizeNumericString(rechKg),
+                  impDevolucionRechazadaBobinas: "",
                   impDevolucionRechazadaMotivo: firstMotivo,
                 }
               : null),
@@ -2046,10 +2119,10 @@ export default function WorkOrderPrintingControlPanel({
           devolucionBuenaKg: hasBuena
             ? normalizeNumericString(buenaKg)
             : cur.devolucionBuenaKg,
-          devolucionRechazadaKg: "",
-          devolucionRechazadaBobinas: hasRech
-            ? normalizeNumericString(rechBobinas)
-            : cur.devolucionRechazadaBobinas,
+          devolucionRechazadaKg: hasRech
+            ? normalizeNumericString(rechKg)
+            : cur.devolucionRechazadaKg,
+          devolucionRechazadaBobinas: hasRech ? "" : cur.devolucionRechazadaBobinas,
           devolucionRechazadaMotivo: hasRech
             ? firstMotivo
             : cur.devolucionRechazadaMotivo,
@@ -2060,12 +2133,16 @@ export default function WorkOrderPrintingControlPanel({
           ...printingTurnoToMirror(nextTurn),
           impDevolucionesAlmacenUltimoEnvioMs: Date.now(),
           impDevolucionesAlmacenSnapBuena: normalizeNumericString(nextTurn.devolucionBuenaKg),
-          impDevolucionesAlmacenSnapRech: normalizeNumericString(nextTurn.devolucionRechazadaBobinas),
+          impDevolucionesAlmacenSnapRech: normalizeNumericString(
+            nextTurn.devolucionRechazadaKg || nextTurn.devolucionRechazadaBobinas,
+          ),
         }
       }
       setForm((prev) => patchDev(prev))
       setReturnDraft({
         buenaMaterialId: "",
+        buenaEspecificaciones: "",
+        buenaMotivo: "",
         bobinaCode: "",
         rechazadaEntries: [newWarehouseRejectedEntry()],
       })
@@ -2105,38 +2182,15 @@ export default function WorkOrderPrintingControlPanel({
     toast.error(MES_SAVE_BLOCKED_MESSAGE)
   }
 
-  function requestResetAll() {
-    if (saving) return
-    if (controlReadOnly) return
-    setResetConfirmOpen(true)
-  }
-
-  async function confirmResetAll() {
-    if (saving) return
-    if (controlReadOnly) return
-    setResetConfirmOpen(false)
-
-    const cleared: Record<string, unknown> = {
-      ...form,
-      [IMP_TURNOS_KEY]: [],
-      [IMP_ACTUAL_KEY]: null,
-      ...clearPrintingMirrorKeys(),
-    }
-    for (const k of Object.keys(cleared)) {
-      if (k.startsWith("impBlockDone.")) delete cleared[k]
-    }
-
-    clearPrintingBrowserCache(workOrderId)
-    setForm(bootstrapPrintingFormState(cleared))
-    mesPrintingToastSuccess("Impresión reiniciada localmente. Guardando en el servidor…")
-    await persistPrintingForm(cleared, { skipProductionSaveGuard: true })
-  }
-
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de impresión…</p>
 
   return (
     <div className="ax-mes space-y-4">
-      <WorkOrderStageBadge current="produccion" />
+      <MesOperativoEstadoCard
+        areaLabel="Impresión"
+        estado={operativoEstado}
+        producidoKg={producidoAcumuladoKg}
+      />
       {hasActiveTurno && !readOnlyOps && !canEditByControl ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2209,18 +2263,12 @@ export default function WorkOrderPrintingControlPanel({
         salidaMeta={salidaBobinasMeta}
         scrapTransparenteRaw={readNumberString(form.impScrapTransparenteKg)}
         scrapImpresoRaw={readNumberString(form.impScrapImpresoKg)}
-        scrapImpresoDestino={(() => {
-          const d = readString(form.impScrapImpresoDestino).toLowerCase()
-          if (d === "poliestireno" || d === "transparente") return "poliestireno"
-          return "bopp"
-        })()}
+        scrapImpresoDestinoRaw={readString(form.impScrapImpresoDestino) || "bopp"}
         onSetScrapImpresoDestino={(v) =>
-          setForm((prev) => ({
-            ...prev,
-            impScrapImpresoDestino: v,
-          }))
+          setForm((prev) => ({ ...prev, impScrapImpresoDestino: v }))
         }
         devolucionBuena={devolucionBuena}
+        devolucionRechazadaKg={devolucionRechazadaKg}
         devolucionRechazada={devolucionRechazadaBobinas}
         totalSalida={totalSalida}
         formatTimerHms={formatTimerHms}
@@ -2257,7 +2305,7 @@ export default function WorkOrderPrintingControlPanel({
         onEntradaChange={(idx, v) =>
           patchActiveTurn((t) => {
             const next = [...t.entradaBobinasKg]
-            next[idx] = v
+            next[idx] = sanitizeBobinaKgSlotInput(v)
             return { ...t, entradaBobinasKg: next }
           })
         }
@@ -2306,7 +2354,7 @@ export default function WorkOrderPrintingControlPanel({
         onSalidaChange={(idx, v) =>
           patchActiveTurn((t) => {
             const next = [...t.salidaBobinasKg]
-            next[idx] = v
+            next[idx] = sanitizeBobinaKgSlotInput(v)
             return { ...t, salidaBobinasKg: next }
           })
         }
@@ -2333,8 +2381,6 @@ export default function WorkOrderPrintingControlPanel({
         onPreviewDesperdicioReport={openDesperdicioPreview}
         canPreviewPlanillaReport={canPreviewPlanillaReport}
         onPreviewPlanillaReport={openPlanillaPreview}
-        canResetAll={!saving && !controlReadOnly}
-        onResetAll={requestResetAll}
         simplifiedTimerActions
         devolucionesPendienteAlmacen={devolucionesPendienteAlmacen}
       />
@@ -2388,18 +2434,6 @@ export default function WorkOrderPrintingControlPanel({
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
-          {!controlReadOnly && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-amber-300 text-amber-950 hover:bg-amber-50"
-              disabled={saving}
-              onClick={requestResetAll}
-            >
-              <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Empezar de cero
-            </Button>
-          ) : null}
         </div>
       </div>
 
@@ -2434,22 +2468,6 @@ export default function WorkOrderPrintingControlPanel({
         description="Se abrirá una pestaña nueva con el reporte de tiempos y pausas registrados hasta este momento."
         confirmLabel="Abrir vista previa"
         onConfirm={() => confirmOpenTimerReportPreview()}
-      />
-
-      <MesPrintingConfirmDialog
-        tone="amber"
-        open={resetConfirmOpen}
-        onOpenChange={setResetConfirmOpen}
-        icon={<RotateCcw className="h-5 w-5" aria-hidden />}
-        title="Reiniciar impresión (OT)"
-        description={
-          <>
-            Esto borrará turnos, cronómetro, entradas/salidas y desperdicio registrados en Impresión para esta
-            OT. ¿Desea continuar?
-          </>
-        }
-        confirmLabel="Confirmar reinicio"
-        onConfirm={() => void confirmResetAll()}
       />
 
       <MesPrintingConfirmDialog

@@ -28,7 +28,6 @@
         'bopp' => 'BOPP',
         'polietileno' => 'Polietileno (PE)',
         'politerlero' => 'Polietileno (PE)',
-        'poliestireno' => 'Poliestireno',
         'transparente' => 'Transparente',
         'all' => 'Todos los sustratos',
         default => 'Todos los sustratos',

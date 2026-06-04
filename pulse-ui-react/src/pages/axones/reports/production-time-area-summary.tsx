@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
+import { ReportTableScroll } from "./report-table-scroll"
 import {
   formatDurationHms,
   PRODUCTION_AREA_LABELS,
@@ -71,7 +72,7 @@ export function ProductionTimePlantKpi({ candidates }: { candidates: WorkOrderTi
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
       <KpiCard label="Efectivo (planta)" value={formatDurationHms(totals.prod)} />
       <KpiCard label="Muerto (planta)" value={formatDurationHms(totals.down)} />
       <KpiCard label="Montaje op." value={formatDurationHms(totals.mount)} sub="Operación mount, no área" />
@@ -88,7 +89,7 @@ export function ProductionTimeAreaKpiCards({
   areaRows: ReturnType<typeof rollupByArea>
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
       {areaRows.map((row) => {
         const hasData = row.segment_count > 0
         const totalSec = row.prod_sec + row.down_sec + row.mount_sec + row.demount_sec
@@ -122,9 +123,11 @@ export function ProductionTimeAreaKpiCards({
 export function ProductionTimeAreaSummaryTable({
   areaRows,
   loading,
+  includeLive = true,
 }: {
   areaRows: ReturnType<typeof rollupByArea>
   loading: boolean
+  includeLive?: boolean
 }) {
   const totals = useMemo(() => {
     const withData = areaRows.filter((r) => r.segment_count > 0)
@@ -134,15 +137,18 @@ export function ProductionTimeAreaSummaryTable({
   const hasAny = areaRows.some((r) => r.segment_count > 0)
 
   return (
-    <div className="bg-card space-y-3 rounded-2xl border p-4 shadow-sm">
+    <div className="bg-card space-y-3 rounded-2xl border p-3 shadow-sm sm:p-4">
       <div className="space-y-1">
         <p className="text-sm font-medium">Resumen por área</p>
         <p className="text-muted-foreground text-xs">
           Totales del rango agrupados por área ({PRODUCTION_AREA_ORDER.map((a) => PRODUCTION_AREA_LABELS[a]).join(", ")}
           ). Mismo criterio que el agregado por máquina.
+          {includeLive
+            ? " Incluye turnos en curso; se actualiza automáticamente cada 30 s."
+            : " Solo segmentos cerrados (desactive el modo histórico en filtros para tiempo real)."}
         </p>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-background shadow-sm">
+      <ReportTableScroll tableMinWidthClass="min-w-[36rem]">
         <Table>
           <TableHeader>
             <TableRow className={catalogTableHeaderRowClass}>
@@ -247,7 +253,7 @@ export function ProductionTimeAreaSummaryTable({
             </TableFooter>
           ) : null}
         </Table>
-      </div>
+      </ReportTableScroll>
     </div>
   )
 }
@@ -255,9 +261,11 @@ export function ProductionTimeAreaSummaryTable({
 export function ProductionTimeMachineTable({
   aggRows,
   loading,
+  includeLive = true,
 }: {
   aggRows: ProductionTimeAggRow[]
   loading: boolean
+  includeLive?: boolean
 }) {
   const totals = useMemo(
     () => (aggRows.length > 0 ? sumAggRowsTotals(aggRows) : null),
@@ -267,12 +275,14 @@ export function ProductionTimeMachineTable({
   const AREA_TABLE_COL_COUNT = 8
 
   return (
-    <div className="bg-card space-y-3 rounded-2xl border p-4 shadow-sm">
-      <p className="text-muted-foreground text-sm">
-        <span className="font-medium text-foreground">Agregado por área y máquina</span> — segmentos cerrados en el
-        rango, agrupados por código de máquina dentro de cada área (criterio del PDF planta).
+    <div className="bg-card space-y-3 rounded-2xl border p-3 shadow-sm sm:p-4">
+      <p className="text-muted-foreground text-sm leading-relaxed">
+        <span className="font-medium text-foreground">Agregado por área y máquina</span> —{" "}
+        {includeLive
+          ? "turnos cerrados y en curso en el rango, agrupados por código de máquina (PDF planta usa solo cerrados)."
+          : "segmentos cerrados en el rango, agrupados por código de máquina (criterio del PDF planta)."}
       </p>
-      <div className="overflow-x-auto rounded-xl border bg-background shadow-sm">
+      <ReportTableScroll tableMinWidthClass="min-w-[40rem]">
         <Table>
           <TableHeader>
             <TableRow className={catalogTableHeaderRowClass}>
@@ -377,9 +387,9 @@ export function ProductionTimeMachineTable({
                 </TableCell>
               </TableRow>
             </TableFooter>
-          ) : null}
+            ) : null}
         </Table>
-      </div>
+      </ReportTableScroll>
     </div>
   )
 }

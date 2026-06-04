@@ -1,0 +1,171 @@
+/* Panel unificado OT — área Tintas */
+
+.tintas-workspace {
+  overflow: hidden;
+  border-radius: 1.25rem;
+  border: 1px solid hsl(258 48% 82% / 0.55);
+  background: linear-gradient(
+    165deg,
+    hsl(0 0% 100%) 0%,
+    hsl(258 40% 98%) 42%,
+    hsl(280 35% 97%) 100%
+  );
+  box-shadow:
+    0 1px 2px hsl(258 40% 40% / 0.06),
+    0 12px 40px -8px hsl(258 50% 35% / 0.14);
+}
+
+.tintas-workspace__hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid hsl(258 42% 88% / 0.8);
+  background: linear-gradient(
+    90deg,
+    hsl(258 55% 96%) 0%,
+    hsl(280 45% 95%) 50%,
+    hsl(258 50% 97%) 100%
+  );
+}
+
+.tintas-workspace__hero-title {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: hsl(258 45% 28%);
+}
+
+.tintas-workspace__hero-icon {
+  display: flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, hsl(258 65% 55%), hsl(280 60% 48%));
+  color: white;
+  box-shadow: 0 4px 12px hsl(258 55% 40% / 0.35);
+}
+
+.tintas-workspace__main {
+  display: grid;
+  gap: 0;
+}
+
+@media (min-width: 1024px) {
+  .tintas-workspace__main {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.tintas-workspace__pane {
+  padding: 1.25rem 1.35rem 1.5rem;
+  min-height: 12rem;
+}
+
+.tintas-workspace__pane--consumo {
+  background: hsl(0 0% 100% / 0.65);
+}
+
+@media (min-width: 1024px) {
+  .tintas-workspace__pane--mezcla {
+    border-left: 1px solid hsl(258 38% 88% / 0.9);
+    background: linear-gradient(180deg, hsl(280 40% 98% / 0.9) 0%, hsl(258 35% 99%) 100%);
+  }
+}
+
+@media (max-width: 1023px) {
+  .tintas-workspace__pane--mezcla {
+    border-top: 1px solid hsl(258 38% 88% / 0.9);
+  }
+}
+
+.tintas-pane__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tintas-pane__head-icon {
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+}
+
+.tintas-pane__head-icon--consumo {
+  background: hsl(258 55% 94%);
+  color: hsl(258 55% 42%);
+}
+
+.tintas-pane__head-icon--mezcla {
+  background: hsl(280 50% 93%);
+  color: hsl(280 45% 38%);
+}
+
+.tintas-pane__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: hsl(258 35% 22%);
+}
+
+.tintas-pane__desc {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: hsl(258 15% 42%);
+}
+
+.tintas-workspace__summary {
+  padding: 1rem 1.35rem 1.25rem;
+  border-top: 1px solid hsl(258 38% 88% / 0.85);
+  background: hsl(258 30% 97% / 0.85);
+}
+
+.tintas-workspace__recetario {
+  padding: 1rem 1.35rem 1.35rem;
+  border-top: 1px dashed hsl(258 35% 85% / 0.9);
+  background: hsl(0 0% 100% / 0.5);
+}
+
+.tintas-workspace .tintas-ink-row {
+  border-color: hsl(258 35% 88% / 0.9);
+  background: hsl(0 0% 100% / 0.8);
+}
+
+.tintas-workspace .tintas-chem-row {
+  border-color: hsl(258 30% 90%);
+  background: linear-gradient(90deg, hsl(258 40% 98%) 0%, hsl(0 0% 100%) 100%);
+}
+
+.tintas-workspace .tintas-save-consumo {
+  background: linear-gradient(135deg, hsl(258 62% 48%), hsl(280 55% 44%));
+  color: white;
+  border: none;
+  box-shadow: 0 4px 14px hsl(258 50% 40% / 0.3);
+}
+
+.tintas-workspace .tintas-save-consumo:hover {
+  background: linear-gradient(135deg, hsl(258 62% 42%), hsl(280 55% 38%));
+}
+
+.tintas-workspace .tintas-create-mix {
+  background: linear-gradient(135deg, hsl(280 55% 46%), hsl(258 58% 44%));
+  color: white;
+  border: none;
+}
+
+.tintas-workspace .tintas-mix-component {
+  border-color: hsl(280 35% 88%);
+  background: hsl(0 0% 100% / 0.75);
+}

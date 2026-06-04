@@ -18,7 +18,16 @@ import { shouldPlayOperationalToast } from "@/lib/operational-alert-toast-policy
 import type { StreamAlertPayload } from "@/lib/operational-alerts-stream"
 import { getStoredUser } from "@/lib/auth-storage"
 import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
+import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
+import { isAxonesFullAccess, normalizeRole } from "@/lib/axones-roles"
+import { operationalAlertTypeLabel } from "@/lib/operational-alert-labels"
 import { cn } from "@/lib/utils"
+
+function canSeeWarehouseBellBadge(role?: string | null): boolean {
+  const r = normalizeRole(role)
+  if (isAxonesFullAccess(role)) return true
+  return ["inventory", "inventario", "inventory_chief", "jefe_inventario", "jefe_almacen"].includes(r)
+}
 
 type Notification = {
   id: number
@@ -32,6 +41,7 @@ type Notification = {
   color?: string
   workOrderId?: number
   targetArea?: string | null
+  materialRequestId?: number
   hiddenCount?: number
 }
 
@@ -63,15 +73,8 @@ function streamPayloadToRow(row: StreamAlertPayload): AlertApiRow {
   }
 }
 
-const ALERT_TITLE_ES: Record<string, string> = {
-  ot_material_shortage: "Escasez de material (OT)",
-  scrap_threshold_exceeded: "Desperdicio ≥ 5%",
-  material_low_stock: "Stock bajo",
-}
-
 function alertTitleInSpanish(alertType: string): string {
-  const key = alertType.toLowerCase().trim()
-  return ALERT_TITLE_ES[key] ?? key.replaceAll("_", " ")
+  return operationalAlertTypeLabel(alertType)
 }
 
 function routeForAreaTarget(targetArea?: string | null): string | null {
@@ -88,10 +91,18 @@ function routeForAlertType(
   alertType: string,
   workOrderId?: number,
   targetArea?: string | null,
+  materialRequestId?: number,
 ): string {
   const key = alertType.toLowerCase().trim()
   if (key === "inventory_return_pending") {
     return "/devoluciones"
+  }
+  if (key === "material_request_pending_warehouse") {
+    const mrId = Number(materialRequestId ?? 0)
+    if (Number.isFinite(mrId) && mrId > 0) {
+      return `/solicitudes-area/insumos/${mrId}`
+    }
+    return "/solicitudes-area"
   }
   if (key === "material_low_stock" || key === "low_stock") {
     return "/materiales"
@@ -122,11 +133,18 @@ export function NotificationDropdown() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<AlertApiRow[]>([])
+  const session = getStoredUser()
+  const showWarehouseBadge = canSeeWarehouseBellBadge(session?.role)
+  const { count: warehousePending, reload: reloadWarehousePending } =
+    useWarehouseInsumosPendingCount()
 
   async function load() {
     try {
+      if (showWarehouseBadge) {
+        await reloadWarehousePending()
+      }
       const res = await apiFetch<AlertPage>("alerts", {
-        query: { page: 1, per_page: 8 },
+        query: { page: 1, per_page: 8, unread: "1" },
       })
       setRows(res.data ?? [])
     } catch (e) {
@@ -155,7 +173,7 @@ export function NotificationDropdown() {
     }
     window.addEventListener("alerts:refresh", onRefresh)
     return () => window.removeEventListener("alerts:refresh", onRefresh)
-  }, [])
+  }, [load])
 
   const onStreamRow = useCallback((row: StreamAlertPayload) => {
     setRows((prev) => {
@@ -225,7 +243,14 @@ export function NotificationDropdown() {
         }
       }
       setOpen(false)
-      navigate(routeForAlertType(item.alertType, item.workOrderId, item.targetArea))
+      navigate(
+        routeForAlertType(
+          item.alertType,
+          item.workOrderId,
+          item.targetArea,
+          item.materialRequestId,
+        ),
+      )
     } catch {
       // errores manejados en acknowledgeOne
     }
@@ -269,6 +294,10 @@ export function NotificationDropdown() {
           color: severityColor(row.severity),
           workOrderId: Number(row.work_order?.id ?? 0) || undefined,
           targetArea: (row.metadata?.target_area as string | undefined) ?? null,
+          materialRequestId:
+            Number(row.metadata?.material_request_id ?? 0) > 0
+              ? Number(row.metadata?.material_request_id)
+              : undefined,
           hiddenCount: hidden,
         } satisfies Notification
       })
@@ -285,6 +314,9 @@ export function NotificationDropdown() {
     [notifications],
   )
   const unreadCount = unreadNotifications.length
+  const bellBadgeCount = showWarehouseBadge
+    ? Math.max(unreadCount, warehousePending)
+    : unreadCount
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -298,11 +330,11 @@ export function NotificationDropdown() {
             <Bell />
           </Button>
 
-          {unreadCount > 0 && (
+          {bellBadgeCount > 0 && (
             <span className="absolute -right-0.5 -top-0.5 h-5 min-w-5 rounded-full
               bg-destructive px-1 text-[10px] font-medium
               text-destructive-foreground flex items-center justify-center">
-              {unreadCount}
+              {bellBadgeCount > 99 ? "99+" : bellBadgeCount}
             </span>
           )}
         </div>
@@ -315,7 +347,7 @@ export function NotificationDropdown() {
         <DropdownMenuLabel className="flex items-center justify-between px-4 py-3">
           <span>Alertas</span>
           <span className="text-xs text-muted-foreground">
-            {unreadCount} sin leer
+            {bellBadgeCount} sin leer
           </span>
         </DropdownMenuLabel>
 

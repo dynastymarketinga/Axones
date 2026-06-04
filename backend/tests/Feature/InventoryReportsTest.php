@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\MaterialRequestStatus;
 use App\Enums\WorkOrderStatus;
+use App\Models\Bobina;
 use App\Models\Client;
 use App\Models\InventoryMovement;
 use App\Models\InventoryReturn;
@@ -504,26 +505,91 @@ class InventoryReportsTest extends TestCase
         $user = User::factory()->create();
         $token = $user->createToken('t')->plainTextToken;
 
+        $supplier = \App\Models\Supplier::query()->create(['name' => 'Proveedor RPT', 'rif' => 'J-PR1']);
+
         $mat = Material::query()->create([
             'sku' => 'BR-RPT',
             'name' => 'Rechazo test',
             'inventory_area' => 'bobinas_rechazadas',
             'unit' => 'kg',
             'min_stock' => 0,
+            'supplier_id' => $supplier->id,
         ]);
         $mat->forceFill(['quantity_on_hand' => 5])->save();
+
+        $client = Client::query()->create(['name' => 'C-RPT', 'rif' => 'J-CR1']);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-REJ-RPT',
+            'client_id' => $client->id,
+        ]);
+
+        $ret = InventoryReturn::query()->create([
+            'material_id' => $mat->id,
+            'work_order_id' => $wo->id,
+            'destination_area' => 'bobinas_rechazadas',
+            'quantity' => 12.5,
+            'status' => 'accepted',
+            'reason' => '1 bobina(s) rechazada(s) · Motivo: Defecto de impresión · Peso: 12.500 Kg · Proveedor: Proveedor RPT',
+            'accepted_at' => '2026-04-15 10:00:00',
+        ]);
+
+        Bobina::query()->create([
+            'material_id' => $mat->id,
+            'inventory_return_id' => $ret->id,
+            'code' => 'REJ-001-ABC',
+            'weight_kg' => 12.5,
+            'status' => 'rejected',
+        ]);
 
         $response = $this->getJson('/api/reports/rejected-bobinas?from=2026-04-01&to=2026-04-30', ['Authorization' => 'Bearer '.$token]);
 
         $response->assertOk();
         $response->assertJsonStructure([
-            'materials',
-            'bobinas',
-            'bobinas_total',
+            'from',
+            'to',
+            'supplier_id',
+            'rows',
         ]);
-        $this->assertCount(1, $response->json('materials'));
-        $this->assertEquals('BR-RPT', $response->json('materials.0.sku'));
-        $this->assertEquals(0, $response->json('bobinas_total'));
+        $response->assertJsonPath('rows.0.numero_bobina', 'REJ-001-ABC');
+        $response->assertJsonPath('rows.0.proveedor', 'Proveedor RPT');
+        $response->assertJsonPath('rows.0.peso_kg', '12.500');
+        $response->assertJsonPath('rows.0.motivo', 'Defecto de impresión');
+        $response->assertJsonPath('rows.0.work_order_code', 'OT-REJ-RPT');
+
+        $filtered = $this->getJson('/api/reports/rejected-bobinas?from=2026-04-01&to=2026-04-30&supplier_id='.$supplier->id, ['Authorization' => 'Bearer '.$token]);
+        $filtered->assertOk()->assertJsonCount(1, 'rows');
+
+        $otherSupplier = \App\Models\Supplier::query()->create(['name' => 'Otro', 'rif' => 'J-OT1']);
+        $empty = $this->getJson('/api/reports/rejected-bobinas?from=2026-04-01&to=2026-04-30&supplier_id='.$otherSupplier->id, ['Authorization' => 'Bearer '.$token]);
+        $empty->assertOk()->assertJsonCount(0, 'rows');
+
+        $csv = $this->get(
+            '/api/reports/rejected-bobinas?from=2026-04-01&to=2026-04-30&format=csv',
+            ['Authorization' => 'Bearer '.$token],
+        );
+        $csv->assertOk();
+        $body = (string) $csv->getContent();
+        $this->assertStringContainsString('numero_bobina', $body);
+        $this->assertStringContainsString('REJ-001-ABC', $body);
+        $this->assertStringContainsString('Defecto de impresión', $body);
+    }
+
+    public function test_rejected_bobinas_inventory_snapshot(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        Material::query()->create([
+            'sku' => 'BR-SNAP',
+            'name' => 'Rechazo snap',
+            'inventory_area' => 'bobinas_rechazadas',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+
+        $response = $this->getJson('/api/reports/rejected-bobinas-inventory', ['Authorization' => 'Bearer '.$token]);
+        $response->assertOk();
+        $response->assertJsonStructure(['materials', 'bobinas', 'bobinas_total']);
     }
 
     public function test_consumption_report_supports_csv_download(): void

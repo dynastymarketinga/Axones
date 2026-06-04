@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { ClipboardList, Package } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -24,7 +25,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
 import { cn } from "@/lib/utils"
+
+function TabCountBadge({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span className="ml-1 inline-flex min-w-5 justify-center rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums">
+      {count > 99 ? "99+" : count}
+    </span>
+  )
+}
 
 const AREA_OPTIONS = [
   { value: "almacen", label: "Almacén" },
@@ -42,6 +54,21 @@ const STATUS_OPTIONS = [
   { value: "cancelled", label: "Cancelada" },
 ] as const
 
+type InsumosTrayTab = "manual" | "ot_planilla"
+
+const TRAY_TABS: Array<{ value: InsumosTrayTab; label: string; hint: string }> = [
+  {
+    value: "manual",
+    label: "Solicitudes de insumos",
+    hint: "Formulario Nueva solicitud y pedidos manuales de las áreas.",
+  },
+  {
+    value: "ot_planilla",
+    label: "Desde orden de trabajo",
+    hint: "Sustratos virgen (impresión / laminación) al guardar la planilla OT.",
+  },
+]
+
 type AreaReqRow = {
   id: number
   area: string
@@ -52,11 +79,16 @@ type AreaReqRow = {
 }
 
 export default function AreaRequestsPage() {
+  const [trayTab, setTrayTab] = useState<InsumosTrayTab>("manual")
   const [area, setArea] = useState<string>("all")
   const [status, setStatus] = useState<string>("all")
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<AreaReqRow> | null>(null)
+
+  const activeTray = TRAY_TABS.find((t) => t.value === trayTab) ?? TRAY_TABS[0]
+  const { breakdown: pendingBreakdown, reload: reloadPendingCounts } =
+    useWarehouseInsumosPendingCount()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -66,6 +98,7 @@ export default function AreaRequestsPage() {
           page,
           per_page: 20,
           insumos_only: "1",
+          insumos_origin: trayTab,
           area: area !== "all" ? area : undefined,
           status: status !== "all" ? status : undefined,
         },
@@ -78,11 +111,15 @@ export default function AreaRequestsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, area, status])
+  }, [page, area, status, trayTab])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void reloadPendingCounts()
+  }, [reloadPendingCounts, load])
 
   function areaLabel(code: string) {
     return AREA_OPTIONS.find((o) => o.value === code)?.label ?? code
@@ -113,19 +150,19 @@ export default function AreaRequestsPage() {
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Solicitudes entre áreas</h1>
         <p className="text-muted-foreground max-w-3xl text-sm">
-          Bandeja del almacén con las{" "}
-          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/solicitudes-material">
-            solicitudes de insumos
-          </Link>{" "}
-          registradas por las áreas (formulario{" "}
+          Bandeja del almacén para autorizar salidas de inventario. Use la pestaña{" "}
+          <strong>Solicitudes de insumos</strong> para pedidos del formulario{" "}
           <Link
             className="text-primary font-medium underline-offset-4 hover:underline"
             to="/solicitudes-material/nueva"
           >
             Nueva solicitud
           </Link>
-          ). No incluye avisos automáticos de OT. Desde <strong>Ver insumos</strong> puede autorizar la salida y rebajar
-          inventario; el historial queda en{" "}
+          ; la pestaña <strong>Desde orden de trabajo</strong> agrupa los sustratos virgen guardados en la{" "}
+          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/ordenes-trabajo">
+            planilla OT
+          </Link>
+          . Desde <strong>Ver insumos</strong> puede autorizar y despachar; el historial queda en{" "}
           <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/movimientos-inventario">
             Movimientos
           </Link>
@@ -133,55 +170,78 @@ export default function AreaRequestsPage() {
         </p>
       </div>
 
-      <div className="rounded-xl border border-zinc-200/90 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="grid min-w-[10.5rem] gap-2">
-            <Label className="text-foreground/90 text-sm font-semibold">Área</Label>
-            <Select
-              value={area}
-              onValueChange={(v) => {
-                setArea(v)
-                setPage(1)
-              }}
-            >
-              <SelectTrigger className={filterTriggerClass}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
-                <SelectItem value="all">Todas</SelectItem>
-                {AREA_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid min-w-[10.5rem] gap-2">
-            <Label className="text-foreground/90 text-sm font-semibold">Estado</Label>
-            <Select
-              value={status}
-              onValueChange={(v) => {
-                setStatus(v)
-                setPage(1)
-              }}
-            >
-              <SelectTrigger className={filterTriggerClass}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
-                {STATUS_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
+      <Tabs
+        value={trayTab}
+        onValueChange={(v) => {
+          setTrayTab(v as InsumosTrayTab)
+          setPage(1)
+        }}
+      >
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/40 p-1">
+          <TabsTrigger value="manual" className="inline-flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
+            Solicitudes de insumos
+            <TabCountBadge count={pendingBreakdown.manual} />
+          </TabsTrigger>
+          <TabsTrigger value="ot_planilla" className="inline-flex items-center gap-2">
+            <Package className="h-4 w-4 shrink-0" aria-hidden />
+            Desde orden de trabajo
+            <TabCountBadge count={pendingBreakdown.otPlanilla} />
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-card to-violet-500/[0.07] shadow-md shadow-primary/5">
+        <p className="text-muted-foreground mt-3 text-sm">{activeTray.hint}</p>
+
+        <TabsContent value={trayTab} className="mt-4 space-y-4">
+          <div className="rounded-xl border border-zinc-200/90 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="grid min-w-[10.5rem] gap-2">
+                <Label className="text-foreground/90 text-sm font-semibold">Área</Label>
+                <Select
+                  value={area}
+                  onValueChange={(v) => {
+                    setArea(v)
+                    setPage(1)
+                  }}
+                >
+                  <SelectTrigger className={filterTriggerClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+                    <SelectItem value="all">Todas</SelectItem>
+                    {AREA_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid min-w-[10.5rem] gap-2">
+                <Label className="text-foreground/90 text-sm font-semibold">Estado</Label>
+                <Select
+                  value={status}
+                  onValueChange={(v) => {
+                    setStatus(v)
+                    setPage(1)
+                  }}
+                >
+                  <SelectTrigger className={filterTriggerClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+                    {STATUS_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-card to-violet-500/[0.07] shadow-md shadow-primary/5">
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/25 to-transparent" />
         <div className="overflow-x-auto">
           <Table>
@@ -217,7 +277,9 @@ export default function AreaRequestsPage() {
               ) : !rows?.data.length ? (
                 <TableRow className="border-border/50 hover:bg-transparent">
                   <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
-                    Sin solicitudes de insumos.
+                    {trayTab === "ot_planilla"
+                      ? "Sin solicitudes de sustratos desde orden de trabajo."
+                      : "Sin solicitudes de insumos manuales."}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -265,33 +327,35 @@ export default function AreaRequestsPage() {
             </TableBody>
           </Table>
         </div>
-      </div>
-
-      {rows && rows.last_page > 1 ? (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            Página {rows.current_page} de {rows.last_page} · {rows.total}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={rows.current_page >= rows.last_page || loading}
-              onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-            >
-              Siguiente
-            </Button>
           </div>
-        </div>
-      ) : null}
+
+          {rows && rows.last_page > 1 ? (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Página {rows.current_page} de {rows.last_page} · {rows.total}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.current_page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.current_page >= rows.last_page || loading}
+                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

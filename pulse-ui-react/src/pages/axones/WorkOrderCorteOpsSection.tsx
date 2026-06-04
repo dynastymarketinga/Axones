@@ -1,9 +1,11 @@
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  ArrowUpRight,
   AlarmClock,
   BarChart3,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronsUpDown,
   CirclePlay,
@@ -14,6 +16,7 @@ import {
   History,
   Hourglass,
   IdCard,
+  Printer,
   LogOut,
   Moon,
   NotebookPen,
@@ -26,6 +29,7 @@ import {
   Recycle,
   Ruler,
   Scissors,
+  Sparkles,
   Sun,
   Timer,
   Trash2,
@@ -43,6 +47,7 @@ import {
   CortePaletasSectionFooter,
   CortePaletasSectionToolbar,
 } from "@/components/axones/CortePaletasSectionFooter"
+import { MesBobinaKgSlotCell } from "@/components/axones/MesBobinaKgSlotCell"
 import { CortePaletaRollosPaginatedGrid } from "@/components/axones/CortePaletaRollosPaginatedGrid"
 import {
   fieldLegend,
@@ -85,6 +90,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -92,6 +106,9 @@ import {
   explainCannotAddPaleta,
 } from "@/lib/corte-paleta-flow"
 import { normalizeScrapSubstrate, SCRAP_POLIETILENO } from "@/lib/scrap-substrate"
+import { showAxonesSuccessSwal } from "@/lib/axones-success-swal"
+import { isBobinaKgSlotFilled } from "@/lib/bobina-kg-slot"
+import { cumulativeArranqueSeconds, cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
 import { formatHoraArranqueFromMs, horaArranqueMsFromTimer } from "@/lib/mes-timer-band-shared"
 import { cn } from "@/lib/utils"
 
@@ -110,6 +127,7 @@ import {
 } from "@/pages/axones/use-corte-paleta-page-size"
 import {
   COR_ACTUAL_KEY,
+  COR_ENTRADA_META_KEY,
   COR_ENTRADA_SLOTS,
   COR_PAUSE_REASONS,
   COR_ROLLOS_PER_PALETA,
@@ -143,7 +161,17 @@ import {
   type CorPaleta,
   type CortePauseEntry,
   type CorteTurnoEntry,
+  emptyBobinaLabelMeta,
+  type BobinaLabelMeta,
 } from "./corte-turnos"
+import { getMetaSeries, normalizeNumericString, validateBobinaLabelSave } from "./laminacion-turnos"
+import {
+  bobinaLabelDraftFromMeta,
+  bobinaLabelTooltipText,
+  hasBobinaLabelMeta,
+  MesBobinaEntradaLabelDialog,
+  normalizeEntradaLabelForSave,
+} from "./mes-bobina-entrada-label-dialog"
 import {
   activePersonnelFromStrings,
   stringsFromActivePersonnel,
@@ -220,6 +248,8 @@ type Props = {
   deadSec?: number
   effectiveSec?: number
   demountSec?: number
+  /** Tiempo de arranque acumulado (OT o turno según `timerShowsOtAccumulated`). */
+  arranqueSec?: number
   timerShowsOtAccumulated?: boolean
   kgHora?: string
   horaArranque?: string
@@ -297,6 +327,154 @@ function CerrarPaletaButton({
   )
 }
 
+function corteDesperdicioDestinoValue(raw: string): "auto" | "bopp" | typeof SCRAP_POLIETILENO {
+  const s = normalizeScrapSubstrate(raw)
+  return s === "bopp" || s === SCRAP_POLIETILENO ? s : "auto"
+}
+
+function corteDesperdicioSustratoValue(raw: string): "auto" | "bopp" | typeof SCRAP_POLIETILENO | "transparente" {
+  const s = normalizeScrapSubstrate(raw)
+  return s === "bopp" || s === SCRAP_POLIETILENO || s === "transparente" ? s : "auto"
+}
+
+function CorteDesperdicioDestinoToggle({
+  idPrefix,
+  label,
+  hint,
+  value,
+  onChange,
+  disabled,
+}: {
+  idPrefix: string
+  label: string
+  hint?: string
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+}) {
+  const normalized = corteDesperdicioDestinoValue(value)
+  return (
+    <div className="mes-scrap-destino space-y-1.5">
+      <Label id={`${idPrefix}-label`} className="mes-scrap-destino__label text-muted-foreground">
+        {label}
+      </Label>
+      {hint ? <p className="text-muted-foreground text-[10px] leading-snug">{hint}</p> : null}
+      <ToggleGroup
+        type="single"
+        aria-labelledby={`${idPrefix}-label`}
+        className="mes-scrap-toggle-group flex flex-wrap justify-start gap-1"
+        value={normalized}
+        onValueChange={(v) => {
+          if (!v || disabled) return
+          onChange(v === "auto" ? "" : v)
+        }}
+        disabled={disabled}
+      >
+        <ToggleGroupItem value="auto" className="mes-scrap-toggle-item h-7 px-2 text-xs">
+          Auto
+        </ToggleGroupItem>
+        <ToggleGroupItem value="bopp" className="mes-scrap-toggle-item mes-scrap-toggle-item--bopp h-7 px-2 text-xs">
+          BOPP
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value={SCRAP_POLIETILENO}
+          className="mes-scrap-toggle-item mes-scrap-toggle-item--pe h-7 px-2 text-xs"
+        >
+          Polietileno
+        </ToggleGroupItem>
+      </ToggleGroup>
+    </div>
+  )
+}
+
+function CorteDesperdicioSustratoToggle({
+  idPrefix,
+  value,
+  onChange,
+  disabled,
+}: {
+  idPrefix: string
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+}) {
+  const normalized = corteDesperdicioSustratoValue(value)
+  return (
+    <ToggleGroup
+      type="single"
+      aria-labelledby={`${idPrefix}-label`}
+      className="mes-scrap-toggle-group flex flex-wrap justify-start gap-1"
+      value={normalized}
+      onValueChange={(v) => {
+        if (!v || disabled) return
+        onChange(v === "auto" ? "" : v)
+      }}
+      disabled={disabled}
+    >
+      <ToggleGroupItem value="auto" className="mes-scrap-toggle-item h-7 px-2 text-xs">
+        Auto
+      </ToggleGroupItem>
+      <ToggleGroupItem value="bopp" className="mes-scrap-toggle-item mes-scrap-toggle-item--bopp h-7 px-2 text-xs">
+        BOPP
+      </ToggleGroupItem>
+      <ToggleGroupItem
+        value={SCRAP_POLIETILENO}
+        className="mes-scrap-toggle-item mes-scrap-toggle-item--pe h-7 px-2 text-xs"
+      >
+        Polietileno
+      </ToggleGroupItem>
+      <ToggleGroupItem value="transparente" className="mes-scrap-toggle-item h-7 px-2 text-xs">
+        Transparente
+      </ToggleGroupItem>
+    </ToggleGroup>
+  )
+}
+
+const DRAFT_PEOPLE_PAGE_SIZE = 5
+
+const MES_CORTE_CONFIRM_INDIGO = {
+  panel:
+    "border-indigo-200/80 bg-gradient-to-b from-indigo-50/50 to-background sm:max-w-md sm:rounded-lg dark:from-indigo-950/35 dark:to-background",
+  iconBox:
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-100/80 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/45 dark:text-indigo-300",
+}
+
+type MesCorteConfirmDialogProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  icon: ReactNode
+  title: string
+  description: ReactNode
+  confirmLabel: string
+  onConfirm: () => void
+}
+
+function MesCorteConfirmDialog(props: MesCorteConfirmDialogProps) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className={MES_CORTE_CONFIRM_INDIGO.panel}>
+        <DialogHeader className="space-y-4 text-left">
+          <div className="flex items-start gap-3">
+            <div className={MES_CORTE_CONFIRM_INDIGO.iconBox}>{props.icon}</div>
+            <div className="min-w-0 space-y-2">
+              <DialogTitle className="text-xl font-semibold tracking-tight">{props.title}</DialogTitle>
+              <DialogDescription className="text-sm leading-relaxed">{props.description}</DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button type="button" onClick={() => props.onConfirm()}>
+            {props.confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function roleLabelEs(role: DraftPersonRole): string {
   if (role === "operador") return "Operador"
   if (role === "supervisor") return "Supervisor"
@@ -330,6 +508,7 @@ export default function WorkOrderCorteOpsSection({
   deadSec: deadSecProp,
   effectiveSec: effectiveSecProp,
   demountSec: demountSecProp,
+  arranqueSec: arranqueSecProp,
   timerShowsOtAccumulated,
   kgHora: kgHoraProp,
   horaArranque: horaArranqueProp,
@@ -385,11 +564,28 @@ export default function WorkOrderCorteOpsSection({
     name: "",
     role: "operador",
   })
+  const [draftPeopleQuery, setDraftPeopleQuery] = useState("")
+  const [draftPeoplePage, setDraftPeoplePage] = useState(1)
+  const [startTurnConfirmOpen, setStartTurnConfirmOpen] = useState(false)
+  const [labelEditorOpen, setLabelEditorOpen] = useState(false)
+  const [labelEditorIndex, setLabelEditorIndex] = useState(0)
+  const [labelEditorDraft, setLabelEditorDraft] = useState<BobinaLabelMeta>(emptyBobinaLabelMeta())
+  const [labelEditorError, setLabelEditorError] = useState("")
 
   const closedTurnosLocal = useMemo(() => parseCorteTurnos(form[COR_TURNOS_KEY], form), [form])
   const closedTurnos = closedTurnosProp ?? closedTurnosLocal
   const activeTurno = useMemo(() => materializeOpenCorteTurnoActual(form), [form])
   const hasActiveTurno = hasActiveTurnoProp ?? activeTurno !== null
+
+  useEffect(() => {
+    if (!hasActiveTurno) {
+      setDraftPeople([])
+      setDraftStaging({ name: "", role: "operador" })
+      setDraftPeopleQuery("")
+      setDraftPeoplePage(1)
+    }
+  }, [hasActiveTurno])
+
   const turnoUi =
     coerceTurnoUi(activeTurno?.turno ?? "") ||
     coerceTurnoUi(readString(form.corTurno)) ||
@@ -398,9 +594,40 @@ export default function WorkOrderCorteOpsSection({
     coerceGrupoUi(activeTurno?.grupo ?? "") ||
     coerceGrupoUi(readString(form.corGrupo)) ||
     coerceGrupoUi(corGrupoProp)
-  const showPersonalTurnoSetup = !hasActiveTurno
+  const showPersonalTurnoSetup = !hasActiveTurno && !areaFinalizada
+
+  const draftPeopleFiltered = useMemo(() => {
+    const q = draftPeopleQuery.trim().toLowerCase()
+    if (!q) return draftPeople
+    return draftPeople.filter((p) => {
+      const turno = (p.turno ?? draftTurno).toLowerCase()
+      const grupo = (p.grupo ?? draftGrupo).toLowerCase()
+      const role = roleLabelEs(p.role).toLowerCase()
+      const name = p.name.toLowerCase()
+      return (
+        name.includes(q) ||
+        role.includes(q) ||
+        turno.includes(q) ||
+        grupo.includes(q) ||
+        `grupo ${grupo}`.includes(q)
+      )
+    })
+  }, [draftGrupo, draftPeople, draftPeopleQuery, draftTurno])
+  const draftPeopleTotalPages = Math.max(1, Math.ceil(draftPeopleFiltered.length / DRAFT_PEOPLE_PAGE_SIZE))
+  const draftPeopleSafePage = Math.min(draftPeoplePage, draftPeopleTotalPages)
+  const draftPeopleStart = (draftPeopleSafePage - 1) * DRAFT_PEOPLE_PAGE_SIZE
+  const draftPeopleVisible = draftPeopleFiltered.slice(
+    draftPeopleStart,
+    draftPeopleStart + DRAFT_PEOPLE_PAGE_SIZE,
+  )
 
   const entradaBobinas = useMemo(() => getNumericSeries(form, "corEntradaBobinasKg", COR_ENTRADA_SLOTS), [form])
+  const entradaBobinasMeta = useMemo(
+    () => getMetaSeries(form, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS),
+    [form],
+  )
+  const doneEntradaImpresa =
+    entradaBobinas.some((v) => readNumber(v) > 0) || entradaBobinasMeta.some((m) => hasBobinaLabelMeta(m))
   const entradaBobinasCount = useMemo(() => entradaBobinas.filter((v) => Number(v) > 0).length, [entradaBobinas])
   const entradaBobinasTotal = useMemo(() => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaBobinas])
   const corPaletas = useMemo(() => getCorPaletas(form), [form])
@@ -427,6 +654,10 @@ export default function WorkOrderCorteOpsSection({
     () => salidaPaletasRollos.reduce((acc, n) => acc + n, 0),
     [salidaPaletasRollos],
   )
+  const paletasResumenRollosTotal = useMemo(
+    () => corPaletas.reduce((acc, p) => acc + countRollosWithKg(p), 0),
+    [corPaletas],
+  )
   const salidaTotalKg = useMemo(
     () => salidaPaletasTotales.reduce((acc, n) => acc + n, 0),
     [salidaPaletasTotales],
@@ -448,6 +679,12 @@ export default function WorkOrderCorteOpsSection({
   const kgIngresados = entradaBobinasTotal
   const kgSalida = salidaTotalKg
   const kgMerma = readNumber(form.kgMermaCorte)
+  const doneResumenCorte =
+    entradaBobinasCount > 0 ||
+    bobinasSalidaCount > 0 ||
+    salidaTotalKg > 0.01 ||
+    kgMerma > 0.01 ||
+    corPaletas.some((p) => isCorPaletaCerrada(p))
   const metraje = readNumber(form.metrajeCorte)
   const scrapRefile = readNumber(form.corScrapRefileKg)
   const scrapImpreso = readNumber(form.corScrapImpresoKg)
@@ -499,8 +736,19 @@ export default function WorkOrderCorteOpsSection({
   const effectiveSec = effectiveSecProp ?? localEffectiveSec
   const deadSec = deadSecProp ?? localDeadSec
   const totalSec = totalSecProp ?? localTotalSec
-  const demountSec = demountSecProp ?? 0
+  const localDemountSec = useMemo(
+    () => cumulativeDemountSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, nowMs],
+  )
+  const localArranqueSec = useMemo(
+    () => cumulativeArranqueSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, nowMs],
+  )
+  const demountSec = demountSecProp ?? localDemountSec
+  const arranqueSec = arranqueSecProp ?? localArranqueSec
   const formatTimerHmsFn = formatTimerHmsProp ?? formatTimerHms
+  const doneTemporizador =
+    areaFinalizada || timerState === "completed" || timerState === "stopped"
   const kgHora = kgHoraProp ?? (effectiveSec > 0 ? (kgSalida / (effectiveSec / 3600)).toFixed(2) : "0.00")
   const displayHoraArranque =
     horaArranqueProp ?? formatHoraArranqueFromMs(horaArranqueMsFromTimer(activeTimer))
@@ -564,6 +812,59 @@ export default function WorkOrderCorteOpsSection({
       }
       return synced
     })
+  }
+
+  function openEntradaLabelEditor(idx: number) {
+    setLabelEditorIndex(idx)
+    setLabelEditorDraft(bobinaLabelDraftFromMeta(entradaBobinasMeta[idx]))
+    setLabelEditorError("")
+    setLabelEditorOpen(true)
+  }
+
+  function clearLabelEditor() {
+    setLabelEditorDraft({ ...emptyBobinaLabelMeta(), fecha: bobinaLabelDraftFromMeta(undefined).fecha })
+    setLabelEditorError("")
+  }
+
+  function saveEntradaLabelEditor() {
+    const normalized = normalizeEntradaLabelForSave(labelEditorDraft)
+    const err = validateBobinaLabelSave(normalized)
+    if (err) {
+      setLabelEditorError(err)
+      return
+    }
+    if (opsReadOnly) return
+    const nextMeta = [...entradaBobinasMeta]
+    nextMeta[labelEditorIndex] = normalized
+    const nextKg = [...entradaBobinas]
+    const pesoLabel = readNumber(normalized.peso)
+    if (pesoLabel > 0.005 && readNumber(nextKg[labelEditorIndex]) < 0.005) {
+      nextKg[labelEditorIndex] = normalizeNumericString(pesoLabel)
+    }
+    setForm((prev) => {
+      const base = { ...prev, [COR_ENTRADA_META_KEY]: nextMeta, corEntradaBobinasKg: nextKg }
+      const synced = syncCorteFormMetrics(base)
+      const entradaKg = sumEntradaKgFromForm(synced).toFixed(2)
+      if (hasActiveTurno) {
+        const cur = parseCorteTurnoActual(synced[COR_ACTUAL_KEY], synced)
+        if (cur) {
+          const nextTurn: CorteTurnoEntry = {
+            ...cur,
+            entradaBobinasKg: nextKg,
+            entradaBobinasMeta: nextMeta,
+            kgIngresados: entradaKg,
+          }
+          return {
+            ...synced,
+            [COR_ACTUAL_KEY]: nextTurn,
+            ...corteTurnoToMirror(nextTurn),
+          }
+        }
+      }
+      return synced
+    })
+    setLabelEditorOpen(false)
+    setLabelEditorError("")
   }
 
   const patchActiveTurnLocal = useCallback((updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
@@ -658,28 +959,10 @@ export default function WorkOrderCorteOpsSection({
       cor_paletas: next,
       corSalidaPaletasKg: next.map((p) => p.rollosKg),
     }
-    const toSave = syncCorteFormMetrics({ ...form, ...patch })
     writePaletas(next)
-    void (async () => {
-      if (!onRequestSave) {
-        toast.success(`${target.label} cerrada. Saldo visible en Despacho · producto terminado.`)
-        return
-      }
-      const ok = await onRequestSave(toSave, {
-        suppressSuccessToast: true,
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-      })
-      if (ok) {
-        toast.success(
-          `${target.label} cerrada (${kg.toFixed(2)} kg). Consulte Despacho · producto terminado; si no aparece, revise el aviso al guardar.`,
-        )
-      } else {
-        toast.error(
-          `${target.label} quedó cerrada en pantalla pero no se guardó en el servidor. Pulse Guardar de nuevo.`,
-        )
-      }
-    })()
+    toast.success(
+      `${target.label} cerrada en pantalla (${kg.toFixed(2)} kg). Pulse Guardar → Guardar para enviar a Despacho.`,
+    )
   }
 
   function removePaleta(index: number) {
@@ -727,15 +1010,41 @@ export default function WorkOrderCorteOpsSection({
       toast.warning("Solo puede haber un supervisor en el turno.")
       return
     }
-    setDraftPeople((prev) => [...prev, { id: `draft-${Date.now()}`, role, name: trimmed }])
+    setDraftPeople((prev) => [
+      ...prev,
+      { id: `draft-${Date.now()}`, role, name: trimmed, grupo: draftGrupo, turno: draftTurno },
+    ])
     setDraftStaging({ name: "", role: "operador" })
   }
 
-  function onIniciarTurno() {
+  function onDraftPersonRemove(id: string) {
+    setDraftPeople((prev) => prev.filter((p) => p.id !== id))
+  }
+
+  function requestIniciarTurno() {
     if (opsReadOnly) return
     if (hasActiveTurno) return
     if (draftOperadorMissing) {
-      toast.error("Guarde al menos un operador antes de iniciar el turno.")
+      toast.error(
+        draftPeople.length > 0
+          ? "Falta un Operador en la cuadrilla. Guarde al menos una persona con rol Operador (Ayudante no basta)."
+          : "Guarde al menos un operador en la cuadrilla antes de iniciar el turno.",
+      )
+      return
+    }
+    setStartTurnConfirmOpen(true)
+  }
+
+  function confirmIniciarTurno() {
+    if (opsReadOnly) return
+    if (hasActiveTurno) return
+    if (draftOperadorMissing) {
+      setStartTurnConfirmOpen(false)
+      toast.error(
+        draftPeople.length > 0
+          ? "Falta un Operador en la cuadrilla. Guarde al menos una persona con rol Operador (Ayudante no basta)."
+          : "Guarde al menos un operador en la cuadrilla antes de iniciar el turno.",
+      )
       return
     }
     const { operador, ayudante, supervisor } = stringsFromActivePersonnel(draftPeople)
@@ -746,27 +1055,43 @@ export default function WorkOrderCorteOpsSection({
       ayudante,
       supervisor,
     })
-    setForm((prev) => {
-      const nextForm: Record<string, unknown> = {
-        ...prev,
-        [COR_ACTUAL_KEY]: t,
-        ...corteTurnoToMirror(t),
-        [COR_TURNOS_KEY]: parseCorteTurnos(prev[COR_TURNOS_KEY], prev),
-      }
-      queueMicrotask(() => {
-        void onRequestSave?.(nextForm, {
-          suppressSuccessToast: true,
-          skipProductionSaveGuard: true,
-          notifyProductionSave: false,
-        })
-      })
-      return nextForm
-    })
+    const entradaKgArr = [...entradaBobinas]
+    const entradaMetaArr = [...entradaBobinasMeta]
+    const turnoWithEntrada: CorteTurnoEntry = {
+      ...t,
+      entradaBobinasKg: entradaKgArr,
+      entradaBobinasMeta: entradaMetaArr,
+      kgIngresados: sumEntradaKgFromForm({
+        corEntradaBobinasKg: entradaKgArr,
+      }).toFixed(2),
+    }
+    const nextForm: Record<string, unknown> = {
+      ...form,
+      [COR_ACTUAL_KEY]: turnoWithEntrada,
+      ...corteTurnoToMirror(turnoWithEntrada),
+      [COR_TURNOS_KEY]: parseCorteTurnos(form[COR_TURNOS_KEY], form),
+    }
+    setForm(nextForm)
     setDraftPeople([])
     setDraftStaging({ name: "", role: "operador" })
-    toast.success(
-      "Turno de planta abierto y guardado. Use el cronómetro (play) para registrar tiempos.",
-    )
+    setStartTurnConfirmOpen(false)
+    void (async () => {
+      if (onRequestSave) {
+        const ok = await onRequestSave(nextForm, {
+          skipProductionSaveGuard: true,
+          notifyProductionSave: false,
+          suppressSuccessToast: true,
+        })
+        if (!ok) {
+          toast.error("No se pudo guardar el turno en el servidor. Revise su conexión e intente Guardar.")
+          return
+        }
+      }
+      await showAxonesSuccessSwal(
+        "Turno de planta abierto",
+        "Cuadrilla guardada. Use el cronómetro (play) y, al terminar otro turno, pulse Guardar → Finalizar turno o Cerrar turno en el cronómetro.",
+      )
+    })()
   }
 
   function applyCerrarTurno(cur: CorteTurnoEntry) {
@@ -790,6 +1115,7 @@ export default function WorkOrderCorteOpsSection({
       observaciones: readString(form.corObservaciones),
       paletas: cur.paletas,
       entradaBobinasKg: cur.entradaBobinasKg,
+      entradaBobinasMeta: cur.entradaBobinasMeta,
     }
     setForm((prev) => {
       const next = {
@@ -800,12 +1126,11 @@ export default function WorkOrderCorteOpsSection({
         ...clearCorteMirrorKeys(),
         ...syncCorteSalidaFields({ ...prev, cor_paletas: clearCorteMirrorKeys().cor_paletas }),
       }
-      queueMicrotask(() =>
-        onRequestSave?.(next, { clearTurnoActual: true, suppressSuccessToast: true }),
-      )
       return next
     })
-    toast.success("Turno cerrado. Puede iniciar otro turno cuando corresponda.")
+    toast.success(
+      "Turno cerrado en pantalla. Pulse Guardar → Finalizar turno para enviar al servidor y limpiar el formulario.",
+    )
   }
 
   function cerrarTurnoActual() {
@@ -911,7 +1236,6 @@ export default function WorkOrderCorteOpsSection({
         toast.error("No se pudo pausar el cronómetro. Guarde el turno e intente de nuevo.")
         return prev
       }
-      queueMicrotask(() => onRequestSave?.(next, { suppressSuccessToast: true }))
       return next
     })
     setPauseMotivoDialogOpen(true)
@@ -955,13 +1279,14 @@ export default function WorkOrderCorteOpsSection({
         [COR_ACTUAL_KEY]: nextTurn,
         ...corteTurnoToMirror(nextTurn),
       }
-      queueMicrotask(() => onRequestSave?.(nextForm, { suppressSuccessToast: true }))
       return nextForm
     })
     setPauseReason("")
     setPauseObs("")
     setPauseMotivoDialogOpen(false)
-    toast.message("Parada registrada. Use play para reanudar el tiempo efectivo.")
+    toast.message(
+      "Parada registrada. Use play para reanudar. Pulse Guardar → Finalizar turno al cerrar la sesión.",
+    )
   }
 
   const confirmPauseAndResume = confirmPauseAndResumeProp ?? confirmPauseAndResumeLocal
@@ -981,7 +1306,12 @@ export default function WorkOrderCorteOpsSection({
       title={mesSectionTitle(BarChart3, "Acumulado de la orden (todos los turnos)")}
       headerRight={<MesSectionHeaderExtras isDone={doneAcumulado} />}
     >
-        <div className="mes-stat-grid mes-stat-grid--4">
+        <div
+          className={cn(
+            "mes-stat-grid mes-stat-grid--4",
+            showPersonalTurnoSetup && "is-compact-tiles",
+          )}
+        >
           <MesStatTile
             label="Pedido total"
             value={`${pedidoTotalKg.toFixed(2)} Kg`}
@@ -1040,76 +1370,359 @@ export default function WorkOrderCorteOpsSection({
       </MesSectionShell>
   )
 
+  const savedPeopleSection = (
+    <MesSectionShell
+      title={mesSectionTitle(Users, `Personal guardado (${draftPeople.length})`)}
+      subtle
+      className="montaje-personal-turno-section montaje-personal-turno-section--accessible"
+    >
+      <Collapsible defaultOpen className="montaje-saved-list rounded-md border border-dashed bg-muted/20">
+        <CollapsibleTrigger className="montaje-saved-list-trigger flex w-full items-center justify-between gap-2 px-4 py-3 text-left font-semibold hover:bg-muted/40">
+          <span className="inline-flex items-center gap-2">
+            <Users className="h-5 w-5 shrink-0 opacity-70" aria-hidden />
+            Lista de cuadrilla
+          </span>
+          <ChevronDown className="h-5 w-5 shrink-0 opacity-70" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          {draftPeople.length === 0 ? (
+            <div className="montaje-saved-list-empty border-t px-4 py-3 text-muted-foreground">
+              Aún no hay personas en la lista. Guarde al menos un <strong>operador</strong> antes de pulsar{" "}
+              <strong>Iniciar turno</strong>.
+            </div>
+          ) : (
+            <>
+              <div className="border-t px-4 py-3">
+                <Input
+                  value={draftPeopleQuery}
+                  onChange={(e) => {
+                    setDraftPeoplePage(1)
+                    setDraftPeopleQuery(e.target.value)
+                  }}
+                  placeholder="Buscar por nombre, rol, turno o grupo"
+                  className="h-10 text-sm"
+                />
+              </div>
+              {draftPeopleFiltered.length === 0 ? (
+                <div className="montaje-saved-list-empty border-t px-4 py-3 text-muted-foreground">
+                  No hay coincidencias para <strong>{draftPeopleQuery.trim()}</strong>.
+                </div>
+              ) : null}
+              <ul className="montaje-saved-list-items space-y-2 border-t px-4 py-3">
+                {draftPeopleVisible.map((p) => (
+                  <li
+                    key={p.id}
+                    className="montaje-saved-person-row flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2.5"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <Badge
+                        className={cn(
+                          "min-w-[4.25rem] justify-center border px-2 py-0.5 text-xs uppercase tracking-wide",
+                          (p.turno ?? draftTurno) === "diurno" &&
+                            "border-slate-800/70 bg-slate-700 text-white dark:border-slate-600 dark:bg-slate-600",
+                          (p.turno ?? draftTurno) === "nocturno" &&
+                            "border-indigo-800/70 bg-indigo-700 text-white dark:border-indigo-600 dark:bg-indigo-600",
+                        )}
+                      >
+                        {(p.turno ?? draftTurno) === "diurno" ? "Diurno" : "Nocturno"}
+                      </Badge>
+                      <Badge
+                        className={cn(
+                          "montaje-grupo-badge min-w-[4.5rem] justify-center border px-2 py-0.5 text-xs uppercase tracking-wide",
+                          (p.grupo ?? draftGrupo) === "A" &&
+                            "border-blue-800/70 bg-blue-700 text-white dark:border-blue-600 dark:bg-blue-600",
+                          (p.grupo ?? draftGrupo) === "B" &&
+                            "border-orange-800/70 bg-orange-700 text-white dark:border-orange-600 dark:bg-orange-600",
+                          (p.grupo ?? draftGrupo) === "C" &&
+                            "border-teal-800/70 bg-teal-700 text-white dark:border-teal-600 dark:bg-teal-600",
+                        )}
+                      >
+                        Grupo {p.grupo ?? draftGrupo}
+                      </Badge>
+                      <Badge
+                        className={cn(
+                          "min-w-[5rem] justify-center border px-2 py-0.5 text-xs uppercase tracking-wide",
+                          p.role === "operador" &&
+                            "border-emerald-800/70 bg-emerald-700 text-white dark:border-emerald-600 dark:bg-emerald-600",
+                          p.role === "ayudante" &&
+                            "border-amber-800/70 bg-amber-700 text-white dark:border-amber-600 dark:bg-amber-600",
+                          p.role === "supervisor" &&
+                            "border-violet-800/70 bg-violet-700 text-white dark:border-violet-600 dark:bg-violet-600",
+                        )}
+                      >
+                        {roleLabelEs(p.role)}
+                      </Badge>
+                      <span className="montaje-saved-person-label truncate">
+                        <span className="font-semibold text-foreground">{p.name}</span>
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="montaje-remove-person-btn h-10 w-10 shrink-0"
+                      onClick={() => onDraftPersonRemove(p.id)}
+                      disabled={opsReadOnly}
+                      title="Quitar de la lista"
+                      aria-label={`Quitar a ${p.name} de la lista`}
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              {draftPeopleTotalPages > 1 ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
+                  <span className="text-muted-foreground">
+                    Mostrando {draftPeopleStart + 1}-
+                    {Math.min(draftPeopleStart + DRAFT_PEOPLE_PAGE_SIZE, draftPeopleFiltered.length)} de{" "}
+                    {draftPeopleFiltered.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDraftPeoplePage((p) => Math.max(1, p - 1))}
+                      disabled={draftPeopleSafePage <= 1}
+                    >
+                      Anterior
+                    </Button>
+                    <span className="text-muted-foreground text-xs">
+                      Página {draftPeopleSafePage} / {draftPeopleTotalPages}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDraftPeoplePage((p) => Math.min(draftPeopleTotalPages, p + 1))}
+                      disabled={draftPeopleSafePage >= draftPeopleTotalPages}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    </MesSectionShell>
+  )
+
   return (
     <>
       {showPersonalTurnoSetup ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start xl:gap-5">
-          <div className="min-w-0">{acumuladoOrdenSection}</div>
+          <div className="min-w-0 space-y-4">
+            {acumuladoOrdenSection}
+            {savedPeopleSection}
+          </div>
           <div className="min-w-0">
-            <MesSectionShell title={mesSectionTitle(Users, "Personal y turno de planta")} subtle bodyClassName="mes-section__body--flush">
-              <p className="text-muted-foreground mb-3 text-xs leading-snug">
-                Elija turno y grupo, guarde la cuadrilla (mínimo un operador) y pulse{" "}
-                <span className="font-semibold text-foreground">Iniciar turno</span>. El cronómetro se inicia después con play.
-              </p>
-              <div className="rounded-lg border bg-background/60 p-3">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
+            <MesSectionShell
+              title={mesSectionTitle(Users, "Personal y turno de planta")}
+              subtle
+              className="montaje-personal-turno-section montaje-personal-turno-section--accessible"
+              bodyClassName="mes-section__body--flush"
+            >
+              <div className="mes-setup-steps mb-4 rounded-md border border-border/70 bg-background p-4">
+                <div className="text-foreground text-base font-semibold leading-snug">
+                  Siga estos pasos para iniciar el turno:
+                </div>
+                <ol className="montaje-setup-steps-list mt-2 space-y-2 pl-5 leading-relaxed text-muted-foreground">
+                  <li>
+                    <span className="font-semibold text-foreground">1)</span> Elija{" "}
+                    <span className="font-semibold text-foreground">Turno</span> y{" "}
+                    <span className="font-semibold text-foreground">Grupo</span>.
+                  </li>
+                  <li>
+                    <span className="font-semibold text-foreground">2)</span> Escriba nombre, seleccione rol y pulse{" "}
+                    <span className="font-semibold text-foreground">Guardar persona</span>.
+                  </li>
+                  <li>
+                    <span className="font-semibold text-foreground">3)</span> Cuando haya al menos un{" "}
+                    <span className="font-semibold text-foreground">Operador</span>, pulse{" "}
+                    <span className="font-semibold text-foreground">Iniciar turno</span>.
+                  </li>
+                </ol>
+                <p className="montaje-setup-note mt-3 leading-relaxed text-muted-foreground">
+                  Nota: <span className="font-semibold text-foreground">Iniciar turno</span> no arranca el cronómetro
+                  de máquina. El tiempo se inicia después en{" "}
+                  <span className="font-semibold text-foreground">Cronómetro de producción</span> (botón play).
+                </p>
+              </div>
+
+              <div className="montaje-personal-panel rounded-lg border bg-background/60 p-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
                     {fieldLegend(Clock, "Turno")}
-                    <ToggleGroup type="single" variant="outline" className="mes-toggle-row mes-toggle-turno w-full" value={draftTurno} onValueChange={(v) => v && setDraftTurno(v as "diurno" | "nocturno")}>
-                      <ToggleGroupItem value="diurno" className="flex-1 gap-2"><Sun className="h-4 w-4" />Diurno</ToggleGroupItem>
-                      <ToggleGroupItem value="nocturno" className="flex-1 gap-2"><Moon className="h-4 w-4" />Nocturno</ToggleGroupItem>
-                    </ToggleGroup>
+                    <div className="mes-toggle-row mes-toggle-turno">
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        className="w-full"
+                        value={draftTurno}
+                        onValueChange={(v) => {
+                          if (!v) return
+                          setDraftTurno(v as "diurno" | "nocturno")
+                        }}
+                      >
+                        <ToggleGroupItem value="diurno" className="flex-1 gap-2">
+                          <Sun className="h-4 w-4 shrink-0" aria-hidden />
+                          Diurno
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
+                          <Moon className="h-4 w-4 shrink-0" aria-hidden />
+                          Nocturno
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </div>
+                    <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {fieldLegend(Users, "Grupo")}
-                    <ToggleGroup type="single" variant="outline" className="mes-toggle-row mes-toggle-grupo w-full" value={draftGrupo} onValueChange={(v) => v && setDraftGrupo(v as "A" | "B" | "C")}>
-                      {(["A", "B", "C"] as const).map((g) => (
-                        <ToggleGroupItem key={g} value={g} className={cn("flex-1", g === "A" && "mes-grupo-a", g === "B" && "mes-grupo-b", g === "C" && "mes-grupo-c")}>{g}</ToggleGroupItem>
-                      ))}
-                    </ToggleGroup>
+                    <div className="mes-toggle-row mes-toggle-grupo">
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        className="w-full"
+                        value={draftGrupo}
+                        onValueChange={(v) => {
+                          if (!v) return
+                          setDraftGrupo(v as "A" | "B" | "C")
+                        }}
+                      >
+                        {(["A", "B", "C"] as const).map((g) => (
+                          <ToggleGroupItem
+                            key={g}
+                            value={g}
+                            className={cn(
+                              "flex-1 gap-1",
+                              g === "A" && "mes-grupo-a",
+                              g === "B" && "mes-grupo-b",
+                              g === "C" && "mes-grupo-c",
+                            )}
+                          >
+                            <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                            {g}
+                          </ToggleGroupItem>
+                        ))}
+                      </ToggleGroup>
+                    </div>
+                    <p className="mes-field-hint">
+                      Cuadrilla o equipo asignado a la máquina (rotación interna A / B / C).
+                    </p>
                   </div>
                 </div>
-                <div className="mt-4 space-y-2 border-t pt-4">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      {fieldLabel(mk("draft-person-name"), UserRound, "Nombre")}
-                      <Input
-                        id={mk("draft-person-name")}
-                        name="corDraftPersonName"
-                        className="h-9"
-                        value={draftStaging.name}
-                        onChange={(e) => setDraftStaging((s) => ({ ...s, name: e.target.value }))}
-                        placeholder="Nombre"
-                      />
+
+                <div className="mt-5 border-t border-border/60 pt-5">
+                  <div className="montaje-cuadrilla-heading mb-3 font-semibold uppercase tracking-wide text-muted-foreground">
+                    Cuadrilla (antes de iniciar)
+                  </div>
+                  <div className="montaje-cuadrilla-form space-y-4 rounded-md border bg-background p-3 sm:p-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-2">
+                        {fieldLabel(
+                          mk("draft-person-name"),
+                          UserRound,
+                          <>
+                            Nombre
+                            <span className="text-muted-foreground">
+                              {draftStaging.role === "operador" ? " (operador)" : " (personal)"}
+                            </span>
+                          </>,
+                        )}
+                        <Input
+                          id={mk("draft-person-name")}
+                          name="corDraftPersonName"
+                          className="montaje-person-input ot-input-unified h-11 w-full min-w-0 text-base md:text-base"
+                          value={draftStaging.name}
+                          onChange={(e) => setDraftStaging((s) => ({ ...s, name: e.target.value }))}
+                          placeholder="Nombre"
+                          disabled={opsReadOnly}
+                        />
+                      </div>
+
+                      <div className="min-w-0 space-y-2">
+                        {fieldLabel(mk("draft-person-role"), IdCard, "Rol")}
+                        <Select
+                          value={draftStaging.role}
+                          onValueChange={(v) => setDraftStaging((s) => ({ ...s, role: v as DraftPersonRole }))}
+                          disabled={opsReadOnly}
+                        >
+                          <SelectTrigger
+                            id={mk("draft-person-role")}
+                            className="montaje-person-role-trigger h-11 w-full min-w-0 text-base"
+                          >
+                            <SelectValue placeholder="Seleccione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="operador">Operador</SelectItem>
+                            <SelectItem value="ayudante">Ayudante</SelectItem>
+                            <SelectItem value="supervisor">Supervisor</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <div className="montaje-role-hint text-muted-foreground">
+                          {draftStaging.role === "operador"
+                            ? "Rol principal requerido para poder iniciar el turno"
+                            : draftStaging.role === "supervisor"
+                              ? "Control y seguimiento del turno"
+                              : "Apoyo operativo de la cuadrilla"}
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      {fieldLabel(mk("draft-person-role"), IdCard, "Rol")}
-                      <Select
-                        value={draftStaging.role}
-                        onValueChange={(v) => setDraftStaging((s) => ({ ...s, role: v as DraftPersonRole }))}
+
+                    <div className="flex justify-center">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="montaje-save-person-btn h-12 w-full max-w-xs gap-2 text-base font-semibold sm:w-auto sm:min-w-[12rem] sm:shrink-0"
+                        onClick={() => onDraftPersonGuardar(draftStaging.name, draftStaging.role)}
+                        disabled={opsReadOnly}
                       >
-                        <SelectTrigger id={mk("draft-person-role")} className="h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="operador">Operador</SelectItem>
-                          <SelectItem value="ayudante">Ayudante</SelectItem>
-                          <SelectItem value="supervisor">Supervisor</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        <UserPlus className="h-5 w-5 shrink-0" aria-hidden />
+                        Guardar persona
+                      </Button>
                     </div>
                   </div>
-                  <Button type="button" variant="secondary" size="sm" onClick={() => onDraftPersonGuardar(draftStaging.name, draftStaging.role)}><UserPlus className="mr-1 h-4 w-4" />Guardar persona</Button>
-                  {draftPeople.map((p) => (
-                    <div key={p.id} className="flex justify-between rounded border px-2 py-1 text-xs">
-                      <span>{p.name} — {roleLabelEs(p.role)}</span>
-                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDraftPeople((prev) => prev.filter((x) => x.id !== p.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
+
+                  {draftOperadorMissing ? (
+                    <div className="montaje-operador-warning mt-3 rounded-md border px-3 py-2.5">
+                      {draftPeople.length > 0 ? (
+                        <>
+                          Hay personal en la lista, pero falta un{" "}
+                          <span className="font-semibold">Operador</span> (responsable del turno). En{" "}
+                          <span className="font-semibold">Rol</span> elija <span className="font-semibold">Operador</span>,
+                          escriba el nombre y pulse <span className="font-semibold">Guardar persona</span>.
+                        </>
+                      ) : (
+                        <>
+                          Debe guardar al menos un <span className="font-semibold">operador</span> antes de pulsar{" "}
+                          <span className="font-semibold">Iniciar turno</span> en esta misma sección.
+                        </>
+                      )}
                     </div>
-                  ))}
-                  <Button type="button" className="w-full" onClick={onIniciarTurno} disabled={opsReadOnly || draftOperadorMissing}><CirclePlay className="mr-2 h-4 w-4" />Iniciar turno</Button>
+                  ) : null}
                 </div>
               </div>
             </MesSectionShell>
+          </div>
+
+          <div className="col-span-1 flex justify-center border-t border-border/60 pt-5 xl:col-span-2">
+            <Button
+              type="button"
+              className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
+              onClick={requestIniciarTurno}
+              disabled={opsReadOnly || draftOperadorMissing}
+              title={
+                draftOperadorMissing
+                  ? "Guarde al menos una persona con rol Operador en la cuadrilla"
+                  : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+              }
+            >
+              <CirclePlay className="h-5 w-5 shrink-0" aria-hidden />
+              Iniciar turno
+            </Button>
           </div>
         </div>
       ) : (
@@ -1143,6 +1756,32 @@ export default function WorkOrderCorteOpsSection({
             siguiente. Para cerrar la sesión use{" "}
             <span className="font-semibold text-foreground">Cerrar turno</span> en el cronómetro.
           </p>
+          <div
+            className="mb-3 rounded-md border border-sky-500/35 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
+            role="status"
+          >
+            <p>
+              <span className="font-semibold">Completo</span> solo indica que este turno ya tiene operador registrado;{" "}
+              <span className="font-semibold">no</span> significa que el turno terminó.
+            </p>
+            <p className="mt-1.5">
+              Para <span className="font-semibold">otro turno con otra persona</span> (como en Montaje e Impresión): cierre
+              este turno y verá la pantalla <span className="font-semibold">Personal y turno de planta</span> con el botón{" "}
+              <span className="font-semibold">Iniciar turno</span>.
+            </p>
+            {onRequestCerrarTurno && !opsReadOnly ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 h-8 border-sky-600/40 bg-background text-xs font-semibold"
+                onClick={onRequestCerrarTurno}
+              >
+                <LogOut className="mr-1.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                Cerrar turno e iniciar otro
+              </Button>
+            ) : null}
+          </div>
           <div className="grid gap-2 md:grid-cols-2">
             <div className="space-y-1">
               {fieldLegend(Clock, "Turno")}
@@ -1329,8 +1968,14 @@ export default function WorkOrderCorteOpsSection({
                 </Tooltip>
               </TooltipProvider>
             ) : (
-              <MesSectionHeaderExtras isDone={timerState === "completed" || timerState === "stopped"} />
+              <MesSectionHeaderExtras isDone={doneTemporizador} />
             )}
+            {multiPhaseTimer && doneTemporizador ? (
+              <div className="mes-badge-done">
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                Completo
+              </div>
+            ) : null}
             <Badge variant="secondary" className="max-w-[14rem] text-xs leading-snug">
               {areaFinalizada
                 ? "Área finalizada"
@@ -1353,7 +1998,7 @@ export default function WorkOrderCorteOpsSection({
                           : timerState === "completed"
                             ? "Orden finalizada"
                             : timerState === "stopped"
-                              ? "Turno cerrado"
+                              ? "Registro de turno cerrado"
                               : "Cronómetro listo (sin iniciar)"}
             </Badge>
           </div>
@@ -1367,16 +2012,17 @@ export default function WorkOrderCorteOpsSection({
               <>
                 <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
                 <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
-                <span className="font-semibold">no</span> cierra el turno de planta. Use{" "}
-                <span className="font-semibold">Cerrar turno</span> para terminar la sesión.
+                <span className="font-semibold">no</span> cierra el turno de planta. Para cerrar la sesión use{" "}
+                <span className="font-semibold">Cerrar turno</span>.
               </>
             )}
           </div>
         ) : (
           <div className="mb-3 rounded-md border border-dashed border-slate-400 bg-white px-3 py-2 text-xs text-slate-600">
             Primero abra un <span className="font-semibold text-foreground">turno de planta</span> con{" "}
-            <span className="font-semibold text-foreground">Iniciar turno</span> arriba. Después use el cronómetro
-            multi-fase (arranque, producción, desmontaje y paradas con motivo).
+            <span className="font-semibold text-foreground">Iniciar turno</span> en la sección superior. Después podrá
+            usar el <span className="font-semibold text-foreground">cronómetro</span> (play en esta sección) para
+            registrar tiempos y paradas con motivo.
           </div>
         )}
         {multiPhaseTimer && onRequestTimerConfirm && onPreviewTimerReport ? (
@@ -1385,11 +2031,13 @@ export default function WorkOrderCorteOpsSection({
             effectiveSec={effectiveSec}
             deadSec={deadSec}
             demountSec={demountSec}
+            arranqueSec={arranqueSec}
             totalSec={totalSec}
             kgHora={kgHora}
             horaArranque={displayHoraArranque}
             timerShowsOtAccumulated={timerShowsOtAccumulated}
             timerRunning={timerRunning}
+            arranqueRunning={arranqueRunning}
             demountRunning={demountRunning}
             timerActionFlags={timerActionFlags!}
             onRequestTimerConfirm={onRequestTimerConfirm}
@@ -1397,6 +2045,7 @@ export default function WorkOrderCorteOpsSection({
             canFinalizeOrder={canFinalizeOrder}
             areaFinalizada={areaFinalizada}
             areaLabel="corte"
+            showTimerActions={hasActiveTurno}
           />
         ) : hasActiveTurno ? (
           <p className="text-muted-foreground text-xs">
@@ -1432,6 +2081,7 @@ export default function WorkOrderCorteOpsSection({
       <MesSectionShell
         title={mesSectionTitle(Package, "Ingreso de bobinas impresa — Kg")}
         subtle
+        headerRight={<MesSectionHeaderExtras isDone={doneEntradaImpresa} />}
         bodyClassName="mes-section__body--flush"
       >
         <p className="text-muted-foreground mb-2 px-3 pt-3 text-xs leading-snug">
@@ -1439,33 +2089,48 @@ export default function WorkOrderCorteOpsSection({
           <span className="font-medium text-foreground">Kg ingresados</span> en proceso de corte. La salida por paleta ({COR_ROLLOS_PER_PALETA}{" "}
           rollos/paleta) es independiente.
         </p>
-        <div className="grid grid-cols-2 gap-2 px-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10">
-          {entradaBobinas.map((val, idx) => (
-            <div key={`ent-cor-${idx}`} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label htmlFor={mk(`entrada-bobina-${idx}`)} className="ot-label">
-                  <span className="inline-flex items-center gap-1">
-                    <Hash className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                    {idx + 1}
-                  </span>
-                </Label>
-              </div>
-              <Input
+        <div className="grid grid-cols-2 gap-2 px-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
+          {entradaBobinas.map((val, idx) => {
+            const filled = isBobinaKgSlotFilled(val) || hasBobinaLabelMeta(entradaBobinasMeta[idx])
+            return (
+              <MesBobinaKgSlotCell
+                key={`ent-cor-${idx}`}
                 id={mk(`entrada-bobina-${idx}`)}
                 name={`corEntradaBobinaKg_${idx + 1}`}
-                className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                inputMode="decimal"
+                slotNum={idx + 1}
                 value={val}
-                onChange={(e) => {
+                filled={filled}
+                inputDisabled={entradaInputDisabled}
+                onChange={(v) => {
                   const next = [...entradaBobinas]
-                  next[idx] = e.target.value
+                  next[idx] = v
                   writeEntradaBobinasKg(next)
                 }}
-                placeholder="0"
-                disabled={entradaInputDisabled}
+                labelButton={
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant={hasBobinaLabelMeta(entradaBobinasMeta[idx]) ? "default" : "outline"}
+                          className="h-5 w-5"
+                          onClick={() => openEntradaLabelEditor(idx)}
+                          disabled={entradaInputDisabled}
+                          title={`Etiqueta bobina impresa #${idx + 1}`}
+                        >
+                          <ArrowUpRight className="h-3 w-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {bobinaLabelTooltipText(entradaBobinasMeta[idx])}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                }
               />
-            </div>
-          ))}
+            )
+          })}
         </div>
         <div className="mt-2 px-3 pb-3 mes-stat-grid sm:grid-cols-3">
           <MesStatTile label="N° bobinas" value={entradaBobinasCount} />
@@ -1484,7 +2149,7 @@ export default function WorkOrderCorteOpsSection({
 
       {!hasActiveTurno ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
-          Inicie un <span className="font-semibold text-foreground">turno de planta</span> para registrar paletas de salida, scrap y resúmenes del turno.
+          Inicie un <span className="font-semibold text-foreground">turno de planta</span> para registrar paletas de salida, desperdicio y resúmenes del turno.
         </div>
       ) : null}
 
@@ -1630,311 +2295,382 @@ export default function WorkOrderCorteOpsSection({
         title={mesSectionTitle(PackageSearch, "Proceso de corte")}
         subtle
         bodyClassName="mes-section__body--flush"
-      >
-        <p className="text-muted-foreground mb-3 text-xs leading-snug">
-          <span className="font-medium text-foreground">Kg salida</span> incluye paletas abiertas y cerradas.
-          Solo las paletas <span className="font-medium text-foreground">cerradas</span> (botón Cerrar paleta) pasan a
-          Despacho · producto terminado.
-        </p>
-        <div className="mes-stat-grid mes-stat-grid--4">
-          <MesStatTile
-            label="Kg ingresados"
-            value={`${entradaBobinasTotal.toFixed(2)} Kg`}
-            icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Kg salida (plantas)"
-            value={`${salidaTotalKg.toFixed(2)} Kg`}
-            icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Kg en despacho (cerradas)"
-            value={`${kgDespachoAcum.toFixed(2)} Kg`}
-            tone="positive"
-            icon={<PackageCheck className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Kg despacho (provisional)"
-            value={`${kgProvisionalDespacho.toFixed(2)} Kg`}
-            icon={<Package className="h-3.5 w-3.5" />}
-          />
-          <div className="mes-stat-tile"><Label htmlFor={mk("kg-merma-corte")} className="mes-stat-tile__label">
-              Kg merma
-            </Label>
-            <Input
-              id={mk("kg-merma-corte")}
-              name="kgMermaCorte"
-              className="ot-input-unified mt-1 h-8"
-              inputMode="decimal"
-              value={readString(form.kgMermaCorte)}
-              onChange={(e) => setKey("kgMermaCorte", e.target.value)}
-              placeholder="0"
-            /></div>
-          <div className="mes-stat-tile">
-            <Label htmlFor={mk("metraje-corte")} className="mes-stat-tile__label">
-              Metraje
-            </Label>
-            <Input
-              id={mk("metraje-corte")}
-              name="metrajeCorte"
-              className="ot-input-unified mt-1 h-8"
-              inputMode="decimal"
-              value={readString(form.metrajeCorte)}
-              onChange={(e) => setKey("metrajeCorte", e.target.value)}
-              placeholder="0"
-            />
-          </div>
-        </div>
-        <div className="mes-stat-grid mt-2 sm:grid-cols-3">
-          <MesStatTile label="Merma %" value={`${mermaPct}%`} icon={<Percent className="h-3.5 w-3.5" />} />
-          <MesStatTile label="Rendimiento" value={`${kgHora} Kg/h`} icon={<TrendingDown className="h-3.5 w-3.5" />} />
-          <MesStatTile label="Metraje total" value={`${metraje.toFixed(2)} m`} icon={<Ruler className="h-3.5 w-3.5" />} />
-        </div>
-        <div className="mes-stat-grid mt-2 mes-stat-grid--4">
-          <MesStatTile label="Salida total" value={`${salidaTotalKg.toFixed(2)} Kg`} icon={<ArrowUpFromLine className="h-3.5 w-3.5" />} />
-          <MesStatTile
-            label="Despacho (cerradas)"
-            value={`${kgDespachoAcum.toFixed(2)} Kg`}
-            tone="positive"
-            icon={<PackageCheck className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile
-            label="Despacho (provisional)"
-            value={`${kgProvisionalDespacho.toFixed(2)} Kg`}
-            icon={<Package className="h-3.5 w-3.5" />}
-          />
-          <MesStatTile label="Merma" value={`${kgMerma.toFixed(2)} Kg`} icon={<Trash2 className="h-3.5 w-3.5" />} />
-          <MesStatTile label="Paletas" value={salidaPaletas.length} />
-          <MesStatTile label="Bobinas" value={bobinasSalidaCount} />
-        </div>
-      </MesSectionShell>
-
-      <MesSectionShell title={mesSectionTitle(Recycle, "Scrap / Refil")} subtle>
-        <div className="mb-3 space-y-2 rounded border bg-background/80 p-2">
-          <Label id={mk("cor-desperdicio-sustrato-label")} className="text-muted-foreground text-xs font-medium">
-            Sustrato del desperdicio (reporte)
-          </Label>
-          <p className="text-muted-foreground text-[11px] leading-snug">
-            Clasificación global de la OT en el reporte (mal corte y «auto» en refile/impreso). «Auto» usa la estructura
-            del producto. Transparente aplica cuando el sustrato es film transparente / CPP.
-          </p>
-          <ToggleGroup
-            type="single"
-            aria-labelledby={mk("cor-desperdicio-sustrato-label")}
-            className="flex flex-wrap justify-start gap-1"
-            value={
-              (() => {
-                const s = normalizeScrapSubstrate(readString(form.corDesperdicioSustrato))
-                return s === "bopp" || s === SCRAP_POLIETILENO || s === "transparente" ? s : "auto"
-              })()
+        headerRight={
+          <MesSectionHeaderExtras
+            isDone={
+              entradaBobinasTotal > 0.01 ||
+              salidaTotalKg > 0.01 ||
+              kgMerma > 0.01 ||
+              metraje > 0.01
             }
-            onValueChange={(v) => {
-              if (!v) return
-              setKey("corDesperdicioSustrato", v === "auto" ? "" : v)
-            }}
-          >
-            <ToggleGroupItem value="auto" className="text-xs">
-              Auto
-            </ToggleGroupItem>
-            <ToggleGroupItem value="bopp" className="text-xs">
-              BOPP
-            </ToggleGroupItem>
-            <ToggleGroupItem value={SCRAP_POLIETILENO} className="text-xs">
-              Polietileno
-            </ToggleGroupItem>
-            <ToggleGroupItem value="transparente" className="text-xs">
-              Transparente
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-        <div className="mb-3 grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1 rounded border bg-background/80 p-2">
-            <Label id={mk("cor-scrap-refile-destino-label")} className="text-muted-foreground text-xs font-medium">
-              Destino refile (BOPP / PE)
-            </Label>
-            <p className="text-muted-foreground text-[11px] leading-snug">«Auto» hereda el sustrato global o la estructura.</p>
-            <ToggleGroup
-              type="single"
-              aria-labelledby={mk("cor-scrap-refile-destino-label")}
-              className="flex flex-wrap justify-start gap-1"
-              value={
-                (() => {
-                  const s = normalizeScrapSubstrate(readString(form.corScrapRefileDestino))
-                  return s === "bopp" || s === SCRAP_POLIETILENO ? s : "auto"
-                })()
-              }
-              onValueChange={(v) => {
-                if (!v) return
-                setKey("corScrapRefileDestino", v === "auto" ? "" : v)
-              }}
-            >
-              <ToggleGroupItem value="auto" className="text-xs">
-                Auto
-              </ToggleGroupItem>
-              <ToggleGroupItem value="bopp" className="text-xs">
-                BOPP
-              </ToggleGroupItem>
-              <ToggleGroupItem value={SCRAP_POLIETILENO} className="text-xs">
-                Polietileno
-              </ToggleGroupItem>
-            </ToggleGroup>
+          />
+        }
+      >
+        <div className="space-y-4 px-3 py-3">
+          <p className="text-muted-foreground text-xs leading-snug">
+            <span className="font-medium text-foreground">Kg salida (plantas)</span> suma paletas abiertas y cerradas.
+            Solo las paletas <span className="font-medium text-foreground">cerradas</span> (botón{" "}
+            <span className="font-medium text-foreground">Cerrar paleta</span>) pasan a Despacho · producto terminado.
+          </p>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Flujo de material (Kg)
+            </p>
+            <div className="mes-stat-grid mes-stat-grid--4">
+              <MesStatTile
+                label="Kg ingresados"
+                value={`${entradaBobinasTotal.toFixed(2)} Kg`}
+                icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Kg salida (plantas)"
+                value={`${salidaTotalKg.toFixed(2)} Kg`}
+                icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Kg en despacho (cerradas)"
+                value={`${kgDespachoAcum.toFixed(2)} Kg`}
+                tone="positive"
+                icon={<PackageCheck className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Kg despacho (provisional)"
+                value={`${kgProvisionalDespacho.toFixed(2)} Kg`}
+                icon={<Package className="h-3.5 w-3.5" />}
+              />
+            </div>
           </div>
-          <div className="space-y-1 rounded border bg-background/80 p-2">
-            <Label id={mk("cor-scrap-impreso-destino-label")} className="text-muted-foreground text-xs font-medium">
-              Destino impreso corte (BOPP / PE)
-            </Label>
-            <p className="text-muted-foreground text-[11px] leading-snug">«Auto» hereda el sustrato global o la estructura.</p>
-            <ToggleGroup
-              type="single"
-              aria-labelledby={mk("cor-scrap-impreso-destino-label")}
-              className="flex flex-wrap justify-start gap-1"
-              value={
-                (() => {
-                  const s = normalizeScrapSubstrate(readString(form.corScrapImpresoDestino))
-                  return s === "bopp" || s === SCRAP_POLIETILENO ? s : "auto"
-                })()
-              }
-              onValueChange={(v) => {
-                if (!v) return
-                setKey("corScrapImpresoDestino", v === "auto" ? "" : v)
-              }}
-            >
-              <ToggleGroupItem value="auto" className="text-xs">
-                Auto
-              </ToggleGroupItem>
-              <ToggleGroupItem value="bopp" className="text-xs">
-                BOPP
-              </ToggleGroupItem>
-              <ToggleGroupItem value={SCRAP_POLIETILENO} className="text-xs">
-                Polietileno
-              </ToggleGroupItem>
-            </ToggleGroup>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Captura manual del turno
+            </p>
+            <div className="mes-stat-grid sm:grid-cols-2">
+              <div className="mes-stat-tile">
+                <Label htmlFor={mk("kg-merma-corte")} className="mes-stat-tile__label">
+                  Kg merma
+                </Label>
+                <Input
+                  id={mk("kg-merma-corte")}
+                  name="kgMermaCorte"
+                  className="ot-input-unified mt-1 h-9 bg-white dark:bg-white dark:text-slate-900"
+                  inputMode="decimal"
+                  value={readString(form.kgMermaCorte)}
+                  onChange={(e) => setKey("kgMermaCorte", e.target.value)}
+                  placeholder="0"
+                  disabled={inputDisabled}
+                />
+              </div>
+              <div className="mes-stat-tile">
+                <Label htmlFor={mk("metraje-corte")} className="mes-stat-tile__label">
+                  Metraje (turno)
+                </Label>
+                <Input
+                  id={mk("metraje-corte")}
+                  name="metrajeCorte"
+                  className="ot-input-unified mt-1 h-9 bg-white dark:bg-white dark:text-slate-900"
+                  inputMode="decimal"
+                  value={readString(form.metrajeCorte)}
+                  onChange={(e) => setKey("metrajeCorte", e.target.value)}
+                  placeholder="0"
+                  disabled={inputDisabled}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded border bg-background p-2 text-sm">
-            <Label htmlFor={mk("cor-scrap-refile-kg")} className="text-muted-foreground">
-              Refile (Kg)
-            </Label>
-            <Input
-              id={mk("cor-scrap-refile-kg")}
-              name="corScrapRefileKg"
-              className="ot-input-unified mt-1 h-8"
-              inputMode="decimal"
-              value={readString(form.corScrapRefileKg)}
-              onChange={(e) => setKey("corScrapRefileKg", e.target.value)}
-              placeholder="0"
-            />
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Indicadores
+            </p>
+            <div className="mes-stat-grid sm:grid-cols-3">
+              <MesStatTile label="Merma %" value={`${mermaPct}%`} icon={<Percent className="h-3.5 w-3.5" />} />
+              <MesStatTile
+                label="Rendimiento"
+                value={`${kgHora} Kg/h`}
+                icon={<TrendingDown className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Metraje total"
+                value={`${metraje.toFixed(2)} m`}
+                icon={<Ruler className="h-3.5 w-3.5" />}
+              />
+            </div>
           </div>
-          <div className="rounded border bg-background p-2 text-sm">
-            <Label htmlFor={mk("cor-scrap-impreso-kg")} className="text-muted-foreground">
-              Impreso (Kg)
-            </Label>
-            <Input
-              id={mk("cor-scrap-impreso-kg")}
-              name="corScrapImpresoKg"
-              className="ot-input-unified mt-1 h-8"
-              inputMode="decimal"
-              value={readString(form.corScrapImpresoKg)}
-              onChange={(e) => setKey("corScrapImpresoKg", e.target.value)}
-              placeholder="0"
-            />
-          </div>
-          <div className="rounded border bg-background p-2 text-sm">
-            <Label htmlFor={mk("cor-scrap-mal-corte-kg")} className="text-muted-foreground">
-              Mal corte (Kg)
-            </Label>
-            <Input
-              id={mk("cor-scrap-mal-corte-kg")}
-              name="corScrapMalCorteKg"
-              className="ot-input-unified mt-1 h-8"
-              inputMode="decimal"
-              value={readString(form.corScrapMalCorteKg)}
-              onChange={(e) => setKey("corScrapMalCorteKg", e.target.value)}
-              placeholder="0"
-            />
-          </div>
-          <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Total scrap</span>
-            <p className="font-semibold">{scrapTotal.toFixed(2)}</p>
-          </div>
-        </div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">% scrap / ingreso</span>
-            <p className="font-semibold">{refilPct}%</p>
-          </div>
-          <div className="rounded border bg-background p-2 text-sm">
-            <span className="text-muted-foreground">Estado</span>
-            <p className="font-semibold">{kgIngresados > 0 ? "Calculado" : "Sin datos"}</p>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unidades</p>
+            <div className="mes-stat-grid sm:grid-cols-2">
+              <MesStatTile label="Paletas de salida" value={corPaletas.length} icon={<Package className="h-3.5 w-3.5" />} />
+              <MesStatTile
+                label="Bobinas de salida"
+                value={bobinasSalidaCount}
+                icon={<Scissors className="h-3.5 w-3.5" />}
+              />
+            </div>
           </div>
         </div>
       </MesSectionShell>
 
-      <MesSectionShell title={mesSectionTitle(PieChart, "Resúmenes")} subtle>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resumen del turno</p>
-        <div className="mes-stat-grid mes-stat-grid--4">
-          <MesStatTile label="N° Bobinas Usadas" value={entradaBobinasCount} />
-          <MesStatTile label="N° Rollos" value={bobinasSalidaCount} />
-          <MesStatTile label="Peso Total (Kg)" value={salidaTotalKg.toFixed(2)} />
-          <MesStatTile label="N° Paletas" value={salidaPaletas.length} />
+      <MesSectionShell
+        title={mesSectionTitle(Recycle, "Desperdicio / refil")}
+        subtle
+        className="mes-section--scrap-premium"
+        bodyClassName="mes-section__body--flush"
+        headerRight={
+          <MesSectionHeaderExtras
+            isDone={
+              scrapTotal > 0.01 ||
+              readString(form.corScrapRefileKg).trim() !== "" ||
+              readString(form.corScrapImpresoKg).trim() !== "" ||
+              readString(form.corScrapMalCorteKg).trim() !== ""
+            }
+          />
+        }
+      >
+        <div className="space-y-4 px-3 py-3">
+          <p className="text-muted-foreground text-xs leading-snug">
+            Clasifique el desperdicio para el reporte de inventario. El destino{" "}
+            <span className="font-medium text-foreground">BOPP / Polietileno</span> aplica a refile e impreso de corte.{" "}
+            <span className="font-medium text-foreground">Transparente</span> cuando el film es CPP / transparente.
+          </p>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Clasificación para reporte
+            </p>
+            <div className="mes-scrap-destino space-y-2">
+              <Label id={mk("cor-desperdicio-sustrato-label")} className="mes-scrap-destino__label text-muted-foreground">
+                Sustrato del desperdicio (global)
+              </Label>
+              <p className="text-muted-foreground text-[10px] leading-snug">
+                Afecta mal corte y los destinos en «Auto». «Auto» usa la estructura del producto.
+              </p>
+              <CorteDesperdicioSustratoToggle
+                idPrefix={mk("cor-desperdicio-sustrato")}
+                value={readString(form.corDesperdicioSustrato)}
+                onChange={(v) => setKey("corDesperdicioSustrato", v)}
+                disabled={inputDisabled}
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Destino por tipo de material
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <CorteDesperdicioDestinoToggle
+                idPrefix={mk("cor-desperdicio-refile-destino")}
+                label="Refile (BOPP / PE)"
+                hint="«Auto» hereda el sustrato global o la estructura."
+                value={readString(form.corScrapRefileDestino)}
+                onChange={(v) => setKey("corScrapRefileDestino", v)}
+                disabled={inputDisabled}
+              />
+              <CorteDesperdicioDestinoToggle
+                idPrefix={mk("cor-desperdicio-impreso-destino")}
+                label="Impreso corte (BOPP / PE)"
+                hint="«Auto» hereda el sustrato global o la estructura."
+                value={readString(form.corScrapImpresoDestino)}
+                onChange={(v) => setKey("corScrapImpresoDestino", v)}
+                disabled={inputDisabled}
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Kilos registrados
+            </p>
+            <div className="mes-scrap-grid mes-scrap-grid--corte">
+              <div className="mes-scrap-field">
+                {fieldLabel(mk("cor-desperdicio-refile-kg"), Recycle, "Refile (Kg)")}
+                <Input
+                  id={mk("cor-desperdicio-refile-kg")}
+                  name="corScrapRefileKg"
+                  className="ot-input-unified mes-scrap-input h-9"
+                  inputMode="decimal"
+                  value={readString(form.corScrapRefileKg)}
+                  onChange={(e) => setKey("corScrapRefileKg", e.target.value)}
+                  placeholder="0"
+                  disabled={inputDisabled}
+                />
+              </div>
+              <div className="mes-scrap-field">
+                {fieldLabel(mk("cor-desperdicio-impreso-kg"), Printer, "Impreso (Kg)")}
+                <Input
+                  id={mk("cor-desperdicio-impreso-kg")}
+                  name="corScrapImpresoKg"
+                  className="ot-input-unified mes-scrap-input h-9"
+                  inputMode="decimal"
+                  value={readString(form.corScrapImpresoKg)}
+                  onChange={(e) => setKey("corScrapImpresoKg", e.target.value)}
+                  placeholder="0"
+                  disabled={inputDisabled}
+                />
+              </div>
+              <div className="mes-scrap-field">
+                {fieldLabel(mk("cor-desperdicio-mal-corte-kg"), Scissors, "Mal corte (Kg)")}
+                <Input
+                  id={mk("cor-desperdicio-mal-corte-kg")}
+                  name="corScrapMalCorteKg"
+                  className="ot-input-unified mes-scrap-input h-9"
+                  inputMode="decimal"
+                  value={readString(form.corScrapMalCorteKg)}
+                  onChange={(e) => setKey("corScrapMalCorteKg", e.target.value)}
+                  placeholder="0"
+                  disabled={inputDisabled}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resumen</p>
+            <div className="mes-stat-grid sm:grid-cols-3">
+              <MesStatTile
+                label="Total desperdicio"
+                value={`${scrapTotal.toFixed(2)} Kg`}
+                icon={<Trash2 className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="% desperdicio / ingreso"
+                value={`${refilPct}%`}
+                icon={<PieChart className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Estado"
+                value={kgIngresados > 0 ? "Calculado" : "Sin datos"}
+                icon={<BarChart3 className="h-3.5 w-3.5" />}
+              />
+            </div>
+          </div>
         </div>
-        <div className="mes-stat-grid mt-2 sm:grid-cols-2">
-          <MesStatTile label="Merma (Kg)" value={kgMerma.toFixed(2)} icon={<Trash2 className="h-3.5 w-3.5" />} />
-          <MesStatTile label="% Merma" value={`${mermaPct}%`} icon={<Percent className="h-3.5 w-3.5" />} />
-        </div>
-        <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resumen de paletas</p>
-        <div className="overflow-x-auto rounded-md border border-[var(--ax-mes-border,#cbd5e1)] bg-[var(--ax-mes-panel,#fff)]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
-                <th className="py-2 pr-2 pl-2">Paleta</th>
-                <th className="py-2 pr-2 text-center">Bobinas</th>
-                <th className="py-2 pr-2 text-center">Rollos</th>
-                <th className="py-2 pr-2 text-right">Peso (Kg)</th>
-                <th className="py-2 text-center">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {corPaletas.map((p, idx) => (
-                <tr key={`res-paleta-${p.id ?? idx}`} className="border-b">
-                  <td className="py-1.5 pl-2 pr-2">{p.label ?? `Paleta #${String(idx + 1).padStart(2, "0")}`}</td>
-                  <td className="py-1.5 pr-2 text-center">—</td>
-                  <td className="py-1.5 pr-2 text-center">{countRollosWithKg(p)}</td>
-                  <td className="py-1.5 pr-2 text-right">{sumKgFromPaleta(p).toFixed(2)}</td>
-                  <td className="py-1.5 text-center">
-                    {isCorPaletaCerrada(p) ? (
-                      <Badge variant="outline" className="text-xs border-emerald-500/40 bg-emerald-500/10">
-                        En despacho
-                      </Badge>
-                    ) : sumKgFromPaleta(p) > 0 ? (
-                      <Badge
-                        variant="outline"
-                        className="text-xs border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
-                      >
-                        Provisional en despacho
-                      </Badge>
-                    ) : (
-                      <CerrarPaletaButton
-                        variant="ghost"
-                        disabled={!canOperateProduction || sumKgFromPaleta(p) <= 0}
-                        onClick={() => cerrarPaleta(idx)}
-                      />
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="font-semibold">
-                <td className="pt-2 pb-2 pl-2 pr-2">TOTAL</td>
-                <td className="pt-2 pb-2 pr-2 text-center">{bobinasSalidaCount}</td>
-                <td className="pt-2 pb-2 pr-2 text-center">{bobinasSalidaCount}</td>
-                <td className="pt-2 pb-2 pr-2 text-right">{salidaTotalKg.toFixed(2)}</td>
-                <td className="pt-2 pb-2" />
-              </tr>
-            </tfoot>
-          </table>
+      </MesSectionShell>
+
+      <MesSectionShell
+        title={mesSectionTitle(PieChart, "Resumen de producción del turno")}
+        subtle
+        className="mes-section--resumen-premium"
+        bodyClassName="mes-section__body--flush"
+        headerRight={<MesSectionHeaderExtras isDone={doneResumenCorte} />}
+      >
+        <div className="space-y-4 px-3 py-3">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Volúmenes del turno
+            </p>
+            <div className="mes-stat-grid mes-stat-grid--4">
+              <MesStatTile
+                label="Bobinas usadas (entrada)"
+                value={entradaBobinasCount}
+                icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Rollos de salida"
+                value={bobinasSalidaCount}
+                icon={<Scissors className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Peso total salida"
+                value={`${salidaTotalKg.toFixed(2)} Kg`}
+                icon={<Weight className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="Paletas registradas"
+                value={salidaPaletas.length}
+                icon={<Package className="h-3.5 w-3.5" />}
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Merma</p>
+            <div className="mes-stat-grid sm:grid-cols-2">
+              <MesStatTile
+                label="Merma (Kg)"
+                value={`${kgMerma.toFixed(2)} Kg`}
+                icon={<Trash2 className="h-3.5 w-3.5" />}
+              />
+              <MesStatTile
+                label="% merma / ingreso"
+                value={`${mermaPct}%`}
+                icon={<Percent className="h-3.5 w-3.5" />}
+              />
+            </div>
+          </div>
+
+          <div className="mes-paletas-resumen-panel rounded-lg border border-slate-200/90 bg-slate-50/60 p-3 dark:border-slate-700/60 dark:bg-slate-900/25">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+              Paletas de salida
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="h-8 text-xs">Paleta</TableHead>
+                  <TableHead className="h-8 text-center text-xs">Bobinas</TableHead>
+                  <TableHead className="h-8 text-center text-xs">Rollos</TableHead>
+                  <TableHead className="h-8 text-right text-xs">Peso (Kg)</TableHead>
+                  <TableHead className="h-8 text-center text-xs">Estado</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {corPaletas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-4 text-center text-xs text-muted-foreground">
+                      Sin paletas registradas en este turno.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  corPaletas.map((p, idx) => (
+                    <TableRow key={`res-paleta-${p.id ?? idx}`}>
+                      <TableCell className="py-2 text-xs font-medium">
+                        {p.label ?? `Paleta #${String(idx + 1).padStart(2, "0")}`}
+                      </TableCell>
+                      <TableCell className="py-2 text-center text-xs text-muted-foreground">—</TableCell>
+                      <TableCell className="py-2 text-center text-xs">{countRollosWithKg(p)}</TableCell>
+                      <TableCell className="py-2 text-right text-xs font-medium">
+                        {sumKgFromPaleta(p).toFixed(2)}
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        {isCorPaletaCerrada(p) ? (
+                          <Badge variant="outline" className="text-xs border-emerald-500/40 bg-emerald-500/10">
+                            En despacho
+                          </Badge>
+                        ) : sumKgFromPaleta(p) > 0 ? (
+                          <Badge
+                            variant="outline"
+                            className="text-xs border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                          >
+                            Provisional
+                          </Badge>
+                        ) : (
+                          <CerrarPaletaButton
+                            variant="ghost"
+                            disabled={!canOperateProduction || sumKgFromPaleta(p) <= 0}
+                            onClick={() => cerrarPaleta(idx)}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+              {corPaletas.length > 0 ? (
+                <TableFooter>
+                  <TableRow className="bg-slate-100/80 hover:bg-slate-100/80 dark:bg-slate-800/50">
+                    <TableCell className="py-2 text-xs font-semibold">Total</TableCell>
+                    <TableCell className="py-2 text-center text-xs font-semibold">{entradaBobinasCount}</TableCell>
+                    <TableCell className="py-2 text-center text-xs font-semibold">{paletasResumenRollosTotal}</TableCell>
+                    <TableCell className="py-2 text-right text-xs font-semibold">{salidaTotalKg.toFixed(2)}</TableCell>
+                    <TableCell className="py-2" />
+                  </TableRow>
+                </TableFooter>
+              ) : null}
+            </Table>
+          </div>
         </div>
       </MesSectionShell>
 
@@ -2050,6 +2786,31 @@ export default function WorkOrderCorteOpsSection({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MesCorteConfirmDialog
+        open={startTurnConfirmOpen}
+        onOpenChange={setStartTurnConfirmOpen}
+        icon={<Sparkles className="h-5 w-5" aria-hidden />}
+        title="Abrir turno de planta (registro)"
+        description="Confirme para abrir el registro de turno de planta (Diurno/Nocturno y grupo), habilitar el cronómetro y el resumen operativo del turno en curso."
+        confirmLabel="Confirmar e iniciar"
+        onConfirm={() => confirmIniciarTurno()}
+      />
+
+      <MesBobinaEntradaLabelDialog
+        open={labelEditorOpen}
+        onOpenChange={setLabelEditorOpen}
+        slotIndex={labelEditorIndex}
+        draft={labelEditorDraft}
+        onDraftChange={(key, value) => {
+          setLabelEditorDraft((prev) => ({ ...prev, [key]: value }))
+          if (key === "fecha" && labelEditorError) setLabelEditorError("")
+        }}
+        error={labelEditorError}
+        onClear={clearLabelEditor}
+        onSave={saveEntradaLabelEditor}
+        materialLabel="impresa"
+      />
 
       <Dialog open={cumulativeTurnosDialogOpen} onOpenChange={setCumulativeTurnosDialogOpen}>
         <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">

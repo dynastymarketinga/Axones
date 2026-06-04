@@ -8,6 +8,7 @@ use App\Http\Requests\StoreFacilityAreaRequest;
 use App\Http\Requests\UpdateFacilityAreaRequest;
 use App\Models\AreaRequest;
 use App\Services\AreaRequestService;
+use App\Services\OperationalAlertService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +18,7 @@ class AreaRequestController extends Controller
 {
     public function __construct(
         private readonly AreaRequestService $areaRequestService,
+        private readonly OperationalAlertService $operationalAlerts,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -37,6 +39,10 @@ class AreaRequestController extends Controller
 
         if ($insumosOnly) {
             $this->areaRequestService->applyMaterialInsumosOnlyFilter($query);
+            $origin = strtolower(trim((string) $request->query('insumos_origin', '')));
+            if (in_array($origin, ['manual', 'ot_planilla'], true)) {
+                $this->areaRequestService->applyInsumosOriginFilter($query, $origin);
+            }
         } else {
             $this->areaRequestService->applyWorkOrderCoordinationListFilter($query);
         }
@@ -82,6 +88,18 @@ class AreaRequestController extends Controller
         return response()->json([
             'status' => $status,
             'counts' => $counts,
+        ]);
+    }
+
+    public function warehousePendingCount(): JsonResponse
+    {
+        $this->operationalAlerts->syncWarehouseAlertsForPendingMaterialRequests();
+        $breakdown = $this->areaRequestService->pendingWarehouseInsumosBreakdown();
+
+        return response()->json([
+            'count' => $breakdown['total'],
+            'manual_pending' => $breakdown['manual'],
+            'ot_planilla_pending' => $breakdown['ot_planilla'],
         ]);
     }
 

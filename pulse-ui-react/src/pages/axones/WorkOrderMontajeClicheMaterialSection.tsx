@@ -26,6 +26,7 @@ import {
 const LIST_PAGE_SIZE = 5
 
 type Props = {
+  embedded?: boolean
   numCliche: string
   numCilindro: string
   filasExtra: MontajeFilaMontaje[]
@@ -263,6 +264,7 @@ function ClicheCilindroPair({
 }
 
 export default function WorkOrderMontajeClicheMaterialSection({
+  embedded = false,
   numCliche,
   numCilindro,
   filasExtra,
@@ -311,17 +313,17 @@ export default function WorkOrderMontajeClicheMaterialSection({
     materialesPag.goToLastPage()
   }
 
-  return (
-    <MesSectionShell
-      title={mesSectionTitle(Layers, "Cliché, cilindro y material")}
-      subtle
-    >
-      <p className="text-muted-foreground mb-4 text-xs leading-relaxed">
-        Datos del montaje de cliché y cilindro. El registro de sticky back, código y color se envía al sistema al pulsar{" "}
-        <span className="font-medium text-foreground">Guardar</span> al pie de página (cierre de turno o finalización
-        del área). Al abrir un <span className="font-medium text-foreground">turno nuevo</span>, estos campos se
-        limpian; lo guardado queda en el historial del turno cerrado.
-      </p>
+  const body = (
+    <>
+      {!embedded ? (
+        <p className="text-muted-foreground mb-4 text-xs leading-relaxed">
+          Datos del montaje de cliché y cilindro. El registro de sticky back, código, color y cantidad de canguro usada se
+          envía al sistema al pulsar <span className="font-medium text-foreground">Guardar</span> al pie de página
+          (cierre de turno o finalización del área). Al abrir un{" "}
+          <span className="font-medium text-foreground">turno nuevo</span>, estos campos se limpian; lo guardado queda en
+          el historial del turno cerrado.
+        </p>
+      ) : null}
 
       <ClicheCilindroPair
         baseId={baseId}
@@ -417,7 +419,7 @@ export default function WorkOrderMontajeClicheMaterialSection({
           }
           readOnly={readOnly}
           emptyReadOnlyText="Sin material registrado."
-          emptyEditableText="Pulse «Agregar fila» para sticky back, código y color."
+          emptyEditableText="Pulse «Agregar fila» para sticky back, código, color y cantidad de canguro usada."
           total={materialesPag.total}
           totalPages={materialesPag.totalPages}
           safePage={materialesPag.safePage}
@@ -431,6 +433,7 @@ export default function WorkOrderMontajeClicheMaterialSection({
               <TableHead className="min-w-[7rem] text-xs">Sticky back</TableHead>
               <TableHead className="min-w-[7rem] text-xs">Código</TableHead>
               <TableHead className="min-w-[7rem] text-xs">Color</TableHead>
+              <TableHead className="min-w-[5.5rem] text-xs">Cantidad (canguro)</TableHead>
               {!readOnly ? <TableHead className="w-10" /> : null}
             </>
           }
@@ -479,6 +482,19 @@ export default function WorkOrderMontajeClicheMaterialSection({
                     aria-label={`Fila ${rowNum} color`}
                   />
                 </TableCell>
+                <TableCell className="py-2">
+                  <Input
+                    id={`${baseId}-mat-${globalIdx}-cantidad`}
+                    name={`mat-${globalIdx}-cantidad`}
+                    className="ot-input-unified h-8 text-xs tabular-nums"
+                    inputMode="decimal"
+                    value={fila.cantidad}
+                    onChange={(e) => updateMaterial(globalIdx, { cantidad: e.target.value })}
+                    disabled={readOnly}
+                    placeholder="Ej. 2"
+                    aria-label={`Fila ${rowNum} cantidad de canguro usada`}
+                  />
+                </TableCell>
                 {!readOnly ? (
                   <TableCell className="py-2 text-center">
                     <Button
@@ -498,6 +514,14 @@ export default function WorkOrderMontajeClicheMaterialSection({
           })}
         </PaginatedListSection>
       </div>
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <MesSectionShell title={mesSectionTitle(Layers, "Cliché, cilindro y material")} subtle>
+      {body}
     </MesSectionShell>
   )
 }

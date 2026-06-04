@@ -10,7 +10,7 @@ type ScrapClassificationHelpProps = {
 const GROUP_MEANING: Record<string, { title: string; body: string; accent: string }> = {
   bopp: {
     title: "BOPP",
-    body: "Film de polipropileno biorientado. No es lo mismo que polietileno ni que la pestaña Poliestireno.",
+    body: "Film de polipropileno biorientado. Incluye el desperdicio impreso registrado en la planilla de impresión.",
     accent: "border-sky-500/25 bg-sky-500/[0.06] text-sky-950 dark:text-sky-100",
   },
   polietileno: {
@@ -22,11 +22,6 @@ const GROUP_MEANING: Record<string, { title: string; body: string; accent: strin
     title: "Transparente",
     body: "Film transparente / CPP registrado en impresión y laminación (kg «Transparente» en la planilla de la OT).",
     accent: "border-violet-500/25 bg-violet-500/[0.06] text-violet-950 dark:text-violet-100",
-  },
-  poliestireno: {
-    title: "Poliestireno",
-    body: "Desperdicio impreso y films clasificados como poliestireno en planta. En impresión el operador elige BOPP o Poliestireno para los kg de impreso.",
-    accent: "border-amber-500/25 bg-amber-500/[0.06] text-amber-950 dark:text-amber-100",
   },
 }
 
@@ -44,7 +39,7 @@ const FLOW_STEPS = [
   {
     step: "3",
     title: "Consultar la pestaña que corresponda",
-    body: "BOPP, Polietileno, Transparente y Poliestireno muestran las mismas columnas de kg, pero solo las OT y los kilos que pertenecen a ese tipo de film.",
+    body: "BOPP, Polietileno y Transparente muestran las mismas columnas de kg, pero solo las OT y los kilos que pertenecen a ese tipo de film.",
   },
   {
     step: "4",
@@ -67,8 +62,8 @@ export function ScrapClassificationHelp({ groups }: ScrapClassificationHelpProps
           <div className="min-w-0 space-y-1">
             <p className="text-foreground text-sm font-semibold">Guía del reporte de desperdicio</p>
             <p className="text-muted-foreground text-sm leading-relaxed">
-              Cuatro pestañas separan el desperdicio por <strong>tipo de film</strong> (materiales distintos entre sí).
-              Transparente, BOPP, polietileno y poliestireno son cubetas de clasificación distintas en planta.
+              Tres pestañas separan el desperdicio por <strong>tipo de film</strong> (materiales distintos entre sí).
+              Transparente, BOPP y polietileno son cubetas de clasificación distintas en planta.
             </p>
           </div>
         </div>
@@ -124,7 +119,7 @@ export function ScrapClassificationHelp({ groups }: ScrapClassificationHelpProps
 
         <p className="text-muted-foreground flex items-start gap-2 border-t border-slate-200/70 pt-3 text-xs leading-relaxed dark:border-slate-700/60">
           <ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden />
-          Si una OT no aparece en BOPP, Polietileno, Transparente o Poliestireno, revise en Corte el sustrato del desperdicio o la
+          Si una OT no aparece en BOPP, Polietileno o Transparente, revise en Corte el sustrato del desperdicio o la
           estructura del producto (mezclas como BOPP + PEBD requieren definición explícita). Kilos en 0 = aún no
           cargaron desperdicio en planilla para esa OT.
         </p>

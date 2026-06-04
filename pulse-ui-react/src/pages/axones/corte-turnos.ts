@@ -10,6 +10,13 @@ import {
 } from "@/lib/mes-phase-timer-fields"
 import { deadAccSecAfterResume } from "@/lib/mes-timer-band-shared"
 
+import { getMetaSeries } from "./laminacion-turnos"
+import { emptyMetaSeries, type BobinaLabelMeta } from "./printing-turnos"
+
+export type { BobinaLabelMeta }
+export { emptyBobinaLabelMeta } from "./printing-turnos"
+export const COR_ENTRADA_META_KEY = "corEntradaBobinasMeta"
+
 export const COR_TURNOS_KEY = "cor_turnos"
 export const COR_ACTUAL_KEY = "corTurnoActual"
 export const COR_LEGACY_ACTUAL_KEY = "cor_turno_actual"
@@ -78,6 +85,7 @@ export type CorteTurnoEntry = {
   metraje: string
   observaciones: string
   entradaBobinasKg: string[]
+  entradaBobinasMeta: BobinaLabelMeta[]
   paletas: CorPaleta[]
   metrics?: CorteTurnMetrics
   timer: CorteTurnTimer
@@ -358,6 +366,9 @@ export function normalizeCorteTurno(raw: unknown, formFallback?: Record<string, 
   const entradaBobinasKg = Array.isArray(o.entradaBobinasKg)
     ? ensureStringArray(o.entradaBobinasKg, COR_ENTRADA_SLOTS)
     : ensureStringArray(fb.corEntradaBobinasKg, COR_ENTRADA_SLOTS)
+  const entradaBobinasMeta = Array.isArray(o.entradaBobinasMeta)
+    ? getMetaSeries({ [COR_ENTRADA_META_KEY]: o.entradaBobinasMeta }, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
+    : getMetaSeries(fb, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
 
   let metrics: CorteTurnMetrics | undefined
   if (o.metrics && typeof o.metrics === "object") {
@@ -391,6 +402,7 @@ export function normalizeCorteTurno(raw: unknown, formFallback?: Record<string, 
     metraje: readNumberString(o.metraje) || readNumberString(fb.metrajeCorte),
     observaciones: readString(o.observaciones) || readString(fb.corObservaciones),
     entradaBobinasKg,
+    entradaBobinasMeta,
     paletas: paletas.length > 0 ? paletas : getCorPaletas(fb),
     metrics,
     timer: parseTimer(o.timer),
@@ -421,10 +433,13 @@ export function parseCorteTurnoActual(
 export function materializeOpenCorteTurnoActual(
   form: Record<string, unknown>,
 ): CorteTurnoEntry | null {
+  if (form[COR_ACTUAL_KEY] === null) return null
   const parsed = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
   if (parsed) return parsed
-  const legacy = legacyActiveTurnoFromForm(form)
-  if (legacy) return legacy
+  if (form[COR_ACTUAL_KEY] === undefined) {
+    const legacy = legacyActiveTurnoFromForm(form)
+    if (legacy) return legacy
+  }
   const raw = form[COR_ACTUAL_KEY]
   if (raw && typeof raw === "object") {
     const t = normalizeCorteTurno(raw, form)
@@ -447,6 +462,11 @@ export function resolveCorteDisplayTimer(
   if (nested.state === "paused" || flat.state === "paused") {
     return nested.state === "paused" ? nested : flat
   }
+
+  const nestedLive = nested.state === "running"
+  const flatStale =
+    flat.state === "pending" || flat.state === "stopped" || flat.state === "completed"
+  if (nestedLive && flatStale) return nested
 
   if (flat.state !== "pending" && flat.state !== nested.state) return flat
 
@@ -547,6 +567,7 @@ export function legacyActiveTurnoFromForm(form: Record<string, unknown>): CorteT
     metraje: readNumberString(form.metrajeCorte),
     observaciones: readString(form.corObservaciones),
     entradaBobinasKg: ensureStringArray(form.corEntradaBobinasKg, COR_ENTRADA_SLOTS),
+    entradaBobinasMeta: getMetaSeries(form, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS),
     paletas: getCorPaletas(form),
     timer: timerFromLegacyFlatForm(form),
   }
@@ -564,6 +585,7 @@ export function corteTurnoToMirror(t: CorteTurnoEntry): Record<string, unknown> 
     metrajeCorte: t.metraje,
     corObservaciones: t.observaciones,
     corEntradaBobinasKg: t.entradaBobinasKg,
+    [COR_ENTRADA_META_KEY]: t.entradaBobinasMeta,
     cor_paletas: t.paletas,
     corSalidaPaletasKg: t.paletas.map((p) => p.rollosKg),
     ...timerToLegacyFlat(t.timer),
@@ -572,6 +594,7 @@ export function corteTurnoToMirror(t: CorteTurnoEntry): Record<string, unknown> 
 
 export function clearCorteMirrorKeys(): Record<string, unknown> {
   return {
+    [COR_LEGACY_ACTUAL_KEY]: null,
     corTurno: "",
     corGrupo: "",
     corOperador: "",
@@ -581,7 +604,11 @@ export function clearCorteMirrorKeys(): Record<string, unknown> {
     kgMermaCorte: "",
     metrajeCorte: "",
     corObservaciones: "",
+    corScrapRefileKg: "",
+    corScrapImpresoKg: "",
+    corScrapMalCorteKg: "",
     corEntradaBobinasKg: Array.from({ length: COR_ENTRADA_SLOTS }, () => ""),
+    [COR_ENTRADA_META_KEY]: emptyMetaSeries(COR_ENTRADA_SLOTS),
     cor_paletas: [
       {
         id: "p-01",
@@ -703,9 +730,13 @@ export function pickAuthoritativeCorPaletas(
 }
 
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
-  let actual =
-    parseCorteTurnoActual(mergedForm[COR_ACTUAL_KEY], mergedForm) ??
-    legacyActiveTurnoFromForm(mergedForm)
+  const turnos = parseCorteTurnos(mergedForm[COR_TURNOS_KEY], mergedForm)
+  const estado = readCorteEstadoArea(mergedForm[COR_ESTADO_KEY])
+
+  let actual = parseCorteTurnoActual(mergedForm[COR_ACTUAL_KEY], mergedForm)
+  if (actual === null && mergedForm[COR_ACTUAL_KEY] === undefined) {
+    actual = legacyActiveTurnoFromForm(mergedForm)
+  }
   if (actual) {
     actual = reconcileCorteTurnoFromMirror(actual, mergedForm)
     const flatTimer = timerFromLegacyFlatForm(mergedForm)
@@ -718,14 +749,11 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
     const paletas = pickAuthoritativeCorPaletas(topPaletas, actual.paletas)
     actual = { ...actual, paletas }
   }
-  const turnos = parseCorteTurnos(mergedForm[COR_TURNOS_KEY], mergedForm)
-  const estado = readCorteEstadoArea(mergedForm[COR_ESTADO_KEY])
 
   let next: Record<string, unknown> = {
     ...mergedForm,
     ...syncCorteFormMetrics(mergedForm),
     [COR_TURNOS_KEY]: turnos,
-    [COR_ACTUAL_KEY]: actual,
     [COR_ESTADO_KEY]: estado,
   }
 
@@ -739,19 +767,12 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
       corSalidaPaletasKg: paletas.map((p) => p.rollosKg),
       [COR_ACTUAL_KEY]: actual,
     }
-  } else if (estado === "finalizada") {
+  } else {
     next = {
       ...next,
-      ...clearCorteMirrorKeys(),
-      ...corteAggregatedTimerMirrorFromTurnos(turnos),
       [COR_ACTUAL_KEY]: null,
-    }
-  } else if (
-    mergedForm[COR_ACTUAL_KEY] === null ||
-    mergedForm[COR_ACTUAL_KEY] === undefined
-  ) {
-    if (!readString(mergedForm.corTurno) && !readString(mergedForm.corOperador)) {
-      next = { ...next, ...clearCorteMirrorKeys(), [COR_ACTUAL_KEY]: null }
+      ...clearCorteMirrorKeys(),
+      ...(turnos.length > 0 ? corteAggregatedTimerMirrorFromTurnos(turnos) : {}),
     }
   }
 
@@ -860,6 +881,7 @@ export function createNewCorteTurno(params: {
     metraje: "",
     observaciones: "",
     entradaBobinasKg: Array.from({ length: COR_ENTRADA_SLOTS }, () => ""),
+    entradaBobinasMeta: emptyMetaSeries(COR_ENTRADA_SLOTS),
     paletas: [
       {
         id: "p-01",

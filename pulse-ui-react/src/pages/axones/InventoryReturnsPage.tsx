@@ -5,14 +5,12 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleDot,
   ClipboardList,
   Filter,
   Hash,
   Layers,
   Package,
   PackageOpen,
-  RefreshCw,
   Scale,
   Settings2,
   Tag,
@@ -31,7 +29,6 @@ import {
 } from "@/components/axones/catalog-list-classes"
 import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
-import { ReasonModal } from "@/components/axones/ReasonModal"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -70,43 +67,40 @@ type ReturnRow = {
   work_order?: { code: string }
 }
 
-function returnStatusLabel(status: string): string {
-  if (status === "pending") return "Pendiente"
-  if (status === "accepted") return "Aceptada"
-  return status
-}
-
-function viewHint(tab: "pending" | "history"): string {
-  if (tab === "pending") {
-    return "Las devoluciones registradas desde otros flujos aparecerán aquí hasta que se acepte el ingreso."
-  }
-  return "Devoluciones ya aceptadas e ingresadas al inventario. Las pendientes están en la pestaña Pendientes."
+function viewHint(kind: "all" | "good" | "rejected"): string {
+  const kindText =
+    kind === "good"
+      ? "Se muestran solo devoluciones buenas (reingreso a inventario)."
+      : kind === "rejected"
+        ? "Se muestran solo devoluciones malas (bobinas rechazadas)."
+        : "Se muestran devoluciones buenas y malas."
+  return `Las devoluciones registradas desde otros flujos aparecerán aquí hasta que se verifique el ingreso. ${kindText}`
 }
 
 export default function InventoryReturnsPage() {
-  const [listTab, setListTab] = useState<"pending" | "history">("pending")
+  const [kindTab, setKindTab] = useState<"all" | "good" | "rejected">("all")
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ReturnRow> | null>(null)
-  const [reasonModalOpen, setReasonModalOpen] = useState(false)
-  const [pendingAcceptId, setPendingAcceptId] = useState<number | null>(null)
-  const [lastReason, setLastReason] = useState("")
-
-  const isHistoryTab = listTab === "history"
-  const colCount = isHistoryTab ? 9 : 8
+  const colCount = 8
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const statusFilter = listTab === "pending" ? "pending" : "accepted"
+      const destinationAreaFilter =
+        kindTab === "good"
+          ? "material"
+          : kindTab === "rejected"
+            ? "bobinas_rechazadas"
+            : undefined
       const data = await apiFetch<LaravelPaginated<ReturnRow>>(
         "inventory-returns",
         {
           query: {
             page,
             per_page: perPage,
-            status: statusFilter,
+            destination_area: destinationAreaFilter,
           },
         },
       )
@@ -118,7 +112,7 @@ export default function InventoryReturnsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, listTab])
+  }, [page, perPage, kindTab])
 
   useEffect(() => {
     void load()
@@ -130,7 +124,7 @@ export default function InventoryReturnsPage() {
         method: "POST",
         body: JSON.stringify({ reason }),
       })
-      toast.success("Devolución aceptada; ingreso aplicado al inventario.")
+      toast.success("Devolución verificada; ingreso aplicado al inventario.")
       void load()
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -144,20 +138,8 @@ export default function InventoryReturnsPage() {
     <div className="mat-list-shell">
       <CatalogPageShell
         title="Devoluciones a inventario"
-        subtitle="Pendiente hasta aceptar ingreso."
+        subtitle="Pendiente hasta verificar ingreso."
         icon={PackageOpen}
-        action={
-          <Button
-            type="button"
-            variant="outline"
-            className={cn("shadow-sm", catalogPaginationOutlineButtonClass)}
-            disabled={loading}
-            onClick={() => void load()}
-          >
-            <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} aria-hidden />
-            Actualizar
-          </Button>
-        }
       >
         <AxonesInventoryModuleNav active="devoluciones" variant="catalog" />
 
@@ -169,19 +151,22 @@ export default function InventoryReturnsPage() {
         ) : (
           <>
             <Tabs
-              value={listTab}
+              value={kindTab}
               onValueChange={(v) => {
-                setListTab(v as "pending" | "history")
+                setKindTab(v as "all" | "good" | "rejected")
                 setPage(1)
               }}
               className="w-full"
             >
               <TabsList className="mat-view-tab-list">
-                <TabsTrigger value="pending" className="mat-view-tab-trigger">
-                  Pendientes
+                <TabsTrigger value="all" className="mat-view-tab-trigger">
+                  Todas
                 </TabsTrigger>
-                <TabsTrigger value="history" className="mat-view-tab-trigger">
-                  Historial
+                <TabsTrigger value="good" className="mat-view-tab-trigger">
+                  Buenas
+                </TabsTrigger>
+                <TabsTrigger value="rejected" className="mat-view-tab-trigger">
+                  Malas
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -192,7 +177,7 @@ export default function InventoryReturnsPage() {
                 <p className="text-sm font-medium">Filtrar listado</p>
               </div>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                {viewHint(listTab)}
+                {viewHint(kindTab)}
               </p>
             </div>
 
@@ -213,9 +198,6 @@ export default function InventoryReturnsPage() {
                       Cantidad
                     </CatalogTableHead>
                     <CatalogTableHead icon={Layers}>Área destino</CatalogTableHead>
-                    {isHistoryTab ? (
-                      <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
-                    ) : null}
                     <CatalogTableHeadRight icon={Settings2} className="whitespace-nowrap">
                       Acciones
                     </CatalogTableHeadRight>
@@ -233,30 +215,10 @@ export default function InventoryReturnsPage() {
                           </div>
                           <div className="max-w-sm space-y-2">
                             <p className="text-foreground text-sm font-medium">
-                              {listTab === "pending"
-                                ? "Sin devoluciones pendientes"
-                                : "Sin registros en el historial"}
+                              Sin devoluciones
                             </p>
                             <p className="text-muted-foreground text-xs leading-relaxed">
-                              {listTab === "pending" ? (
-                                viewHint("pending")
-                              ) : (
-                                <>
-                                  Las devoluciones aceptadas aparecen aquí. Las pendientes están en la
-                                  pestaña{" "}
-                                  <button
-                                    type="button"
-                                    className="text-primary font-medium underline underline-offset-4"
-                                    onClick={() => {
-                                      setListTab("pending")
-                                      setPage(1)
-                                    }}
-                                  >
-                                    Pendientes
-                                  </button>
-                                  .
-                                </>
-                              )}
+                              {viewHint(kindTab)}
                             </p>
                           </div>
                         </div>
@@ -319,25 +281,21 @@ export default function InventoryReturnsPage() {
                               {labelInventoryArea(r.destination_area)}
                             </span>
                           </TableCell>
-                          {isHistoryTab ? (
-                            <TableCell className="p-3 align-middle text-sm">
-                              {returnStatusLabel(r.status)}
-                            </TableCell>
-                          ) : null}
                           <TableCell className="p-3 align-middle text-right">
-                            {!isHistoryTab && r.status === "pending" ? (
+                            {r.status === "pending" ? (
                               <button
                                 type="button"
                                 className="mat-action-accept"
-                                onClick={() => {
-                                  setPendingAcceptId(r.id)
-                                  setReasonModalOpen(true)
-                                }}
+                                onClick={() => void acceptReturn(r.id, "Verificado en devoluciones")}
                               >
                                 <CheckCircle2 className="size-3.5" aria-hidden />
-                                Aceptar ingreso
+                                Verificar
                               </button>
-                            ) : null}
+                            ) : (
+                              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                                Verificado
+                              </span>
+                            )}
                           </TableCell>
                         </TableRow>
                       )
@@ -430,26 +388,6 @@ export default function InventoryReturnsPage() {
           </>
         )}
       </CatalogPageShell>
-
-      <ReasonModal
-        open={reasonModalOpen}
-        initialValue={lastReason}
-        title="Razón del ingreso"
-        description="Para aceptar la devolución debe indicar una razón operativa."
-        confirmLabel="Aceptar ingreso"
-        onCancel={() => {
-          setReasonModalOpen(false)
-          setPendingAcceptId(null)
-        }}
-        onConfirm={(reason) => {
-          const id = pendingAcceptId
-          if (!id) return
-          setLastReason(reason)
-          setReasonModalOpen(false)
-          setPendingAcceptId(null)
-          void acceptReturn(id, reason)
-        }}
-      />
     </div>
   )
 }

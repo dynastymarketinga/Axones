@@ -263,7 +263,9 @@ class WorkOrderOrdenTrabajoService
                 $prev = $existing['corTurnoActual'] ?? null;
                 $closingTurno = is_array($incoming['cor_turnos'] ?? null)
                     && count($incoming['cor_turnos']) > count($existing['cor_turnos'] ?? []);
-                if (is_array($prev) && empty($prev['closed_at']) && ! $closingTurno) {
+                $clearedMirror = array_key_exists('corOperador', $incoming)
+                    && trim((string) $incoming['corOperador']) === '';
+                if (is_array($prev) && empty($prev['closed_at']) && ! $closingTurno && ! $clearedMirror) {
                     continue;
                 }
             }

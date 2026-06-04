@@ -1,31 +1,26 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   ArrowUp,
   Calendar,
-  CalendarClock,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Circle,
-  Clock,
   CircleDashed,
   ClipboardList,
+  CircleDot,
   Droplets,
   ExternalLink,
+  Package,
   FileSearch,
   History,
   Inbox,
-  Info,
   Layers2,
   List,
   ListFilter,
   ListOrdered,
   Minus,
-  PauseCircle,
-  PlayCircle,
   Printer,
   Puzzle,
   Rows3,
@@ -39,17 +34,40 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { MesBandejaCriteriaDateInput } from "@/components/axones/MesBandejaCriteriaDateInput"
+import {
+  MesBandejaCriteriaField,
+  mesBandejaCriteriaSelectClass,
+} from "@/components/axones/MesBandejaCriteriaField"
+import { MesBandejaFiltersPanel } from "@/components/axones/MesBandejaFiltersPanel"
+import { MesBandejaWorkflowStatusPill } from "@/components/axones/MesBandejaWorkflowStatusPill"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
-import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
   INSUMOS_BANDEJA_TABLE_COLSPAN,
   InsumosBandejaTableCard,
+  BandejaIconColumnHeadLabel,
+  BandejaTableHeadLabel,
   insumosBandejaDataRowClassName,
   insumosBandejaIdLinkClassName,
+  insumosBandejaTableHeadClassName,
+  MesBandejaRowIndexDataCell,
+  MesBandejaRowIndexHeadCell,
+  mesBandejaRowNumber,
+  mesBandejaIconColumnCellClass,
+  mesBandejaIconColumnHeadClass,
+  mesBandejaRowTopCellClass,
+  mesBandejaStickyOtCellClass,
+  mesBandejaStickyOtHeadClass,
+  MesBandejaTableColgroup,
+  mesBandejaTableClassName,
 } from "@/components/axones/InsumosBandejaTable"
-import { catalogFilterDateInputClass, catalogFilterPanelClass, catalogSelectTriggerClass } from "@/components/axones/catalog-list-classes"
+import {
+  BANDEJA_PER_PAGE_OPTIONS,
+  BandejaTablePagination,
+} from "@/components/axones/BandejaTablePagination"
+import { catalogFilterPanelClass } from "@/components/axones/catalog-list-classes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -61,7 +79,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -74,11 +91,12 @@ import {
   TableBody,
   TableCell,
   TableHead,
+  TableFooter,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { apiFetch, ApiError } from "@/lib/api"
 import {
   BANDEJA_COLLECT_MAX_PAGES,
@@ -92,7 +110,38 @@ import {
 } from "@/lib/axones-area-bandeja"
 import type { LaravelPaginated, WorkOrderListRow } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
+import {
+  MesBandejaBobinasDataCell,
+  MesBandejaBobinasHeadCell,
+  MesBandejaKgTableHeadCells,
+  MesBandejaKgTableRowCells,
+  MesBandejaKgTableTotalsRow,
+} from "@/components/axones/MesBandejaKgTableCells"
+import { MesBandejaBobinasExpandPanel } from "@/components/axones/MesBandejaBobinasExpandPanel"
+import {
+  MesBandejaTurnoRegistradoDataCell,
+  MesBandejaTurnoRegistradoHeadCell,
+} from "@/components/axones/MesBandejaTurnoRegistradoCell"
+import {
+  MesBandejaProgramacionTableHeadCells,
+  MesBandejaProgramacionTableRowCells,
+} from "@/components/axones/MesBandejaProgramacionTableCells"
+import {
+  MesBandejaAreaPendientesTableHeadCells,
+  MesBandejaAreaPendientesTableRowCells,
+} from "@/components/axones/MesBandejaAreaPendientesTableCells"
+import { MesActivasSubTabsBar } from "@/components/axones/MesActivasSubTabsBar"
+import { MesBandejaProduccionWorkflowTabs } from "@/components/axones/MesBandejaProduccionWorkflowTabs"
+import { bandejaProgramacionRowAccentClass, readBandejaProgramacion } from "@/lib/area-bandeja-programacion"
+import {
+  bandejaPendientesAreaColumnCount,
+  mesBandejaPendientesTableMinWidth,
+  type BandejaPendientesAreaKey,
+} from "@/lib/area-bandeja-pendientes-columns"
 import { MesBandejaTimerCell } from "@/components/axones/MesBandejaTimerCell"
+import { MesBandejaTimesModalBody } from "@/components/axones/MesBandejaTimesModalBody"
+import { MontajeMesBandejaTimesPanel } from "@/components/axones/montaje-bandeja-modals"
+import { PrintingMesBandejaTimesPanel } from "@/components/axones/printing-bandeja-modals"
 import {
   areaHasMesTimerColumn,
   mesAreaDisplayName,
@@ -100,14 +149,20 @@ import {
   MES_CONTROL_SAVED_EVENTS,
   type MesBandejaAreaKey,
 } from "@/lib/area-mes-band-helpers"
+import { printingDevolucionesFromWorkOrderRow, mesBandejaDevolucionesTotalsFromSnapshots } from "@/lib/printing-mes-band-devoluciones"
 import {
-  formatHmsFromSeconds,
-  mesBandejaCardClass,
+  areaShowsMesKgBreakdownColumns,
+  MES_BANDEJA_INDEX_COLUMN_COUNT,
+  MES_BANDEJA_KG_BREAKDOWN_COLUMN_COUNT,
+  MES_BANDEJA_PROGRAMACION_COLUMN_COUNT,
+  mesBandejaOtLinkClassName,
   mesBandejaRowAccentClass,
-  mesBandejaStatePillClass,
+  MES_PRODUCCION_WORKFLOW_TAB_ORDER,
   mesBandejaWorkflowTitle,
-  type MesBandejaMes,
+  mesBandejaKgTotalsFromBands,
+  mesProduccionWorkflowCountsEmpty,
   type MesBandejaWorkflow,
+  type MesProduccionWorkflowFilter,
 } from "@/lib/mes-timer-band-shared"
 import {
   corteActivasBucketFromRow,
@@ -118,6 +173,10 @@ import {
   type LaminacionActivasSubTab,
 } from "@/lib/laminacion-mes-band-status"
 import {
+  montajeActivasBucketFromRow,
+  type MontajeActivasSubTab,
+} from "@/lib/montaje-mes-band-status"
+import {
   printingActivasBucketFromRow,
   type PrintingActivasSubTab,
 } from "@/lib/printing-mes-band-status"
@@ -127,8 +186,7 @@ import {
 } from "@/lib/printing-planilla-preview"
 import {
   areaRequestBadgeClass,
-  areaRequestStatusGlyph,
-  areaRequestStatusLabel,
+  AreaRequestStatusIcon,
 } from "@/lib/axones-area-request-display"
 import {
   areaBandejaProgressStickerClass,
@@ -139,19 +197,6 @@ import {
   resolveAreaRequestStatusForTab,
 } from "@/lib/area-request-for-row"
 import { cn } from "@/lib/utils"
-import {
-  accumulatePrintingFromJson,
-  IMP_ACTUAL_KEY,
-  IMP_TURNOS_KEY,
-  parsePrintingTurnoActual,
-  parsePrintingTurnos,
-  type PrintingTurnoEntry,
-} from "@/pages/axones/printing-turnos"
-import {
-  PrintingTurnoHistorialItem,
-  personnelLinesFromPrintingTurno,
-  turnoGrupoLabelPrinting,
-} from "@/pages/axones/printing-shift-history"
 
 export type AreaKey = "printing" | "montaje" | "laminacion" | "corte" | "tintas"
 
@@ -173,32 +218,12 @@ const AREA_ICON: Record<AreaKey, LucideIcon> = {
   tintas: Droplets,
 }
 
-function mesWorkflowPillGlyph(wf: MesBandejaWorkflow) {
-  const c = "h-3 w-3 shrink-0"
-  if (wf === "iniciado") {
-    return <PlayCircle className={cn(c, "text-emerald-600 dark:text-emerald-400")} aria-hidden />
-  }
-  if (wf === "pausado") {
-    return <PauseCircle className={cn(c, "text-amber-600 dark:text-amber-400")} aria-hidden />
-  }
-  if (wf === "entre_turnos") {
-    return <Clock className={cn(c, "text-sky-600 dark:text-sky-400")} aria-hidden />
-  }
-  if (wf === "turno_abierto") {
-    return <PlayCircle className={cn(c, "text-cyan-600 dark:text-cyan-400")} aria-hidden />
-  }
-  if (wf === "finalizado") {
-    return <CheckCircle2 className={cn(c, "text-slate-600 dark:text-slate-300")} aria-hidden />
-  }
-  return <CircleDashed className={cn(c, "text-violet-600 dark:text-violet-400")} aria-hidden />
-}
-
 function areaTitle(area: AreaKey): string {
   if (area === "printing") return "Área: Impresión"
   if (area === "montaje") return "Área: Montaje"
   if (area === "laminacion") return "Área: Laminación"
   if (area === "corte") return "Área: Corte"
-  return "Área: Tintas"
+  return "Área: Tintas y Mezcla de tinta"
 }
 
 function historialTabLabel(area: AreaKey): string {
@@ -224,195 +249,212 @@ function areaSubtitle(area: AreaKey): string {
   return "En curso: solicitud pendiente y OT en cola o ya en la etapa de este área. Historial: solicitudes cerradas en el área (hechas o canceladas)."
 }
 
-function mesBandejaStatusIcon(wf: MesBandejaWorkflow) {
-  const c = "h-4 w-4 shrink-0"
-  if (wf === "iniciado") {
-    return (
-      <span className="relative inline-flex shrink-0">
-        <PlayCircle
-          className={cn(c, "text-emerald-600 dark:text-emerald-400")}
-          aria-hidden
-        />
-        <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-        </span>
-      </span>
-    )
-  }
-  if (wf === "pausado") {
-    return <PauseCircle className={cn(c, "text-amber-600 dark:text-amber-400")} aria-hidden />
-  }
-  if (wf === "turno_abierto") {
-    return <PlayCircle className={cn(c, "text-cyan-600 dark:text-cyan-400")} aria-hidden />
-  }
-  if (wf === "entre_turnos") {
-    return <Clock className={cn(c, "text-sky-600 dark:text-sky-400")} aria-hidden />
-  }
-  if (wf === "finalizado") {
-    return <CheckCircle2 className={cn(c, "text-slate-600 dark:text-slate-300")} aria-hidden />
-  }
-  return <CircleDashed className={cn(c, "text-violet-600 dark:text-violet-400")} aria-hidden />
-}
-
-function MesBandDetailBlock({
-  mesBand,
-  reqStatus,
-}: {
-  mesBand: MesBandejaMes
-  reqStatus: string
-}) {
-  return (
-    <div className="space-y-4">
-      <div className={cn(mesBandejaCardClass(mesBand.workflow), "shadow-md")}>
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-gradient-to-l from-background/80 to-transparent" />
-        <div className="relative flex gap-2.5">
-          <div className="pt-0.5">{mesBandejaStatusIcon(mesBand.workflow)}</div>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={mesBandejaStatePillClass(mesBand.workflow)}>
-                {mesBandejaWorkflowTitle(mesBand.workflow)}
-              </span>
-            </div>
-            <p className="text-foreground/90 text-sm font-semibold leading-snug">{mesBand.contextLine}</p>
-            <p className="text-muted-foreground text-xs leading-relaxed">{mesBand.hint}</p>
-            {mesBand.showTimes ? (
-              <div className="space-y-1.5 border-t border-black/[0.06] pt-3 dark:border-white/[0.08]">
-                <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Efectivo acumulado
-                  </span>
-                  <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-foreground tabular-nums">
-                    {mesBand.effectiveHms}
-                  </span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  {mesBand.showDeadBreakdown ? (
-                    <>
-                      Paradas (acum.):{" "}
-                      <span className="font-mono text-foreground/90">{mesBand.deadHms}</span>
-                      <span className="text-muted-foreground/70"> · </span>
-                    </>
-                  ) : null}
-                  Total (efectivo + paradas):{" "}
-                  <span className="font-mono text-foreground/90">{mesBand.totalHms}</span>
-                </p>
-                {mesBand.producidoKg != null ? (
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Producido acumulado:{" "}
-                    <span className="font-mono font-semibold text-foreground">
-                      {mesBand.producidoKg.toFixed(2)} Kg
-                    </span>
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <span>Solicitud de área</span>
-        <Badge variant="outline" className={cn(areaRequestBadgeClass(reqStatus), "inline-flex h-6 items-center gap-1 px-2 text-xs")}>
-          {areaRequestStatusGlyph(reqStatus)}
-          {areaRequestStatusLabel(reqStatus)}
-        </Badge>
-      </div>
-    </div>
-  )
-}
-
 function printingFormRecord(row: WorkOrderListRow): Record<string, unknown> | null {
   const f = row.technical_document?.form
   return f && typeof f === "object" && !Array.isArray(f) ? (f as Record<string, unknown>) : null
 }
 
-function printingTimerStateEs(st: string): string {
-  if (st === "running") return "En marcha"
-  if (st === "paused") return "En pausa"
-  if (st === "pending") return "Pendiente"
-  if (st === "stopped") return "Turno cerrado"
-  if (st === "completed") return "Completado"
-  return st
+function MesBandejaTableHeaderCells() {
+  return (
+    <>
+      <MesBandejaRowIndexHeadCell />
+      <TableHead className={mesBandejaStickyOtHeadClass}>
+        <BandejaTableHeadLabel icon={ClipboardList}>Orden de trabajo</BandejaTableHeadLabel>
+      </TableHead>
+      <TableHead className={mesBandejaIconColumnHeadClass}>
+        <BandejaIconColumnHeadLabel
+          icon={CircleDot}
+          line1="Estado"
+          line2="prod."
+          title="Estado de producción MES (cronómetro / turno)"
+        />
+      </TableHead>
+      <TableHead className={mesBandejaIconColumnHeadClass}>
+        <BandejaIconColumnHeadLabel
+          icon={Timer}
+          line1="Tempor."
+          title="Temporizador de la OT"
+        />
+      </TableHead>
+      <MesBandejaTurnoRegistradoHeadCell />
+    </>
+  )
 }
 
-function PrintingMesModalTurnosSection({ row }: { row: WorkOrderListRow }) {
-  const form = printingFormRecord(row)
-  const cerrados = form ? parsePrintingTurnos(form[IMP_TURNOS_KEY]) : []
-  const actual = form ? parsePrintingTurnoActual(form[IMP_ACTUAL_KEY]) : null
+function MesBandejaTableHeadMaterialAcciones() {
+  return (
+    <>
+      <TableHead className={cn(insumosBandejaTableHeadClassName, "px-3 text-center")}>
+        <span
+          className="inline-flex w-full flex-col items-center gap-1 text-center"
+          title="Producto y cliente de la OT"
+        >
+          <Package className="h-3.5 w-3.5 shrink-0 text-primary/55" aria-hidden />
+          <span className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">
+            Material
+          </span>
+        </span>
+      </TableHead>
+      <TableHead className={cn(insumosBandejaTableHeadClassName, "px-2 text-center sm:px-3")}>
+        <span
+          className="inline-flex w-full flex-col items-center gap-1 text-center"
+          title="Acciones sobre la OT"
+        >
+          <ExternalLink className="h-3.5 w-3.5 shrink-0 text-primary/55" aria-hidden />
+          <span className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">
+            Acciones
+          </span>
+        </span>
+      </TableHead>
+    </>
+  )
+}
 
-  if (cerrados.length === 0 && !actual) {
-    return (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-muted/15 p-3 text-xs text-muted-foreground">
-        Sin turnos de impresión guardados en la OT. Los datos aparecen al iniciar turno y guardar en Producción →
-        Impresión.
-      </div>
-    )
-  }
-
-  const totalReg = cerrados.length + (actual ? 1 : 0)
-  const acum = accumulatePrintingFromJson(cerrados, actual)
+function MesBandejaEstadoProduccionCell({
+  mesBand,
+  reqStatus,
+  areaProgressLabelText,
+}: {
+  mesBand: ReturnType<typeof mesBandFromWorkOrderRow>
+  reqStatus: string
+  areaProgressLabelText: string
+}) {
+  const reqKey = (reqStatus ?? "").toLowerCase().trim()
+  const showSolicitudCerrada = reqKey === "done" || reqKey === "cancelled"
 
   return (
-    <div className="space-y-3 border-t border-black/[0.06] pt-4 dark:border-white/[0.08]">
-      <div className="flex items-center gap-2">
-        <History className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Turnos acumulativos · {totalReg} registro(s)
+    <TableCell className={mesBandejaIconColumnCellClass}>
+      <div className="flex items-center justify-center gap-1">
+        {mesBand ? (
+          <MesBandejaWorkflowStatusPill workflow={mesBand.workflow} statusLabel={mesBand.statusLabel} />
+        ) : (
+          <span
+            className={cn(
+              areaBandejaProgressStickerClass(areaProgressLabelText),
+              "inline-flex h-9 w-9 items-center justify-center rounded-full p-0",
+            )}
+            title="Estado de producción en esta área (no depende del tablero Kanban)"
+          >
+            <CircleDashed className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+            <span className="sr-only">{areaProgressLabelText}</span>
+          </span>
+        )}
+        {showSolicitudCerrada ? <AreaRequestStatusIcon status={reqStatus} /> : null}
+      </div>
+    </TableCell>
+  )
+}
+
+function MesBandejaAccionesCell({
+  area,
+  openUrl,
+  workOrderId,
+  planillaPreviewEnabled,
+  onPlanillaPreview,
+}: {
+  area: AreaKey
+  openUrl: (id: number) => string
+  workOrderId: number
+  planillaPreviewEnabled: boolean
+  onPlanillaPreview: () => void
+}) {
+  return (
+    <TableCell className={cn(mesBandejaRowTopCellClass, "px-2 text-center sm:px-3")}>
+      <TooltipProvider delayDuration={220}>
+        <div className="flex items-center justify-center gap-2">
+          {area === "printing" ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn(
+                    "h-9 w-9 shrink-0 border-sky-500/45 bg-sky-500/12 text-sky-800 shadow-sm",
+                    "hover:border-sky-500 hover:bg-sky-500/22 hover:text-sky-900",
+                    "dark:text-sky-100 dark:hover:bg-sky-500/28",
+                  )}
+                  disabled={!planillaPreviewEnabled}
+                  aria-label="Vista previa planilla"
+                  onClick={onPlanillaPreview}
+                >
+                  <FileSearch className="h-4 w-4" aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[14rem] text-center">
+                {planillaPreviewEnabled
+                  ? "Vista previa de la planilla física de impresión"
+                  : "Disponible tras «Finalizar área de impresión»"}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className={cn(
+                  "h-9 w-9 shrink-0 border-violet-500/45 bg-violet-500/12 text-violet-800 shadow-sm",
+                  "hover:border-violet-500 hover:bg-violet-500/22 hover:text-violet-900",
+                  "dark:text-violet-100 dark:hover:bg-violet-500/28",
+                )}
+                asChild
+              >
+                <Link to={openUrl(workOrderId)} aria-label="Abrir OT">
+                  <ExternalLink className="h-4 w-4" aria-hidden />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Abrir OT en {mesAreaDisplayName(area as MesBandejaAreaKey)}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
+    </TableCell>
+  )
+}
+
+function BandejaMaterialCell({
+  order,
+  materialTitle,
+}: {
+  order: WorkOrderListRow
+  materialTitle: string
+}) {
+  return (
+    <TableCell className={cn(mesBandejaRowTopCellClass, "max-w-[10rem] px-3 text-center")}>
+      <div className="flex flex-col items-center gap-1">
+        <p
+          className="text-sm font-semibold leading-snug text-foreground line-clamp-2"
+          title={materialTitle}
+        >
+          {order.product?.name?.trim() ? order.product.name : "—"}
+        </p>
+        <p className="text-xs font-medium leading-snug text-muted-foreground line-clamp-2">
+          {order.client?.name?.trim() ? order.client.name : "—"}
         </p>
       </div>
-      <div className="grid gap-2 text-xs sm:grid-cols-3">
-        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
-          <p className="text-muted-foreground">Producido (salida)</p>
-          <p className="font-mono font-semibold tabular-nums text-foreground">{acum.producidoKg.toFixed(2)} Kg</p>
-        </div>
-        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
-          <p className="text-muted-foreground">Entrada</p>
-          <p className="font-mono font-semibold tabular-nums text-foreground">{acum.entradaKg.toFixed(2)} Kg</p>
-        </div>
-        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
-          <p className="text-muted-foreground">Desperdicio</p>
-          <p className="font-mono font-semibold tabular-nums text-foreground">{acum.scrapKg.toFixed(2)} Kg</p>
-        </div>
-      </div>
-      <ul className="max-h-[min(42vh,18rem)] space-y-2 overflow-y-auto pr-1">
-        {cerrados.map((t) => (
-          <li key={t.id}>
-            <PrintingTurnoHistorialItem turno={t} />
-          </li>
-        ))}
-        {actual ? (
-          <li className="rounded-md border border-violet-300/40 bg-violet-500/6 p-2.5 text-xs">
-            <p className="font-medium text-foreground">Turno en curso · {turnoGrupoLabelPrinting(actual.turno, actual.grupo)}</p>
-            <p className="text-muted-foreground mt-1">
-              Temporizador: {printingTimerStateEs(String(actual.timer.state))}
-            </p>
-            <p className="text-muted-foreground mt-1">
-              Efectivo {formatHmsFromSeconds(actual.timer.effectiveAccSec)} · Muerto{" "}
-              {formatHmsFromSeconds(actual.timer.deadAccSec)} · Total acum. turno{" "}
-              {formatHmsFromSeconds(actual.timer.effectiveAccSec + actual.timer.deadAccSec)}
-            </p>
-            <p className="mt-1.5 font-medium text-foreground/90">Personal</p>
-            {personnelLinesFromPrintingTurno(actual).length === 0 ? (
-              <p className="text-muted-foreground">Sin personal registrado.</p>
-            ) : (
-              <ul className="mt-0.5 space-y-0.5">
-                {personnelLinesFromPrintingTurno(actual).map((line, i) => (
-                  <li key={`actual-p-${i}`}>{line}</li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ) : null}
-      </ul>
-    </div>
+    </TableCell>
   )
 }
 
 type AreaBandejaTab = "activas" | "historial"
 
-type MesActivasSubTab = PrintingActivasSubTab | LaminacionActivasSubTab | CorteActivasSubTab
+type MesActivasSubTab =
+  | PrintingActivasSubTab
+  | LaminacionActivasSubTab
+  | CorteActivasSubTab
+  | MontajeActivasSubTab
 
-/** Sub-vistas dentro de «En curso» (impresión y laminación). */
+function mesActivasSubTabAreaLabel(area: AreaKey): string {
+  if (area === "laminacion") return "laminación"
+  if (area === "corte") return "corte"
+  if (area === "montaje") return "montaje"
+  return "impresión"
+}
+
+/** Sub-vistas dentro de «En curso» (impresión, laminación, corte, montaje). */
 const MES_ACTIVAS_SUB_TAB_LABEL: Record<MesActivasSubTab, string> = {
   pendientes: "Pendientes",
   produccion: "En producción",
@@ -420,13 +462,50 @@ const MES_ACTIVAS_SUB_TAB_LABEL: Record<MesActivasSubTab, string> = {
 }
 
 function areaUsesMesActivasSubTabs(area: AreaKey): boolean {
-  return area === "printing" || area === "laminacion" || area === "corte"
+  return area === "printing" || area === "laminacion" || area === "corte" || area === "montaje"
 }
 
 function mesActivasBucketFromRow(area: AreaKey, row: WorkOrderListRow, nowMs: number): MesActivasSubTab {
+  if (area === "montaje") return montajeActivasBucketFromRow(row, nowMs)
   if (area === "laminacion") return laminacionActivasBucketFromRow(row, nowMs)
   if (area === "corte") return corteActivasBucketFromRow(row, nowMs)
   return printingActivasBucketFromRow(row, nowMs)
+}
+
+function bandejaPriorityIcon(value: string): LucideIcon {
+  if (value === "urgente") return Zap
+  if (value === "alta") return ArrowUp
+  if (value === "normal") return Minus
+  return List
+}
+
+function bandejaPriorityIconClass(value: string): string {
+  if (value === "urgente") return "text-amber-600 dark:text-amber-400"
+  if (value === "alta") return "text-orange-600 dark:text-orange-400"
+  if (value === "normal") return "text-sky-600 dark:text-sky-400"
+  return "text-violet-600/75 dark:text-violet-300"
+}
+
+function bandejaStatusIcon(value: string): LucideIcon {
+  if (value === "open") return Circle
+  if (value === "completed") return CheckCircle2
+  if (value === "cancelled") return XCircle
+  return List
+}
+
+function bandejaStatusIconClass(value: string): string {
+  if (value === "open") return "text-sky-600 dark:text-sky-400"
+  if (value === "completed") return "text-emerald-600 dark:text-emerald-400"
+  if (value === "cancelled") return "text-rose-600 dark:text-rose-400"
+  return "text-muted-foreground"
+}
+
+function areaToPendientesKey(area: AreaKey): BandejaPendientesAreaKey {
+  if (area === "printing") return "printing"
+  if (area === "montaje") return "montaje"
+  if (area === "laminacion") return "laminacion"
+  if (area === "corte") return "corte"
+  return "tintas"
 }
 
 export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
@@ -435,6 +514,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [qInput, setQInput] = useState("")
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState<number>(10)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(
     null,
@@ -446,20 +526,41 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [priority, setPriority] = useState<string>("all")
   const [createdFrom, setCreatedFrom] = useState("")
   const [createdTo, setCreatedTo] = useState("")
-  const [areaRequestedFrom, setAreaRequestedFrom] = useState("")
-  const [areaRequestedTo, setAreaRequestedTo] = useState("")
   const skipSearchPageReset = useRef(true)
   /** Evita forzar «En producción» tras elegir manualmente otra sub-vista MES. */
   const mesActivasSubTabAutoPickedRef = useRef(false)
+  const mesProduccionFilterTouchedRef = useRef(false)
   /** Reloj en vivo para tiempo efectivo acumulado (bandeja impresión). */
   const [mesBandNowMs, setMesBandNowMs] = useState(() => Date.now())
   /** Modal de detalle MES (impresión): id de OT abierta o null. */
   const [mesModalId, setMesModalId] = useState<number | null>(null)
-  const hasTimerColumn = areaHasMesTimerColumn(area)
-  const bandejaActivasColSpan = hasTimerColumn ? 5 : INSUMOS_BANDEJA_TABLE_COLSPAN
-  const bandejaHistorialColSpan = hasTimerColumn ? 5 : INSUMOS_BANDEJA_TABLE_COLSPAN
-  /** Filtro de bandeja MES (impresión / laminación) dentro de «En curso». */
+  /** Fila expandida con devoluciones de bobina (solo impresión). */
+  const [expandedBobinasOtId, setExpandedBobinasOtId] = useState<number | null>(null)
+  /** Filtro de bandeja MES dentro de «En curso». */
   const [mesActivasSubTab, setMesActivasSubTab] = useState<MesActivasSubTab>("pendientes")
+  const [mesProduccionWorkflow, setMesProduccionWorkflow] =
+    useState<MesProduccionWorkflowFilter>("turno_abierto")
+  const hasTimerColumn = areaHasMesTimerColumn(area)
+  const showKgBreakdown = hasTimerColumn && areaShowsMesKgBreakdownColumns(area)
+  const pendientesAreaKey = areaToPendientesKey(area)
+  const pendientesAreaCols = bandejaPendientesAreaColumnCount(pendientesAreaKey)
+  const showProgramacionColumns =
+    activeTab === "activas" &&
+    areaUsesMesActivasSubTabs(area) &&
+    mesActivasSubTab === "pendientes"
+  const mesBandejaColCount = hasTimerColumn
+    ? showProgramacionColumns
+      ? MES_BANDEJA_INDEX_COLUMN_COUNT +
+        1 +
+        MES_BANDEJA_PROGRAMACION_COLUMN_COUNT +
+        pendientesAreaCols +
+        2
+      : MES_BANDEJA_INDEX_COLUMN_COUNT +
+        6 +
+        (showKgBreakdown ? MES_BANDEJA_KG_BREAKDOWN_COLUMN_COUNT : 0)
+    : INSUMOS_BANDEJA_TABLE_COLSPAN
+  const bandejaActivasColSpan = mesBandejaColCount
+  const bandejaHistorialColSpan = mesBandejaColCount
 
   const queryStatus = status !== "all" ? status : undefined
   const queryPriority = priority !== "all" ? priority : undefined
@@ -479,18 +580,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       q: search || undefined,
       created_from: createdFrom || undefined,
       created_to: createdTo || undefined,
-      area_requested_from: areaRequestedFrom || undefined,
-      area_requested_to: areaRequestedTo || undefined,
     }
-  }, [
-    queryStatus,
-    queryPriority,
-    search,
-    createdFrom,
-    createdTo,
-    areaRequestedFrom,
-    areaRequestedTo,
-  ])
+  }, [queryStatus, queryPriority, search, createdFrom, createdTo])
 
   const refreshBandejaMeta = useCallback(async () => {
     const base = bandejaListFilters
@@ -562,6 +653,14 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     setPage(1)
   }, [search])
 
+  useEffect(() => {
+    setPage(1)
+  }, [perPage, activeTab, status, priority, createdFrom, createdTo])
+
+  useEffect(() => {
+    setExpandedBobinasOtId(null)
+  }, [page, activeTab, mesActivasSubTab, mesProduccionWorkflow])
+
   const load = useCallback(
     async (opts?: { silent?: boolean }) => {
       const silent = opts?.silent === true
@@ -571,7 +670,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
         if (activeTab === "historial") {
           query = {
             page,
-            per_page: 20,
+            per_page: perPage,
             historial_area: miAreaApi,
             historial_exclude_pending: 1,
             status: queryStatus,
@@ -579,20 +678,16 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             q: search || undefined,
             created_from: createdFrom || undefined,
             created_to: createdTo || undefined,
-            area_requested_from: areaRequestedFrom || undefined,
-            area_requested_to: areaRequestedTo || undefined,
           }
         } else {
           query = {
             page,
-            per_page: 20,
+            per_page: perPage,
             status: queryStatus,
             priority: queryPriority,
             q: search || undefined,
             created_from: createdFrom || undefined,
             created_to: createdTo || undefined,
-            area_requested_from: areaRequestedFrom || undefined,
-            area_requested_to: areaRequestedTo || undefined,
             mi_area: miAreaApi,
             area_process_tag: "active",
           }
@@ -617,13 +712,12 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       activeTab,
       miAreaApi,
       page,
+      perPage,
       queryPriority,
       queryStatus,
       search,
       createdFrom,
       createdTo,
-      areaRequestedFrom,
-      areaRequestedTo,
     ],
   )
 
@@ -666,20 +760,84 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     return mesBandFromWorkOrderRow(area as MesBandejaAreaKey, mesModalRow, mesBandNowMs)
   }, [mesModalRow, hasTimerColumn, area, mesBandNowMs])
 
-  const mesModalReqStatus = useMemo(() => {
-    if (!mesModalRow) return "pending"
-    return resolveAreaRequestStatusForTab(mesModalRow, activeTab) ?? "pending"
-  }, [mesModalRow, activeTab])
+  const mesProduccionWorkflowCounts = useMemo(() => {
+    const counts = mesProduccionWorkflowCountsEmpty()
+    if (!areaUsesMesActivasSubTabs(area) || !rows?.data.length) return counts
+    for (const o of rows.data) {
+      if (mesActivasBucketFromRow(area, o, mesBandNowMs) !== "produccion") continue
+      const wf = mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)?.workflow
+      if (wf === "sin_iniciar") counts.sin_iniciar++
+      else if (wf === "turno_abierto") counts.turno_abierto++
+      else if (wf === "entre_turnos") counts.entre_turnos++
+      else if (wf === "iniciado") counts.iniciado++
+      else if (wf === "pausado") counts.pausado++
+    }
+    return counts
+  }, [area, rows, mesBandNowMs])
+
+  const produccionRowsOnPage = useMemo(() => {
+    if (!rows?.data.length) return []
+    return rows.data.filter(
+      (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === "produccion",
+    )
+  }, [rows, area, mesBandNowMs])
 
   const displayActivasRows = useMemo((): WorkOrderListRow[] => {
     if (!rows?.data.length) return []
-    if (areaUsesMesActivasSubTabs(area)) {
-      return rows.data.filter(
-        (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === mesActivasSubTab,
+    if (!areaUsesMesActivasSubTabs(area)) return rows.data
+
+    let list = rows.data.filter(
+      (o) => mesActivasBucketFromRow(area, o, mesBandNowMs) === mesActivasSubTab,
+    )
+
+    if (mesActivasSubTab === "produccion") {
+      list = list.filter(
+        (o) =>
+          mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)?.workflow ===
+          mesProduccionWorkflow,
       )
     }
+
+    return list
+  }, [rows, area, mesBandNowMs, mesActivasSubTab, mesProduccionWorkflow])
+
+  const activasTableRows = useMemo((): WorkOrderListRow[] => {
+    if (!rows?.data.length) return []
+    if (areaUsesMesActivasSubTabs(area)) {
+      return displayActivasRows
+    }
     return rows.data
-  }, [rows, area, mesBandNowMs, mesActivasSubTab])
+  }, [rows, area, displayActivasRows])
+
+  const activasKgTotals = useMemo(() => {
+    if (!showKgBreakdown || activasTableRows.length === 0) return null
+    const totals = mesBandejaKgTotalsFromBands(
+      activasTableRows.map((o) => mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)),
+    )
+    return totals.rowsWithKg > 0 ? totals : null
+  }, [showKgBreakdown, activasTableRows, area, mesBandNowMs])
+
+  const historialKgTotals = useMemo(() => {
+    if (!showKgBreakdown || !rows?.data.length) return null
+    const totals = mesBandejaKgTotalsFromBands(
+      rows.data.map((o) => mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)),
+    )
+    return totals.rowsWithKg > 0 ? totals : null
+  }, [showKgBreakdown, rows, area, mesBandNowMs])
+
+  const activasDevolucionesTotals = useMemo(() => {
+    if (!showKgBreakdown || activasTableRows.length === 0) return null
+    return mesBandejaDevolucionesTotalsFromSnapshots(
+      activasTableRows.map((o) => printingDevolucionesFromWorkOrderRow(o)),
+    )
+  }, [showKgBreakdown, activasTableRows])
+
+  const historialDevolucionesTotals = useMemo(() => {
+    if (!showKgBreakdown || !rows?.data.length) return null
+    return mesBandejaDevolucionesTotalsFromSnapshots(
+      rows.data.map((o) => printingDevolucionesFromWorkOrderRow(o)),
+    )
+  }, [showKgBreakdown, rows])
 
   const mesActivasBucketCounts = useMemo(() => {
     if (!areaUsesMesActivasSubTabs(area) || !rows?.data.length) return null
@@ -707,13 +865,26 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     if (activeTab !== "activas") {
       setMesActivasSubTab("pendientes")
       mesActivasSubTabAutoPickedRef.current = false
+      mesProduccionFilterTouchedRef.current = false
     }
   }, [activeTab])
 
   useEffect(() => {
     setMesActivasSubTab("pendientes")
     mesActivasSubTabAutoPickedRef.current = false
+    mesProduccionFilterTouchedRef.current = false
   }, [area])
+
+  useEffect(() => {
+    if (mesActivasSubTab !== "produccion" || mesProduccionFilterTouchedRef.current) return
+    if (!rows?.data.length) return
+    for (const wf of MES_PRODUCCION_WORKFLOW_TAB_ORDER) {
+      if (mesProduccionWorkflowCounts[wf] > 0) {
+        setMesProduccionWorkflow(wf)
+        return
+      }
+    }
+  }, [mesActivasSubTab, mesProduccionWorkflowCounts, rows])
 
   useEffect(() => {
     if (mesModalId === null) return
@@ -798,70 +969,210 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   const AreaIcon = AREA_ICON[area]
 
-  const filterHint = (
+  const activeServerFilterCount = useMemo(() => {
+    let n = 0
+    if (search.trim()) n++
+    if (status !== "all") n++
+    if (priority !== "all") n++
+    if (createdFrom) n++
+    if (createdTo) n++
+    return n
+  }, [search, status, priority, createdFrom, createdTo])
+
+  const clearBandejaFilters = useCallback(() => {
+    setQInput("")
+    setSearch("")
+    setStatus("all")
+    setPriority("all")
+    setCreatedFrom("")
+    setCreatedTo("")
+    setPage(1)
+  }, [])
+
+  const filterHintBody = (
+    <>
+      La búsqueda filtra por código OT, referencia, cliente o producto al escribir.{" "}
+      <span className="font-medium text-foreground/85">Estado OT</span> es abierta / completada / cancelada de la orden
+      (no el icono de reloj de solicitud al área en la tabla).
+      {hasTimerColumn ? (
+        <>
+          {" "}
+          Los botones de cronómetro (Sin iniciar, Turno abierto, etc.) filtran solo las filas de la página actual.
+        </>
+      ) : null}
+    </>
+  )
+
+  const filterHint = hasTimerColumn ? (
+    <p className="text-muted-foreground max-sm:hidden flex items-start gap-2 text-xs leading-relaxed sm:text-sm">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <span>{filterHintBody}</span>
+    </p>
+  ) : (
     <p className="text-muted-foreground mt-1 flex items-start gap-2 border-t border-border/60 pt-3 text-xs md:col-span-12 lg:col-span-12">
       <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-      <span>
-        La búsqueda filtra por código OT, referencia, cliente o producto al escribir.{" "}
-        <strong className="font-medium text-foreground/85">Estado OT</strong> es abierta / completada / cancelada de la
-        orden (no el badge naranja «Pendiente» de solicitud al área).
-      </span>
+      <span>{filterHintBody}</span>
     </p>
   )
 
-  const pagination =
-    rows && rows.last_page > 1 ? (
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">
-          Página {rows.current_page} de {rows.last_page} · {rows.total}
-        </span>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={rows.current_page <= 1 || loading}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="gap-1.5"
-          >
-            <ChevronLeft className="h-4 w-4" aria-hidden />
-            Anterior
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={rows.current_page >= rows.last_page || loading}
-            onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-            className="gap-1.5"
-          >
-            Siguiente
-            <ChevronRight className="h-4 w-4" aria-hidden />
-          </Button>
-        </div>
-      </div>
-    ) : null
+  const bandejaCriteriaRow = (
+    <CatalogFilterGrid className="gap-3 md:gap-2.5">
+      <MesBandejaCriteriaField
+        label="Prioridad"
+        icon={ListFilter}
+        accent="violet"
+        active={priority !== "all"}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <Select
+          value={priority}
+          onValueChange={(v) => {
+            setPriority(v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className={mesBandejaCriteriaSelectClass("violet", priority !== "all")}>
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              {(() => {
+                const Icon = bandejaPriorityIcon(priority)
+                return <Icon className={cn("h-4 w-4 shrink-0", bandejaPriorityIconClass(priority))} aria-hidden />
+              })()}
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent className="border-violet-500/20">
+            <SelectItem value="all" className="gap-2.5 font-medium">
+              <List className="h-4 w-4 shrink-0 text-violet-600/70" aria-hidden />
+              Todas
+            </SelectItem>
+            <SelectItem value="normal" className="gap-2.5 font-medium">
+              <Minus className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              Normal
+            </SelectItem>
+            <SelectItem value="alta" className="gap-2.5 font-medium">
+              <ArrowUp className="h-4 w-4 shrink-0 text-orange-600" aria-hidden />
+              Alta
+            </SelectItem>
+            <SelectItem value="urgente" className="gap-2.5 font-medium">
+              <Zap className="h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+              Urgente
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </MesBandejaCriteriaField>
 
-  const mesActivasSubTabHint = useMemo(() => {
-    if (!areaUsesMesActivasSubTabs(area)) return ""
-    const finalizeLabel =
-      area === "laminacion"
-        ? "Finalizar área de laminación"
-        : area === "corte"
-          ? "Finalizar área de corte"
-          : "Finalizar área de impresión"
-    if (mesActivasSubTab === "pendientes") {
-      return "Primera vez en el área o sin turno iniciado. Abra la OT, arme cuadrilla e inicie turno de planta."
-    }
-    if (mesActivasSubTab === "produccion") {
-      return `Turno en curso o entre turnos (sin cronómetro activo tras cerrar). Use Guardar o Terminar turno de planta en la OT; luego «${finalizeLabel}» cuando cierre el área.`
-    }
-    return "Área MES finalizada. También aparecen en la pestaña Historial."
-  }, [area, mesActivasSubTab])
+      <MesBandejaCriteriaField
+        label="Estado OT"
+        icon={SlidersHorizontal}
+        accent="sky"
+        active={status !== "all"}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <Select
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className={mesBandejaCriteriaSelectClass("sky", status !== "all")}>
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              {(() => {
+                const Icon = bandejaStatusIcon(status)
+                return <Icon className={cn("h-4 w-4 shrink-0", bandejaStatusIconClass(status))} aria-hidden />
+              })()}
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent className="border-sky-500/20">
+            <SelectItem value="all" className="gap-2.5 font-medium">
+              <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              Todos
+            </SelectItem>
+            <SelectItem value="open" className="gap-2.5 font-medium">
+              <Circle className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              Abierta
+            </SelectItem>
+            <SelectItem value="completed" className="gap-2.5 font-medium">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+              Completada
+            </SelectItem>
+            <SelectItem value="cancelled" className="gap-2.5 font-medium">
+              <XCircle className="h-4 w-4 shrink-0 text-rose-600" aria-hidden />
+              Cancelada
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </MesBandejaCriteriaField>
+
+      <MesBandejaCriteriaField
+        label="Fecha OT (desde)"
+        icon={Calendar}
+        accent="amber"
+        active={Boolean(createdFrom)}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <MesBandejaCriteriaDateInput
+          accent="amber"
+          value={createdFrom}
+          onChange={(v) => {
+            setCreatedFrom(v)
+            setPage(1)
+          }}
+        />
+      </MesBandejaCriteriaField>
+
+      <MesBandejaCriteriaField
+        label="Fecha OT (hasta)"
+        icon={Calendar}
+        accent="orange"
+        active={Boolean(createdTo)}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <MesBandejaCriteriaDateInput
+          accent="orange"
+          value={createdTo}
+          onChange={(v) => {
+            setCreatedTo(v)
+            setPage(1)
+          }}
+        />
+      </MesBandejaCriteriaField>
+    </CatalogFilterGrid>
+  )
+
+  const bandejaSearchFields = (
+    <CatalogSearchField
+      id={`a-q-${area}`}
+      label="Ref. pedido cliente"
+      placeholder="Código OT, referencia, cliente…"
+      value={qInput}
+      onChange={(ev) => setQInput(ev.target.value)}
+      className="min-w-0"
+    />
+  )
+
+  const pagination = rows ? (
+    <BandejaTablePagination
+      rows={rows}
+      page={page}
+      perPage={perPage}
+      loading={loading}
+      onPageChange={setPage}
+      onPerPageChange={(n) => {
+        if (BANDEJA_PER_PAGE_OPTIONS.includes(n as (typeof BANDEJA_PER_PAGE_OPTIONS)[number])) {
+          setPerPage(n)
+        }
+      }}
+    />
+  ) : null
 
   return (
     <CatalogPageShell
       title={areaTitle(area)}
       subtitle={areaSubtitle(area)}
       icon={AreaIcon}
+      className={hasTimerColumn ? "!p-0 md:!p-0 space-y-5" : undefined}
     >
       <>
         <Dialog
@@ -870,15 +1181,23 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             if (!open) setMesModalId(null)
           }}
         >
-          <DialogContent className="max-h-[min(88vh,680px)] gap-0 overflow-y-auto sm:max-w-lg">
+          <DialogContent
+            className={cn(
+              "max-h-[min(88vh,680px)] gap-0 overflow-y-auto",
+              area === "printing" || area === "montaje" ? "sm:max-w-xl" : "sm:max-w-lg",
+            )}
+          >
             <DialogHeader className="space-y-2 pb-2 pr-8">
-              <DialogTitle>
-                {hasTimerColumn ? mesAreaDisplayName(area as MesBandejaAreaKey) : areaTitle(area)} —{" "}
-                {mesModalRow?.code ?? (mesModalId ? `OT #${mesModalId}` : "—")}
+              <DialogTitle className="flex items-center gap-2">
+                <Timer className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+                Tiempos — {mesModalRow?.code ?? (mesModalId ? `OT #${mesModalId}` : "—")}
               </DialogTitle>
               <DialogDescription>
-                Tiempos según el último guardado en el servidor. La bandeja se sincroniza al guardar en la OT o cada
-                pocos segundos con esta vista abierta.
+                {area === "printing"
+                  ? "Cronómetro, arranque, desmontaje y paradas (misma lógica que Producción → Impresión)."
+                  : area === "montaje"
+                    ? "Cronómetro, arranque, operación, desmontaje, kg y paradas (misma lógica que Producción → Montaje)."
+                    : "Tiempos acumulados de la OT según el último guardado en el servidor."}
               </DialogDescription>
             </DialogHeader>
             <div className="py-4">
@@ -887,24 +1206,26 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                   Esta OT no está en la página actual del listado. Cierre el cuadro o navegue en el listado hasta
                   encontrarla.
                 </p>
-              ) : (
-                <>
-                  {mesModalBand ? (
-                    <MesBandDetailBlock
-                      mesBand={mesModalBand}
-                      reqStatus={mesModalReqStatus}
-                    />
-                  ) : mesModalRow ? (
-                    <p className="text-muted-foreground mb-4 text-sm leading-relaxed">
-                      La OT no está en etapa {mesAreaDisplayName(area as MesBandejaAreaKey)} en el tablero. Abra la OT
-                      en Producción para iniciar o continuar el temporizador acumulativo.
-                    </p>
-                  ) : null}
-                  {area === "printing" && mesModalRow ? (
-                    <PrintingMesModalTurnosSection row={mesModalRow} />
-                  ) : null}
-                </>
-              )}
+              ) : area === "printing" && mesModalRow ? (
+                <PrintingMesBandejaTimesPanel
+                  row={mesModalRow}
+                  mesBand={mesModalBand}
+                  nowMs={mesBandNowMs}
+                />
+              ) : area === "montaje" && mesModalRow ? (
+                <MontajeMesBandejaTimesPanel
+                  row={mesModalRow}
+                  mesBand={mesModalBand}
+                  nowMs={mesBandNowMs}
+                />
+              ) : mesModalBand ? (
+                <MesBandejaTimesModalBody mesBand={mesModalBand} />
+              ) : mesModalRow ? (
+                <p className="text-muted-foreground text-sm leading-relaxed">
+                  La OT no está en etapa {mesAreaDisplayName(area as MesBandejaAreaKey)} en el tablero. Abra la OT en
+                  Producción para iniciar o continuar el temporizador.
+                </p>
+              ) : null}
             </div>
             <DialogFooter className="flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end">
               {mesModalId !== null ? (
@@ -952,202 +1273,84 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
           </TabsTrigger>
         </TabsList>
 
-        <div className={cn(catalogFilterPanelClass, "mt-4")}>
-          <CatalogFilterGrid>
-            <CatalogSearchField
-              id={`a-q-${area}`}
-              label="Ref. pedido cliente"
-              placeholder="Código OT, referencia, cliente…"
-              value={qInput}
-              onChange={(ev) => setQInput(ev.target.value)}
-              className="min-w-0 md:col-span-6 lg:col-span-6"
-            />
-            <CatalogLabeledField label="Prioridad" icon={ListFilter} className="md:col-span-3 lg:col-span-3">
-              <Select
-                value={priority}
-                onValueChange={(v) => {
-                  setPriority(v)
-                  setPage(1)
-                }}
-              >
-                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="gap-2">
-                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Todas
-                  </SelectItem>
-                  <SelectItem value="normal" className="gap-2">
-                    <Minus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Normal
-                  </SelectItem>
-                  <SelectItem value="alta" className="gap-2">
-                    <ArrowUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Alta
-                  </SelectItem>
-                  <SelectItem value="urgente" className="gap-2">
-                    <Zap className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Urgente
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Estado OT" icon={SlidersHorizontal} className="md:col-span-3 lg:col-span-3">
-              <Select
-                value={status}
-                onValueChange={(v) => {
-                  setStatus(v)
-                  setPage(1)
-                }}
-              >
-                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="gap-2">
-                    <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Todos
-                  </SelectItem>
-                  <SelectItem value="open" className="gap-2">
-                    <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Abierta
-                  </SelectItem>
-                  <SelectItem value="completed" className="gap-2">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Completada
-                  </SelectItem>
-                  <SelectItem value="cancelled" className="gap-2">
-                    <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    Cancelada
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (desde)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={createdFrom}
-                onChange={(ev) => {
-                  setCreatedFrom(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Fecha OT (hasta)" icon={Calendar} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={createdTo}
-                onChange={(ev) => {
-                  setCreatedTo(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (desde)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={areaRequestedFrom}
-                onChange={(ev) => {
-                  setAreaRequestedFrom(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
-            <CatalogLabeledField label="Solicitud área (hasta)" icon={CalendarClock} className="md:col-span-3 lg:col-span-3">
-              <Input
-                type="date"
-                className={catalogFilterDateInputClass}
-                value={areaRequestedTo}
-                onChange={(ev) => {
-                  setAreaRequestedTo(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </CatalogLabeledField>
+        {hasTimerColumn ? (
+          <MesBandejaFiltersPanel
+            className="mt-4"
+            activeFilterCount={activeServerFilterCount}
+            onClear={clearBandejaFilters}
+            criteriaRow={bandejaCriteriaRow}
+            searchFields={bandejaSearchFields}
+            hint={filterHint}
+          />
+        ) : (
+          <div className={cn(catalogFilterPanelClass, "mt-4 space-y-3")}>
+            {bandejaCriteriaRow}
+            {bandejaSearchFields}
             {filterHint}
-          </CatalogFilterGrid>
-        </div>
+          </div>
+        )}
 
         <TabsContent value="activas" className="mt-4 space-y-4">
           {areaUsesMesActivasSubTabs(area) ? (
             <div className="space-y-2">
-              <ToggleGroup
-                type="single"
+              <MesActivasSubTabsBar
                 value={mesActivasSubTab}
-                onValueChange={(v) => {
-                  if (!v) return
-                  setMesActivasSubTab(v as MesActivasSubTab)
+                counts={mesActivasBucketCounts}
+                areaLabel={mesActivasSubTabAreaLabel(area)}
+                onChange={(v) => {
+                  setMesActivasSubTab(v)
                   setMesModalId(null)
+                  if (v === "produccion") {
+                    mesProduccionFilterTouchedRef.current = false
+                  }
                 }}
-                variant="outline"
-                size="sm"
-                className="flex h-auto w-full flex-wrap justify-stretch gap-1.5 rounded-xl border border-border/60 bg-muted/30 p-1.5 sm:justify-start"
-                aria-label={`Vista de bandeja de ${
-                  area === "laminacion" ? "laminación" : area === "corte" ? "corte" : "impresión"
-                }`}
-              >
-                <ToggleGroupItem
-                  value="pendientes"
-                  className="inline-flex min-h-9 flex-1 basis-[calc(33.333%-0.25rem)] flex-wrap items-center justify-center gap-2 rounded-lg px-2.5 py-2 text-xs data-[state=on]:border-primary/35 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm sm:flex-initial sm:basis-auto sm:text-sm"
-                >
-                  <Inbox className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                  <span className="font-medium">Pendientes</span>
-                  <span className="text-muted-foreground font-normal tabular-nums">
-                    ({mesActivasBucketCounts?.pendientes ?? 0})
-                  </span>
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="produccion"
-                  className="inline-flex min-h-9 flex-1 basis-[calc(33.333%-0.25rem)] flex-wrap items-center justify-center gap-2 rounded-lg px-2.5 py-2 text-xs data-[state=on]:border-primary/35 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm sm:flex-initial sm:basis-auto sm:text-sm"
-                >
-                  <PlayCircle className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                  <span className="font-medium">En producción</span>
-                  <span className="text-muted-foreground font-normal tabular-nums">
-                    ({mesActivasBucketCounts?.produccion ?? 0})
-                  </span>
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="finalizadas"
-                  className="inline-flex min-h-9 flex-1 basis-[calc(33.333%-0.25rem)] flex-wrap items-center justify-center gap-2 rounded-lg px-2.5 py-2 text-xs data-[state=on]:border-primary/35 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm sm:flex-initial sm:basis-auto sm:text-sm"
-                >
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                  <span className="font-medium">Finalizadas</span>
-                  <span className="text-muted-foreground font-normal tabular-nums">
-                    ({mesActivasBucketCounts?.finalizadas ?? 0})
-                  </span>
-                </ToggleGroupItem>
-              </ToggleGroup>
-              <p className="text-muted-foreground flex items-start gap-2 text-xs leading-relaxed sm:text-sm">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <span>{mesActivasSubTabHint}</span>
-              </p>
+              />
+              {mesActivasSubTab === "produccion" ? (
+                <MesBandejaProduccionWorkflowTabs
+                  value={mesProduccionWorkflow}
+                  counts={mesProduccionWorkflowCounts}
+                  onChange={(wf) => {
+                    mesProduccionFilterTouchedRef.current = true
+                    setMesProduccionWorkflow(wf)
+                    setMesModalId(null)
+                  }}
+                />
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             {areaUsesMesActivasSubTabs(area) ? (
               <p className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm">
                 <ClipboardList className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <span>
-                  <span className="tabular-nums text-foreground/90">{displayActivasRows.length}</span> OT en esta
-                  página · Bandeja del área:{" "}
-                  <span className="tabular-nums text-foreground/90">{displayTotalActivas}</span>
+                <span className="sm:hidden">
+                  <span className="tabular-nums text-muted-foreground">{displayActivasRows.length}</span> OT
+                  {mesActivasSubTab === "produccion" ? (
+                    <>
+                      {" · "}
+                      <span className="tabular-nums text-muted-foreground">{produccionRowsOnPage.length}</span> prod.
+                    </>
+                  ) : null}{" "}
+                  · bandeja{" "}
+                  <span className="tabular-nums text-muted-foreground">{displayTotalActivas}</span>
+                </span>
+                <span className="hidden sm:inline">
+                  <span className="tabular-nums text-muted-foreground">{displayActivasRows.length}</span> OT en esta
+                  vista
+                  {mesActivasSubTab === "produccion" ? (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <span className="tabular-nums text-muted-foreground">
+                        {produccionRowsOnPage.length}
+                      </span>{" "}
+                      en «En producción» en esta página
+                    </>
+                  ) : null}{" "}
+                  · Bandeja del área:{" "}
+                  <span className="tabular-nums text-muted-foreground">{displayTotalActivas}</span>
                 </span>
               </p>
-            ) : hasTimerColumn ? (
-              <p className="text-muted-foreground flex items-start gap-2 text-xs leading-relaxed sm:text-sm">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <span>
-                  <strong className="font-medium text-foreground/90">Pendiente</strong> (badge naranja) = solicitud
-                  administrativa al área. El badge de color junto a él ={" "}
-                  <strong className="font-medium text-foreground/90">estado de producción</strong> (turno y
-                  cronómetro), igual que en la pantalla de producción.
-                </span>
-              </p>
-            ) : (
+            ) : hasTimerColumn ? null : (
               <p className="text-muted-foreground flex items-start gap-2 text-sm">
                 <Inbox className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
                 <span>Solicitud pendiente: OT en cola (antes de esta etapa) o ya en la etapa de este área.</span>
@@ -1161,30 +1364,66 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             )}
           </div>
 
-          <InsumosBandejaTableCard>
-            <Table>
+          <InsumosBandejaTableCard wideTable={hasTimerColumn}>
+            <Table
+              className={
+                hasTimerColumn
+                  ? mesBandejaTableClassName(
+                      showProgramacionColumns
+                        ? { pendientesMinWidth: mesBandejaPendientesTableMinWidth(pendientesAreaKey) }
+                        : showKgBreakdown,
+                    )
+                  : undefined
+              }
+            >
+              {hasTimerColumn ? (
+                <MesBandejaTableColgroup
+                  showKgBreakdown={showKgBreakdown}
+                  variant={
+                    showProgramacionColumns
+                      ? undefined
+                      : showKgBreakdown
+                        ? "produccion-kg"
+                        : "produccion"
+                  }
+                  pendientesArea={showProgramacionColumns ? pendientesAreaKey : undefined}
+                  pendientesAreaColumnCount={showProgramacionColumns ? pendientesAreaCols : 0}
+                />
+              ) : null}
               <TableHeader>
                 <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
-                  <TableHead className="h-10 w-[88px] px-2 pl-5 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    ID
-                  </TableHead>
-                  <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {hasTimerColumn ? "Estado producción" : "Estado"}
-                  </TableHead>
                   {hasTimerColumn ? (
-                    <TableHead className="h-10 min-w-[11.5rem] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Timer className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-                        Temporizador
-                      </span>
-                    </TableHead>
-                  ) : null}
-                  <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Material
-                  </TableHead>
-                  <TableHead className="h-10 w-[120px] px-2 pr-5 text-right align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Acciones
-                  </TableHead>
+                    showProgramacionColumns ? (
+                      <>
+                        <MesBandejaRowIndexHeadCell />
+                        <TableHead className={mesBandejaStickyOtHeadClass}>
+                          <BandejaTableHeadLabel icon={ClipboardList}>Orden de trabajo</BandejaTableHeadLabel>
+                        </TableHead>
+                        <MesBandejaProgramacionTableHeadCells />
+                        <MesBandejaAreaPendientesTableHeadCells area={pendientesAreaKey} />
+                      </>
+                    ) : (
+                      <>
+                        <MesBandejaTableHeaderCells />
+                        {showKgBreakdown ? (
+                          <>
+                            <MesBandejaBobinasHeadCell />
+                            <MesBandejaKgTableHeadCells />
+                          </>
+                        ) : null}
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <TableHead className={cn(insumosBandejaTableHeadClassName, "pl-5")}>
+                        <BandejaTableHeadLabel icon={ClipboardList}>Orden de trabajo</BandejaTableHeadLabel>
+                      </TableHead>
+                      <TableHead className={cn(insumosBandejaTableHeadClassName, "px-2")}>
+                        <BandejaTableHeadLabel icon={CircleDot}>Estado</BandejaTableHeadLabel>
+                      </TableHead>
+                    </>
+                  )}
+                  <MesBandejaTableHeadMaterialAcciones />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1209,11 +1448,12 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                 ) : areaUsesMesActivasSubTabs(area) && displayActivasRows.length === 0 ? (
                   <TableRow className="border-border/50 hover:bg-transparent">
                     <TableCell
-                      colSpan={5}
+                      colSpan={bandejaActivasColSpan}
                       className="text-muted-foreground py-10 text-center"
                     >
-                      Ninguna OT en «{MES_ACTIVAS_SUB_TAB_LABEL[mesActivasSubTab]}» en esta página. Pruebe otra
-                      vista o otra página del listado.
+                      {mesActivasSubTab === "produccion"
+                        ? `Ninguna OT en «${mesBandejaWorkflowTitle(mesProduccionWorkflow)}» en esta página. Elija otro estado o cambie de página.`
+                        : `Ninguna OT en «${MES_ACTIVAS_SUB_TAB_LABEL[mesActivasSubTab]}» en esta página. Pruebe otra vista o otra página del listado.`}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1222,111 +1462,117 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                     const mesBand = hasTimerColumn
                       ? mesBandFromWorkOrderRow(area as MesBandejaAreaKey, o, mesBandNowMs)
                       : null
-                    const rowAccent = mesBand ? mesBandejaRowAccentClass(mesBand.workflow) : ""
+                    const rowAccent = showProgramacionColumns
+                      ? bandejaProgramacionRowAccentClass(readBandejaProgramacion(o).priority)
+                      : mesBand
+                        ? mesBandejaRowAccentClass(mesBand.workflow)
+                        : ""
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
                     const planillaPreviewForm = area === "printing" ? printingFormRecord(o) : null
                     const planillaPreviewEnabled = canOpenPrintingPlanillaPreview(planillaPreviewForm)
+                    const rowNumber = mesBandejaRowNumber(page, rows?.per_page ?? perPage, idx)
+                    const bobinasDevoluciones = showKgBreakdown
+                      ? printingDevolucionesFromWorkOrderRow(o)
+                      : null
+                    const bobinasExpanded = expandedBobinasOtId === o.id
                     return (
-                      <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
-                        <TableCell className="pl-5 align-middle">
-                          <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
-                            {o.code}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="align-middle">
-                          {hasTimerColumn ? (
-                            <div className="flex min-w-0 max-w-[20rem] flex-col gap-2">
-                              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                {mesBand ? (
-                                  <span
-                                    className={mesBandejaStatePillClass(mesBand.workflow)}
-                                    role="status"
-                                  >
-                                    {mesWorkflowPillGlyph(mesBand.workflow)}
-                                    {mesBandejaWorkflowTitle(mesBand.workflow)}
-                                  </span>
-                                ) : (
-                                  <span
-                                    className={areaBandejaProgressStickerClass(areaProgressLabel(o, mesBand))}
-                                    title="Estado de producción en esta área (no depende del tablero Kanban)"
-                                  >
-                                    <CircleDashed className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                    <span className="min-w-0">{areaProgressLabel(o, mesBand)}</span>
-                                  </span>
-                                )}
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    areaRequestBadgeClass(reqStatus),
-                                    "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
-                                  )}
-                                  title="Solicitud al área (cola administrativa, no es el cronómetro)"
-                                >
-                                  <span className="sr-only">Solicitud: </span>
-                                  {areaRequestStatusGlyph(reqStatus)}
-                                  {areaRequestStatusLabel(reqStatus)}
-                                </Badge>
-                              </div>
-                            </div>
-                          ) : (
-                            <Badge
-                              variant="outline"
-                              className={cn(areaRequestBadgeClass(reqStatus), "inline-flex items-center gap-1")}
-                            >
-                              {areaRequestStatusGlyph(reqStatus)}
-                              {areaRequestStatusLabel(reqStatus)}
-                            </Badge>
-                          )}
-                        </TableCell>
+                      <Fragment key={o.id}>
+                      <TableRow className={insumosBandejaDataRowClassName(idx, rowAccent)}>
                         {hasTimerColumn ? (
-                          <TableCell className="min-w-[11.5rem] align-middle">
-                            <MesBandejaTimerCell mesBand={mesBand} onOpenDetail={() => setMesModalId(o.id)} />
-                          </TableCell>
-                        ) : null}
-                        <TableCell className="max-w-md align-middle">
-                          <p
-                            className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
-                            title={materialTitle}
-                          >
-                            {o.product?.name?.trim() ? o.product.name : "—"}
-                          </p>
-                          <p className="text-muted-foreground text-xs leading-snug">
-                            {o.client?.name?.trim() ? o.client.name : "—"}
-                          </p>
-                        </TableCell>
-                        <TableCell className="pr-5 text-right align-middle">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            {area === "printing" ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="gap-1.5"
-                                disabled={!planillaPreviewEnabled}
-                                title={
-                                  planillaPreviewEnabled
-                                    ? "Vista previa de la planilla física de impresión"
-                                    : "Disponible tras «Finalizar área de impresión»"
-                                }
-                                onClick={() => openPrintingPlanillaPreview(o)}
-                              >
-                                <FileSearch className="h-3.5 w-3.5" aria-hidden />
-                                Vista previa
-                              </Button>
-                            ) : null}
-                            <Button variant="outline" size="sm" className="border-primary/25 gap-1.5" asChild>
-                              <Link to={openUrl(o.id)}>
-                                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                                Abrir
+                          showProgramacionColumns ? (
+                            <>
+                              <MesBandejaRowIndexDataCell rowNumber={rowNumber} />
+                              <TableCell className={mesBandejaStickyOtCellClass}>
+                                <div className="flex">
+                                  <Link to={openUrl(o.id)} className={mesBandejaOtLinkClassName}>
+                                    {o.code}
+                                  </Link>
+                                </div>
+                              </TableCell>
+                              <MesBandejaProgramacionTableRowCells row={o} />
+                              <MesBandejaAreaPendientesTableRowCells row={o} area={pendientesAreaKey} />
+                            </>
+                          ) : (
+                            <>
+                              <MesBandejaRowIndexDataCell rowNumber={rowNumber} />
+                              <TableCell className={mesBandejaStickyOtCellClass}>
+                                <div className="flex">
+                                  <Link to={openUrl(o.id)} className={mesBandejaOtLinkClassName}>
+                                    {o.code}
+                                  </Link>
+                                </div>
+                              </TableCell>
+                              <MesBandejaEstadoProduccionCell
+                                mesBand={mesBand}
+                                reqStatus={reqStatus}
+                                areaProgressLabelText={areaProgressLabel(o, mesBand)}
+                              />
+                              <TableCell className={mesBandejaIconColumnCellClass}>
+                                <MesBandejaTimerCell mesBand={mesBand} onOpenDetail={() => setMesModalId(o.id)} />
+                              </TableCell>
+                              <MesBandejaTurnoRegistradoDataCell
+                                area={area}
+                                mesBand={mesBand}
+                                workOrder={o}
+                              />
+                              {showKgBreakdown ? (
+                                <>
+                                  <MesBandejaBobinasDataCell
+                                    devoluciones={bobinasDevoluciones}
+                                    expanded={bobinasExpanded}
+                                    onToggle={() =>
+                                      setExpandedBobinasOtId((cur) => (cur === o.id ? null : o.id))
+                                    }
+                                  />
+                                  <MesBandejaKgTableRowCells mesBand={mesBand} />
+                                </>
+                              ) : null}
+                            </>
+                          )
+                        ) : (
+                          <>
+                            <TableCell className="pl-5 align-middle">
+                              <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
+                                {o.code}
                               </Link>
-                            </Button>
-                          </div>
-                        </TableCell>
+                            </TableCell>
+                            <TableCell className="align-middle">
+                              <AreaRequestStatusIcon status={reqStatus} />
+                            </TableCell>
+                          </>
+                        )}
+                        <BandejaMaterialCell order={o} materialTitle={materialTitle} />
+                        <MesBandejaAccionesCell
+                          area={area}
+                          openUrl={openUrl}
+                          workOrderId={o.id}
+                          planillaPreviewEnabled={planillaPreviewEnabled}
+                          onPlanillaPreview={() => openPrintingPlanillaPreview(o)}
+                        />
                       </TableRow>
+                      {showKgBreakdown && bobinasExpanded && bobinasDevoluciones ? (
+                        <TableRow className="bg-muted/15 hover:bg-muted/20">
+                          <TableCell colSpan={mesBandejaColCount} className="py-3 pl-3 pr-3">
+                            <MesBandejaBobinasExpandPanel
+                              devoluciones={bobinasDevoluciones}
+                              workOrderCode={o.code}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                      </Fragment>
                     )
                   })
                 )}
               </TableBody>
+              {showKgBreakdown && !showProgramacionColumns && activasKgTotals && activasTableRows.length > 0 && !loading ? (
+                <TableFooter className="border-t-0 bg-transparent [&>tr]:border-0 [&>tr]:hover:bg-transparent">
+                  <MesBandejaKgTableTotalsRow
+                    totals={activasKgTotals}
+                    devolucionesTotals={activasDevolucionesTotals}
+                  />
+                </TableFooter>
+              ) : null}
             </Table>
           </InsumosBandejaTableCard>
           {pagination}
@@ -1351,30 +1597,32 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
             </Badge>
           </div>
 
-          <InsumosBandejaTableCard>
-            <Table>
+          <InsumosBandejaTableCard wideTable={hasTimerColumn}>
+            <Table className={hasTimerColumn ? mesBandejaTableClassName(showKgBreakdown) : undefined}>
+              {hasTimerColumn ? <MesBandejaTableColgroup showKgBreakdown={showKgBreakdown} /> : null}
               <TableHeader>
                 <TableRow className="border-b border-primary/10 bg-primary/[0.07] hover:bg-primary/[0.07]">
-                  <TableHead className="h-10 w-[88px] px-2 pl-5 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    ID
-                  </TableHead>
-                  <TableHead className="h-10 min-w-[140px] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {hasTimerColumn ? "Estado producción" : "Estado"}
-                  </TableHead>
                   {hasTimerColumn ? (
-                    <TableHead className="h-10 min-w-[11.5rem] px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Timer className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-                        Temporizador
-                      </span>
-                    </TableHead>
-                  ) : null}
-                  <TableHead className="h-10 px-2 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Material
-                  </TableHead>
-                  <TableHead className="h-10 w-[120px] px-2 pr-5 text-right align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Acciones
-                  </TableHead>
+                    <>
+                      <MesBandejaTableHeaderCells />
+                      {showKgBreakdown ? (
+                        <>
+                          <MesBandejaBobinasHeadCell />
+                          <MesBandejaKgTableHeadCells />
+                        </>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <TableHead className={cn(insumosBandejaTableHeadClassName, "pl-5")}>
+                        <BandejaTableHeadLabel icon={ClipboardList}>Orden de trabajo</BandejaTableHeadLabel>
+                      </TableHead>
+                      <TableHead className={cn(insumosBandejaTableHeadClassName, "px-2")}>
+                        <BandejaTableHeadLabel icon={CircleDot}>Estado</BandejaTableHeadLabel>
+                      </TableHead>
+                    </>
+                  )}
+                  <MesBandejaTableHeadMaterialAcciones />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1407,54 +1655,37 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
                     const planillaPreviewForm = area === "printing" ? printingFormRecord(o) : null
                     const planillaPreviewEnabled = canOpenPrintingPlanillaPreview(planillaPreviewForm)
+                    const rowNumber = mesBandejaRowNumber(page, rows?.per_page ?? perPage, idx)
+                    const bobinasDevoluciones = showKgBreakdown
+                      ? printingDevolucionesFromWorkOrderRow(o)
+                      : null
+                    const bobinasExpanded = expandedBobinasOtId === o.id
                     return (
-                      <TableRow key={o.id} className={insumosBandejaDataRowClassName(idx, rowAccent)}>
-                        <TableCell className="pl-5 align-middle">
-                          <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
-                            {o.code}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="align-middle">
-                          {hasTimerColumn ? (
-                            <div className="flex min-w-0 max-w-[20rem] flex-col gap-2">
-                              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                {mesBand ? (
-                                  <span
-                                    className={mesBandejaStatePillClass(mesBand.workflow)}
-                                    role="status"
-                                  >
-                                    {mesWorkflowPillGlyph(mesBand.workflow)}
-                                    {mesBandejaWorkflowTitle(mesBand.workflow)}
-                                  </span>
-                                ) : (
-                                  <span
-                                    className={areaBandejaProgressStickerClass(areaProgressLabel(o, mesBand))}
-                                    title="Estado de producción en esta área (no depende del tablero Kanban)"
-                                  >
-                                    <CircleDashed className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                    <span className="min-w-0">{areaProgressLabel(o, mesBand)}</span>
-                                  </span>
-                                )}
-                                {reqStatus ? (
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      areaRequestBadgeClass(reqStatus),
-                                      "inline-flex h-5 w-fit shrink-0 items-center gap-1 px-1.5 py-0 text-[10px] leading-none",
-                                    )}
-                                    title="Solicitud al área"
-                                  >
-                                    <span className="sr-only">Solicitud: </span>
-                                    {areaRequestStatusGlyph(reqStatus)}
-                                    {areaRequestStatusLabel(reqStatus)}
-                                  </Badge>
-                                ) : null}
+                      <Fragment key={o.id}>
+                      <TableRow className={insumosBandejaDataRowClassName(idx, rowAccent)}>
+                        {hasTimerColumn ? (
+                          <>
+                            <MesBandejaRowIndexDataCell rowNumber={rowNumber} />
+                            <TableCell className={mesBandejaStickyOtCellClass}>
+                              <div className="flex">
+                                <Link to={openUrl(o.id)} className={mesBandejaOtLinkClassName}>
+                                  {o.code}
+                                </Link>
                               </div>
+                            </TableCell>
+                            <MesBandejaEstadoProduccionCell
+                              mesBand={mesBand}
+                              reqStatus={reqStatus ?? "pending"}
+                              areaProgressLabelText={areaProgressLabel(o, mesBand)}
+                            />
+                            <TableCell className={mesBandejaIconColumnCellClass}>
+                              <MesBandejaTimerCell
+                                mesBand={mesBand}
+                                onOpenDetail={() => setMesModalId(o.id)}
+                              />
                               {mesBand?.workflow === "finalizado" || reqCreatedAt ? (
-                                <p className="text-muted-foreground text-[11px] leading-snug">
-                                  {mesBand?.workflow === "finalizado"
-                                    ? "Área MES finalizada en esta OT."
-                                    : null}
+                                <p className="text-muted-foreground mt-2 text-[11px] leading-snug">
+                                  {mesBand?.workflow === "finalizado" ? "Área MES finalizada en esta OT." : null}
                                   {reqCreatedAt ? (
                                     <span>
                                       {mesBand?.workflow === "finalizado" ? " " : null}
@@ -1463,83 +1694,80 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                                   ) : null}
                                 </p>
                               ) : null}
-                            </div>
-                          ) : (
-                            <div className="flex flex-col gap-2">
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  areaRequestBadgeClass(reqStatus),
-                                  "inline-flex w-fit items-center gap-1",
-                                )}
-                              >
-                                {areaRequestStatusGlyph(reqStatus)}
-                                {areaRequestStatusLabel(reqStatus)}
-                              </Badge>
-                              <div className="text-muted-foreground text-xs leading-snug">
-                                <span className="text-foreground/90">{areaProgressLabel(o, mesBand)}</span>
-                                {reqCreatedAt ? (
-                                  <span>
-                                    {" "}
-                                    · Sol. {new Date(reqCreatedAt).toLocaleDateString()}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          )}
-                        </TableCell>
-                        {hasTimerColumn ? (
-                          <TableCell className="min-w-[11.5rem] align-middle">
-                            <MesBandejaTimerCell
+                            </TableCell>
+                            <MesBandejaTurnoRegistradoDataCell
+                              area={area}
                               mesBand={mesBand}
-                              onOpenDetail={() => setMesModalId(o.id)}
+                              workOrder={o}
+                            />
+                            {showKgBreakdown ? (
+                              <>
+                                <MesBandejaBobinasDataCell
+                                  devoluciones={bobinasDevoluciones}
+                                  expanded={bobinasExpanded}
+                                  onToggle={() =>
+                                    setExpandedBobinasOtId((cur) => (cur === o.id ? null : o.id))
+                                  }
+                                />
+                                <MesBandejaKgTableRowCells mesBand={mesBand} />
+                              </>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <TableCell className="pl-5 align-middle">
+                              <Link to={openUrl(o.id)} className={insumosBandejaIdLinkClassName}>
+                                {o.code}
+                              </Link>
+                            </TableCell>
+                            <TableCell className="align-middle">
+                              <div className="flex flex-col gap-2">
+                                <AreaRequestStatusIcon status={reqStatus} />
+                                <div className="text-muted-foreground text-xs leading-snug">
+                                  <span className="text-foreground/90">{areaProgressLabel(o, mesBand)}</span>
+                                  {reqCreatedAt ? (
+                                    <span>
+                                      {" "}
+                                      · Sol. {new Date(reqCreatedAt).toLocaleDateString()}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </TableCell>
+                          </>
+                        )}
+                        <BandejaMaterialCell order={o} materialTitle={materialTitle} />
+                        <MesBandejaAccionesCell
+                          area={area}
+                          openUrl={openUrl}
+                          workOrderId={o.id}
+                          planillaPreviewEnabled={planillaPreviewEnabled}
+                          onPlanillaPreview={() => openPrintingPlanillaPreview(o)}
+                        />
+                      </TableRow>
+                      {showKgBreakdown && bobinasExpanded && bobinasDevoluciones ? (
+                        <TableRow className="bg-muted/15 hover:bg-muted/20">
+                          <TableCell colSpan={mesBandejaColCount} className="py-3 pl-3 pr-3">
+                            <MesBandejaBobinasExpandPanel
+                              devoluciones={bobinasDevoluciones}
+                              workOrderCode={o.code}
                             />
                           </TableCell>
-                        ) : null}
-                        <TableCell className="max-w-md align-middle">
-                          <p
-                            className="text-foreground line-clamp-2 text-sm font-medium leading-snug"
-                            title={materialTitle}
-                          >
-                            {o.product?.name?.trim() ? o.product.name : "—"}
-                          </p>
-                          <p className="text-muted-foreground text-xs leading-snug">
-                            {o.client?.name?.trim() ? o.client.name : "—"}
-                          </p>
-                        </TableCell>
-                        <TableCell className="pr-5 text-right align-middle">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            {area === "printing" ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="gap-1.5"
-                                disabled={!planillaPreviewEnabled}
-                                title={
-                                  planillaPreviewEnabled
-                                    ? "Vista previa de la planilla física de impresión"
-                                    : "Disponible tras «Finalizar área de impresión»"
-                                }
-                                onClick={() => openPrintingPlanillaPreview(o)}
-                              >
-                                <FileSearch className="h-3.5 w-3.5" aria-hidden />
-                                Vista previa
-                              </Button>
-                            ) : null}
-                            <Button variant="outline" size="sm" className="border-primary/25 gap-1.5" asChild>
-                              <Link to={openUrl(o.id)}>
-                                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                                Abrir
-                              </Link>
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                        </TableRow>
+                      ) : null}
+                      </Fragment>
                     )
                   })
                 )}
               </TableBody>
+              {showKgBreakdown && historialKgTotals && (rows?.data.length ?? 0) > 0 && !loading ? (
+                <TableFooter className="border-t-0 bg-transparent [&>tr]:border-0 [&>tr]:hover:bg-transparent">
+                  <MesBandejaKgTableTotalsRow
+                    totals={historialKgTotals}
+                    devolucionesTotals={historialDevolucionesTotals}
+                  />
+                </TableFooter>
+              ) : null}
             </Table>
           </InsumosBandejaTableCard>
 

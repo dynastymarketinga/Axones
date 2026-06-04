@@ -5,6 +5,9 @@ import {
   clearPrintingTurnoOperativo,
   flushPrintingTurnoOperativoToCapturas,
   IMP_BOBINAS_SLOTS,
+  normalizePrintingTurno,
+  isBobinaKgSlotFilled,
+  sanitizeBobinaKgSlotInput,
   turnoProduccionTotals,
   type PrintingTurnoEntry,
 } from "./printing-turnos"
@@ -66,5 +69,30 @@ describe("printing capturas", () => {
     t.salidaBobinasKg[0] = "30"
     const acc = accumulatePrintingFromJson([], t)
     expect(acc.producidoKg).toBe(80)
+  })
+})
+
+describe("sanitizeBobinaKgSlotInput", () => {
+  it("rechaza texto y conserva decimales kg", () => {
+    expect(sanitizeBobinaKgSlotInput("AAAAD")).toBe("")
+    expect(sanitizeBobinaKgSlotInput("12,5")).toBe("12,5")
+    expect(sanitizeBobinaKgSlotInput("1a2b3")).toBe("123")
+  })
+
+  it("isBobinaKgSlotFilled solo con kg > 0", () => {
+    expect(isBobinaKgSlotFilled("")).toBe(false)
+    expect(isBobinaKgSlotFilled("0")).toBe(false)
+    expect(isBobinaKgSlotFilled("1")).toBe(true)
+    expect(isBobinaKgSlotFilled("12,5")).toBe(true)
+  })
+
+  it("normaliza turnos al cargar JSON con basura en casillas", () => {
+    const t = normalizePrintingTurno({
+      id: "t-x",
+      entradaBobinasKg: ["1", "1", "AAAAD"],
+    })
+    expect(t?.entradaBobinasKg[0]).toBe("1")
+    expect(t?.entradaBobinasKg[1]).toBe("1")
+    expect(t?.entradaBobinasKg[2]).toBe("")
   })
 })

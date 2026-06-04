@@ -28,7 +28,6 @@
         'laminacion' => 'Laminación',
         'corte' => 'Corte',
         'montaje' => 'Montaje',
-        'tintas' => 'Tintas',
       ];
       $segLabel = [
         'mount' => 'Montaje',
@@ -78,7 +77,7 @@
       }
 
       // Orden estable por área y máquina
-      $areaOrder = ['montaje' => 0, 'printing' => 1, 'laminacion' => 2, 'corte' => 3, 'tintas' => 4];
+      $areaOrder = ['montaje' => 0, 'printing' => 1, 'laminacion' => 2, 'corte' => 3];
       $items = array_values($agg);
       usort($items, function ($a, $b) use ($areaOrder) {
         $ao = $areaOrder[$a['area']] ?? 99;

@@ -9,7 +9,7 @@ export const MON_CILINDROS_LEGACY_KEY = "montCilindros"
 export const MON_STICKY_BACK_KEY = "montStickyBack"
 export const MON_CODIGO_KEY = "montCodigoMontaje"
 export const MON_COLOR_KEY = "montColorMontaje"
-/** Filas de material usado en montaje (sticky back, código, color). */
+/** Filas de material usado en montaje (sticky back, código, color, cantidad/canguro). */
 export const MON_MATERIALES_MONTAJE_KEY = "montMaterialesMontaje"
 /** @deprecated Solo migración desde registros antiguos. */
 export const MON_MATERIALES_KEY = "montMaterialesUsados"
@@ -23,6 +23,8 @@ export type MontajeMaterialFila = {
   stickyBack: string
   codigo: string
   color: string
+  /** Cantidad usada (p. ej. canguro / sticky back). */
+  cantidad: string
 }
 
 type MontajeMaterialTipo = "sticky_back" | "codigo" | "color"
@@ -50,7 +52,7 @@ export function emptyMontajeFila(): MontajeFilaMontaje {
 }
 
 export function emptyMontajeMaterialFila(): MontajeMaterialFila {
-  return { stickyBack: "", codigo: "", color: "" }
+  return { stickyBack: "", codigo: "", color: "", cantidad: "" }
 }
 
 function filaFromRecord(o: Record<string, unknown>): MontajeFilaMontaje {
@@ -130,6 +132,7 @@ function materialFilaFromRecord(o: Record<string, unknown>): MontajeMaterialFila
     stickyBack: readString(o.stickyBack ?? o.sticky_back),
     codigo: readString(o.codigo ?? o.code),
     color: readString(o.color),
+    cantidad: readString(o.cantidad ?? o.quantity),
   }
 }
 
@@ -175,7 +178,7 @@ export function readMontajeMaterialesState(
   const codigo = readString(rawCodigo)
   const color = readString(rawColor)
   if (sticky.trim() || codigo.trim() || color.trim()) {
-    return [{ stickyBack: sticky, codigo, color }]
+    return [{ stickyBack: sticky, codigo, color, cantidad: "" }]
   }
 
   const { stickies, codigos, colors } = legacyMaterialLists(rawMaterialesLegacy)
@@ -186,6 +189,7 @@ export function readMontajeMaterialesState(
     stickyBack: stickies[i] ?? "",
     codigo: codigos[i] ?? "",
     color: colors[i] ?? "",
+    cantidad: "",
   }))
 }
 
@@ -195,8 +199,15 @@ export function montajeMaterialesForSave(rows: MontajeMaterialFila[]): MontajeMa
       stickyBack: r.stickyBack.trim(),
       codigo: r.codigo.trim(),
       color: r.color.trim(),
+      cantidad: r.cantidad.trim().replace(",", "."),
     }))
-    .filter((r) => r.stickyBack.length > 0 || r.codigo.length > 0 || r.color.length > 0)
+    .filter(
+      (r) =>
+        r.stickyBack.length > 0 ||
+        r.codigo.length > 0 ||
+        r.color.length > 0 ||
+        r.cantidad.length > 0,
+    )
 }
 
 export function clearMontajeClicheMaterialKeys(): Record<string, unknown> {

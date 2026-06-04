@@ -51,10 +51,10 @@ describe("montaje-cliche-material", () => {
 
   it("readMontajeMaterialesState conserva filas vacías y migra campos sueltos o legacy", () => {
     expect(
-      readMontajeMaterialesState([{ stickyBack: "Rev", codigo: "", color: "Cyan" }]),
-    ).toEqual([{ stickyBack: "Rev", codigo: "", color: "Cyan" }])
+      readMontajeMaterialesState([{ stickyBack: "Rev", codigo: "", color: "Cyan", cantidad: "2" }]),
+    ).toEqual([{ stickyBack: "Rev", codigo: "", color: "Cyan", cantidad: "2" }])
     expect(readMontajeMaterialesState(undefined, "Lam", "77501", "Negro")).toEqual([
-      { stickyBack: "Lam", codigo: "77501", color: "Negro" },
+      { stickyBack: "Lam", codigo: "77501", color: "Negro", cantidad: "" },
     ])
     expect(
       readMontajeMaterialesState(undefined, "", "", "", [
@@ -62,15 +62,15 @@ describe("montaje-cliche-material", () => {
         { tipo: "codigo", descripcion: "B" },
         { tipo: "color", descripcion: "C" },
       ]),
-    ).toEqual([{ stickyBack: "A", codigo: "B", color: "C" }])
+    ).toEqual([{ stickyBack: "A", codigo: "B", color: "C", cantidad: "" }])
   })
 
   it("montajeMaterialesForSave omite filas totalmente vacías", () => {
     expect(
       montajeMaterialesForSave([
-        { stickyBack: "Rev", codigo: "", color: "" },
-        { stickyBack: "", codigo: "", color: "" },
+        { stickyBack: "Rev", codigo: "", color: "", cantidad: "3" },
+        { stickyBack: "", codigo: "", color: "", cantidad: "" },
       ]),
-    ).toEqual([{ stickyBack: "Rev", codigo: "", color: "" }])
+    ).toEqual([{ stickyBack: "Rev", codigo: "", color: "", cantidad: "3" }])
   })
 })

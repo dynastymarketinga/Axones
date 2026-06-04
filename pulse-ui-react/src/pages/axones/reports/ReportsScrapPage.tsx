@@ -73,6 +73,7 @@ import {
   type ScrapSubstrateGroupConfig,
 } from "@/lib/scrap-substrate-catalog"
 import { ReportPageShell, useReportRange } from "./report-shared"
+import { getReportIdentity } from "./ReportIdentityBanner"
 import { useReportEntityFilters } from "./use-report-entity-filters"
 
 const WORK_ORDER_CODE_DEBOUNCE_MS = 400
@@ -600,7 +601,7 @@ export default function ReportsScrapPage() {
                 )}
                 {historyKgHeadKg(
                   "Imp. impreso",
-                  "Kg de desperdicio impreso en impresión, según destino BOPP o Poliestireno en la planilla de impresión.",
+                  "Kg de desperdicio impreso en impresión, según destino BOPP o Polietileno en la planilla de impresión.",
                   kgHeadClass,
                 )}
                 {historyKgHeadKg(
@@ -941,8 +942,9 @@ export default function ReportsScrapPage() {
 
   return (
     <ReportPageShell
+      identityKey="desperdicio"
       title="Desperdicio"
-      description="Historial de desperdicio en kilogramos por tipo de film (planilla de la OT) y vistas de merma por área. Use las pestañas BOPP, Polietileno y Transparente para separar materiales distintos."
+      description="Merma en kilogramos por tipo de film (BOPP, Polietileno, Transparente), área u orden de trabajo."
       from={from}
       to={to}
       onFromChange={setFrom}
@@ -969,7 +971,31 @@ export default function ReportsScrapPage() {
         selectedClientLabel={entity.selectedClientLabel}
         selectedProductLabel={entity.selectedProductLabel}
         listLoading={listLoading}
+        theme={getReportIdentity("desperdicio").theme}
       />
+
+      <div className="bg-card flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/25 bg-gradient-to-r from-rose-500/[0.06] to-transparent p-4 shadow-sm">
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium">Resumen mensual</p>
+          <p className="text-muted-foreground text-sm">
+            Totales de desperdicio (kg) por mes calendario en el rango seleccionado: impresión, laminación, corte y total.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="default"
+          disabled={loading}
+          onClick={() =>
+            void downloadCsv(
+              "reports/scrap-monthly-summary",
+              "desperdicio-resumen-mensual.csv",
+              baseQuery,
+            )
+          }
+        >
+          Descargar resumen mensual
+        </Button>
+      </div>
 
       <ScrapClassificationHelp groups={substrateGroups} />
 

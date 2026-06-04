@@ -21,6 +21,16 @@ class ReportDateRangeRequest extends FormRequest
             'from' => ['required', 'date'],
             'to' => ['required', 'date', 'after_or_equal:from'],
             'format' => ['sometimes', 'string', Rule::in(['csv'])],
+            'live' => ['sometimes', 'boolean'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('live')) {
+            $this->merge([
+                'live' => filter_var($this->input('live'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false,
+            ]);
+        }
     }
 }

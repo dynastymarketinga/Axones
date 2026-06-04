@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\WorkOrderBoardStage;
+use App\Models\CorteTimeSegment;
 use App\Models\PrintingTimeSegment;
 use App\Models\User;
 use App\Models\WorkOrder;
@@ -147,6 +148,51 @@ class MesTimerSegmentSyncTest extends TestCase
                 ->whereNull('ended_at')
                 ->count(),
         );
+    }
+
+    public function test_corte_control_timer_start_creates_production_segment(): void
+    {
+        $user = User::factory()->create(['role' => 'corte']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-MES-SYNC-CORTE',
+            'status' => 'in_progress',
+            'board_stage' => WorkOrderBoardStage::Corte->value,
+            'created_by' => $user->id,
+        ]);
+
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'corTimerState' => 'pending',
+                'corOperador' => 'Ana',
+                'corTurno' => 'diurno',
+                'corGrupo' => 'A',
+            ],
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corTimerState' => 'running',
+                'corTimerLastResumeAtMs' => (string) (now()->getTimestampMs()),
+                'corOperador' => 'Ana',
+                'corTurno' => 'diurno',
+                'corGrupo' => 'A',
+            ],
+        ], $h)->assertOk();
+
+        $this->assertDatabaseHas('corte_time_segments', [
+            'work_order_id' => $wo->id,
+            'segment_type' => 'production',
+            'user_id' => $user->id,
+        ]);
+
+        $open = CorteTimeSegment::query()
+            ->where('work_order_id', $wo->id)
+            ->whereNull('ended_at')
+            ->first();
+        $this->assertNotNull($open);
+        $this->assertSame('production', $open->segment_type);
     }
 
     public function test_time_report_candidates_include_ot_after_mes_timer_sync(): void

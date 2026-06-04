@@ -1,10 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { FileSearch, RotateCcw, Save, Scissors } from "lucide-react"
+import { FileSearch, Flag, LogOut, Save, Scissors } from "lucide-react"
 import { toast } from "sonner"
 
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +15,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { apiFetch, ApiError } from "@/lib/api"
 
 type CorteDispatchSyncStatus = {
@@ -60,31 +67,24 @@ export function corteDispatchSyncIssueMessage(
 /**
  * Guardar / cerrar paleta no finaliza corEstadoArea; avisa si el sync a despacho falló.
  */
+/** Solo avisos de error al guardar; el saldo en Despacho no dispara toast automático de éxito. */
 function warnCorteDispatchSync(dispatchSync?: CorteDispatchSyncStatus): void {
   if (!dispatchSync) return
   const issue = corteDispatchSyncIssueMessage(dispatchSync)
-  if (issue) {
-    const needsMaterial =
-      (dispatchSync.closed_paletas_with_kg > 0 ||
-        (dispatchSync.provisional_paletas_with_kg ?? 0) > 0) &&
-      !dispatchSync.material_resolved
-    if (needsMaterial) toast.error(issue)
-    else toast.warning(issue)
-    return
-  }
-  const provisional = dispatchSync.provisional_paletas_with_kg ?? 0
-  const provisionalSynced = dispatchSync.provisional_synced ?? 0
-  if (provisional > 0 && provisionalSynced >= provisional) {
-    toast.message("Saldo provisional visible en Despacho · producto terminado.")
-  }
+  if (!issue) return
+  const needsMaterial =
+    (dispatchSync.closed_paletas_with_kg > 0 ||
+      (dispatchSync.provisional_paletas_with_kg ?? 0) > 0) &&
+    !dispatchSync.material_resolved
+  if (needsMaterial) toast.error(issue)
+  else toast.warning(issue)
 }
 import { applyMesPhaseConfirmToTimer } from "@/lib/mes-multi-phase-timer-exec"
-import { cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
+import { cumulativeArranqueSeconds, cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
 import {
   cumulativeDeadSeconds,
   cumulativeEffectiveSeconds,
   cumulativeTotalPersistedSeconds,
-  deadAccSecAfterResume,
   formatHoraArranqueFromMs,
   horaArranqueMsFromTimer,
 } from "@/lib/mes-timer-band-shared"
@@ -97,7 +97,11 @@ import {
 import { getStoredUser } from "@/lib/auth-storage"
 import { withCorteAutoFields } from "@/lib/corte-planilla-metrics"
 import { filterCorteControlForm } from "@/lib/corte-control-keys"
-import { CORTE_CONTROL_SAVED_EVENT } from "@/lib/corte-mes-band-status"
+import {
+  deriveCorteOperativoEstado,
+  CORTE_CONTROL_SAVED_EVENT,
+} from "@/lib/corte-mes-band-status"
+import { MesOperativoEstadoCard } from "@/components/axones/mes"
 import {
   canSaveProductionAreaForm,
   hasProductionTimerStarted,
@@ -110,6 +114,8 @@ import {
   clearCorteMirrorKeys,
   corteTurnoToMirror,
   COR_ACTUAL_KEY,
+  COR_ENTRADA_META_KEY,
+  COR_ENTRADA_SLOTS,
   COR_ESTADO_KEY,
   COR_TURNOS_KEY,
   corteAggregatedTimerMirrorFromTurnos,
@@ -123,6 +129,7 @@ import {
   accumulateCorteFromJson,
   formatTimerHms,
   pauseCorteProductionTimerOnForm,
+  startCorteProductionTimerOnForm,
   type CortePauseEntry,
   type CorteTurnTimer,
   getCorPaletas,
@@ -136,6 +143,7 @@ import {
   syncCorteSalidaFields,
   type CorteTurnoEntry,
 } from "./corte-turnos"
+import { getMetaSeries } from "./laminacion-turnos"
 import { stringsFromActivePersonnel, type DraftPerson } from "./WorkOrderMontajeOpsSection"
 import WorkOrderCorteOpsSection from "./WorkOrderCorteOpsSection"
 import { WindingFigurePicker } from "./WindingFigurePicker"
@@ -178,6 +186,98 @@ function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, un
   return { ...prefill, ...(form ?? {}) }
 }
 
+type MesCorteGuardarChoiceDialogProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  canFinalizeArea: boolean
+  hasActiveTurno: boolean
+  onGuardarSesion: () => void
+  onFinalizarTurno: () => void
+  onFinalizarCierreCorte: () => void
+}
+
+function MesCorteGuardarChoiceDialog(props: MesCorteGuardarChoiceDialogProps) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="border-slate-200 bg-white sm:max-w-md">
+        <DialogHeader className="space-y-3 text-left">
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-800">
+              <Save className="h-5 w-5" aria-hidden />
+            </div>
+            <div className="min-w-0 space-y-2">
+              <DialogTitle className="text-xl font-semibold tracking-tight">Guardar en el sistema</DialogTitle>
+              <DialogDescription className="text-sm leading-relaxed">
+                Elija qué desea hacer. Nada se envía al servidor hasta confirmar aquí (sin guardado automático ni avisos
+                de Despacho al cerrar paletas).
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <DialogFooter className="flex flex-col gap-2 sm:flex-col sm:items-stretch">
+          <Button
+            type="button"
+            className="h-auto min-h-10 justify-start gap-2 whitespace-normal px-4 py-3 text-left"
+            disabled={!props.hasActiveTurno}
+            onClick={() => {
+              props.onOpenChange(false)
+              props.onGuardarSesion()
+            }}
+          >
+            <Save className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>
+              <span className="block font-semibold">Guardar</span>
+              <span className="block text-xs font-normal opacity-90">
+                Guarda el turno en curso sin cerrarlo (producción, paletas y saldo en Despacho si aplica).
+              </span>
+            </span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto min-h-10 justify-start gap-2 whitespace-normal border-sky-200 bg-sky-50/80 px-4 py-3 text-left text-sky-950 hover:bg-sky-100"
+            disabled={!props.hasActiveTurno}
+            onClick={() => {
+              props.onOpenChange(false)
+              props.onFinalizarTurno()
+            }}
+          >
+            <LogOut className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>
+              <span className="block font-semibold">Finalizar turno</span>
+              <span className="block text-xs font-normal opacity-90">
+                Cierra el turno de planta, guarda tiempos y producción, y deja el formulario listo para un turno nuevo.
+              </span>
+            </span>
+          </Button>
+          {props.canFinalizeArea ? (
+            <Button
+              type="button"
+              variant="destructive"
+              className="h-auto min-h-10 justify-start gap-2 whitespace-normal px-4 py-3 text-left"
+              onClick={() => {
+                props.onOpenChange(false)
+                props.onFinalizarCierreCorte()
+              }}
+            >
+              <Flag className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>
+                <span className="block font-semibold">Finalizar cierre de Corte</span>
+                <span className="block text-xs font-normal opacity-90">
+                  Marca el área de corte como finalizada en la OT (solo jefatura).
+                </span>
+              </span>
+            </Button>
+          ) : null}
+          <Button type="button" variant="ghost" className="sm:mt-1" onClick={() => props.onOpenChange(false)}>
+            Cancelar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function WorkOrderCorteControlPanel({
   workOrderId,
   canFinalizeOrder = false,
@@ -189,9 +289,9 @@ export default function WorkOrderCorteControlPanel({
   const [saving, setSaving] = useState(false)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
   const [form, setForm] = useState<Record<string, unknown>>({})
+  const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false)
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
   const [finalizeAreaConfirmOpen, setFinalizeAreaConfirmOpen] = useState(false)
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [pauseMotivoModalOpen, setPauseMotivoModalOpen] = useState(false)
   const [pauseReason, setPauseReason] = useState("")
   const [pauseObs, setPauseObs] = useState("")
@@ -241,6 +341,10 @@ export default function WorkOrderCorteControlPanel({
   const timerPaused = timerState === "paused"
   const hasActiveTurno = activeTurno !== null
   const nowMs = Date.now() + timerTick * 0
+  const operativoEstado = useMemo(
+    () => deriveCorteOperativoEstado(form, nowMs),
+    [form, timerTick],
+  )
   const jsonAccum = useMemo(
     () => accumulateCorteFromJson(closedTurnos, activeTurno, sumSalidaKgFromForm(form)),
     [closedTurnos, activeTurno, form],
@@ -261,10 +365,15 @@ export default function WorkOrderCorteControlPanel({
     () => cumulativeDemountSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
   )
+  const otArranqueAccSec = useMemo(
+    () => cumulativeArranqueSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
   const displayEffectiveSec = otEffectiveAccSec
   const displayDeadSec = otDeadAccSec
   const displayTotalSec = otTotalAccSec
   const displayDemountSec = otDemountAccSec
+  const displayArranqueSec = otArranqueAccSec
   const producidoAcumuladoKg = jsonAccum.producidoKg
   const kgHora =
     displayEffectiveSec > 0.01
@@ -361,7 +470,7 @@ export default function WorkOrderCorteControlPanel({
     if (controlReadOnly) return ""
     if (canSaveProduction || areaFinalizada) return ""
     if (canPersistShiftOpen) {
-      return "Turno abierto: puede guardar turno y personal. Para cerrar paletas y avisar a otras áreas, inicie el cronómetro (play)."
+      return "Pulse Guardar y elija «Finalizar turno» o «Finalizar cierre de Corte». Para cerrar paletas en Despacho, inicie el cronómetro (play)."
     }
     return MES_SAVE_BLOCKED_MESSAGE
   }, [areaFinalizada, canPersistShiftOpen, canSaveProduction, controlReadOnly])
@@ -419,16 +528,19 @@ export default function WorkOrderCorteControlPanel({
         const entradaKg = sanitizeCorEntradaBobinasKg(
           src.corEntradaBobinasKg ?? actualP.entradaBobinasKg,
         )
+        const entradaMeta = getMetaSeries(src, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
         actualP = {
           ...actualP,
           paletas: sanitizeCorPaletasForPersistence(topPaletas),
           entradaBobinasKg: entradaKg,
+          entradaBobinasMeta: entradaMeta,
           kgIngresados: sumEntradaKgFromForm({ ...src, corEntradaBobinasKg: entradaKg }).toFixed(2),
         }
       }
 
       const paletasForSave = sanitizeCorPaletasForPersistence(getCorPaletas(src))
       const entradaForSave = sanitizeCorEntradaBobinasKg(src.corEntradaBobinasKg)
+      const entradaMetaForSave = getMetaSeries(src, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
       const salidaFields = syncCorteSalidaFields({
         ...src,
         cor_paletas: paletasForSave,
@@ -447,6 +559,7 @@ export default function WorkOrderCorteControlPanel({
         cor_paletas: paletasForSave,
         corSalidaPaletasKg: paletasForSave.map((p) => p.rollosKg),
         corEntradaBobinasKg: entradaForSave,
+        [COR_ENTRADA_META_KEY]: entradaMetaForSave,
         [COR_TURNOS_KEY]: closedP,
         [COR_ESTADO_KEY]: readCorteEstadoArea(src[COR_ESTADO_KEY]),
         kgIngresadosCorte: normalizeNumericString(
@@ -467,7 +580,7 @@ export default function WorkOrderCorteControlPanel({
       if (actualP !== null) {
         normalizedForm[COR_ACTUAL_KEY] = actualP
       } else if (options?.clearTurnoActual) {
-        normalizedForm[COR_ACTUAL_KEY] = null
+        Object.assign(normalizedForm, clearCorteMirrorKeys(), { [COR_ACTUAL_KEY]: null })
       }
 
       const corteOnlyForm = filterCorteControlForm(normalizedForm)
@@ -536,31 +649,6 @@ export default function WorkOrderCorteControlPanel({
     })
   }, [])
 
-  const patchActiveTurnAndPersist = useCallback(
-    (updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => {
-      setForm((prev) => {
-        const cur = materializeOpenCorteTurnoActual(prev)
-        if (!cur) return prev
-        const nextTurn = updater(cur)
-        const nextForm: Record<string, unknown> = {
-          ...prev,
-          [COR_ACTUAL_KEY]: nextTurn,
-          ...corteTurnoToMirror(nextTurn),
-          ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
-        }
-        queueMicrotask(() => {
-          void persistCorteForm(nextForm, {
-            skipProductionSaveGuard: true,
-            notifyProductionSave: false,
-            suppressSuccessToast: true,
-          })
-        })
-        return nextForm
-      })
-    },
-    [persistCorteForm],
-  )
-
   const applyCerrarTurno = useCallback(
     async (cur: CorteTurnoEntry) => {
       const finalizedTimer = finalizeTurnTimerNow(cur.timer)
@@ -599,16 +687,81 @@ export default function WorkOrderCorteControlPanel({
       setForm(bootstrapCorteFormState(nextForm))
       const ok = await persistCorteForm(nextForm, {
         skipProductionSaveGuard: true,
-        notifyProductionSave: false,
+        notifyProductionSave: timerEverStarted,
+        clearTurnoActual: true,
+        successMessage: "Turno de planta cerrado y guardado. El formulario quedó en blanco para iniciar otro turno.",
         suppressSuccessToast: true,
       })
       if (ok) {
-        toast.success("Turno de planta cerrado y guardado.")
+        toast.success(
+          "Turno de planta cerrado y guardado. El formulario quedó en blanco para iniciar otro turno.",
+        )
         await load()
       }
     },
-    [form, persistCorteForm, load],
+    [form, persistCorteForm, load, timerEverStarted],
   )
+
+  const requestGuardar = useCallback(() => {
+    if (saving || controlReadOnly) return
+    if (!canClickGuardar) {
+      toast.error(
+        !hasActiveTurno && closedTurnos.length === 0
+          ? "Abra un turno de planta antes de guardar."
+          : MES_SAVE_BLOCKED_MESSAGE,
+      )
+      return
+    }
+    if (hasActiveTurno) {
+      const cur = materializeOpenCorteTurnoActual(form)
+      if (!cur?.operador.trim() || !cur.turno || !cur.grupo) {
+        toast.error("Complete turno, grupo y operador antes de guardar.")
+        return
+      }
+      setGuardarChoiceOpen(true)
+      return
+    }
+    if (canFinalizeOrder && !areaFinalizada) {
+      setGuardarChoiceOpen(true)
+      return
+    }
+    toast.message("No hay turno abierto. Inicie un turno de planta o finalice el cierre de Corte si corresponde.")
+  }, [
+    areaFinalizada,
+    canClickGuardar,
+    canFinalizeOrder,
+    closedTurnos.length,
+    controlReadOnly,
+    form,
+    hasActiveTurno,
+    saving,
+  ])
+
+  const handleGuardarSesion = useCallback(() => {
+    void persistCorteForm(undefined, {
+      skipProductionSaveGuard: !canSaveProduction && canPersistShiftOpen,
+      notifyProductionSave: canSaveProduction && timerEverStarted,
+      successMessage: "Control de corte guardado.",
+    })
+  }, [
+    canPersistShiftOpen,
+    canSaveProduction,
+    persistCorteForm,
+    timerEverStarted,
+  ])
+
+  const handleFinalizarTurnoFromGuardar = useCallback(() => {
+    const cur = materializeOpenCorteTurnoActual(form)
+    if (!cur) {
+      toast.error("No hay turno de planta abierto.")
+      return
+    }
+    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
+      toast.error("Complete turno, grupo y operador.")
+      return
+    }
+    void applyCerrarTurno(cur)
+  }, [applyCerrarTurno, form])
 
   async function finalizarAreaCorte() {
     if (!canFinalizeOrder) {
@@ -660,21 +813,7 @@ export default function WorkOrderCorteControlPanel({
     }
   }
 
-  async function confirmResetAll() {
-    if (saving || controlReadOnly) return
-    setResetConfirmOpen(false)
-    const cleared: Record<string, unknown> = {
-      ...form,
-      [COR_TURNOS_KEY]: [],
-      [COR_ACTUAL_KEY]: null,
-      [COR_ESTADO_KEY]: "abierta",
-      ...clearCorteMirrorKeys(),
-    }
-    setForm(bootstrapCorteFormState(cleared))
-    toast.success("Corte reiniciado. Guardando en el servidor…")
-    await persistCorteForm(cleared, { skipProductionSaveGuard: true, notifyProductionSave: false })
-  }
-
+  /** Persiste turno + espejo plano para sincronizar corte_time_segments (reportes de planta). */
   function patchAndPersistTimer(
     updater: (timer: CorteTurnTimer) => CorteTurnTimer,
     successMessage?: string,
@@ -682,19 +821,18 @@ export default function WorkOrderCorteControlPanel({
     const cur = activeTurno
     if (!cur) return
     const nextTurn: CorteTurnoEntry = { ...cur, timer: updater(cur.timer) }
+    const nextForm: Record<string, unknown> = {
+      ...form,
+      [COR_ACTUAL_KEY]: nextTurn,
+      ...corteTurnoToMirror(nextTurn),
+    }
     patchActiveTurn(() => nextTurn)
-    void persistCorteForm(
-      {
-        ...form,
-        [COR_ACTUAL_KEY]: nextTurn,
-        ...corteTurnoToMirror(nextTurn),
-      },
-      {
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-        successMessage,
-      },
-    )
+    void persistCorteForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      successMessage,
+      suppressSuccessToast: !successMessage,
+    })
   }
 
   function requestTimerConfirm(key: MesTimerConfirmKey) {
@@ -734,63 +872,51 @@ export default function WorkOrderCorteControlPanel({
 
   function confirmStartProductionTimer() {
     if (!hasActiveTurno || controlReadOnly) return
-    const now = Date.now()
-    const cur = activeTurno
-    if (!cur) return
-    const nextTurn: CorteTurnoEntry = {
-      ...cur,
-      timer: {
-        ...cur.timer,
-        state: "running",
-        startedAtMs: cur.timer.startedAtMs || now,
-        deadAccSec: deadAccSecAfterResume(cur.timer, now),
-        lastResumeAtMs: now,
-        pauseAtMs: 0,
-      },
+    const nextBase = startCorteProductionTimerOnForm(form)
+    if (!nextBase) return
+    const nextTurn = materializeOpenCorteTurnoActual(nextBase)
+    if (!nextTurn) return
+    const nextForm: Record<string, unknown> = {
+      ...nextBase,
+      ...syncCorteFormMetrics({ ...nextBase, cor_paletas: nextTurn.paletas }),
     }
-    patchActiveTurn(() => nextTurn)
-    void persistCorteForm(
-      {
-        ...form,
-        [COR_ACTUAL_KEY]: nextTurn,
-        ...corteTurnoToMirror(nextTurn),
-      },
-      {
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-        suppressSuccessToast: true,
-      },
+    setForm((prev) => ({
+      ...prev,
+      [COR_ACTUAL_KEY]: nextTurn,
+      ...corteTurnoToMirror(nextTurn),
+      ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
+    }))
+    void persistCorteForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      suppressSuccessToast: true,
+    })
+    toast.message(
+      "Producción iniciada. Los tiempos se reflejan en Reportes → Producción y tiempos (active «Incluir turnos en curso»).",
     )
   }
 
   function confirmResumeProductionAfterDeadTime() {
     if (!hasActiveTurno || controlReadOnly || !timerPaused) return
-    const now = Date.now()
-    const cur = activeTurno
-    if (!cur) return
-    const nextTurn: CorteTurnoEntry = {
-      ...cur,
-      timer: {
-        ...cur.timer,
-        state: "running",
-        deadAccSec: deadAccSecAfterResume(cur.timer, now),
-        lastResumeAtMs: now,
-        pauseAtMs: 0,
-      },
+    const nextBase = startCorteProductionTimerOnForm(form)
+    if (!nextBase) return
+    const nextTurn = materializeOpenCorteTurnoActual(nextBase)
+    if (!nextTurn) return
+    const nextForm: Record<string, unknown> = {
+      ...nextBase,
+      ...syncCorteFormMetrics({ ...nextBase, cor_paletas: nextTurn.paletas }),
     }
-    patchActiveTurn(() => nextTurn)
-    void persistCorteForm(
-      {
-        ...form,
-        [COR_ACTUAL_KEY]: nextTurn,
-        ...corteTurnoToMirror(nextTurn),
-      },
-      {
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-        successMessage: "Producción reanudada.",
-      },
-    )
+    setForm((prev) => ({
+      ...prev,
+      [COR_ACTUAL_KEY]: nextTurn,
+      ...corteTurnoToMirror(nextTurn),
+      ...syncCorteFormMetrics({ ...prev, cor_paletas: nextTurn.paletas }),
+    }))
+    void persistCorteForm(nextForm, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      successMessage: "Producción reanudada.",
+    })
   }
 
   function runOpenTimerReportPreview() {
@@ -916,6 +1042,12 @@ export default function WorkOrderCorteControlPanel({
           skipProductionSaveGuard: true,
           notifyProductionSave: false,
           suppressSuccessToast: true,
+        }).then((ok) => {
+          if (ok) {
+            toast.message(
+              "Parada registrada. Use «Fin de parada» para reanudar; el tiempo muerto queda en el reporte de planta.",
+            )
+          }
         })
       })
       return nextForm
@@ -923,47 +1055,13 @@ export default function WorkOrderCorteControlPanel({
     setPauseReason("")
     setPauseObs("")
     setPauseMotivoModalOpen(false)
-    toast.message(
-      "Parada registrada. El cronómetro sigue en pausa; use «Fin de parada» para reanudar el tiempo efectivo.",
-    )
   }
-
-  useEffect(() => {
-    if (!timerRunning && !arranqueRunning && !demountRunning) return
-    const id = window.setInterval(() => {
-      if (saving) return
-      persistCorteFormCb(form, {
-        skipProductionSaveGuard: !canSaveProduction && canPersistShiftOpen,
-        notifyProductionSave: canSaveProduction && timerEverStarted,
-        suppressSuccessToast: true,
-      })
-    }, 60000)
-    return () => window.clearInterval(id)
-  }, [
-    timerRunning,
-    arranqueRunning,
-    demountRunning,
-    saving,
-    persistCorteFormCb,
-    form,
-    canSaveProduction,
-    canPersistShiftOpen,
-    timerEverStarted,
-  ])
-
-  const saveCorteForm = useCallback(() => {
-    void persistCorteForm(undefined, {
-      skipProductionSaveGuard: !canSaveProduction && canPersistShiftOpen,
-      notifyProductionSave: canSaveProduction && timerEverStarted,
-    })
-  }, [canPersistShiftOpen, canSaveProduction, persistCorteForm, timerEverStarted])
 
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de corte…</p>
 
   return (
     <div className="ax-mes space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <WorkOrderStageBadge current="corte" />
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -977,7 +1075,7 @@ export default function WorkOrderCorteControlPanel({
           <Button
             type="button"
             size="sm"
-            onClick={saveCorteForm}
+            onClick={requestGuardar}
             disabled={saving || controlReadOnly || (!areaFinalizada && !canClickGuardar)}
             title={guardarHint || undefined}
           >
@@ -1079,39 +1177,11 @@ export default function WorkOrderCorteControlPanel({
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card p-3">
-        <h3 className="mb-2 text-base font-semibold">Datos de pedido / OT (solo lectura)</h3>
-        <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <span className="text-muted-foreground">OT:</span> {readString(prefill.numeroOrden) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Cliente:</span> {readString(form.cliente) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Producto:</span> {readString(form.producto) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">CPE:</span> {readString(form.cpe) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Estructura:</span>{" "}
-            {readString(form.estructuraMaterial) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Tipo impresión:</span>{" "}
-            {readString(form.tipoImpresionEstructura || form.tipoImpresion) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Cant. solicitada (Kg):</span>{" "}
-            {readString(form.pedidoKg) || "—"}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Ref. pedido:</span>{" "}
-            {readString(form.client_order_code || form.client_order_reference) || "—"}
-          </div>
-        </div>
-      </div>
+      <MesOperativoEstadoCard
+        areaLabel="Corte"
+        estado={operativoEstado}
+        producidoKg={producidoAcumuladoKg}
+      />
 
       {areaFinalizada ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
@@ -1146,6 +1216,7 @@ export default function WorkOrderCorteControlPanel({
         deadSec={displayDeadSec}
         effectiveSec={displayEffectiveSec}
         demountSec={displayDemountSec}
+        arranqueSec={displayArranqueSec}
         timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
         horaArranque={displayHoraArranque}
@@ -1162,11 +1233,11 @@ export default function WorkOrderCorteControlPanel({
         corOperador={readString(form.corOperador)}
         corAyudante={readString(form.corAyudante)}
         corSupervisor={readString(form.corSupervisor)}
-        onSetTurno={(v) => patchActiveTurnAndPersist((t) => ({ ...t, turno: v }))}
-        onSetGrupo={(v) => patchActiveTurnAndPersist((t) => ({ ...t, grupo: v }))}
+        onSetTurno={(v) => patchActiveTurn((t) => ({ ...t, turno: v }))}
+        onSetGrupo={(v) => patchActiveTurn((t) => ({ ...t, grupo: v }))}
         onActivePersonnelApply={(people: DraftPerson[]) => {
           const { operador, ayudante, supervisor } = stringsFromActivePersonnel(people)
-          patchActiveTurnAndPersist((t) => ({ ...t, operador, ayudante, supervisor }))
+          patchActiveTurn((t) => ({ ...t, operador, ayudante, supervisor }))
         }}
         patchActiveTurn={patchActiveTurn}
         onRequestSave={persistCorteFormCb}
@@ -1189,35 +1260,34 @@ export default function WorkOrderCorteControlPanel({
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
             type="button"
-            onClick={saveCorteForm}
+            onClick={requestGuardar}
             disabled={saving || controlReadOnly || (!areaFinalizada && !canClickGuardar)}
             title={guardarHint || undefined}
           >
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
-          {!controlReadOnly && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-amber-300 text-amber-950 hover:bg-amber-50"
-              disabled={saving}
-              onClick={() => setResetConfirmOpen(true)}
-            >
-              <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Empezar de cero
-            </Button>
-          ) : null}
         </div>
       </div>
+
+      <MesCorteGuardarChoiceDialog
+        open={guardarChoiceOpen}
+        onOpenChange={setGuardarChoiceOpen}
+        canFinalizeArea={canFinalizeOrder && !areaFinalizada}
+        hasActiveTurno={hasActiveTurno}
+        onGuardarSesion={handleGuardarSesion}
+        onFinalizarTurno={handleFinalizarTurnoFromGuardar}
+        onFinalizarCierreCorte={() => setFinalizeAreaConfirmOpen(true)}
+      />
 
       <AlertDialog open={closeTurnConfirmOpen} onOpenChange={setCloseTurnConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Cerrar turno</AlertDialogTitle>
             <AlertDialogDescription>
-              Se cerrará el registro de turno de planta en curso y se consolidará el cronómetro en el historial. Podrá
-              abrir otro turno después. ¿Confirma el cierre?
+              Se cerrará el turno de planta en curso y se guardará en el historial. Después verá la pantalla{" "}
+              <span className="font-semibold">Personal y turno de planta</span> (como en Montaje e Impresión) para
+              agregar otra cuadrilla y pulsar <span className="font-semibold">Iniciar turno</span>. ¿Confirma el cierre?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1260,22 +1330,6 @@ export default function WorkOrderCorteControlPanel({
             >
               Sí, finalizar área
             </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reiniciar corte (OT)</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esto borrará turnos, cronómetro, bobinas, paletas y métricas registradas en Corte para esta OT en el
-              servidor. ¿Desea continuar?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmResetAll()}>Confirmar reinicio</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

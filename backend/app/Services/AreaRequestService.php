@@ -39,6 +39,26 @@ class AreaRequestService
     }
 
     /**
+     * Separa bandeja manual vs sustratos virgen generados al guardar planilla OT.
+     *
+     * @param  'manual'|'ot_planilla'  $origin
+     */
+    public function applyInsumosOriginFilter(Builder $query, string $origin): void
+    {
+        $marker = PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER.'%';
+
+        $query->whereHas('materialRequest', function (Builder $q) use ($origin, $marker): void {
+            if ($origin === 'ot_planilla') {
+                $q->where('notes', 'like', $marker);
+            } else {
+                $q->where(function (Builder $q2) use ($marker): void {
+                    $q2->whereNull('notes')->orWhere('notes', 'not like', $marker);
+                });
+            }
+        });
+    }
+
+    /**
      * En listados: una fila por OT y área (la más reciente) para coordinación entre áreas.
      * Las solicitudes de insumos (material_request_id) y las manuales sin OT se listan completas.
      */
@@ -86,6 +106,43 @@ class AreaRequestService
         return [
             'groups' => $groups->count(),
             'closed' => $closed,
+        ];
+    }
+
+    /** Avisos espejo de solicitudes de insumos pendientes de despacho (bandeja almacén). */
+    public function countPendingWarehouseInsumos(): int
+    {
+        return $this->pendingWarehouseInsumosBreakdown()['total'];
+    }
+
+    /**
+     * @return array{total: int, manual: int, ot_planilla: int}
+     */
+    public function pendingWarehouseInsumosBreakdown(): array
+    {
+        $rows = AreaRequest::query()
+            ->whereNotNull('material_request_id')
+            ->where('status', AreaRequestStatus::Pending->value)
+            ->with(['materialRequest:id,notes'])
+            ->get(['id', 'material_request_id']);
+
+        $marker = PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER;
+        $manual = 0;
+        $otPlanilla = 0;
+
+        foreach ($rows as $row) {
+            $notes = trim((string) ($row->materialRequest?->notes ?? ''));
+            if (str_starts_with($notes, $marker)) {
+                $otPlanilla++;
+            } else {
+                $manual++;
+            }
+        }
+
+        return [
+            'total' => $manual + $otPlanilla,
+            'manual' => $manual,
+            'ot_planilla' => $otPlanilla,
         ];
     }
 }

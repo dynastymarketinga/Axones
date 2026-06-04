@@ -6,6 +6,7 @@ import { Barcode, Boxes, Building2, Check, ChevronDown, ChevronsUpDown, Layers, 
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import type { ClientRecord, LaravelPaginated, MaterialRow, ProductRecord, SupplierRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -181,8 +182,8 @@ export default function MaterialFormPage() {
     if (p.tab) setTab(p.tab)
     if (typeof p.sku === "string" && p.sku.trim()) setSku(p.sku.trim().toUpperCase())
     if (typeof p.name === "string") setName(p.name.trim())
-    if (typeof p.micras === "string" && p.micras.trim()) setMicras(p.micras.trim())
-    if (typeof p.ancho === "string" && p.ancho.trim()) setAncho(p.ancho.trim())
+    if (typeof p.micras === "string" && p.micras.trim()) setMicras(formatMaterialDimensionDisplay(p.micras))
+    if (typeof p.ancho === "string" && p.ancho.trim()) setAncho(formatMaterialDimensionDisplay(p.ancho))
     if (typeof p.supplierId === "number" && p.supplierId > 0) {
       setSupplierId(p.supplierId)
       setNoSupplier(false)
@@ -203,8 +204,8 @@ export default function MaterialFormPage() {
       setTab(inferTabFromArea(row.inventory_area))
       setTintaAreaChoice(row.inventory_area === "cementerio_tintas" ? "cementerio_tintas" : "tintas")
       setTintaSubarea((row.tinta_subareas?.[0]?.subarea as "laminacion" | "superficie" | "prueba_laminacion" | "laminacion_nueva") || "laminacion")
-      setMicras(row.micras ?? "")
-      setAncho(row.ancho ?? "")
+      setMicras(formatMaterialDimensionDisplay(row.micras))
+      setAncho(formatMaterialDimensionDisplay(row.ancho))
       setNotes(row.notes ?? "")
       setConsumibleUnit(MISC_UNITS.includes((row.unit ?? "") as (typeof MISC_UNITS)[number]) ? (row.unit as (typeof MISC_UNITS)[number]) : "unidad")
       setSelectedProductIds((row.substrate_products ?? []).map((p) => p.id))

@@ -32,6 +32,9 @@ type ReportEntityFiltersProps = {
   onProductComboOpenChange: (open: boolean) => void
   selectedClientLabel: string
   selectedProductLabel: string
+  hideProduct?: boolean
+  /** Sin tarjeta ni etiqueta duplicada; para columnas del panel compacto de filtros. */
+  embedded?: boolean
   className?: string
 }
 
@@ -48,14 +51,93 @@ export function ReportEntityFilters({
   onProductComboOpenChange,
   selectedClientLabel,
   selectedProductLabel,
+  hideProduct = false,
+  embedded = false,
   className,
 }: ReportEntityFiltersProps) {
   const hasClient = clientFilter !== "all"
   const hasProduct = productFilter !== "all"
 
+  const clientPicker = (
+    <Popover open={clientComboOpen} onOpenChange={onClientComboOpenChange}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={clientComboOpen}
+          className={cn(
+            embedded ? "h-9 w-full justify-between px-3 text-xs font-normal" : "h-11 w-full justify-between px-3 font-normal",
+            catalogSelectTriggerClass,
+            hasClient && "border-violet-500/40 bg-violet-500/[0.06]",
+          )}
+        >
+          <span className="truncate text-left">{selectedClientLabel}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] max-w-[100vw] p-0"
+        align="start"
+        side="bottom"
+      >
+        <Command shouldFilter>
+          <CommandInput placeholder="Buscar por nombre o RIF…" />
+          <CommandList>
+            <CommandEmpty>Ningún cliente coincide.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="todos"
+                onSelect={() => {
+                  onClientFilterChange("all")
+                  onClientComboOpenChange(false)
+                }}
+              >
+                <Check
+                  className={cn(
+                    "mr-2 h-4 w-4",
+                    clientFilter === "all" ? "opacity-100" : "opacity-0",
+                  )}
+                  aria-hidden
+                />
+                Todos los clientes
+              </CommandItem>
+              {clients.map((c) => {
+                const line = c.rif ? `${c.name} ${c.rif}` : c.name
+                return (
+                  <CommandItem
+                    key={c.id}
+                    value={line}
+                    onSelect={() => {
+                      onClientFilterChange(String(c.id))
+                      onClientComboOpenChange(false)
+                    }}
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        clientFilter === String(c.id) ? "opacity-100" : "opacity-0",
+                      )}
+                      aria-hidden
+                    />
+                    {c.rif ? `${c.name} · ${c.rif}` : c.name}
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+
+  if (embedded && hideProduct) {
+    return <div className={cn("min-w-0", className)}>{clientPicker}</div>
+  }
+
   return (
     <ReportFilterSection
-      title="Cliente y producto"
+      title={hideProduct ? "Cliente" : "Cliente y producto"}
       accentClass="text-violet-700 dark:text-violet-300"
       dotClass="bg-violet-500"
       borderClass="border-violet-500/25 from-violet-500/[0.06]"
@@ -63,78 +145,10 @@ export function ReportEntityFilters({
     >
       <CatalogFilterGrid>
         <CatalogLabeledField label="Cliente" icon={Users} className="min-w-0 md:col-span-6">
-          <Popover open={clientComboOpen} onOpenChange={onClientComboOpenChange}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                role="combobox"
-                aria-expanded={clientComboOpen}
-                className={cn(
-                  "h-11 w-full justify-between px-3 font-normal",
-                  catalogSelectTriggerClass,
-                  hasClient && "border-violet-500/40 bg-violet-500/[0.06]",
-                )}
-              >
-                <span className="truncate text-left">{selectedClientLabel}</span>
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] max-w-[100vw] p-0"
-              align="start"
-              side="bottom"
-            >
-              <Command shouldFilter>
-                <CommandInput placeholder="Buscar por nombre o RIF…" />
-                <CommandList>
-                  <CommandEmpty>Ningún cliente coincide.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem
-                      value="todos"
-                      onSelect={() => {
-                        onClientFilterChange("all")
-                        onClientComboOpenChange(false)
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4",
-                          clientFilter === "all" ? "opacity-100" : "opacity-0",
-                        )}
-                        aria-hidden
-                      />
-                      Todos los clientes
-                    </CommandItem>
-                    {clients.map((c) => {
-                      const line = c.rif ? `${c.name} ${c.rif}` : c.name
-                      return (
-                        <CommandItem
-                          key={c.id}
-                          value={line}
-                          onSelect={() => {
-                            onClientFilterChange(String(c.id))
-                            onClientComboOpenChange(false)
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              clientFilter === String(c.id) ? "opacity-100" : "opacity-0",
-                            )}
-                            aria-hidden
-                          />
-                          {c.rif ? `${c.name} · ${c.rif}` : c.name}
-                        </CommandItem>
-                      )
-                    })}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+          {clientPicker}
         </CatalogLabeledField>
 
+        {hideProduct ? null : (
         <CatalogLabeledField label="Producto" icon={Package} className="min-w-0 md:col-span-6">
           <Popover open={productComboOpen} onOpenChange={onProductComboOpenChange}>
             <PopoverTrigger asChild>
@@ -207,6 +221,7 @@ export function ReportEntityFilters({
             </PopoverContent>
           </Popover>
         </CatalogLabeledField>
+        )}
       </CatalogFilterGrid>
     </ReportFilterSection>
   )

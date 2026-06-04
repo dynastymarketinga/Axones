@@ -6,13 +6,16 @@ use App\Enums\AlertSeverity;
 use App\Enums\OperationalAlertType;
 use App\Enums\PrintingTimeSegmentType;
 use App\Models\Material;
+use App\Models\MaterialRequest;
 use App\Models\OperationalAlert;
+use App\Services\PlanillaSustratoMaterialRequestSyncService;
 use App\Models\CorteTimeSegment;
 use App\Models\LaminacionTimeSegment;
 use App\Models\MontajeTimeSegment;
 use App\Models\PrintingTimeSegment;
 use App\Models\User;
 use App\Models\WorkOrder;
+use Illuminate\Support\Str;
 
 class OperationalAlertService
 {
@@ -42,13 +45,14 @@ class OperationalAlertService
      * Escasez de material en OT (líneas de consumo o sustratos virgen en planilla).
      */
     public function recordOtMaterialShortageLine(
-        WorkOrder $workOrder,
+        ?WorkOrder $workOrder,
         ?User $user,
         int $materialId,
         string $qtyRequested,
         ?string $areaLabel = null,
         ?string $originatingArea = null,
         string $source = 'ot_lines',
+        ?int $clientOrderId = null,
     ): void {
         /** @var Material|null $material */
         $material = Material::query()->find($materialId);
@@ -56,8 +60,14 @@ class OperationalAlertService
             return;
         }
 
+        $clientOrderId = $clientOrderId ?? ($workOrder?->client_order_id ? (int) $workOrder->client_order_id : null);
+
         $qoh = (string) $material->quantity_on_hand;
         if (bccomp($qoh, $qtyRequested, 3) >= 0) {
+            return;
+        }
+
+        if ($workOrder === null && $clientOrderId === null) {
             return;
         }
 
@@ -65,11 +75,15 @@ class OperationalAlertService
             ? sprintf(' (%s)', $areaLabel)
             : '';
 
+        $otRef = $workOrder !== null
+            ? $workOrder->code
+            : sprintf('borrador pedido cliente #%d', $clientOrderId);
+
         $message = sprintf(
             'Stock insuficiente para %s (%s) en OT %s%s: hay %s %s, se piden %s %s.',
             $material->sku,
             $material->name,
-            $workOrder->code,
+            $otRef,
             $areaSuffix,
             $qoh,
             $material->unit,
@@ -88,28 +102,64 @@ class OperationalAlertService
         if ($originatingArea !== null && $originatingArea !== '') {
             $metadata['target_area'] = $originatingArea;
         }
+        if ($clientOrderId !== null) {
+            $metadata['client_order_id'] = $clientOrderId;
+        }
 
-        $existingUnread = OperationalAlert::query()
-            ->where('work_order_id', $workOrder->getKey())
+        $existingUnreadQuery = OperationalAlert::query()
             ->where('alert_type', OperationalAlertType::OtMaterialShortage->value)
             ->where('material_id', $material->getKey())
-            ->whereNull('acknowledged_at')
-            ->first();
+            ->whereNull('acknowledged_at');
+
+        if ($workOrder !== null) {
+            $existingUnreadQuery->where('work_order_id', $workOrder->getKey());
+        } elseif ($clientOrderId !== null) {
+            $existingUnreadQuery
+                ->whereNull('work_order_id')
+                ->where('metadata->client_order_id', $clientOrderId);
+        }
+
+        /** @var OperationalAlert|null $existingUnread */
+        $existingUnread = $existingUnreadQuery->first();
 
         if ($existingUnread !== null) {
-            $existingUnread->update([
+            $payload = [
                 'message' => $message,
                 'metadata' => $metadata,
-            ]);
+            ];
+            if ($workOrder !== null && $existingUnread->work_order_id === null) {
+                $payload['work_order_id'] = $workOrder->getKey();
+            }
+            $existingUnread->update($payload);
 
             return;
+        }
+
+        if ($workOrder !== null && $clientOrderId !== null) {
+            $draftAlert = OperationalAlert::query()
+                ->where('alert_type', OperationalAlertType::OtMaterialShortage->value)
+                ->where('material_id', $material->getKey())
+                ->whereNull('work_order_id')
+                ->whereNull('acknowledged_at')
+                ->where('metadata->client_order_id', $clientOrderId)
+                ->first();
+
+            if ($draftAlert !== null) {
+                $draftAlert->update([
+                    'work_order_id' => $workOrder->getKey(),
+                    'message' => $message,
+                    'metadata' => $metadata,
+                ]);
+
+                return;
+            }
         }
 
         OperationalAlert::query()->create([
             'alert_type' => OperationalAlertType::OtMaterialShortage->value,
             'severity' => AlertSeverity::Critical->value,
             'message' => $message,
-            'work_order_id' => $workOrder->getKey(),
+            'work_order_id' => $workOrder?->getKey(),
             'material_id' => $material->getKey(),
             'metadata' => $metadata,
             'created_by' => $user?->getKey(),
@@ -379,6 +429,112 @@ class OperationalAlertService
             'material_id' => null,
             'metadata' => $metadata,
             'created_by' => null,
+        ]);
+    }
+
+    /**
+     * Crea alertas de campana para solicitudes ya pendientes (p. ej. antes de activar notificaciones).
+     */
+    public function syncWarehouseAlertsForPendingMaterialRequests(): int
+    {
+        $created = 0;
+        $pendingMrs = MaterialRequest::query()
+            ->whereIn('status', ['pending', 'partial'])
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        foreach ($pendingMrs as $mr) {
+            $before = OperationalAlert::query()
+                ->where('alert_type', OperationalAlertType::MaterialRequestPendingWarehouse->value)
+                ->whereNull('acknowledged_at')
+                ->where('metadata->material_request_id', $mr->getKey())
+                ->count();
+
+            $this->recordMaterialRequestPendingForWarehouse($mr, null);
+
+            $after = OperationalAlert::query()
+                ->where('alert_type', OperationalAlertType::MaterialRequestPendingWarehouse->value)
+                ->whereNull('acknowledged_at')
+                ->where('metadata->material_request_id', $mr->getKey())
+                ->count();
+
+            if ($after > $before) {
+                $created++;
+            }
+        }
+
+        return $created;
+    }
+
+    /**
+     * Campana / alertas: nueva solicitud de insumos o sustratos planilla OT pendiente de despacho.
+     */
+    public function recordMaterialRequestPendingForWarehouse(MaterialRequest $mr, ?User $user): void
+    {
+        if (! in_array($mr->status, ['pending', 'partial'], true)) {
+            return;
+        }
+
+        $mr->loadMissing(['workOrder', 'lines.material']);
+
+        $already = OperationalAlert::query()
+            ->where('alert_type', OperationalAlertType::MaterialRequestPendingWarehouse->value)
+            ->whereNull('acknowledged_at')
+            ->where('metadata->material_request_id', $mr->getKey())
+            ->exists();
+
+        if ($already) {
+            return;
+        }
+
+        $fromPlanilla = str_starts_with(
+            trim((string) $mr->notes),
+            PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER,
+        );
+
+        $woCode = $mr->workOrder?->code;
+        $otRef = $woCode !== null && $woCode !== ''
+            ? $woCode
+            : 'sin OT';
+
+        $origin = $fromPlanilla
+            ? 'sustratos virgen (planilla OT)'
+            : 'solicitud de insumos';
+
+        $lineSummary = $mr->lines
+            ->map(function ($ln) {
+                $sku = $ln->material?->sku;
+                $name = $ln->material?->name ?? $ln->description;
+                $qty = (string) $ln->quantity_requested;
+
+                return trim(($sku ? $sku.' · ' : '').($name ?? '—').' · '.$qty);
+            })
+            ->filter()
+            ->take(3)
+            ->implode('; ');
+
+        $message = sprintf(
+            'Almacén: despacho pendiente (%s) · OT %s · solicitud #%d%s.',
+            $origin,
+            $otRef,
+            $mr->getKey(),
+            $lineSummary !== '' ? ' · '.$lineSummary : '',
+        );
+
+        OperationalAlert::query()->create([
+            'alert_type' => OperationalAlertType::MaterialRequestPendingWarehouse->value,
+            'severity' => AlertSeverity::Info->value,
+            'message' => Str::limit($message, 500),
+            'work_order_id' => $mr->work_order_id,
+            'material_id' => $mr->lines->first()?->material_id,
+            'metadata' => [
+                'target_area' => 'inventario',
+                'channel' => 'bell',
+                'material_request_id' => $mr->getKey(),
+                'from_planilla' => $fromPlanilla,
+            ],
+            'created_by' => $user?->getKey(),
         ]);
     }
 

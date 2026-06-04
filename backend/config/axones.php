@@ -63,12 +63,6 @@ return [
             'structure_patterns' => ['transparente', 'cpp', 'cast', 'opp'],
             'aliases' => [],
         ],
-        [
-            'id' => 'poliestireno',
-            'label' => 'Poliestireno',
-            'structure_patterns' => ['poliestireno', 'poliestyrene', 'hips', 'gpps', 'pps'],
-            'aliases' => [],
-        ],
     ],
 
 ];

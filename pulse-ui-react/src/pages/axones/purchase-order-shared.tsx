@@ -3,6 +3,7 @@
 /* eslint-disable react-refresh/only-export-components -- utilidades compartidas del módulo OC */
 
 import { CheckCircle2, Droplet, FlaskConical, Layers, Loader2, Package } from "lucide-react"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import { cn } from "@/lib/utils"
 
 export type PoItemType = "sustrato" | "tinta" | "quimico" | "otros"
@@ -54,12 +55,7 @@ export function toDateInputValue(value: string | null | undefined): string {
 }
 
 export function formatQuantityEs(value: string | number | null | undefined): string {
-  const n = Number(value ?? 0)
-  if (!Number.isFinite(n)) return "0,000"
-  return new Intl.NumberFormat("es-VE", {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(n)
+  return formatQuantityDisplay(value) || "0"
 }
 
 export const PO_ITEM_TYPE_DISPLAY: Record<

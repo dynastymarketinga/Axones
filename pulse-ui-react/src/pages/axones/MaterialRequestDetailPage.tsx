@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import type { ClientRecord, ProductRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -191,9 +192,9 @@ export default function MaterialRequestDetailPage() {
                           </div>
                         )}
                       </TableCell>
-                      <TableCell>{ln.quantity_requested}</TableCell>
-                      <TableCell>{ln.quantity_dispatched}</TableCell>
-                      <TableCell>{rem.toFixed(3)}</TableCell>
+                      <TableCell>{formatQuantityDisplay(ln.quantity_requested)}</TableCell>
+                      <TableCell>{formatQuantityDisplay(ln.quantity_dispatched)}</TableCell>
+                      <TableCell>{formatQuantityDisplay(rem)}</TableCell>
                     </TableRow>
                   )
                 })}

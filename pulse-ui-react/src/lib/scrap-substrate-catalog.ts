@@ -30,11 +30,6 @@ export const DEFAULT_SCRAP_SUBSTRATE_GROUPS: ScrapSubstrateGroupConfig[] = [
     label: "Transparente",
     structure_patterns: ["transparente", "cpp", "cast", "opp"],
   },
-  {
-    id: "poliestireno",
-    label: "Poliestireno",
-    structure_patterns: ["poliestireno", "poliestyrene", "hips", "gpps", "pps"],
-  },
 ]
 
 export type ScrapSubstrateConfigPayload = {

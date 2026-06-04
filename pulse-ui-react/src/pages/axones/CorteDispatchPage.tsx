@@ -29,7 +29,6 @@ import {
 } from "@/components/axones/CatalogTableHead"
 import { DeliveryNotePrefillPreviewDialog } from "@/components/axones/DeliveryNotePrefillPreviewDialog"
 import { LoadingTableRow } from "@/components/axones/LoadingStates"
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import {
   catalogActionButtonClass,
   catalogPaginationOutlineButtonClass,
@@ -373,7 +372,6 @@ export default function CorteDispatchPage() {
       title="Despacho · producto terminado"
       subtitle="Paletas cerradas en Corte listas para nota de entrega. Las filas provisionales son solo consulta hasta cerrar la paleta."
       icon={Truck}
-      headerExtras={<WorkOrderStageBadge current="despacho" />}
       action={
         <Button type="button" onClick={proceedToNewNote} disabled={!selectedRows.length}>
           Crear nota con seleccionadas

@@ -21,13 +21,15 @@ import {
   LogOut,
   Moon,
   Package,
-  RotateCcw,
+  Ruler,
   Sun,
   Timer,
   Trash2,
+  TrendingDown,
   UserPlus,
   UserRound,
   Users,
+  Weight,
 } from "lucide-react"
 
 import {
@@ -76,9 +78,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { sanitizeDecimalTwoInput } from "@/lib/decimal-two-input"
 import { cn } from "@/lib/utils"
 
 import {
+  sumMermaKg,
   sumProduccionKg,
   type MontajeTurnoEntry,
 } from "./montaje-turnos"
@@ -99,11 +103,6 @@ function roleLabelEs(role: DraftPersonRole): string {
   if (role === "operador") return "Operador"
   if (role === "supervisor") return "Supervisor"
   return "Ayudante"
-}
-
-function sumMermaKg(t: MontajeTurnoEntry): number {
-  void t
-  return 0
 }
 
 function personnelLinesFromMontajeTurno(t: MontajeTurnoEntry): string[] {
@@ -193,19 +192,28 @@ type Props = {
   turnosRegistrados: number
   totalProduccionAcumulada: number
   totalMermaAcumulada: number
+  kgProduccionTurno: number
+  kgProduccionRaw: string
+  mermaRaw: string
+  metrajeRaw: string
+  onSetKgProduccion: (v: string) => void
+  onSetMerma: (v: string) => void
+  onSetMetraje: (v: string) => void
   ultimoTurnoLabel: string
   timerState: string
   totalSec: number
   deadSec: number
   /** Tiempo de desmontaje acumulado (OT o turno según `timerShowsOtAccumulated`). */
   demountSec: number
+  /** Tiempo de arranque acumulado (OT, todos los turnos). */
+  arranqueSec: number
+  arranqueRunning?: boolean
   effectiveSec: number
   /** Si true, effectiveSec/deadSec/totalSec son acumulado OT (todos los turnos). */
   timerShowsOtAccumulated?: boolean
   kgHora: string
   /** Hora de arranque del cronómetro del turno en curso (reloj, no duración). */
   horaArranque: string
-  arranqueRunning?: boolean
   montajeOpRunning?: boolean
   demountRunning?: boolean
   timerRunning: boolean
@@ -255,10 +263,10 @@ type Props = {
   lastClosedTurno: MontajeTurnoEntry | null
   canPreviewTimerReport: boolean
   onPreviewTimerReport: () => void
-  canResetAll: boolean
-  onResetAll: () => void
   /** Vista piso: solo play / parada / vista previa en el cronómetro. */
   simplifiedTimerActions?: boolean
+  /** Si false, el cronómetro es solo lectura (entre turnos). */
+  showTimerActions?: boolean
 }
 
 function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
@@ -270,6 +278,35 @@ function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
         <span>{text}</span>
       </span>
     </Label>
+  )
+}
+
+function formatMontajeMetrajeDisplay(turno: MontajeTurnoEntry): string {
+  const raw = (turno.metrajeKg ?? "").trim()
+  if (!raw) return "—"
+  const n = Number(raw.replace(",", "."))
+  return Number.isFinite(n) ? `${n} m` : raw
+}
+
+function MontajeProduccionTurnoReadOnlyTiles({ turno }: { turno: MontajeTurnoEntry }) {
+  return (
+    <div className="mes-stat-grid sm:grid-cols-3">
+      <MesStatTile
+        label="Kg producción"
+        value={`${sumProduccionKg(turno).toFixed(2)} Kg`}
+        icon={<Weight className="h-3.5 w-3.5" />}
+      />
+      <MesStatTile
+        label="Merma (Kg)"
+        value={`${sumMermaKg(turno).toFixed(2)} Kg`}
+        icon={<TrendingDown className="h-3.5 w-3.5" />}
+      />
+      <MesStatTile
+        label="Metraje (m)"
+        value={formatMontajeMetrajeDisplay(turno)}
+        icon={<Ruler className="h-3.5 w-3.5" />}
+      />
+    </div>
   )
 }
 
@@ -325,6 +362,15 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
     props.areaFinalizada ||
     props.timerState === "completed" ||
     props.timerState === "stopped"
+
+  const numKg = (raw: string) => {
+    const n = Number(String(raw).replace(",", "."))
+    return Number.isFinite(n) ? n : 0
+  }
+  const doneProduccion =
+    numKg(props.kgProduccionRaw) > 0 ||
+    numKg(props.mermaRaw) > 0 ||
+    numKg(props.metrajeRaw) > 0
 
   const showPersonalTurnoSetup = !props.hasActiveTurno && !props.areaFinalizada
   const draftPeopleFiltered = useMemo(() => {
@@ -561,12 +607,42 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
         </div>
       ) : null}
 
+      <div className="space-y-4">
+        {showPersonalTurnoSetup || props.hasActiveTurno || props.areaFinalizada ? acumuladoOrdenSection : null}
+        {props.closedTurnos.length > 0 ? (
+          <Collapsible className="rounded-lg border border-slate-300 bg-white shadow-sm">
+            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/50">
+              <span className="inline-flex items-center gap-2">
+                <History className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+                Turnos registrados ({props.closedTurnos.length})
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ul className="space-y-2 border-t px-3 pb-3 pt-1 text-xs">
+                {props.closedTurnos.map((t) => (
+                  <li key={t.id} className="rounded border bg-background p-2">
+                    <div className="font-medium">
+                      {t.closed_at
+                        ? new Date(t.closed_at).toLocaleString("es-VE")
+                        : "—"}{" "}
+                      · {t.turno || "?"} / {t.grupo || "?"} · {t.operador || "—"}
+                    </div>
+                    <div className="text-muted-foreground mt-1">
+                      Producción {sumProduccionKg(t).toFixed(2)} Kg · Merma {sumMermaKg(t).toFixed(2)} Kg · Tiempo efectivo{" "}
+                      {props.formatTimerHms(t.timer.effectiveAccSec)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
+      </div>
+
       {showPersonalTurnoSetup ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start xl:gap-5">
-          <div className="min-w-0 space-y-4">
-            {acumuladoOrdenSection}
-            {savedPeopleSection}
-          </div>
+          <div className="min-w-0 space-y-4">{savedPeopleSection}</div>
           <div className="min-w-0">
             <MesSectionShell
               title={mesSectionTitle(Users, "Personal y turno de planta")}
@@ -721,18 +797,20 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
                       </div>
                     </div>
 
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="montaje-save-person-btn h-12 w-full gap-2 text-base font-semibold sm:w-auto sm:min-w-[12rem] sm:shrink-0"
-                      onClick={() =>
-                        props.onDraftPersonGuardar(props.draftStagingName, props.draftStagingRole)
-                      }
-                      disabled={props.readOnlyOps}
-                    >
-                      <UserPlus className="h-5 w-5 shrink-0" aria-hidden />
-                      Guardar persona
-                    </Button>
+                    <div className="flex justify-center">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="montaje-save-person-btn h-12 w-full max-w-xs gap-2 text-base font-semibold sm:w-auto sm:min-w-[12rem] sm:shrink-0"
+                        onClick={() =>
+                          props.onDraftPersonGuardar(props.draftStagingName, props.draftStagingRole)
+                        }
+                        disabled={props.readOnlyOps}
+                      >
+                        <UserPlus className="h-5 w-5 shrink-0" aria-hidden />
+                        Guardar persona
+                      </Button>
+                    </div>
                   </div>
 
                   {props.draftOperadorMissing ? (
@@ -753,59 +831,27 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
                     </div>
                   ) : null}
                 </div>
-
-                <div className="mt-5 flex justify-center border-t border-border/60 pt-5">
-                  <Button
-                    type="button"
-                    className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
-                    onClick={props.onIniciarTurno}
-                    disabled={props.readOnlyOps || props.draftOperadorMissing}
-                    title={
-                      props.draftOperadorMissing
-                        ? "Guarde al menos una persona con rol Operador en la cuadrilla"
-                        : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
-                    }
-                  >
-                    <CirclePlay className="h-5 w-5 shrink-0" aria-hidden />
-                    Iniciar turno
-                  </Button>
-                </div>
               </div>
             </MesSectionShell>
           </div>
-        </div>
-      ) : (
-        acumuladoOrdenSection
-      )}
 
-      {props.closedTurnos.length > 0 ? (
-        <Collapsible className="rounded-lg border border-slate-300 bg-white shadow-sm">
-          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/50">
-            <span className="inline-flex items-center gap-2">
-              <History className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
-              Turnos registrados ({props.closedTurnos.length})
-            </span>
-            <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <ul className="space-y-2 border-t px-3 pb-3 pt-1 text-xs">
-              {props.closedTurnos.map((t) => (
-                <li key={t.id} className="rounded border bg-background p-2">
-                  <div className="font-medium">
-                    {t.closed_at
-                      ? new Date(t.closed_at).toLocaleString("es-VE")
-                      : "—"}{" "}
-                    · {t.turno || "?"} / {t.grupo || "?"} · {t.operador || "—"}
-                  </div>
-                  <div className="text-muted-foreground mt-1">
-                    Producción {sumProduccionKg(t).toFixed(2)} Kg · Merma {sumMermaKg(t).toFixed(2)} Kg · Tiempo efectivo{" "}
-                    {props.formatTimerHms(t.timer.effectiveAccSec)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
+          <div className="col-span-1 flex justify-center border-t border-border/60 pt-5 xl:col-span-2">
+            <Button
+              type="button"
+              className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
+              onClick={props.onIniciarTurno}
+              disabled={props.readOnlyOps || props.draftOperadorMissing}
+              title={
+                props.draftOperadorMissing
+                  ? "Guarde al menos una persona con rol Operador en la cuadrilla"
+                  : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
+              }
+            >
+              <CirclePlay className="h-5 w-5 shrink-0" aria-hidden />
+              Iniciar turno
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       {props.hasActiveTurno || !!visibleTurno ? (
@@ -1053,6 +1099,73 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
       </MesSectionShell>
       ) : null}
 
+      {props.hasActiveTurno ? (
+        <MesSectionShell
+          title={mesSectionTitle(Weight, "Producción del turno")}
+          subtle
+          headerRight={<MesSectionHeaderExtras isDone={doneProduccion} />}
+        >
+          <div className="mes-stat-grid sm:grid-cols-3">
+            <div className="mes-stat-tile space-y-2">
+              {fieldLabel(mk("kg-prod"), Weight, "Kg producción")}
+              <Input
+                id={mk("kg-prod")}
+                name="montKgProduccion"
+                className="ot-input-unified h-9 bg-white"
+                inputMode="decimal"
+                value={props.kgProduccionRaw}
+                onChange={(e) =>
+                  props.onSetKgProduccion(sanitizeDecimalTwoInput(e.target.value))
+                }
+                disabled={props.readOnlyOps}
+                placeholder="0,00"
+              />
+            </div>
+            <div className="mes-stat-tile space-y-2">
+              {fieldLabel(mk("merma"), TrendingDown, "Merma (Kg)")}
+              <Input
+                id={mk("merma")}
+                name="montMermaKg"
+                className="ot-input-unified h-9 bg-white"
+                inputMode="decimal"
+                value={props.mermaRaw}
+                onChange={(e) => props.onSetMerma(sanitizeDecimalTwoInput(e.target.value))}
+                disabled={props.readOnlyOps}
+                placeholder="0,00"
+              />
+            </div>
+            <div className="mes-stat-tile space-y-2">
+              {fieldLabel(mk("metraje"), Ruler, "Metraje (m)")}
+              <Input
+                id={mk("metraje")}
+                name="montMetraje"
+                className="ot-input-unified h-9 bg-white"
+                inputMode="decimal"
+                value={props.metrajeRaw}
+                onChange={(e) => props.onSetMetraje(sanitizeDecimalTwoInput(e.target.value))}
+                disabled={props.readOnlyOps}
+                placeholder="0"
+                aria-describedby={mk("metraje-hint")}
+              />
+            </div>
+          </div>
+          <p id={mk("metraje-hint")} className="text-muted-foreground mt-2 text-xs leading-snug">
+            <span className="font-medium text-foreground">Metraje (m):</span> metros lineales del material montado en
+            este turno (opcional; no suma al kg acumulado). Kg y merma alimentan el acumulado de la orden, el dashboard
+            y el resumen de material al guardar.
+          </p>
+        </MesSectionShell>
+      ) : visibleTurno ? (
+        <MesSectionShell title={mesSectionTitle(Weight, "Producción del turno cerrado")} subtle>
+          <MontajeProduccionTurnoReadOnlyTiles turno={visibleTurno} />
+          <p className="text-muted-foreground mt-2 text-xs leading-snug">
+            Valores del último turno cerrado.{" "}
+            <span className="font-medium text-foreground">Metraje (m)</span> es referencia opcional de metros
+            montados; el acumulado de la OT usa kg y merma.
+          </p>
+        </MesSectionShell>
+      ) : null}
+
       <MesSectionShell
         title={mesSectionTitle(Timer, "Cronómetro de producción")}
         headerRight={
@@ -1108,22 +1221,14 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
       >
         {props.hasActiveTurno ? (
           <div className="mb-3 rounded-md border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs leading-snug text-foreground">
-            <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
-            <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
-            <span className="font-semibold">no</span> cierra el turno de planta.
             {simplifiedTimer && props.timerActionFlags ? (
-              <> {MES_TIMER_HELP_TEXT}</>
-            ) : simplifiedTimer ? (
-              <>
-                {" "}
-                Cierre con <span className="font-semibold">Guardar</span>,{" "}
-                <span className="font-semibold">Fin del turno</span> o{" "}
-                <span className="font-semibold">Finalizar orden</span>.
-              </>
+              MES_TIMER_HELP_TEXT
             ) : (
               <>
-                {" "}
-                Para cerrar la sesión use <span className="font-semibold">Finalizar turno</span>.
+                <span className="font-semibold">Cronómetro (máquina):</span> cuenta tiempo efectivo y paradas.{" "}
+                <span className="font-semibold">Parada</span> detiene el efectivo y pide motivo (tiempo muerto);{" "}
+                <span className="font-semibold">no</span> cierra el turno de planta. Para cerrar la sesión use{" "}
+                <span className="font-semibold">Finalizar turno</span>.
               </>
             )}
           </div>
@@ -1142,11 +1247,13 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
             effectiveSec={props.effectiveSec}
             deadSec={props.deadSec}
             demountSec={props.demountSec}
+            arranqueSec={props.arranqueSec}
             totalSec={props.totalSec}
             kgHora={props.kgHora}
             horaArranque={props.horaArranque}
             timerShowsOtAccumulated={props.timerShowsOtAccumulated}
             timerRunning={props.timerRunning}
+            arranqueRunning={props.arranqueRunning}
             demountRunning={props.demountRunning}
             timerActionFlags={props.timerActionFlags}
             onRequestTimerConfirm={props.onRequestTimerConfirm}
@@ -1154,6 +1261,7 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
             canFinalizeOrder={props.canFinalizeOrder}
             areaFinalizada={props.areaFinalizada}
             areaLabel="montaje"
+            showTimerActions={props.showTimerActions ?? props.hasActiveTurno}
           />
         ) : (
         <div className="mes-timer-grid">
@@ -1237,26 +1345,6 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
                         {props.canPreviewTimerReport
                           ? "Vista previa del reporte del cronómetro"
                           : "Inicie el cronómetro para habilitar la vista previa"}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="mes-timer-action-labeled">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mes-timer-action-btn mes-btn-warn-outline"
-                          aria-label="Reiniciar (desde cero)"
-                          onClick={props.onResetAll}
-                          disabled={!props.canResetAll}
-                        >
-                          <RotateCcw className="shrink-0" aria-hidden />
-                          <span>Reiniciar</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">
-                        Borra turnos, cronómetro y checks para esta OT (Montaje)
                       </TooltipContent>
                     </Tooltip>
                   </div>

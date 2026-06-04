@@ -73,6 +73,7 @@ class PrintingProductionService
             'mount' => '0',
             'production' => '0',
             'downtime' => '0',
+            'demount' => '0',
         ];
         foreach ($closed as $seg) {
             $type = $seg->segment_type;

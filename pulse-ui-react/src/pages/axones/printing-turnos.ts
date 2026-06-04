@@ -1,3 +1,7 @@
+import { parseDecimalTwoInput, sanitizeDecimalTwoInput } from "@/lib/decimal-two-input"
+import { sanitizeBobinaKgSlotInput } from "@/lib/bobina-kg-slot"
+
+export { isBobinaKgSlotFilled, sanitizeBobinaKgSlotInput } from "@/lib/bobina-kg-slot"
 import {
   emptyMesPhaseTimerFields,
   finalizeMesPhaseSlotsOnTimer,
@@ -41,10 +45,17 @@ export const IMP_BOBINAS_SLOTS = 30
 /** Línea de devolución rechazada en el panel de envío a almacén (puede haber varias por motivo/material). */
 export type WarehouseRejectedEntry = {
   id: string
+  /** @deprecated Preferir kg; se conserva para totales en turno. */
   bobinas: string
-  /** Peso de referencia en Kg (opcional; no reemplaza el conteo de bobinas). */
+  /** Kilos de material rechazado (cantidad principal hacia almacén). */
   kg: string
   motivo: string
+  /** Fecha impresa en la etiqueta de la bobina (AAAA-MM-DD). */
+  fechaBobina: string
+  /** Fecha de registro / creación del aviso (AAAA-MM-DD). */
+  creadaFecha: string
+  /** Operador que reporta la devolución mala. */
+  operador: string
   /** Proveedor (catálogo); opcional. */
   proveedorId: string
   materialId: string
@@ -64,6 +75,9 @@ export function newWarehouseRejectedEntry(
     bobinas: "",
     kg: "",
     motivo: "",
+    fechaBobina: "",
+    creadaFecha: "",
+    operador: "",
     proveedorId: "",
     materialId: "",
     obs: "",
@@ -77,12 +91,28 @@ export function countRejectedEntryBobinas(raw: unknown): number {
   return Math.floor(n)
 }
 
+export function countRejectedEntryKg(raw: unknown): number {
+  const n = readNumber(raw)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return n
+}
+
 export function sumRejectedEntryBobinas(entries: WarehouseRejectedEntry[]): number {
   return entries.reduce((acc, e) => acc + countRejectedEntryBobinas(e.bobinas), 0)
 }
 
+export function sumRejectedEntryKg(entries: WarehouseRejectedEntry[]): number {
+  return entries.reduce((acc, e) => acc + countRejectedEntryKg(e.kg), 0)
+}
+
 export function rejectedEntriesWithBobinas(entries: WarehouseRejectedEntry[]): WarehouseRejectedEntry[] {
-  return entries.filter((e) => countRejectedEntryBobinas(e.bobinas) > 0)
+  return entries.filter(
+    (e) => countRejectedEntryBobinas(e.bobinas) > 0 || countRejectedEntryKg(e.kg) > 0,
+  )
+}
+
+export function rejectedEntriesWithKg(entries: WarehouseRejectedEntry[]): WarehouseRejectedEntry[] {
+  return entries.filter((e) => countRejectedEntryKg(e.kg) > 0)
 }
 
 export function allRejectedEntriesHaveMotivo(entries: WarehouseRejectedEntry[]): boolean {
@@ -94,6 +124,9 @@ export function allRejectedEntriesHaveMotivo(entries: WarehouseRejectedEntry[]):
 /** Borrador de campos solo para el envío a almacén (materiales, referencia y líneas rechazadas). */
 export type WarehouseReturnDraft = {
   buenaMaterialId: string
+  /** Texto libre o autocompletado desde el material seleccionado. */
+  buenaEspecificaciones: string
+  buenaMotivo: string
   bobinaCode: string
   rechazadaEntries: WarehouseRejectedEntry[]
 }
@@ -316,6 +349,7 @@ export function emptyNumericSeries(size: number): string[] {
   return Array.from({ length: size }, () => "")
 }
 
+/** Casilla kg de bobina (ingreso/salida): solo dígitos y coma/punto con hasta 2 decimales. */
 export function emptyMetaSeries(size: number): BobinaLabelMeta[] {
   return Array.from({ length: size }, () => emptyBobinaLabelMeta())
 }
@@ -431,7 +465,7 @@ export function timerToLegacyFlat(timer: PrintingTurnTimer): Record<string, unkn
 function getNumericSeriesForm(form: Record<string, unknown>, key: string, size: number): string[] {
   const raw = form[key]
   if (!Array.isArray(raw)) return emptyNumericSeries(size)
-  const out = raw.slice(0, size).map((v) => readNumberString(v))
+  const out = raw.slice(0, size).map((v) => sanitizeBobinaKgSlotInput(v))
   while (out.length < size) out.push("")
   return out
 }
@@ -559,7 +593,7 @@ export function normalizePrintingTurno(raw: unknown): PrintingTurnoEntry | null 
 
 function padStringArray(raw: unknown, size: number): string[] {
   if (!Array.isArray(raw)) return emptyNumericSeries(size)
-  const out = raw.slice(0, size).map((v) => readNumberString(v))
+  const out = raw.slice(0, size).map((v) => sanitizeBobinaKgSlotInput(v))
   while (out.length < size) out.push("")
   return out
 }

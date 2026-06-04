@@ -1,3 +1,4 @@
+import { formatPlainNumberDisplay, formatQuantityDisplay } from "@/lib/numeric-display"
 import type { PurchaseItemTypeKey } from "@/pages/axones/purchase-item-type-meta"
 import { shouldShowDimsForItemType } from "@/pages/axones/purchase-item-type-meta"
 
@@ -39,9 +40,14 @@ function normalizeKey(value: string): string {
 }
 
 function formatQtyEs(value: string | number | null | undefined): string {
-  const n = Number(String(value ?? "0").replace(",", "."))
-  if (!Number.isFinite(n)) return "0,000"
-  return n.toLocaleString("es-VE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+  return formatQuantityDisplay(value) || "0"
+}
+
+/** Micras / ancho para inputs y etiquetas (20.000 → "20"). */
+export function formatMaterialDimensionDisplay(
+  value: string | number | null | undefined,
+): string {
+  return formatPlainNumberDisplay(value)
 }
 
 export function parseOcLineMeta(description: string | null | undefined): {
@@ -96,8 +102,8 @@ export function formatMaterialIdentity(input: MaterialIdentityInput): string {
 export function formatMaterialDimensionHint(input: MaterialCatalogLabelInput): string | null {
   const key = input.itemTypeKey ?? "sustrato"
   if (!shouldShowDimsForItemType(key)) return null
-  const micras = (input.micras ?? "").trim()
-  const ancho = (input.ancho ?? "").trim()
+  const micras = formatMaterialDimensionDisplay(input.micras)
+  const ancho = formatMaterialDimensionDisplay(input.ancho)
   const parts: string[] = []
   if (micras) parts.push(`${micras} µm`)
   if (ancho) parts.push(`${ancho} mm`)

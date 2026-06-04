@@ -57,6 +57,28 @@ describe("resolveCorteDisplayTimer desync", () => {
     expect(timer.state).toBe("paused")
   })
 
+  it("prefers nested running when flat mirror is still stopped", () => {
+    const base = legacyActiveTurnoFromForm({
+      corOperador: "Ana",
+      corTurno: "diurno",
+      corGrupo: "A",
+    })
+    expect(base).not.toBeNull()
+    const turno: NonNullable<typeof base> = {
+      ...base,
+      timer: {
+        ...base.timer,
+        state: "running",
+        startedAtMs: 1_700_000_000_000,
+        lastResumeAtMs: 1_700_000_000_000,
+      },
+    }
+    const form = { corTimerState: "stopped", corTimerLastResumeAtMs: 0 }
+    const timer = resolveCorteDisplayTimer(turno, form)
+    expect(timer.state).toBe("running")
+    expect(timer.lastResumeAtMs).toBe(1_700_000_000_000)
+  })
+
   it("prefers nested paused when flat still running after pause", () => {
     const base = legacyActiveTurnoFromForm({
       corOperador: "Ana",
@@ -176,9 +198,8 @@ describe("startCorteProductionTimerOnForm", () => {
 })
 
 describe("legacyActiveTurnoFromForm", () => {
-  it("rebuilds open turno from flat mirror when corTurnoActual is null", () => {
+  it("rebuilds open turno from flat mirror fields", () => {
     const t = legacyActiveTurnoFromForm({
-      [COR_ACTUAL_KEY]: null,
       corOperador: "Ana",
       corTurno: "diurno",
       corGrupo: "A",
@@ -186,6 +207,32 @@ describe("legacyActiveTurnoFromForm", () => {
     expect(t?.operador).toBe("Ana")
     expect(t?.turno).toBe("diurno")
     expect(t?.grupo).toBe("A")
+  })
+})
+
+describe("materializeOpenCorteTurnoActual", () => {
+  it("does not reopen turno from flat mirror when corTurnoActual is null", () => {
+    expect(
+      materializeOpenCorteTurnoActual({
+        [COR_ACTUAL_KEY]: null,
+        corOperador: "Ana",
+        corTurno: "diurno",
+        corGrupo: "A",
+      }),
+    ).toBeNull()
+  })
+
+  it("bootstrap clears mirror after explicit turno close", () => {
+    const boot = bootstrapCorteFormState({
+      [COR_ACTUAL_KEY]: null,
+      cor_turnos: [{ id: "t1", closed_at: "2026-01-01T12:00:00.000Z", turno: "diurno", grupo: "A", operador: "Ana" }],
+      corOperador: "Ana",
+      corTurno: "diurno",
+      corGrupo: "A",
+    })
+    expect(boot[COR_ACTUAL_KEY]).toBeNull()
+    expect(boot.corOperador).toBe("")
+    expect(materializeOpenCorteTurnoActual(boot)).toBeNull()
   })
 })
 

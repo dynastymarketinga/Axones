@@ -17,7 +17,7 @@ use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\MaterialRequestController;
 use App\Http\Controllers\Api\MiscellaneousReceiptController;
 use App\Http\Controllers\Api\OperationalAlertController;
-use App\Http\Controllers\Api\OperationalAlertStreamController;
+use App\Http\Controllers\Api\PlanillaSustratoShortageAlertController;
 use App\Http\Controllers\Api\PasswordResetRequestController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\PurchaseOrderController;
@@ -71,6 +71,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
 
     Route::get('/alerts', [OperationalAlertController::class, 'index']);
+    Route::post('/planilla-sustrato-shortage-alerts', [PlanillaSustratoShortageAlertController::class, 'store'])
+        ->middleware('area.role:planilla_write');
     Route::get('/alerts/stream', [OperationalAlertStreamController::class, 'stream']);
     Route::patch('/alerts/{operational_alert}/acknowledge', [OperationalAlertController::class, 'acknowledge']);
     Route::post('/alerts/acknowledge-all', [OperationalAlertController::class, 'acknowledgeAll']);
@@ -84,8 +86,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/inventory-area-daily/preview', [ReportController::class, 'inventoryAreaDailyPreview']);
     Route::get('/reports/inventory-area-daily.pdf', [ReportController::class, 'inventoryAreaDailyPdf']);
     Route::get('/reports/consumption-by-client-product', [ReportController::class, 'consumptionByClientProduct']);
+    Route::get('/reports/rejected-bobinas-inventory', [ReportController::class, 'rejectedBobinasInventory']);
     Route::get('/reports/rejected-bobinas', [ReportController::class, 'rejectedBobinas']);
+    Route::get('/reports/rejected-bobinas/preview', [ReportController::class, 'rejectedBobinasPreview']);
     Route::get('/reports/work-order-material-summary', [ReportController::class, 'workOrderMaterialSummary']);
+    Route::get('/reports/work-order-controls-summary', [ReportController::class, 'workOrderControlsSummary']);
+    Route::get('/reports/work-order-controls-summary/preview', [ReportController::class, 'workOrderControlsSummaryPreview']);
+    Route::get('/reports/work-order-controls-summary.pdf', [ReportController::class, 'workOrderControlsSummaryPdf']);
     Route::get('/reports/production-time-by-area', [ReportController::class, 'productionTimeByArea']);
     Route::get('/reports/production-time-by-area/preview', [ReportController::class, 'productionTimeByAreaPreview']);
     Route::get('/reports/production-time-by-area.pdf', [ReportController::class, 'productionTimeByAreaPdf']);
@@ -97,6 +104,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/scrap-by-filters/preview', [ReportController::class, 'scrapByFiltersPreview']);
     Route::get('/reports/scrap-by-filters.pdf', [ReportController::class, 'scrapByFiltersPdf']);
     Route::get('/reports/scrap-by-filters', [ReportController::class, 'scrapByFilters']);
+    Route::get('/reports/production-material-summary', [ReportController::class, 'productionMaterialSummary']);
+    Route::get('/reports/consumables-summary', [ReportController::class, 'consumablesSummary']);
+    Route::get('/reports/scrap-monthly-summary', [ReportController::class, 'scrapMonthlySummary']);
     Route::get('/reports/tinta-consumption-by-client', [ReportController::class, 'tintaConsumptionByClient']);
 
     Route::get('/inventory-movements', [InventoryMovementsController::class, 'index']);
@@ -245,6 +255,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/area-requests', [AreaRequestController::class, 'index']);
     Route::get('/area-requests/counts', [AreaRequestController::class, 'counts']);
+    Route::get('/area-requests/warehouse-pending-count', [AreaRequestController::class, 'warehousePendingCount']);
     Route::post('/area-requests', [AreaRequestController::class, 'store']);
     Route::patch('/area-requests/{area_request}', [AreaRequestController::class, 'update']);
     Route::delete('/area-requests/{area_request}', [AreaRequestController::class, 'destroy']);

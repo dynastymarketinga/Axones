@@ -75,6 +75,8 @@ class PlanillaSustratoMaterialRequestSyncTest extends TestCase
         $this->assertNotNull($shadow);
         $this->assertSame('impresion', $shadow->area);
         $this->assertSame(AreaRequestStatus::Pending->value, $shadow->status);
+        $this->assertStringContainsString('OT-SUS-1', (string) $shadow->title);
+        $this->assertStringContainsString('Impresión', (string) $shadow->title);
         $this->assertStringContainsString('SUB-420', (string) $shadow->body);
         $this->assertStringContainsString('420.50', (string) $shadow->body);
     }

@@ -1,4 +1,5 @@
 import type { MaterialRow } from "@/types/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 
 export type MaterialRequestDispatchLine = {
   id: number
@@ -61,7 +62,7 @@ export function defaultApprovalQty(
   const rem = lineRemaining(ln)
   const bobinaPicker = usesBobinaPicker(material?.inventory_area, bobinas)
   const max = maxApprovableQty(rem, stockOnHand(material), bobinaPicker)
-  return max > 0 ? String(max) : ""
+  return max > 0 ? formatQuantityDisplay(max) : ""
 }
 
 export function validateApprovalQty(
@@ -73,11 +74,11 @@ export function validateApprovalQty(
   hasMaterial: boolean,
 ): string | null {
   if (qn > remaining + 0.0005) {
-    return `No puede aprobar más de lo pendiente (${remaining.toFixed(3)} ${unit}).`
+    return `No puede aprobar más de lo pendiente (${formatQuantityDisplay(remaining)} ${unit}).`
   }
   if (bobinaPicker) return null
   if (hasMaterial && stock > 0 && qn > stock + 0.0005) {
-    return `Stock insuficiente: hay ${stock.toFixed(3)} ${unit} en inventario.`
+    return `Stock insuficiente: hay ${formatQuantityDisplay(stock)} ${unit} en inventario.`
   }
   return null
 }

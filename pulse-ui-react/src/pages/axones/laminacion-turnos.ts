@@ -139,6 +139,18 @@ export function readLamNumber(v: unknown): number {
   return 0
 }
 
+/** Consumo material del turno: entrada − sobro (mínimo 0). */
+export function computeLamMaterialConsumo(entrada: unknown, sobro: unknown): number {
+  return Math.max(0, readLamNumber(entrada) - readLamNumber(sobro))
+}
+
+/** Prioriza captura del turno activo; si está vacía, usa el espejo plano lam*. */
+export function pickLamTurnoMaterialField(turnoValue: unknown, mirrorValue: unknown): string {
+  const fromTurno = readNumberString(turnoValue).trim()
+  if (fromTurno !== "") return readNumberString(turnoValue)
+  return readNumberString(mirrorValue)
+}
+
 export function toFiniteOrNull(v: unknown): number | null {
   const raw = readNumberString(v).trim().replace(",", ".")
   if (!raw) return null

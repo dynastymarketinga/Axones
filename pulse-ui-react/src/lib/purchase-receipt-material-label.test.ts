@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   formatMaterialCatalogLabel,
+  formatMaterialDimensionDisplay,
   formatMaterialDimensionHint,
   formatMaterialIdentity,
   formatOcLineReceiptProgress,
@@ -57,6 +58,19 @@ describe("formatMaterialCatalogLabel", () => {
         itemTypeKey: "sustrato",
       }),
     ).toBe("857757 · bopp 23 · valeria prueba · 20 µm · 1000 mm")
+  })
+
+  it("normaliza micras/ancho con ceros decimales del API", () => {
+    expect(
+      formatMaterialCatalogLabel({
+        sku: "MAT-MASFPAAS",
+        name: "AAAA",
+        supplierName: "Victor",
+        micras: "10.000",
+        ancho: "12.000",
+        itemTypeKey: "sustrato",
+      }),
+    ).toBe("MAT-MASFPAAS · AAAA · Victor · 10 µm · 12 mm")
   })
 
   it("no añade dimensiones para tinta", () => {
@@ -123,7 +137,7 @@ describe("formatOcLineReceiptProgress", () => {
         quantity_received: "400",
         unit: "kg",
       }),
-    ).toBe("Pedido 500,000 · Recibido 400,000 · Pendiente 100,000 kg")
+    ).toBe("Pedido 500 · Recibido 400 · Pendiente 100 kg")
   })
 })
 

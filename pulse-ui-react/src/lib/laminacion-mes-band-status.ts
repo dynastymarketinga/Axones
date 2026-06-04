@@ -1,11 +1,13 @@
 import {
   buildMesBandFromTurnos,
+  deriveMesOperativoEstadoFromMes,
   mesBandejaCardClass,
   mesBandejaRowAccentClass,
   mesBandejaStatePillClass,
   mesBandejaWorkflowTitle,
   technicalFormFromRow,
   type MesBandejaMes,
+  type MesOperativoEstado,
 } from "@/lib/mes-timer-band-shared"
 import {
   LAM_ACTUAL_KEY,
@@ -72,6 +74,40 @@ function readStoredProducidoKg(form: Record<string, unknown> | null): number {
  * Estado MES para la bandeja de laminación.
  * Incluye OT con datos MES aunque el tablero aún no esté en columna «laminacion».
  */
+export function laminacionMesBandFromForm(
+  form: Record<string, unknown> | null | undefined,
+  nowMs: number = Date.now(),
+): MesBandejaMes {
+  const f = form ?? null
+  const { cerrados, actual, estado } = laminacionFormForMesBand(f)
+  const mes = buildMesBandFromTurnos({
+    areaLabel: "Laminación",
+    estado,
+    cerrados,
+    actual,
+    nowMs,
+    form: f,
+  })
+  const acum = accumulateLaminacionFromJson(cerrados, actual)
+  if (cerrados.length > 0 || actual) {
+    const storedKg = readStoredProducidoKg(f)
+    const producidoKg = Math.max(acum.producidoKg, storedKg)
+    return { ...mes, producidoKg }
+  }
+  const storedOnly = readStoredProducidoKg(f)
+  if (storedOnly > 0.005) {
+    return { ...mes, producidoKg: storedOnly }
+  }
+  return mes
+}
+
+export function deriveLaminacionOperativoEstado(
+  form: Record<string, unknown> | null | undefined,
+  nowMs: number = Date.now(),
+): MesOperativoEstado {
+  return deriveMesOperativoEstadoFromMes(laminacionMesBandFromForm(form, nowMs))
+}
+
 export function laminacionMesBandFromWorkOrderRow(
   row: { technical_document?: { form?: Record<string, unknown> } | null; board_stage?: string | null },
   nowMs: number,
@@ -79,29 +115,7 @@ export function laminacionMesBandFromWorkOrderRow(
   const form = technicalFormFromRow(row)
   const bs = (row.board_stage ?? "").toLowerCase()
   if (bs !== "laminacion" && !hasLaminacionMesActivity(form)) return null
-
-  const { cerrados, actual, estado } = laminacionFormForMesBand(form)
-
-  const mes = buildMesBandFromTurnos({
-    areaLabel: "Laminación",
-    estado,
-    cerrados,
-    actual,
-    nowMs,
-    form,
-  })
-
-  const acum = accumulateLaminacionFromJson(cerrados, actual)
-  if (cerrados.length > 0 || actual) {
-    const storedKg = readStoredProducidoKg(form)
-    const producidoKg = Math.max(acum.producidoKg, storedKg)
-    return { ...mes, producidoKg }
-  }
-  const storedOnly = readStoredProducidoKg(form)
-  if (storedOnly > 0.005) {
-    return { ...mes, producidoKg: storedOnly }
-  }
-  return mes
+  return laminacionMesBandFromForm(form, nowMs)
 }
 
 export type LaminacionActivasSubTab = "pendientes" | "produccion" | "finalizadas"

@@ -10,6 +10,7 @@ import { shouldPlayOperationalToast } from "@/lib/operational-alert-toast-policy
 import type { StreamAlertPayload } from "@/lib/operational-alerts-stream"
 import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
 import type { LaravelPaginated } from "@/types/api"
+import { operationalAlertTypeLabel } from "@/lib/operational-alert-labels"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,22 +34,16 @@ type AlertRow = {
   metadata?: Record<string, unknown>
 }
 
-const ALERT_TYPE_LABEL: Record<string, string> = {
-  ot_material_shortage: "Escasez de material (OT)",
-  scrap_threshold_exceeded: "Desperdicio ≥ 5%",
-  material_low_stock: "Stock bajo",
-  low_stock: "Stock bajo",
-}
-
 const MATERIAL_OPERATIONAL_TYPES = new Set([
   "ot_material_shortage",
   "scrap_threshold_exceeded",
   "material_low_stock",
+  "material_request_pending_warehouse",
+  "inventory_return_pending",
 ])
 
 function alertTypeLabel(alertType?: string | null): string {
-  const key = (alertType ?? "").toLowerCase().trim()
-  return ALERT_TYPE_LABEL[key] ?? (key.replaceAll("_", " ") || "—")
+  return operationalAlertTypeLabel(alertType)
 }
 
 function severityLabel(severity?: string | null): string {
@@ -164,7 +159,7 @@ export default function AxonesOperationalAlertsPage() {
             Alertas operativas
           </h1>
           <p className="text-muted-foreground text-sm">
-            Desperdicio de material (≥ 5%) y escasez de stock por OT o inventario.
+            Mermas, falta de material, insumos por despachar, devoluciones y stock bajo.
           </p>
           <div className="mt-2">
             <Badge variant="outline">Área actual: {areaLabel}</Badge>

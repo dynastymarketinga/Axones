@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { MaterialRequestInventoryResolutionCard } from "@/pages/axones/MaterialRequestInventoryResolutionCard"
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import type { MaterialRequestDispatchLine } from "@/lib/material-request-dispatch-utils"
 import type { ClientRecord, ProductRecord } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
@@ -117,6 +118,7 @@ export default function AreaRequestMaterialInsumosPage() {
         body: JSON.stringify(payload),
       })
       toast.success("Aprobación aplicada. El inventario se rebajó.")
+      window.dispatchEvent(new Event("alerts:refresh"))
       await load()
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -291,7 +293,7 @@ export default function AreaRequestMaterialInsumosPage() {
                             )}
                           </TableCell>
                           <TableCell className="align-middle font-medium tabular-nums">
-                            {ln.quantity_requested}
+                            {formatQuantityDisplay(ln.quantity_requested)}
                             {ln.unit?.trim() || ln.material?.unit ? (
                               <span className="text-muted-foreground ml-1 text-xs font-normal">
                                 {ln.unit?.trim() || ln.material?.unit}
@@ -299,10 +301,10 @@ export default function AreaRequestMaterialInsumosPage() {
                             ) : null}
                           </TableCell>
                           <TableCell className="align-middle tabular-nums text-muted-foreground">
-                            {ln.quantity_dispatched}
+                            {formatQuantityDisplay(ln.quantity_dispatched)}
                           </TableCell>
                           <TableCell className="pr-5 align-middle font-semibold tabular-nums text-primary">
-                            {rem.toFixed(3)}
+                            {formatQuantityDisplay(rem)}
                           </TableCell>
                         </TableRow>
                       )

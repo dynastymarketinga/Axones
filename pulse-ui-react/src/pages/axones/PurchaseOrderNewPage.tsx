@@ -32,6 +32,7 @@ import {
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import {
   isDuplicatePurchaseOrderCodeMessage,
   translateApiValidationMessage,
@@ -338,8 +339,14 @@ type PurchaseOrderNewDraftV1 = {
 
 /** Alinea micras/ancho si el tipo oculta dimensiones (mismo criterio que al editar en UI). */
 function normalizeLineByBusinessRules(line: PoLineDraft): PoLineDraft {
-  if (shouldShowDims(line.item_type)) return line
-  return { ...line, micras: "", ancho_mm: "" }
+  if (!shouldShowDims(line.item_type)) {
+    return { ...line, micras: "", ancho_mm: "" }
+  }
+  return {
+    ...line,
+    micras: formatMaterialDimensionDisplay(line.micras),
+    ancho_mm: formatMaterialDimensionDisplay(line.ancho_mm),
+  }
 }
 
 function normalizePoLineDraftFromStorage(raw: unknown): PoLineDraft {
@@ -832,8 +839,8 @@ export default function PurchaseOrderNewPage() {
     updateLine(rowIndex, {
       material_id: String(material.id),
       description: material.sku || material.name || "",
-      micras: material.micras?.trim() ?? "",
-      ancho_mm: material.ancho?.trim() ?? "",
+      micras: formatMaterialDimensionDisplay(material.micras),
+      ancho_mm: formatMaterialDimensionDisplay(material.ancho),
       unit,
     })
     setMaterialPickerOpenRow(null)

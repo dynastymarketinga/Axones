@@ -3,8 +3,7 @@
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
-import { MesSectionShell } from "@/components/axones/mes"
+import { MesOperativoEstadoCard, MesSectionShell } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,7 +22,6 @@ import WorkOrderMontajeOpsSection, {
 } from "./WorkOrderMontajeOpsSection"
 import WorkOrderMontajeClicheMaterialSection from "./WorkOrderMontajeClicheMaterialSection"
 import {
-  clearMontajeClicheMaterialKeys,
   clearMontajeTurnCaptureFormKeys,
   MON_CILINDRO_KEY,
   MON_CLICHE_KEY,
@@ -40,6 +38,7 @@ import {
   type MontajeFilaMontaje,
   type MontajeMaterialFila,
 } from "./montaje-cliche-material"
+import { showAxonesSuccessSwal } from "@/lib/axones-success-swal"
 import {
   deriveMontajeOperativoEstado,
   MONTAJE_CONTROL_SAVED_EVENT,
@@ -52,7 +51,6 @@ import {
   formatHmsFromSeconds,
   formatHoraArranqueFromMs,
   horaArranqueMsFromTimer,
-  mesBandejaStatePillClass,
 } from "@/lib/mes-timer-band-shared"
 import {
   canSaveProductionAreaForm,
@@ -78,8 +76,10 @@ import {
   parseMontajeTurnoActual,
   parseMontajeTurnos,
   resolveMontajeTurnoActual,
+  cumulativeArranqueSeconds,
   cumulativeDemountSeconds,
   readEstadoArea,
+  sumMermaKg,
   sumProduccionKg,
   type MontajeTurnoEntry,
   type MontajeTurnTimer,
@@ -97,17 +97,14 @@ import {
   CirclePlay,
   FileSearch,
   Flag,
-  Info,
   LogOut,
   NotebookPen,
-  RotateCcw,
   Save,
   Sparkles,
   Users,
 } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
-import { isAxonesDeveloperSession } from "@/lib/axones-roles"
 
 type OrdenTrabajoPayload = {
   work_order_id: number
@@ -312,6 +309,8 @@ type MesMontajeGuardarChoiceDialogProps = {
   onOpenChange: (open: boolean) => void
   canFinalizeArea: boolean
   hasActiveTurno: boolean
+  betweenShiftsMode: boolean
+  onGuardarSesion: () => void
   onFinalizarTurno: () => void
   onFinalizarArea: () => void
 }
@@ -320,99 +319,170 @@ function MesMontajeGuardarChoiceDialog(props: MesMontajeGuardarChoiceDialogProps
   const skin = MES_MONTAJE_CONFIRM.violet
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className={skin.panel}>
-        <DialogHeader className="space-y-4 text-left">
+      <DialogContent className="gap-5 border-slate-200 bg-white sm:max-w-lg dark:border-slate-700 dark:bg-slate-950">
+        <DialogHeader className="space-y-3 text-left">
           <div className="flex items-start gap-3">
             <div className={skin.iconBox}>
               <Save className="h-5 w-5" aria-hidden />
             </div>
-            <div className="min-w-0 space-y-2">
-              <DialogTitle className="text-xl font-semibold tracking-tight">Guardar en el sistema</DialogTitle>
+            <div className="min-w-0 space-y-1">
+              <DialogTitle className="text-lg font-semibold tracking-tight">Guardar en el sistema</DialogTitle>
               <DialogDescription className="text-sm leading-relaxed">
-                <span className="font-semibold text-foreground">Guardar</span> envía cliché, material, tiempos y
-                observaciones al servidor. Elija cómo desea cerrar el registro:
+                {props.betweenShiftsMode ? (
+                  <>
+                    Está <span className="font-semibold text-foreground">entre turnos</span> (sin cuadrilla activa).
+                    Confirme el registro en servidor o cierre el área Montaje si la OT terminó.
+                  </>
+                ) : (
+                  <>
+                    Turno de planta en curso. Al terminar la jornada, elija si cierra el turno o finaliza el área
+                    Montaje en el sistema.
+                  </>
+                )}
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
-        <DialogFooter className="flex flex-col gap-2 sm:flex-col sm:items-stretch">
+
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900/80">
+          <p className="font-medium text-slate-900 dark:text-slate-100">¿Qué desea hacer?</p>
+          <ul className="list-none space-y-2.5 text-slate-600 dark:text-slate-300">
+            <li className="flex gap-2">
+              <LogOut className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              <span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">Finalizar turno</span>
+                {" — "}
+                {props.betweenShiftsMode
+                  ? "Sincroniza tiempos, kg, mermas y datos de cliché/material acumulados."
+                  : "Cierra el turno de planta en curso y guarda arranque, producción y material."}
+              </span>
+            </li>
+            {props.canFinalizeArea ? (
+              <li className="flex gap-2">
+                <Flag className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden />
+                <span>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">Finalizar cierre</span>
+                  {" — "}
+                  Marca el área Montaje como finalizada en la OT y mueve la orden a Historial.
+                </span>
+              </li>
+            ) : null}
+          </ul>
+        </div>
+
+        <DialogFooter className="!flex-row flex-wrap justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            Cancelar
+          </Button>
           <Button
             type="button"
-            variant="outline"
-            className="h-auto min-h-10 justify-start gap-2 whitespace-normal border-sky-200 bg-sky-50/80 px-4 py-3 text-left text-sky-950 hover:bg-sky-100"
-            disabled={!props.hasActiveTurno}
+            variant="secondary"
+            disabled={!props.betweenShiftsMode && !props.hasActiveTurno}
             onClick={() => {
               props.onOpenChange(false)
-              props.onFinalizarTurno()
+              if (props.betweenShiftsMode) {
+                props.onGuardarSesion()
+              } else {
+                props.onFinalizarTurno()
+              }
             }}
           >
-            <LogOut className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            <span>
-              <span className="block font-semibold">Finalizar turno de producción</span>
-              <span className="block text-xs font-normal opacity-90">
-                Cierra el turno de planta en curso y guarda arranque, producción, cliché y material.
-              </span>
-            </span>
+            <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            Finalizar turno
           </Button>
           {props.canFinalizeArea ? (
             <Button
               type="button"
               variant="destructive"
-              className="h-auto min-h-10 justify-start gap-2 whitespace-normal px-4 py-3 text-left"
               onClick={() => {
                 props.onOpenChange(false)
                 props.onFinalizarArea()
               }}
             >
-              <Flag className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              <span>
-                <span className="block font-semibold">Finalizar área Montaje</span>
-                <span className="block text-xs font-normal opacity-90">
-                  Marca el área como finalizada en la OT y mueve la orden a Historial.
-                </span>
-              </span>
+              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Finalizar cierre
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" className="sm:mt-1" onClick={() => props.onOpenChange(false)}>
-            Cancelar
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-const MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES = {
+const MES_MONTAJE_WARNING_TOAST_CLASSNAMES = {
   toast:
-    "!border !border-slate-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
+    "!border !border-amber-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
   title: "!text-slate-900 text-sm font-medium",
-  success: "!bg-white !border-slate-200 !text-slate-900",
+  warning: "!bg-white !border-amber-200 !text-slate-900",
   description: "!text-slate-600 text-sm leading-snug",
-  icon: "text-violet-600",
+  icon: "text-amber-600",
 } as const
 
-function mesMontajeToastSuccess(message: string) {
-  toast.success(message, {
-    richColors: false,
-    classNames: MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES,
-    icon: createElement(Sparkles, { className: "h-4 w-4 shrink-0 text-violet-600", "aria-hidden": true }),
-  })
+function mesMontajeSwalSuccess(message: string) {
+  void showAxonesSuccessSwal(message)
 }
 
-function mesMontajeToastWithBandeja(formSnapshot: Record<string, unknown>, lead: string) {
+/** Texto del modal «Guardado» según estado MES y permisos. */
+function montajeGuardadoSwalContent(
+  formSnapshot: Record<string, unknown>,
+  canFinalizeArea: boolean,
+): { text?: string; html?: string } {
   const op = deriveMontajeOperativoEstado(formSnapshot)
-  mesMontajeToastSuccess(`${lead} ${op.bandejaHint}`)
+  const wf = op.workflow
+
+  if (wf === "entre_turnos") {
+    const finalizeAreaLine = canFinalizeArea
+      ? `<li><span class="font-semibold">Finalizar cierre</span>: si ya no queda montaje en esta OT, pulse <span class="font-semibold">Guardar</span> y elija esta opción.</li>`
+      : `<li><span class="font-semibold">Finalizar cierre</span>: avise a jefatura cuando el montaje de la OT esté completo.</li>`
+    return {
+      html: `<p class="text-sm leading-relaxed">Estado: <span class="font-semibold">Entre turnos</span> — datos guardados en el servidor.</p>
+<p class="mt-3 text-sm font-semibold">Próximo paso</p>
+<ul class="mt-1 list-disc space-y-2 pl-5 text-left text-sm leading-relaxed">
+<li><span class="font-semibold">Finalizar turno</span> (siguiente cuadrilla): abra un <span class="font-semibold">turno nuevo</span> arriba; al terminar la jornada, <span class="font-semibold">Guardar → Finalizar turno</span>.</li>
+${finalizeAreaLine}
+</ul>`,
+    }
+  }
+
+  if (wf === "turno_abierto") {
+    const finalizeAreaHint = canFinalizeArea
+      ? ' o <span class="font-semibold">Finalizar cierre</span>'
+      : ""
+    return {
+      html: `<p class="text-sm leading-relaxed">Turno de planta abierto. Inicie el cronómetro (play) para registrar tiempos.</p>
+<p class="mt-2 text-sm leading-relaxed">Al terminar la jornada: <span class="font-semibold">Guardar → Finalizar turno</span>${finalizeAreaHint}.</p>`,
+    }
+  }
+
+  const text = op.title.trim()
+  return text ? { text } : {}
+}
+
+/** Modal breve: título + detalle opcional (estado en bandeja). */
+function mesMontajeSwalWithBandeja(
+  formSnapshot: Record<string, unknown>,
+  title: string,
+  detail?: string,
+  canFinalizeArea = false,
+) {
+  if (detail?.trim()) {
+    void showAxonesSuccessSwal(title, detail.trim())
+    return
+  }
+  if (title === "Guardado") {
+    const content = montajeGuardadoSwalContent(formSnapshot, canFinalizeArea)
+    void showAxonesSuccessSwal(title, content.text, { html: content.html })
+    return
+  }
+  const op = deriveMontajeOperativoEstado(formSnapshot)
+  const text = op.title.trim()
+  void showAxonesSuccessSwal(title, text && text !== title ? text : undefined)
 }
 
 function mesMontajeToastWarning(message: string) {
   toast.warning(message, {
     richColors: false,
-    classNames: {
-      ...MES_MONTAJE_SUCCESS_TOAST_CLASSNAMES,
-      toast: "!border !border-amber-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
-      warning: "!bg-white !border-amber-200 !text-slate-900",
-      icon: "text-amber-600",
-    },
+    classNames: MES_MONTAJE_WARNING_TOAST_CLASSNAMES,
     icon: createElement(AlertCircle, { className: "h-4 w-4 shrink-0 text-amber-600", "aria-hidden": true }),
   })
 }
@@ -548,10 +618,6 @@ export default function WorkOrderMontajeControlPanel({
   const areaFinalizada = areaEstado === "finalizada"
   const readOnlyOps = areaFinalizada && !canFinalizeOrder
 
-  const operativoEstado = useMemo(
-    () => deriveMontajeOperativoEstado(form, Date.now()),
-    [form],
-  )
   const montajeFilasExtra = useMemo(
     () =>
       readMontajeFilasExtraState(
@@ -624,7 +690,9 @@ export default function WorkOrderMontajeControlPanel({
   const faltanteKg = Math.max(0, pedidoTotalKg - producidoAcumuladoKg)
   const turnosRegistrados = jsonAccum.turnosRegistrados
   const totalProduccionAcumulada = jsonAccum.producidoKg
-  const totalMermaAcumulada = 0
+  const totalMermaAcumulada =
+    closedTurnos.reduce((a, t) => a + sumMermaKg(t), 0) +
+    (activeTurno ? sumMermaKg(activeTurno) : 0)
   const ultimoTurnoLabel = hasActiveTurno ? "Turno en curso" : jsonAccum.ultimoCierreLabel
 
   const [timerTick, setTimerTick] = useState(0)
@@ -633,7 +701,6 @@ export default function WorkOrderMontajeControlPanel({
   const [startTurnConfirmOpen, setStartTurnConfirmOpen] = useState(false)
   const [timerConfirm, setTimerConfirm] = useState<MontajeTimerConfirmKey | null>(null)
   const [takeoverConfirmOpen, setTakeoverConfirmOpen] = useState(false)
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
   const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false)
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
@@ -643,6 +710,8 @@ export default function WorkOrderMontajeControlPanel({
     cur: MontajeTurnoEntry
     finalizedTimer: MontajeTurnTimer
   } | null>(null)
+  const canFinalizeOrderRef = useRef(canFinalizeOrder)
+  canFinalizeOrderRef.current = canFinalizeOrder
   const pauseReasons = MON_PAUSE_REASONS
 
   const pauseEntries = useMemo<MontajePauseEntry[]>(() => {
@@ -673,6 +742,12 @@ export default function WorkOrderMontajeControlPanel({
   const lastResumeAt = readNumber(form.montTimerLastResumeAtMs)
   const pauseAt = readNumber(form.montTimerPauseAtMs)
   const nowMs = Date.now() + timerTick * 0
+
+  const operativoEstado = useMemo(
+    () => deriveMontajeOperativoEstado(form, nowMs),
+    [form, timerTick],
+  )
+
   const shiftEffectiveSec =
     effectiveAcc + (timerRunning && lastResumeAt > 0 ? (nowMs - lastResumeAt) / 1000 : 0)
   const pauseAwaitingMotive = timerPaused && pauseAt > 0 && pauseEntries.length === 0
@@ -694,12 +769,28 @@ export default function WorkOrderMontajeControlPanel({
     () => cumulativeDemountSeconds(closedTurnos, activeTurno, nowMs),
     [closedTurnos, activeTurno, timerTick],
   )
+  const otArranqueAccSec = useMemo(
+    () => cumulativeArranqueSeconds(closedTurnos, activeTurno, nowMs),
+    [closedTurnos, activeTurno, timerTick],
+  )
   /** Cronómetro visible: acumulado OT (todos los turnos), alineado con la bandeja Montaje. */
   const displayEffectiveSec = otEffectiveAccSec
   const displayDeadSec = otDeadAccSec
   const displayTotalSec = otTotalAccSec
   const displayDemountSec = otDemountAccSec
-  const kgHora = "0.00"
+  const displayArranqueSec = otArranqueAccSec
+  const kgProduccionTurno = activeTurno
+    ? sumProduccionKg(activeTurno)
+    : readNumber(form.montKgProduccion)
+  /** Kg/Hora usa acumulado OT cuando el cronómetro muestra tiempos de todos los turnos. */
+  const kgForKgHora =
+    closedTurnos.length > 0 || hasActiveTurno
+      ? totalProduccionAcumulada
+      : kgProduccionTurno
+  const kgHora =
+    displayEffectiveSec > 0.01
+      ? (kgForKgHora / (displayEffectiveSec / 3600)).toFixed(2)
+      : "0.00"
   const displayHoraArranque = useMemo(() => {
     if (!activeTurno) return "—"
     const t = activeTurno.timer
@@ -710,10 +801,6 @@ export default function WorkOrderMontajeControlPanel({
   }, [activeTurno])
 
   const sessionUser = useMemo(() => getStoredUser(), [])
-  const canDevResetMontaje = useMemo(
-    () => isAxonesDeveloperSession(sessionUser),
-    [sessionUser],
-  )
   const isBossLike = canFinalizeOrder
   const activeOwnerId = activeTurno?.control_owner_user_id ?? null
   const activeOwnerName = activeTurno?.control_owner_name ?? null
@@ -808,15 +895,37 @@ export default function WorkOrderMontajeControlPanel({
     return hasActiveTurno
   }, [controlReadOnly, hasActiveTurno])
 
-  const canClickGuardar = canSaveProduction || canPersistShiftOpen
+  const canPersistBetweenShifts = useMemo(() => {
+    if (controlReadOnly || areaFinalizada) return false
+    if (hasActiveTurno) return false
+    return closedTurnos.length > 0
+  }, [areaFinalizada, closedTurnos.length, controlReadOnly, hasActiveTurno])
+
+  const canClickGuardar = canSaveProduction || canPersistShiftOpen || canPersistBetweenShifts
 
   const guardarHint = useMemo(() => {
     if (controlReadOnly) return ""
-    if (canClickGuardar) {
-      return "Al pulsar Guardar elija si cierra el turno de planta o finaliza el área Montaje en el sistema."
+    if (hasActiveTurno && (canSaveProduction || canPersistShiftOpen)) {
+      return "Al pulsar Guardar elija «Finalizar turno» o «Finalizar cierre» del área Montaje."
+    }
+    if (canPersistBetweenShifts) {
+      return "Entre turnos: pulse Guardar y elija «Finalizar turno» (sincronizar) o «Finalizar cierre» si el montaje terminó."
+    }
+    if (canSaveProduction || canPersistShiftOpen) {
+      return "Pulse Guardar para enviar datos al servidor."
+    }
+    if (!hasActiveTurno && closedTurnos.length === 0) {
+      return "Inicie un turno de planta para registrar datos."
     }
     return MES_SAVE_BLOCKED_MESSAGE
-  }, [canClickGuardar, controlReadOnly])
+  }, [
+    canPersistBetweenShifts,
+    canPersistShiftOpen,
+    canSaveProduction,
+    closedTurnos.length,
+    controlReadOnly,
+    hasActiveTurno,
+  ])
 
   function requestTakeover() {
     if (readOnlyOps) return
@@ -846,7 +955,7 @@ export default function WorkOrderMontajeControlPanel({
     }
     patchActiveTurn(() => nextTurn)
     setTakeoverConfirmOpen(false)
-    mesMontajeToastSuccess("Control tomado. Puede editar el turno.")
+    mesMontajeSwalSuccess("Control del turno asignado.")
     void persistMontajeForm(
       {
         ...form,
@@ -944,6 +1053,8 @@ export default function WorkOrderMontajeControlPanel({
     void finalizarAreaMontaje()
   }
 
+  const MAX_KG_PRODUCCION = 50_000
+
   const outlierWarnings = useMemo(() => {
     const warnings: string[] = []
     if (pedidoTotalKg > 0 && producidoAcumuladoKg > pedidoTotalKg + 0.01) {
@@ -951,8 +1062,13 @@ export default function WorkOrderMontajeControlPanel({
         `Producido acumulado (${producidoAcumuladoKg.toFixed(2)} Kg) supera el pedido (${pedidoTotalKg.toFixed(2)} Kg). Verifique unidades o captura.`,
       )
     }
+    if (kgProduccionTurno > MAX_KG_PRODUCCION) {
+      warnings.push(
+        `Producción del turno elevada (${kgProduccionTurno.toFixed(2)} Kg). Verifique unidad y captura.`,
+      )
+    }
     return warnings
-  }, [pedidoTotalKg, producidoAcumuladoKg])
+  }, [pedidoTotalKg, producidoAcumuladoKg, kgProduccionTurno])
 
   const persistMontajeForm = useCallback(
     async (
@@ -962,7 +1078,7 @@ export default function WorkOrderMontajeControlPanel({
         /** Sin notificación inter-área ni validación MES completa (solo abrir turno). */
         notifyProductionSave?: boolean
         successMessage?: string
-        /** Evita toast por defecto cuando el llamador muestra uno con `mesMontajeToastWithBandeja`. */
+        /** Evita aviso por defecto cuando el llamador muestra SweetAlert con `mesMontajeSwalWithBandeja`. */
         suppressSuccessToast?: boolean
       },
     ) => {
@@ -979,10 +1095,12 @@ export default function WorkOrderMontajeControlPanel({
         return false
       }
 
+      const hasClosed = parseMontajeTurnos(src[MON_TURNOS_KEY]).length > 0
       if (
         !notifyProductionSave &&
         !options?.skipProductionSaveGuard &&
-        !resolveMontajeTurnoActual(src)
+        !resolveMontajeTurnoActual(src) &&
+        !hasClosed
       ) {
         toast.error("Abra un turno de planta antes de guardar.")
         return false
@@ -1016,6 +1134,9 @@ export default function WorkOrderMontajeControlPanel({
         montTimerDeadAccSec: normalizeNumericString(src.montTimerDeadAccSec),
         montRegistrosTurnos: String(accFromJson.turnosRegistrados),
         montAcumuladoProducidoKg: normalizeNumericString(accFromJson.producidoKg),
+        montKgProduccion: normalizeNumericString(actualP?.kgProduccion ?? src.montKgProduccion),
+        montMermaKg: normalizeNumericString(actualP?.mermaKg ?? src.montMermaKg),
+        montMetraje: normalizeNumericString(actualP?.metrajeKg ?? src.montMetraje),
         [MON_CLICHE_KEY]: readString(src[MON_CLICHE_KEY]).trim(),
         [MON_CILINDRO_KEY]: readString(src[MON_CILINDRO_KEY]).trim(),
         [MON_FILAS_EXTRA_KEY]: montajeFilasExtraForSave(
@@ -1059,12 +1180,9 @@ export default function WorkOrderMontajeControlPanel({
         }
         if (!options?.suppressSuccessToast) {
           if (options?.successMessage) {
-            mesMontajeToastSuccess(options.successMessage)
+            mesMontajeSwalSuccess(options.successMessage)
           } else {
-            mesMontajeToastWithBandeja(
-              normalizedForm,
-              notifyProductionSave ? "Guardado en el sistema." : "Turno guardado en el sistema.",
-            )
+            mesMontajeSwalWithBandeja(normalizedForm, "Guardado", undefined, canFinalizeOrderRef.current)
           }
         }
         window.dispatchEvent(
@@ -1404,10 +1522,7 @@ export default function WorkOrderMontajeControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesMontajeToastWithBandeja(
-        nextForm,
-        "Parada registrada y guardada. Use play para reanudar el tiempo efectivo.",
-      )
+      mesMontajeSwalWithBandeja(nextForm, "Parada guardada", "Reanude con play.")
     }
   }
 
@@ -1467,10 +1582,7 @@ export default function WorkOrderMontajeControlPanel({
         suppressSuccessToast: true,
       })
       if (ok) {
-        mesMontajeToastWithBandeja(
-          nextForm,
-          "Turno de planta abierto y guardado. Use play en el cronómetro para pasar a «Iniciado».",
-        )
+        mesMontajeSwalWithBandeja(nextForm, "Guardado", undefined, canFinalizeOrder)
         await tryAdvanceBoardStageToMontaje()
         await load()
       }
@@ -1513,7 +1625,7 @@ export default function WorkOrderMontajeControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesMontajeToastWithBandeja(nextForm, "Finalizar turno: registro guardado en el sistema.")
+      mesMontajeSwalWithBandeja(nextForm, "Turno cerrado")
       await load()
     }
   }
@@ -1574,10 +1686,7 @@ export default function WorkOrderMontajeControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesMontajeToastWithBandeja(
-        nextForm,
-        "Área de montaje finalizada. Cronómetro detenido.",
-      )
+      mesMontajeSwalWithBandeja(nextForm, "Montaje finalizado")
       await load()
     }
   }
@@ -1605,9 +1714,22 @@ export default function WorkOrderMontajeControlPanel({
     }
   }
 
+  function handleGuardarSesion() {
+    void persistMontajeForm(undefined, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+    })
+  }
+
   function requestGuardar() {
     if (saving || !canClickGuardar) {
-      if (!canClickGuardar) toast.error(MES_SAVE_BLOCKED_MESSAGE)
+      if (!canClickGuardar) {
+        toast.error(
+          !hasActiveTurno && closedTurnos.length === 0
+            ? "Inicie un turno de planta antes de guardar."
+            : MES_SAVE_BLOCKED_MESSAGE,
+        )
+      }
       return
     }
     if (hasActiveTurno) {
@@ -1616,55 +1738,15 @@ export default function WorkOrderMontajeControlPanel({
         toast.error("Complete turno, grupo y operador antes de guardar.")
         return
       }
-    }
-    if (!hasActiveTurno && !canFinalizeOrder) {
-      toast.error(MES_SAVE_BLOCKED_MESSAGE)
+      setGuardarChoiceOpen(true)
       return
     }
-    setGuardarChoiceOpen(true)
-  }
-
-  function requestResetAll() {
-    if (!canDevResetMontaje) return
-    if (saving) return
-    if (controlReadOnly) return
-    setResetConfirmOpen(true)
-  }
-
-  async function confirmResetAll() {
-    if (!canDevResetMontaje) return
-    if (saving) return
-    if (controlReadOnly) return
-    setResetConfirmOpen(false)
-
-    const cleared: Record<string, unknown> = {
-      ...form,
-      [MON_TURNOS_KEY]: [],
-      [MON_ACTUAL_KEY]: null,
-      [MON_ESTADO_KEY]: "abierta",
-      ...clearMontajeMirrorKeys(),
-      ...clearMontajeClicheMaterialKeys(),
-      [MON_LAST_CLOSED_SNAPSHOT_KEY]: null,
+    if (canPersistBetweenShifts) {
+      setGuardarChoiceOpen(true)
+      return
     }
-    for (const k of Object.keys(cleared)) {
-      if (k.startsWith("montBlockDone.")) delete cleared[k]
-    }
-
-    clearMontajeBrowserCache(workOrderId)
-    setDraftPeople([])
-    setDraftStaging({ name: "", role: "operador" })
-    setPauseReason("")
-    setPauseObs("")
-    setPauseMotivoModalOpen(false)
-    setForm(bootstrapMontajeFormState(cleared))
-    const ok = await persistMontajeForm(cleared, {
-      skipProductionSaveGuard: true,
-      notifyProductionSave: false,
-      suppressSuccessToast: true,
-    })
-    if (ok) {
-      mesMontajeToastWithBandeja(cleared, "Montaje reiniciado en el sistema y en este navegador.")
-      await load()
+    if (canFinalizeOrder) {
+      setGuardarChoiceOpen(true)
     }
   }
 
@@ -1672,40 +1754,12 @@ export default function WorkOrderMontajeControlPanel({
 
   return (
     <div className="ax-mes space-y-4">
-      <WorkOrderStageBadge current="produccion" />
-      <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-950">
-        <div className="flex min-w-0 flex-1 gap-3">
-            <Info className="text-primary mt-0.5 h-5 w-5 shrink-0" aria-hidden />
-            <div className="min-w-0 space-y-1">
-              <p className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
-                Estado operativo Montaje
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={mesBandejaStatePillClass(operativoEstado.workflow)}
-                  role="status"
-                >
-                  {operativoEstado.title}
-                </span>
-                {operativoEstado.contextLine ? (
-                  <span className="text-muted-foreground text-xs">{operativoEstado.contextLine}</span>
-                ) : null}
-              </div>
-              <p className="text-foreground text-xs leading-relaxed">{operativoEstado.mes.hint}</p>
-              <p className="text-muted-foreground border-t border-border/60 pt-2 text-xs leading-relaxed">
-                {operativoEstado.bandejaHint}
-              </p>
-              {lastServerSaveAt ? (
-                <p className="text-muted-foreground text-[11px]">
-                  Último guardado en servidor:{" "}
-                  <time dateTime={lastServerSaveAt}>
-                    {new Date(lastServerSaveAt).toLocaleString()}
-                  </time>
-                </p>
-              ) : null}
-            </div>
-        </div>
-      </div>
+      <MesOperativoEstadoCard
+        areaLabel="Montaje"
+        estado={operativoEstado}
+        producidoKg={totalProduccionAcumulada}
+        lastServerSaveAt={lastServerSaveAt}
+      />
       {hasActiveTurno && !readOnlyOps && !canEditByControl ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1742,16 +1796,24 @@ export default function WorkOrderMontajeControlPanel({
         turnosRegistrados={turnosRegistrados}
         totalProduccionAcumulada={totalProduccionAcumulada}
         totalMermaAcumulada={totalMermaAcumulada}
+        kgProduccionTurno={kgProduccionTurno}
+        kgProduccionRaw={readNumberString(activeTurno?.kgProduccion ?? form.montKgProduccion)}
+        mermaRaw={readNumberString(activeTurno?.mermaKg ?? form.montMermaKg)}
+        metrajeRaw={readNumberString(activeTurno?.metrajeKg ?? form.montMetraje)}
+        onSetKgProduccion={(v) => patchActiveTurn((t) => ({ ...t, kgProduccion: v }))}
+        onSetMerma={(v) => patchActiveTurn((t) => ({ ...t, mermaKg: v }))}
+        onSetMetraje={(v) => patchActiveTurn((t) => ({ ...t, metrajeKg: v }))}
         ultimoTurnoLabel={ultimoTurnoLabel}
         timerState={timerState}
         totalSec={displayTotalSec}
         deadSec={displayDeadSec}
         demountSec={displayDemountSec}
+        arranqueSec={displayArranqueSec}
+        arranqueRunning={arranqueRunning}
         effectiveSec={displayEffectiveSec}
         timerShowsOtAccumulated={closedTurnos.length > 0 || hasActiveTurno}
         kgHora={kgHora}
         horaArranque={displayHoraArranque}
-        arranqueRunning={arranqueRunning}
         montajeOpRunning={montajeOpRunning}
         demountRunning={demountRunning}
         timerRunning={timerRunning}
@@ -1802,28 +1864,30 @@ export default function WorkOrderMontajeControlPanel({
         }}
         canPreviewTimerReport={canPreviewTimerReport}
         onPreviewTimerReport={requestOpenTimerReportPreview}
-        canResetAll={canDevResetMontaje && !saving && !controlReadOnly}
-        onResetAll={requestResetAll}
         simplifiedTimerActions
+        showTimerActions={hasActiveTurno}
       />
 
-      <WorkOrderMontajeClicheMaterialSection
-        numCliche={visibleNumCliche}
-        numCilindro={visibleNumCilindro}
-        filasExtra={visibleFilasExtra}
-        materialesMontaje={visibleMaterialesMontaje}
-        readOnly={controlReadOnly || !hasActiveTurno}
-        onNumClicheChange={(v) => setForm((prev) => ({ ...prev, [MON_CLICHE_KEY]: v }))}
-        onNumCilindroChange={(v) => setForm((prev) => ({ ...prev, [MON_CILINDRO_KEY]: v }))}
-        onFilasExtraChange={(rows: MontajeFilaMontaje[]) =>
-          setForm((prev) => ({ ...prev, [MON_FILAS_EXTRA_KEY]: rows }))
-        }
-        onMaterialesMontajeChange={(rows: MontajeMaterialFila[]) =>
-          setForm((prev) => ({ ...prev, [MON_MATERIALES_MONTAJE_KEY]: rows }))
-        }
-      />
+      {hasActiveTurno || areaFinalizada ? (
+        <WorkOrderMontajeClicheMaterialSection
+          numCliche={visibleNumCliche}
+          numCilindro={visibleNumCilindro}
+          filasExtra={visibleFilasExtra}
+          materialesMontaje={visibleMaterialesMontaje}
+          readOnly={controlReadOnly || !hasActiveTurno}
+          onNumClicheChange={(v) => setForm((prev) => ({ ...prev, [MON_CLICHE_KEY]: v }))}
+          onNumCilindroChange={(v) => setForm((prev) => ({ ...prev, [MON_CILINDRO_KEY]: v }))}
+          onFilasExtraChange={(rows: MontajeFilaMontaje[]) =>
+            setForm((prev) => ({ ...prev, [MON_FILAS_EXTRA_KEY]: rows }))
+          }
+          onMaterialesMontajeChange={(rows: MontajeMaterialFila[]) =>
+            setForm((prev) => ({ ...prev, [MON_MATERIALES_MONTAJE_KEY]: rows }))
+          }
+        />
+      ) : null}
 
-      {(() => {
+      {hasActiveTurno || areaFinalizada ? (
+      (() => {
         const doneObs = !!visibleObsTurno.trim()
         return (
           <MesSectionShell
@@ -1861,7 +1925,8 @@ export default function WorkOrderMontajeControlPanel({
             />
           </MesSectionShell>
         )
-      })()}
+      })()
+      ) : null}
 
       <div className="no-print mb-12 flex flex-col items-center gap-2">
         {guardarHint ? (
@@ -1872,18 +1937,6 @@ export default function WorkOrderMontajeControlPanel({
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
-          {canDevResetMontaje && !controlReadOnly && !areaFinalizada ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-amber-300 text-amber-950 hover:bg-amber-50"
-              disabled={saving}
-              onClick={requestResetAll}
-            >
-              <RotateCcw className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Empezar de cero
-            </Button>
-          ) : null}
         </div>
       </div>
 
@@ -1892,6 +1945,8 @@ export default function WorkOrderMontajeControlPanel({
         onOpenChange={setGuardarChoiceOpen}
         canFinalizeArea={canFinalizeOrder}
         hasActiveTurno={hasActiveTurno}
+        betweenShiftsMode={canPersistBetweenShifts && !hasActiveTurno}
+        onGuardarSesion={handleGuardarSesion}
         onFinalizarTurno={requestCerrarTurnoActual}
         onFinalizarArea={requestFinalizarAreaMontaje}
       />
@@ -1927,23 +1982,6 @@ export default function WorkOrderMontajeControlPanel({
         description="Se abrirá una pestaña nueva con el reporte de tiempos y pausas registrados hasta este momento."
         confirmLabel="Abrir vista previa"
         onConfirm={() => confirmOpenTimerReportPreview()}
-      />
-
-      <MesMontajeConfirmDialog
-        tone="amber"
-        open={resetConfirmOpen}
-        onOpenChange={setResetConfirmOpen}
-        icon={<RotateCcw className="h-5 w-5" aria-hidden />}
-        title="Empezar de cero (Montaje)"
-        description={
-          <>
-            Borra en el <strong>sistema</strong> y en este navegador: turnos cerrados, turno abierto, cronómetro,
-            kg, mermas, metraje y paradas. La planilla técnica (frecuencia, bandas, etc.) no se modifica. La bandeja
-            Montaje volverá a «Sin iniciar». ¿Continuar?
-          </>
-        }
-        confirmLabel="Sí, reiniciar todo"
-        onConfirm={() => void confirmResetAll()}
       />
 
       <MesMontajeConfirmDialog

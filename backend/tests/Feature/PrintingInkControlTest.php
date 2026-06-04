@@ -27,7 +27,7 @@ class PrintingInkControlTest extends TestCase
 
     public function test_put_consumables_requires_at_least_one_block(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
         $wo = WorkOrder::query()->create(['code' => 'OT-INK-2']);
 
@@ -36,7 +36,7 @@ class PrintingInkControlTest extends TestCase
 
     public function test_ink_lines_and_chemicals_round_trip_and_show_in_printing_state(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
         $wo = WorkOrder::query()->create(['code' => 'OT-INK-3']);
 
@@ -74,7 +74,7 @@ class PrintingInkControlTest extends TestCase
 
     public function test_rejects_non_tinta_material(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
         $wo = WorkOrder::query()->create(['code' => 'OT-INK-4']);
 
@@ -95,7 +95,7 @@ class PrintingInkControlTest extends TestCase
 
     public function test_partial_update_only_ink_preserves_chemicals(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
         $wo = WorkOrder::query()->create(['code' => 'OT-INK-5']);
 
@@ -125,7 +125,7 @@ class PrintingInkControlTest extends TestCase
 
     public function test_duplicate_chemical_type_in_payload_fails(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
         $wo = WorkOrder::query()->create(['code' => 'OT-INK-6']);
 
@@ -139,7 +139,7 @@ class PrintingInkControlTest extends TestCase
 
     public function test_rejects_cancelled_work_order(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss']);
         $h = $this->auth($user);
         $wo = WorkOrder::query()->create(['code' => 'OT-INK-7', 'status' => 'cancelled']);
 

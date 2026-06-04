@@ -4,6 +4,7 @@ import {
   printingActivasBucketFromRow,
   printingMesBandFromWorkOrderRow,
 } from "@/lib/printing-mes-band-status"
+import { mesBandejaKgTotalsFromBands } from "@/lib/mes-timer-band-shared"
 import type { WorkOrderListRow } from "@/types/api"
 
 describe("printingActivasBucketFromRow", () => {
@@ -164,5 +165,44 @@ describe("printingActivasBucketFromRow", () => {
     } as unknown as WorkOrderListRow
     expect(printingActivasBucketFromRow(row, Date.now())).toBe("finalizadas")
     expect(printingMesBandFromWorkOrderRow(row, Date.now())?.workflow).toBe("finalizado")
+  })
+})
+
+describe("mesBandejaKgTotalsFromBands", () => {
+  it("suma kg de varias filas visibles en la bandeja", () => {
+    const totals = mesBandejaKgTotalsFromBands([
+      {
+        workflow: "turno_abierto",
+        contextLine: "",
+        hint: "",
+        effectiveHms: "0:00:00",
+        deadHms: "0:00:00",
+        totalHms: "0:00:00",
+        showTimes: false,
+        showDeadBreakdown: false,
+        producidoKg: 10,
+        entradaKg: 10,
+        desperdicioKg: 20,
+      },
+      {
+        workflow: "iniciado",
+        contextLine: "",
+        hint: "",
+        effectiveHms: "0:00:00",
+        deadHms: "0:00:00",
+        totalHms: "0:00:00",
+        showTimes: false,
+        showDeadBreakdown: false,
+        producidoKg: 5,
+        entradaKg: 3,
+        desperdicioKg: 2,
+      },
+    ])
+
+    expect(totals.rowsWithKg).toBe(2)
+    expect(totals.producidoKg).toBe(15)
+    expect(totals.entradaKg).toBe(13)
+    expect(totals.desperdicioKg).toBe(22)
+    expect(totals.totalMasaKg).toBe(50)
   })
 })

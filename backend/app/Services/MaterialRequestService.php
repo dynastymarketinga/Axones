@@ -22,6 +22,7 @@ class MaterialRequestService
 {
     public function __construct(
         private readonly InventoryLedgerService $ledger,
+        private readonly OperationalAlertService $operationalAlerts,
     ) {}
 
     /**
@@ -71,6 +72,7 @@ class MaterialRequestService
 
         $mr = $mr->fresh()->load(['lines.material', 'workOrder']);
         $this->syncShadowAreaRequestForMaterialRequest($mr);
+        $this->operationalAlerts->recordMaterialRequestPendingForWarehouse($mr, $user);
 
         return $mr;
     }
@@ -409,6 +411,28 @@ class MaterialRequestService
         return in_array($o, $allowed, true) ? $o : 'almacen';
     }
 
+    private function isPlanillaSustratoMaterialRequest(MaterialRequest $mr): bool
+    {
+        return str_starts_with(trim((string) $mr->notes), PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER);
+    }
+
+    private function shadowAreaRequestTitle(MaterialRequest $mr): string
+    {
+        if ($this->isPlanillaSustratoMaterialRequest($mr)) {
+            $wo = $mr->workOrder;
+            $code = $wo?->code ?? ($mr->work_order_id ? '#'.$mr->work_order_id : '—');
+            $areaLabel = match (strtolower(trim((string) $mr->originating_area))) {
+                'impresion' => 'Impresión',
+                'laminacion' => 'Laminación',
+                default => ucfirst(trim((string) $mr->originating_area)) ?: 'Producción',
+            };
+
+            return sprintf('OT %s — %s (sustratos)', $code, $areaLabel);
+        }
+
+        return 'Solicitud de insumos #'.$mr->getKey();
+    }
+
     private function shadowMaterialRequestBody(MaterialRequest $mr): string
     {
         $lines = [];
@@ -430,8 +454,12 @@ class MaterialRequestService
             }
         }
 
+        $originLine = $this->isPlanillaSustratoMaterialRequest($mr)
+            ? '[Origen: sustratos virgen en planilla OT — solicitud al almacén]'
+            : '[Origen: solicitud de insumos al almacén]';
+
         $parts = [
-            '[Origen: solicitud de insumos al almacén]',
+            $originLine,
             'Estado en insumos: '.$mr->status.'.',
             $mr->authorized_by ? 'Autorización de insumos: registrada.' : 'Autorización de insumos: pendiente.',
             $mr->notes ? 'Observaciones: '.$mr->notes : null,
@@ -476,7 +504,7 @@ class MaterialRequestService
         $payload = [
             'material_request_id' => $mr->getKey(),
             'area' => $this->shadowAreaCode($mr->originating_area),
-            'title' => 'Solicitud de insumos #'.$mr->getKey(),
+            'title' => $this->shadowAreaRequestTitle($mr),
             'body' => $this->shadowMaterialRequestBody($mr),
             'status' => $this->shadowAreaRequestStatusFromMaterial($mr->status),
             'work_order_id' => $mr->work_order_id,

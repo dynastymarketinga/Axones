@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import {
   formatMaterialCatalogLabel,
   formatMaterialIdentity,
@@ -154,8 +156,8 @@ function normalizeLineByBusinessRules(line: FreeLine): FreeLine {
     ...line,
     material_label: typeof line.material_label === "string" ? line.material_label : "",
     unit: safeUnit,
-    micras: requiresDimensions ? line.micras : "",
-    ancho_mm: requiresDimensions ? line.ancho_mm : "",
+    micras: requiresDimensions ? formatMaterialDimensionDisplay(line.micras) : "",
+    ancho_mm: requiresDimensions ? formatMaterialDimensionDisplay(line.ancho_mm) : "",
   }
 }
 
@@ -168,8 +170,8 @@ function hydrateFreeLineMaterialLabel(line: FreeLine, materialsList: MaterialRow
       return {
         ...normalized,
         material_label: materialLabelFromRow(mat, normalized.item_type),
-        micras: mat.micras?.trim() || normalized.micras,
-        ancho_mm: mat.ancho?.trim() || normalized.ancho_mm,
+        micras: formatMaterialDimensionDisplay(mat.micras) || formatMaterialDimensionDisplay(normalized.micras),
+        ancho_mm: formatMaterialDimensionDisplay(mat.ancho) || formatMaterialDimensionDisplay(normalized.ancho_mm),
         unit: mat.unit?.trim() || normalized.unit,
       }
     }
@@ -248,7 +250,7 @@ function receiptLineValidationMessage(
       const pending = polRemainingQty(pol)
       if (quantity > pending + 0.0001) {
         const unit = (row.unit || pol.unit || "kg").trim() || "kg"
-        return `La cantidad no puede superar lo pendiente (${pending.toLocaleString("es-VE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${unit}).`
+        return `La cantidad no puede superar lo pendiente (${formatQuantityDisplay(pending)} ${unit}).`
       }
     }
   }
@@ -323,8 +325,8 @@ function buildFreeLineFromPurchaseOrderLine(
     item_type: inferredItemType,
     material_label,
     material_id,
-    micras: matFromList?.micras?.trim() || parsed.micras,
-    ancho_mm: matFromList?.ancho?.trim() || parsed.ancho_mm,
+    micras: formatMaterialDimensionDisplay(matFromList?.micras) || formatMaterialDimensionDisplay(parsed.micras),
+    ancho_mm: formatMaterialDimensionDisplay(matFromList?.ancho) || formatMaterialDimensionDisplay(parsed.ancho_mm),
     quantity: String(rem),
     unit: unitRaw || "kg",
   })
@@ -1156,8 +1158,8 @@ export default function PurchaseReceiptNewPage() {
     updateFreeLine(rowIndex, {
       material_id: String(material.id),
       material_label: materialLabelFromRow(material, row?.item_type ?? "Sustrato"),
-      micras: material.micras?.trim() ?? "",
-      ancho_mm: material.ancho?.trim() ?? "",
+      micras: formatMaterialDimensionDisplay(material.micras),
+      ancho_mm: formatMaterialDimensionDisplay(material.ancho),
       unit: safeUnit,
     })
     setMaterialPickerOpenRow(null)

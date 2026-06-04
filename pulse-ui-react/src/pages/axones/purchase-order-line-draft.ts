@@ -1,3 +1,4 @@
+import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import { parsePoLineItemType, type PoItemType } from "@/pages/axones/purchase-order-shared"
 
 export type PoLineDraft = {
@@ -67,8 +68,14 @@ export function shouldShowDims(itemType: PoItemType) {
 }
 
 export function normalizeLineByBusinessRules(line: PoLineEditDraft): PoLineEditDraft {
-  if (shouldShowDims(line.item_type)) return line
-  return { ...line, micras: "", ancho_mm: "" }
+  if (!shouldShowDims(line.item_type)) {
+    return { ...line, micras: "", ancho_mm: "" }
+  }
+  return {
+    ...line,
+    micras: formatMaterialDimensionDisplay(line.micras),
+    ancho_mm: formatMaterialDimensionDisplay(line.ancho_mm),
+  }
 }
 
 export function isPoLineSubmitReady(line: PoLineDraft): boolean {

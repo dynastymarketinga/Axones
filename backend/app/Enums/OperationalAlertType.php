@@ -12,6 +12,8 @@ enum OperationalAlertType: string
     case DowntimeExceeded = 'downtime_exceeded';
     /** Devolución a inventario registrada (impresión u otros flujos): aviso en campana para almacén/inventario. */
     case InventoryReturnPending = 'inventory_return_pending';
+    /** Solicitud de insumos / sustratos planilla OT pendiente de despacho en almacén. */
+    case MaterialRequestPendingWarehouse = 'material_request_pending_warehouse';
 
     /** Tipos mostrados en /alertas (desperdicio y escasez de material). */
     public static function materialOperationalValues(): array
@@ -20,6 +22,15 @@ enum OperationalAlertType: string
             self::OtMaterialShortage->value,
             self::ScrapThresholdExceeded->value,
             self::MaterialLowStock->value,
+        ];
+    }
+
+    /** Campana y bandeja de notificaciones para roles de inventario / almacén. */
+    public static function warehouseNotificationValues(): array
+    {
+        return [
+            self::MaterialRequestPendingWarehouse->value,
+            self::InventoryReturnPending->value,
         ];
     }
 

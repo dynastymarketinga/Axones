@@ -6,9 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ReportDateRangeRequest;
 use App\Http\Requests\ReportInventoryAreaDailyRequest;
 use App\Http\Requests\ReportInventoryMovementsRequest;
+use App\Http\Requests\ReportConsumablesSummaryRequest;
+use App\Http\Requests\ReportProductionMaterialSummaryRequest;
+use App\Http\Requests\ReportRejectedBobinasRequest;
 use App\Http\Requests\ReportWorkOrderMaterialSummaryRequest;
 use App\Http\Requests\ScrapReportRequest;
 use App\Http\Requests\WorkOrderTimeReportRequest;
+use App\Models\Supplier;
 use App\Models\WorkOrder;
 use App\Services\InventoryReportService;
 use App\Support\ScrapSubstrateCatalog;
@@ -16,6 +20,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\View;
 use Illuminate\Validation\ValidationException;
 
@@ -170,6 +175,158 @@ class ReportController extends Controller
     }
 
     /**
+     * Resumen de controles por OT: consumibles y tiempos (impresión, laminación, corte).
+     */
+    public function workOrderControlsSummary(ReportWorkOrderMaterialSummaryRequest $request): JsonResponse|Response
+    {
+        $payload = $this->workOrderControlsSummaryPayload($request);
+
+        if (($request->validated()['format'] ?? null) === 'csv') {
+            $rows = [];
+            $wo = (array) ($payload['work_order'] ?? []);
+            $rows[] = [
+                'section' => 'work_order',
+                'code' => $wo['code'] ?? '',
+                'client_name' => $wo['client_name'] ?? '',
+                'product_name' => $wo['product_name'] ?? '',
+            ];
+
+            foreach ((array) (($payload['times']['by_area'] ?? []) ?: []) as $row) {
+                $rows[] = ['section' => 'times_by_area'] + $row;
+            }
+            $rows[] = ['section' => 'times_totals'] + (array) ($payload['times']['totals'] ?? []);
+
+            $ps = (array) ($payload['production_summary'] ?? []);
+            if ($ps !== []) {
+                $rows[] = ['section' => 'production_summary'] + $this->flattenProductionSummaryForCsv($ps);
+            }
+
+            foreach ((array) ($payload['consumables']['by_area'] ?? []) as $area => $block) {
+                foreach ((array) ($block['bobina_usages'] ?? []) as $row) {
+                    $rows[] = ['section' => 'bobina_usages', 'area' => $area] + $row;
+                }
+                foreach ((array) ($block['ink_control_lines'] ?? []) as $row) {
+                    $rows[] = ['section' => 'ink_control_lines', 'area' => $area] + $row;
+                }
+                foreach ((array) ($block['chemical_usages'] ?? []) as $row) {
+                    $rows[] = ['section' => 'chemical_usages', 'area' => $area] + $row;
+                }
+                if ($area === 'laminacion') {
+                    $rows[] = [
+                        'section' => 'laminacion_solvent',
+                        'area' => $area,
+                        'solvent_quantity_kg' => $block['solvent_quantity_kg'] ?? '0.000',
+                        'solvent_notes' => $block['solvent_notes'] ?? '',
+                    ];
+                }
+            }
+
+            $csv = $this->reports->rowsToCsv($rows);
+            $id = (int) ($wo['id'] ?? 0);
+
+            return new Response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="resumen-ot-controles-'.$id.'.csv"',
+            ]);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Vista previa HTML del resumen de controles por OT.
+     */
+    public function workOrderControlsSummaryPreview(ReportWorkOrderMaterialSummaryRequest $request): Response
+    {
+        $payload = $this->workOrderControlsSummaryPayload($request);
+        $html = View::make('pdf.work_order_controls_summary', [
+            'report' => $payload,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ])->render();
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="'.$this->workOrderControlsSummaryFileBase($payload).'.html"',
+        ]);
+    }
+
+    /**
+     * Descarga PDF del resumen de controles por OT.
+     */
+    public function workOrderControlsSummaryPdf(ReportWorkOrderMaterialSummaryRequest $request): Response
+    {
+        $payload = $this->workOrderControlsSummaryPayload($request);
+        $html = View::make('pdf.work_order_controls_summary', [
+            'report' => $payload,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+        ])->render();
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'portrait');
+
+        return $pdf->download($this->workOrderControlsSummaryFileBase($payload).'.pdf');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function workOrderControlsSummaryPayload(ReportWorkOrderMaterialSummaryRequest $request): array
+    {
+        $validated = $request->validated();
+        $id = (int) $validated['work_order_id'];
+
+        return $this->reports->workOrderControlsSummary($id);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function workOrderControlsSummaryFileBase(array $payload): string
+    {
+        $wo = (array) ($payload['work_order'] ?? []);
+        $code = (string) ($wo['code'] ?? ('ot-'.($wo['id'] ?? '0')));
+        $code = str_replace(['/', '\\', ' '], '-', $code);
+
+        return 'resumen-ot-controles-'.$code;
+    }
+
+    /**
+     * @param  array<string, mixed>  $ps
+     * @return array<string, mixed>
+     */
+    private function flattenProductionSummaryForCsv(array $ps): array
+    {
+        $virgin = (array) ($ps['virgin_material'] ?? []);
+        $listo = (array) ($ps['material_listo'] ?? []);
+        $impreso = (array) ($listo['impreso'] ?? []);
+        $laminado = (array) ($listo['laminado'] ?? []);
+        $scrap = (array) ($ps['scrap'] ?? []);
+        $tintas = (array) ($ps['tintas'] ?? []);
+        $lamQ = (array) ($ps['laminacion_quimicos'] ?? []);
+
+        return [
+            'printing_total_entrada_kg' => $virgin['printing_total_entrada_kg'] ?? '0.000',
+            'laminacion_total_virgen_kg' => $virgin['laminacion_total_virgen_kg'] ?? '0.000',
+            'impreso_num_bobinas' => $impreso['num_bobinas'] ?? 0,
+            'impreso_peso_total_kg' => $impreso['peso_total_kg'] ?? '0.000',
+            'laminado_peso_total_kg' => $laminado['peso_total_salida_kg'] ?? '0.000',
+            'laminado_num_bobinas' => $laminado['num_bobinas'] ?? 0,
+            'corte_kg_salida' => $listo['corte_kg_salida'] ?? '0.000',
+            'total_listo_despacho_kg' => $listo['total_listo_despacho_kg'] ?? '0.000',
+            'total_general_kg' => $listo['total_general_kg'] ?? '0.000',
+            'scrap_grand_total_kg' => $scrap['grand_total_kg'] ?? '0.000',
+            'tintas_total_original_kg' => $tintas['total_original_kg'] ?? '0.000',
+            'tintas_total_solventadas_kg' => $tintas['total_solventadas_kg'] ?? '0.000',
+            'tintas_alcohol_kg' => $tintas['alcohol_kg'] ?? '0.000',
+            'tintas_metoxil_kg' => $tintas['metoxil_kg'] ?? '0.000',
+            'tintas_npa_kg' => $tintas['npa_kg'] ?? '0.000',
+            'lam_adhesivo_kg' => $lamQ['adhesivo_consumido_kg'] ?? '0.000',
+            'lam_catalizador_kg' => $lamQ['catalizador_consumido_kg'] ?? '0.000',
+            'lam_acetato_lt' => $lamQ['acetato_consumido_lt'] ?? '0.000',
+        ];
+    }
+
+    /**
      * Reporte: consumo agregado por cliente y producto (salidas ligadas a OT vía solicitud).
      */
     public function consumptionByClientProduct(ReportDateRangeRequest $request): JsonResponse|Response
@@ -192,30 +349,123 @@ class ReportController extends Controller
     }
 
     /**
-     * Reporte: inventario del área bobinas rechazadas (kg por material + bobinas registradas con OT vía devolución).
+     * Vista rápida: stock del área bobinas rechazadas (panel / snapshot sin rango).
      */
-    public function rejectedBobinas(ReportDateRangeRequest $request): JsonResponse|Response
+    public function rejectedBobinasInventory(): JsonResponse
+    {
+        return response()->json($this->reports->rejectedBobinasInventory());
+    }
+
+    /**
+     * Reporte descargable de bobinas rechazadas (número, proveedor, peso, motivo) filtrado por fecha y proveedor.
+     */
+    public function rejectedBobinas(ReportRejectedBobinasRequest $request): JsonResponse|Response
     {
         $validated = $request->validated();
-        $payload = $this->reports->rejectedBobinasInventory();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $supplierId = isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null;
+        $payload = $this->reports->rejectedBobinasReport($from, $to, $supplierId);
+
+        if (($validated['format'] ?? null) === 'pdf') {
+            $supplierName = $supplierId !== null ? Supplier::query()->whereKey($supplierId)->value('name') : null;
+            $logoDataUri = Cache::rememberForever('brand:logo-axones-var-01:data-uri', static function (): string {
+                $logoPath = public_path('brand/logo-axones-var-01.png');
+                if (! is_readable($logoPath)) {
+                    return '';
+                }
+
+                return 'data:image/png;base64,'.base64_encode((string) file_get_contents($logoPath));
+            });
+
+            $pdfCacheKey = 'reports:rejected-bobinas:pdf:v1:'.sha1(json_encode([
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'supplier_id' => $supplierId,
+                'rows_hash' => sha1(json_encode($payload['rows'] ?? [])),
+            ], JSON_UNESCAPED_UNICODE));
+
+            $pdfBinary = Cache::remember($pdfCacheKey, now()->addMinutes(10), function () use (
+                $payload,
+                $supplierName,
+                $request,
+                $logoDataUri
+            ): string {
+                $html = View::make('pdf.rejected_bobinas', [
+                    'report' => $payload,
+                    'supplierName' => $supplierName,
+                    'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+                    'generatedAt' => now(),
+                    'logoDataUri' => $logoDataUri,
+                ])->render();
+
+                return Pdf::loadHTML($html)->setPaper('a4', 'landscape')->output();
+            });
+
+            return new Response($pdfBinary, 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="bobinas-rechazadas-'.$from->format('Ymd').'-'.$to->format('Ymd').'.pdf"',
+            ]);
+        }
 
         if (($validated['format'] ?? null) === 'csv') {
-            $rows = [];
-            foreach ((array) ($payload['materials'] ?? []) as $row) {
-                $rows[] = ['section' => 'materials'] + $row;
-            }
-            foreach ((array) ($payload['bobinas'] ?? []) as $row) {
-                $rows[] = ['section' => 'bobinas'] + $row;
-            }
-            $csv = $this->reports->rowsToCsv($rows);
+            $csvRows = array_map(static function (array $row): array {
+                return [
+                    'numero_bobina' => $row['numero_bobina'] ?? '',
+                    'proveedor' => $row['proveedor'] ?? '',
+                    'operador' => $row['operador'] ?? '',
+                    'material' => $row['material'] ?? '',
+                    'peso_kg' => $row['peso_kg'] ?? '',
+                    'motivo' => $row['motivo'] ?? '',
+                    'observacion' => $row['observacion'] ?? '',
+                    'fecha_bobina' => $row['fecha_bobina'] ?? '',
+                    'fecha_registro' => $row['fecha_registro'] ?? '',
+                    'work_order_code' => $row['work_order_code'] ?? '',
+                ];
+            }, (array) ($payload['rows'] ?? []));
+            $csv = $this->reports->rowsToCsv($csvRows, ';', true, 'Bobinas rechazadas');
 
             return new Response($csv, 200, [
                 'Content-Type' => 'text/csv; charset=UTF-8',
-                'Content-Disposition' => 'attachment; filename="rejected-bobinas.csv"',
+                'Content-Disposition' => 'attachment; filename="bobinas-rechazadas-'.$from->format('Ymd').'-'.$to->format('Ymd').'.csv"',
             ]);
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Vista previa HTML del PDF de bobinas rechazadas.
+     */
+    public function rejectedBobinasPreview(ReportRejectedBobinasRequest $request): Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $supplierId = isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null;
+        $payload = $this->reports->rejectedBobinasReport($from, $to, $supplierId);
+        $supplierName = $supplierId !== null ? Supplier::query()->whereKey($supplierId)->value('name') : null;
+        $logoDataUri = Cache::rememberForever('brand:logo-axones-var-01:data-uri', static function (): string {
+            $logoPath = public_path('brand/logo-axones-var-01.png');
+            if (! is_readable($logoPath)) {
+                return '';
+            }
+
+            return 'data:image/png;base64,'.base64_encode((string) file_get_contents($logoPath));
+        });
+
+        $html = View::make('pdf.rejected_bobinas', [
+            'report' => $payload,
+            'supplierName' => $supplierName,
+            'generatedBy' => (string) ($request->user()?->name ?? 'Usuario no identificado'),
+            'generatedAt' => now(),
+            'logoDataUri' => $logoDataUri,
+        ])->render();
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="bobinas-rechazadas-preview-'.$from->format('Ymd').'-'.$to->format('Ymd').'.html"',
+        ]);
     }
 
     /**
@@ -226,7 +476,8 @@ class ReportController extends Controller
         $validated = $request->validated();
         $from = Carbon::parse($validated['from'])->startOfDay();
         $to = Carbon::parse($validated['to'])->endOfDay();
-        $payload = $this->reports->productionTimesByArea($from, $to);
+        $live = (bool) ($validated['live'] ?? false);
+        $payload = $this->reports->productionTimesByArea($from, $to, $live);
 
         if (($validated['format'] ?? null) === 'csv') {
             $csv = $this->reports->rowsToCsv((array) ($payload['rows'] ?? []));
@@ -369,6 +620,142 @@ class ReportController extends Controller
     }
 
     /**
+     * Resumen mensual de desperdicio total (kg) en el rango.
+     */
+    public function scrapMonthlySummary(ScrapReportRequest $request): JsonResponse|Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $payload = $this->reports->scrapMonthlySummary(
+            $from,
+            $to,
+            isset($validated['client_id']) ? (int) $validated['client_id'] : null,
+            isset($validated['product_id']) ? (int) $validated['product_id'] : null,
+        );
+
+        if (($validated['format'] ?? null) === 'csv') {
+            $csv = $this->reports->rowsToCsv((array) ($payload['rows'] ?? []));
+
+            return new Response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="desperdicio-resumen-mensual-'.$from->format('Ymd').'-'.$to->format('Ymd').'.csv"',
+            ]);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Resumen global de material producido (impresión, laminación, corte) filtrado por fecha y cliente.
+     */
+    public function productionMaterialSummary(ReportProductionMaterialSummaryRequest $request): JsonResponse|Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $clientId = isset($validated['client_id']) ? (int) $validated['client_id'] : null;
+        $payload = $this->reports->productionMaterialSummary($from, $to, $clientId);
+
+        if (($validated['format'] ?? null) === 'csv') {
+            $csvRows = [
+                [
+                    'section' => 'resumen',
+                    'work_order_code' => 'TOTAL',
+                    'client_name' => '',
+                    'material_impreso_kg' => $payload['totals']['material_impreso_kg'] ?? '0.000',
+                    'material_laminado_kg' => $payload['totals']['material_laminado_kg'] ?? '0.000',
+                    'material_cortado_kg' => $payload['totals']['material_cortado_kg'] ?? '0.000',
+                    'total_general_kg' => $payload['totals']['total_general_kg'] ?? '0.000',
+                    'impreso_bobinas' => $payload['totals']['impreso_bobinas'] ?? 0,
+                    'laminado_bobinas' => $payload['totals']['laminado_bobinas'] ?? 0,
+                ],
+            ];
+            foreach ((array) ($payload['work_orders'] ?? []) as $row) {
+                $csvRows[] = ['section' => 'detalle'] + $row + [
+                    'total_general_kg' => number_format(
+                        (float) ($row['material_impreso_kg'] ?? 0)
+                        + (float) ($row['material_laminado_kg'] ?? 0)
+                        + (float) ($row['material_cortado_kg'] ?? 0),
+                        3,
+                        '.',
+                        '',
+                    ),
+                ];
+            }
+            $csv = $this->reports->rowsToCsv($csvRows);
+
+            return new Response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="resumen-produccion-material-'.$from->format('Ymd').'-'.$to->format('Ymd').'.csv"',
+            ]);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Resumen de consumibles (tintas, químicos laminación, entradas de material) por período.
+     */
+    public function consumablesSummary(ReportConsumablesSummaryRequest $request): JsonResponse|Response
+    {
+        $validated = $request->validated();
+        $from = Carbon::parse($validated['from'])->startOfDay();
+        $to = Carbon::parse($validated['to'])->endOfDay();
+        $clientId = isset($validated['client_id']) ? (int) $validated['client_id'] : null;
+        $payload = $this->reports->consumablesSummary($from, $to, $clientId);
+
+        if (($validated['format'] ?? null) === 'csv') {
+            $totals = (array) ($payload['totals'] ?? []);
+            $tintas = (array) ($totals['tintas'] ?? []);
+            $lam = (array) ($totals['laminacion'] ?? []);
+            $imp = (array) ($totals['impresion'] ?? []);
+
+            $csvRows = [
+                [
+                    'section' => 'resumen',
+                    'work_order_code' => 'TOTAL',
+                    'client_name' => '',
+                    'tintas_original_kg' => $tintas['total_original_kg'] ?? '0.000',
+                    'tintas_solventadas_kg' => $tintas['total_solventadas_kg'] ?? '0.000',
+                    'tintas_alcohol_kg' => $tintas['alcohol_kg'] ?? '0.000',
+                    'tintas_metoxil_kg' => $tintas['metoxil_kg'] ?? '0.000',
+                    'tintas_npa_kg' => $tintas['npa_kg'] ?? '0.000',
+                    'lam_adhesivo_sobra_kg' => $lam['adhesivo_sobra_kg'] ?? '0.000',
+                    'lam_catalizador_sobra_kg' => $lam['catalizador_sobra_kg'] ?? '0.000',
+                    'lam_acetato_sobra_lt' => $lam['acetato_sobra_lt'] ?? '0.000',
+                    'lam_adhesivo_consumido_kg' => $lam['adhesivo_consumido_kg'] ?? '0.000',
+                    'lam_catalizador_consumido_kg' => $lam['catalizador_consumido_kg'] ?? '0.000',
+                    'lam_acetato_consumido_lt' => $lam['acetato_consumido_lt'] ?? '0.000',
+                    'lam_total_consumible_kg' => $lam['total_consumible_kg'] ?? '0.000',
+                    'laminacion_virgen_entrada_kg' => $lam['material_virgen_entrada_kg'] ?? '0.000',
+                    'impresion_material_consumido_kg' => $imp['material_consumido_kg'] ?? '0.000',
+                ],
+            ];
+            foreach ((array) ($payload['work_orders'] ?? []) as $row) {
+                $csvRows[] = ['section' => 'detalle'] + $row + [
+                    'lam_total_consumible_kg' => number_format(
+                        (float) ($row['lam_adhesivo_consumido_kg'] ?? 0)
+                        + (float) ($row['lam_catalizador_consumido_kg'] ?? 0),
+                        3,
+                        '.',
+                        '',
+                    ),
+                    'impresion_material_consumido_kg' => $row['impresion_entrada_kg'] ?? '0.000',
+                ];
+            }
+            $csv = $this->reports->rowsToCsv($csvRows);
+
+            return new Response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="reporte-consumibles-'.$from->format('Ymd').'-'.$to->format('Ymd').'.csv"',
+            ]);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
      * Consumo de tintas / cementerio / químicos por cliente (salidas vía solicitud).
      */
     public function tintaConsumptionByClient(ReportDateRangeRequest $request): JsonResponse|Response
@@ -398,8 +785,9 @@ class ReportController extends Controller
         $validated = $request->validated();
         $from = Carbon::parse($validated['from'])->startOfDay();
         $to = Carbon::parse($validated['to'])->endOfDay();
+        $live = (bool) ($validated['live'] ?? false);
 
-        return response()->json($this->reports->workOrderTimeReportCandidates($from, $to));
+        return response()->json($this->reports->workOrderTimeReportCandidates($from, $to, $live));
     }
 
     /**
@@ -533,14 +921,12 @@ class ReportController extends Controller
                 'bopp' => 'desperdicio-historial-kg-bopp',
                 'polietileno' => 'desperdicio-historial-kg-polietileno',
                 'transparente' => 'desperdicio-historial-kg-transparente',
-                'poliestireno' => 'desperdicio-historial-kg-poliestireno',
                 default => 'desperdicio-historial-kg',
             },
             default => match (ScrapSubstrateCatalog::normalizeGroupId($substrateGroup)) {
                 'bopp' => 'desperdicio-bopp',
                 'polietileno' => 'desperdicio-polietileno',
                 'transparente' => 'desperdicio-transparente',
-                'poliestireno' => 'desperdicio-poliestireno',
                 default => 'desperdicio-detalle',
             },
         };

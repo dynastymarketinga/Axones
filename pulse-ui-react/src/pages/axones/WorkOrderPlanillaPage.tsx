@@ -159,7 +159,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { WorkOrderStageBadge } from "@/components/axones/WorkOrderStageBadge"
 import { OtPlanillaInputIcon } from "./OtPlanillaInputIcon"
 import { WindingFigurePicker } from "./WindingFigurePicker"
 import WorkOrderPrintingInkTable from "./WorkOrderPrintingInkTable"
@@ -241,6 +240,13 @@ type AssignmentNotificationSummary = {
   areas?: NotificationAreaResult[]
 }
 
+type PlanillaSustratosMaterialSummary = {
+  created?: number[]
+  updated?: number[]
+  cancelled?: number[]
+  skipped?: string[]
+}
+
 type SaveOrdenTrabajoResponse = {
   work_order_id: number
   updated_at: string
@@ -248,6 +254,7 @@ type SaveOrdenTrabajoResponse = {
     broadcast: NotificationSummary | null
     production: NotificationSummary | null
     assignment: AssignmentNotificationSummary | null
+    planilla_sustratos_material?: PlanillaSustratosMaterialSummary | null
   } | null
 }
 
@@ -1375,6 +1382,49 @@ export default function WorkOrderPlanillaPage() {
     null,
   )
   const sustratoKgStockModalDismissedRef = useRef<string | null>(null)
+  const sustratoShortageReportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const schedulePlanillaSustratoShortageAlert = useCallback(
+    (area: "impresion" | "laminacion", row: SustratoRow) => {
+      if (!sustratoRowUsesCatalogMaterial(row)) return
+      const mid = sustratoMaterialIdDigits(row)
+      const kg = readNumberString(row.kg).trim()
+      if (!mid || !kg) return
+
+      const woIdForApi = !isDraftRoute && Number.isFinite(id) && id > 0 ? id : null
+      const coIdForApi = draftCoId
+      if (woIdForApi === null && coIdForApi === null) return
+
+      if (sustratoShortageReportTimerRef.current) {
+        clearTimeout(sustratoShortageReportTimerRef.current)
+      }
+      sustratoShortageReportTimerRef.current = setTimeout(() => {
+        void (async () => {
+          try {
+            await apiFetch("planilla-sustrato-shortage-alerts", {
+              method: "POST",
+              body: JSON.stringify({
+                ...(woIdForApi !== null ? { work_order_id: woIdForApi } : {}),
+                ...(coIdForApi !== null ? { client_order_id: coIdForApi } : {}),
+                lines: [
+                  {
+                    material_id: Number(mid),
+                    quantity_requested: kg.replace(",", "."),
+                    originating_area: area,
+                    area_label: area === "impresion" ? "Impresión" : "Laminación",
+                  },
+                ],
+              }),
+            })
+            window.dispatchEvent(new Event("alerts:refresh"))
+          } catch {
+            // El modal ya advierte; no bloquear la edición de la planilla.
+          }
+        })()
+      }, 500)
+    },
+    [draftCoId, id, isDraftRoute],
+  )
 
   const syncSustratoKgStockModal = useCallback(
     (
@@ -1396,8 +1446,9 @@ export default function WorkOrderPlanillaPage() {
       }
       if (sustratoKgStockModalDismissedRef.current === dismissKey) return
       setSustratoKgStockModal(modal)
+      schedulePlanillaSustratoShortageAlert(area, row)
     },
-    [],
+    [schedulePlanillaSustratoShortageAlert],
   )
 
   const dismissSustratoKgStockModal = useCallback(() => {
@@ -2508,11 +2559,13 @@ export default function WorkOrderPlanillaPage() {
       }
 
       const rowsImp = getSustratosImp(formToSave)
+      const rowsLam = getSustratosLam(formToSave)
       const desarrolloNorm = normalizeDesarrolloMmValue(formToSave.desarrollo)
       const formOut: Record<string, unknown> = {
         ...formToSave,
         ...(desarrolloNorm ? { desarrollo: desarrolloNorm } : {}),
         sustratosVirgenImp: rowsImp,
+        sustratosVirgenLam: rowsLam,
         sustratoVirgenImp1: rowsImp[0]?.material_id ?? "",
         kgUtilizarImp1: rowsImp[0]?.kg ?? "",
         cliente: readString(prefill.cliente) || readString(formToSave.cliente),
@@ -2554,6 +2607,25 @@ export default function WorkOrderPlanillaPage() {
         toastMsg += ` Asignación dirigida a ${assignSent.length} área(s): ${assignLabel}.`
       }
       toast.success(toastMsg)
+
+      const sustratoMr = saveRes.notification_summary?.planilla_sustratos_material
+      if (sustratoMr) {
+        const created = sustratoMr.created?.length ?? 0
+        const updated = sustratoMr.updated?.length ?? 0
+        if (created + updated > 0) {
+          toast.message(
+            `Solicitud de inventario enviada al almacén (${created} nueva(s), ${updated} actualizada(s)). Revise Solicitudes entre áreas.`,
+            { duration: 6000 },
+          )
+        }
+        const skippedMr = sustratoMr.skipped ?? []
+        if (skippedMr.length > 0) {
+          toast.warning(
+            `Sustratos: no se pudo enviar solicitud al almacén — ${skippedMr.join("; ")}`,
+            { duration: 8000 },
+          )
+        }
+      }
       console.groupCollapsed("[OT] Resumen de notificaciones")
       console.info("work_order_id:", saveRes.work_order_id)
       console.info("updated_at:", saveRes.updated_at)
@@ -2692,7 +2764,6 @@ export default function WorkOrderPlanillaPage() {
               ) : null}
             </div>
           ) : null}
-          <WorkOrderStageBadge current="orden" className="mt-4" />
         </div>
         <TooltipProvider delayDuration={150}>
           <div className="flex w-full flex-wrap items-center justify-center gap-2">

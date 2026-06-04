@@ -4,9 +4,15 @@ import { useCallback, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { apiDownloadFile, ApiError } from "@/lib/api"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
+
+import { ReportIdentityBanner } from "./ReportIdentityBanner"
+import type { ReportIdentityKey } from "./report-identities"
+import { REPORT_IDENTITIES } from "./report-identities"
 
 function defaultFrom(): string {
   const d = new Date()
@@ -15,6 +21,12 @@ function defaultFrom(): string {
 }
 
 export type ReportRangeQueryValue = string | number | undefined
+
+/** Vista en pantalla: tiempo real activo salvo `live=0` en la URL. */
+export function parseIncludeLive(param: string | null): boolean {
+  if (param === "0" || param === "false") return false
+  return true
+}
 
 /** HH:MM:SS, coherente con las vistas PDF/HTML de reportes de tiempos. */
 export function formatDurationHms(totalSeconds: number): string {
@@ -38,16 +50,21 @@ export const PRODUCTION_AREA_LABELS: Record<string, string> = {
   laminacion: "Laminación",
   corte: "Corte",
   montaje: "Montaje",
-  tintas: "Tintas",
 }
 
-/** Orden fijo de las cinco áreas de producción en tablas y KPI. */
+/** Áreas sin cronómetro MES (p. ej. Tintas = consumibles, no tiempos). */
+export const PRODUCTION_TIME_AREAS_EXCLUDED = new Set(["tintas"])
+
+export function isProductionTimeReportArea(area: string): boolean {
+  return area !== "" && !PRODUCTION_TIME_AREAS_EXCLUDED.has(area)
+}
+
+/** Orden fijo de las cuatro áreas con cronómetro en tablas y KPI. */
 export const PRODUCTION_AREA_ORDER = [
   "montaje",
   "printing",
   "laminacion",
   "corte",
-  "tintas",
 ] as const
 
 export type ProductionAreaKey = (typeof PRODUCTION_AREA_ORDER)[number]
@@ -93,10 +110,54 @@ export type WorkOrderTimeCandidate = {
   effective_percent: string
 }
 
+/** OT con cronómetro activo en planta (solo cuando `live=1` en candidatos). */
+export type ProductionTimeLiveActiveEntry = {
+  area: string
+  work_order_id: number
+  work_order_code: string
+  segment_types: string[]
+  machine_codes: string[]
+}
+
+export const PRODUCTION_SEGMENT_TYPE_LABELS: Record<string, string> = {
+  production: "Efectivo",
+  downtime: "Muerto",
+  mount: "Montaje",
+  demount: "Desmontaje",
+}
+
+/** Pestaña de producción por área del reporte. */
+export const PRODUCTION_AREA_TAB: Record<ProductionAreaKey, string> = {
+  montaje: "montaje",
+  printing: "printing",
+  laminacion: "laminacion",
+  corte: "corte",
+}
+
+/** Agrupa entradas `live_active` por área en orden de planta. */
+export function groupLiveActiveByArea(
+  entries: ProductionTimeLiveActiveEntry[],
+): { area: ProductionAreaKey; label: string; items: ProductionTimeLiveActiveEntry[] }[] {
+  const map = new Map<ProductionAreaKey, ProductionTimeLiveActiveEntry[]>()
+  for (const entry of entries) {
+    const key = entry.area as ProductionAreaKey
+    if (!PRODUCTION_AREA_ORDER.includes(key)) continue
+    const list = map.get(key) ?? []
+    list.push(entry)
+    map.set(key, list)
+  }
+  return PRODUCTION_AREA_ORDER.filter((area) => map.has(area)).map((area) => ({
+    area,
+    label: PRODUCTION_AREA_LABELS[area] ?? area,
+    items: map.get(area) ?? [],
+  }))
+}
+
 export function pivotProductionRows(rows: ProductionTimeRawRow[]): ProductionTimeAggRow[] {
   const agg = new Map<string, ProductionTimeAggRow>()
   for (const r of rows) {
     const area = String(r.area ?? "")
+    if (!isProductionTimeReportArea(area)) continue
     const machine = String(r.machine_code ?? "")
     const type = String(r.segment_type ?? "")
     const sec = Number(r.total_seconds ?? 0)
@@ -131,7 +192,7 @@ export function pivotProductionRows(rows: ProductionTimeRawRow[]): ProductionTim
   })
 }
 
-/** Agrupa filas por máquina en totales por área (las cinco áreas siempre presentes). */
+/** Agrupa filas por máquina en totales por área (las cuatro áreas con cronómetro siempre presentes). */
 export function rollupByArea(aggRows: ProductionTimeAggRow[]): ProductionTimeAreaSummaryRow[] {
   const map = new Map<string, ProductionTimeAreaSummaryRow>()
   for (const r of aggRows) {
@@ -272,7 +333,30 @@ export function useReportRange() {
     [],
   )
 
-  return { from, setFrom, to, setTo, loading, setLoading, downloadCsv }
+  const downloadPdf = useCallback(
+    async (
+      path: string,
+      fallbackName: string,
+      query: Record<string, ReportRangeQueryValue>,
+    ) => {
+      setLoading(true)
+      try {
+        await apiDownloadFile(path, {
+          query: { ...query, format: "pdf" },
+          fallbackName,
+        })
+        toast.success("Descarga iniciada.")
+      } catch (e) {
+        if (e instanceof ApiError) toast.error(e.message)
+        else toast.error("No se pudo descargar el archivo.")
+      } finally {
+        setLoading(false)
+      }
+    },
+    [],
+  )
+
+  return { from, setFrom, to, setTo, loading, setLoading, downloadCsv, downloadPdf }
 }
 
 type ReportPageShellProps = {
@@ -286,6 +370,8 @@ type ReportPageShellProps = {
   rangeCardTitle?: string
   /** Si es false, no renderiza la tarjeta de Desde/Hasta (filtros de fecha van en el panel del reporte). */
   showRange?: boolean
+  /** Identidad visual y copy de ayuda por tipo de reporte. */
+  identityKey?: ReportIdentityKey
   children: ReactNode
 }
 
@@ -301,15 +387,41 @@ export function ReportPageShell({
   onToChange,
   rangeCardTitle = "Rango de fechas global",
   showRange = true,
+  identityKey,
   children,
 }: ReportPageShellProps) {
+  const identity = identityKey ? REPORT_IDENTITIES[identityKey] : null
+  const TitleIcon = identity?.icon
+
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description ? (
-          <p className="text-muted-foreground text-sm">{description}</p>
-        ) : null}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start gap-3">
+          {TitleIcon ? (
+            <span
+              className={cn(
+                "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl shadow-sm ring-2",
+                identity!.theme.iconClass,
+              )}
+            >
+              <TitleIcon className="h-5 w-5" aria-hidden />
+            </span>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              {identity ? (
+                <Badge variant="outline" className={cn("text-[10px] font-bold uppercase tracking-wider", identity.theme.badgeClass)}>
+                  {identity.badge}
+                </Badge>
+              ) : null}
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            {description ? (
+              <p className="text-muted-foreground mt-1 max-w-3xl text-sm leading-relaxed">{description}</p>
+            ) : null}
+          </div>
+        </div>
+        {identityKey ? <ReportIdentityBanner identityKey={identityKey} /> : null}
       </div>
 
       {showRange && from != null && to != null && onFromChange && onToChange ? (

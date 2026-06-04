@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, Outlet, useParams } from "react-router-dom"
+import { createBrowserRouter, Navigate, useParams } from "react-router-dom"
 import type { ReactElement } from "react"
 
 import AppLayout from "@/layouts/AppLayout"
@@ -45,10 +45,16 @@ import GateMovementsPage from "@/pages/axones/GateMovementsPage"
 import AxonesDashboardPage from "@/pages/axones/AxonesDashboardPage"
 import AxonesOperationalAlertsPage from "@/pages/axones/AxonesOperationalAlertsPage"
 import ReportsInventoryPage from "@/pages/axones/reports/ReportsInventoryPage"
+import ReportsProductionMaterialSummaryPage from "@/pages/axones/reports/ReportsProductionMaterialSummaryPage"
+import ReportsConsumablesSummaryPage from "@/pages/axones/reports/ReportsConsumablesSummaryPage"
 import ReportsProductionPage from "@/pages/axones/reports/ReportsProductionPage"
 import ReportsTimesPage from "@/pages/axones/reports/ReportsTimesPage"
 import ReportsScrapPage from "@/pages/axones/reports/ReportsScrapPage"
 import ReportsByWorkOrderPage from "@/pages/axones/reports/ReportsByWorkOrderPage"
+import ReportsWorkOrderSummaryPage from "@/pages/axones/reports/ReportsWorkOrderSummaryPage"
+import ReportsRejectedBobinasPreviewPage from "@/pages/axones/reports/ReportsRejectedBobinasPreviewPage"
+import ReportsWorkOrderSummaryPreviewPage from "@/pages/axones/reports/ReportsWorkOrderSummaryPreviewPage"
+import ReportsProductionTimePreviewPage from "@/pages/axones/reports/ReportsProductionTimePreviewPage"
 import TintaMixturesPage from "@/pages/axones/TintaMixturesPage"
 import QualityWorkOrderPage from "@/pages/axones/QualityWorkOrderPage"
 import QualityCertificatePreviewPage from "@/pages/axones/QualityCertificatePreviewPage"
@@ -311,10 +317,16 @@ export const router = createBrowserRouter(
         { path: "vigilancia", element: guardAxonesRoute({ routeKey: "vigilancia", element: <GateMovementsPage /> }) },
         { path: "vigilancia/nuevo", element: guardAxonesRoute({ routeKey: "vigilancia/nuevo", element: <GateMovementNewPage /> }) },
         { path: "reportes/inventario", element: guardAxonesRoute({ routeKey: "reportes/inventario", element: <ReportsInventoryPage /> }) },
+        { path: "reportes/inventario/bobinas-rechazadas/vista-previa", element: guardAxonesRoute({ routeKey: "reportes/inventario", element: <ReportsRejectedBobinasPreviewPage /> }) },
         { path: "reportes/produccion", element: guardAxonesRoute({ routeKey: "reportes/produccion", element: <ReportsProductionPage /> }) },
+        { path: "reportes/produccion/vista-previa", element: guardAxonesRoute({ routeKey: "reportes/produccion", element: <ReportsProductionTimePreviewPage /> }) },
+        { path: "reportes/resumen-produccion", element: guardAxonesRoute({ routeKey: "reportes/resumen-produccion", element: <ReportsProductionMaterialSummaryPage /> }) },
+        { path: "reportes/consumibles", element: guardAxonesRoute({ routeKey: "reportes/consumibles", element: <ReportsConsumablesSummaryPage /> }) },
         { path: "reportes/tiempos", element: guardAxonesRoute({ routeKey: "reportes/tiempos", element: <ReportsTimesPage /> }) },
         { path: "reportes/mermas", element: guardAxonesRoute({ routeKey: "reportes/mermas", element: <ReportsScrapPage /> }) },
         { path: "reportes/por-orden-trabajo", element: guardAxonesRoute({ routeKey: "reportes/por-orden-trabajo", element: <ReportsByWorkOrderPage /> }) },
+        { path: "reportes/resumen-ordenes-trabajo", element: guardAxonesRoute({ routeKey: "reportes/resumen-ordenes-trabajo", element: <ReportsWorkOrderSummaryPage /> }) },
+        { path: "reportes/resumen-ordenes-trabajo/vista-previa", element: guardAxonesRoute({ routeKey: "reportes/resumen-ordenes-trabajo", element: <ReportsWorkOrderSummaryPreviewPage /> }) },
         { path: "asistente", element: guardAxonesRoute({ routeKey: "asistente", element: <AxonesChatPage /> }) },
         { path: "mezclas-tinta", element: guardAxonesRoute({ routeKey: "mezclas-tinta", element: <TintaMixturesPage /> }) },
 

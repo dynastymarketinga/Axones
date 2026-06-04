@@ -1,16 +1,18 @@
 import { useId, useMemo, useState, type ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
-import { Link } from "react-router-dom"
 import {
+  CalendarDays,
   Check,
   ChevronDown,
   ChevronsUpDown,
   FileSearch,
+  NotebookPen,
   PackageCheck,
   PackageX,
   Plus,
   Trash2,
   Undo2,
+  UserRound,
   Warehouse,
   Weight,
 } from "lucide-react"
@@ -35,10 +37,15 @@ import { cn } from "@/lib/utils"
 import type { MaterialRow } from "@/types/api"
 import {
   PRINTING_REJECT_REASONS,
-  sumRejectedEntryBobinas,
+  sumRejectedEntryKg,
   type WarehouseRejectedEntry,
   type WarehouseReturnDraft,
 } from "./printing-turnos"
+import {
+  materialSpecificationsLabel,
+  rejectReasonLabel,
+  todayIsoDate,
+} from "./warehouse-return-helpers"
 
 export type MesWarehouseReturnPanelProps = {
   open: boolean
@@ -68,6 +75,8 @@ export type MesWarehouseReturnSectionProps = {
   areaFlowLabel: string
   fieldPrefix: string
   warehouseReturn: MesWarehouseReturnPanelProps
+  /** Operador por defecto en líneas de devolución mala. */
+  operadorDefault?: string
 }
 
 function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
@@ -82,12 +91,11 @@ function fieldLabel(htmlFor: string, icon: LucideIcon, text: ReactNode) {
   )
 }
 
-function isRejectedFieldComboOpen(
-  open: { entryId: string; field: "motivo" | "proveedor" | "material" } | null,
+function isRejectedMotivoComboOpen(
+  open: { entryId: string } | null,
   entryId: string,
-  field: "motivo" | "proveedor" | "material",
 ): boolean {
-  return open?.entryId === entryId && open.field === field
+  return open?.entryId === entryId
 }
 
 function num(v: string): number {
@@ -99,18 +107,16 @@ function num(v: string): number {
 
 export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps) {
   const { inputDisabled, fieldPrefix, areaFlowLabel, warehouseReturn } = props
-  const [openRejectedCombo, setOpenRejectedCombo] = useState<{
-    entryId: string
-    field: "motivo" | "proveedor" | "material"
-  } | null>(null)
+  const [openRejectedCombo, setOpenRejectedCombo] = useState<{ entryId: string } | null>(null)
   const [buenaComboOpen, setBuenaComboOpen] = useState(false)
 
   const formFieldId = useId().replace(/:/g, "")
   const mk = (suffix: string) => `${formFieldId}-${suffix}`
   const fn = (suffix: string) => `${fieldPrefix}${suffix}`
 
-  const rechBobinasFromEntries = sumRejectedEntryBobinas(warehouseReturn.draft.rechazadaEntries)
-  const rechBobinas = rechBobinasFromEntries
+  const rechKgFromEntries = sumRejectedEntryKg(warehouseReturn.draft.rechazadaEntries)
+  const rechKg = rechKgFromEntries
+  const operadorDefault = props.operadorDefault?.trim() ?? ""
 
   const buenaMaterialSelected = useMemo(
     () =>
@@ -121,32 +127,11 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
   )
 
   function rejectedMotivoLabel(entry: WarehouseRejectedEntry): string {
-    const bobinas = Math.max(0, Math.floor(num(entry.bobinas)))
-    if (inputDisabled || bobinas <= 0) return "— (indique bobinas rechazadas primero)"
+    const kg = num(entry.kg)
+    if (inputDisabled || kg <= 0) return "— (indique kilos rechazados primero)"
     const id = entry.motivo.trim()
-    if (!id) return "Seleccione motivo (obligatorio si hay bobinas rechazadas)"
-    return PRINTING_REJECT_REASONS.find((r) => r.id === id)?.label ?? id
-  }
-
-  function rejectedMaterialLabel(entry: WarehouseRejectedEntry): string {
-    const material = warehouseReturn.materialOptionsBad.find((m) => String(m.id) === entry.materialId)
-    if (warehouseReturn.loadingBad) return "Cargando…"
-    if (!material) return "— (opcional)"
-    return `${material.sku} · ${material.name}`
-  }
-
-  function rejectedSupplierLabel(entry: WarehouseRejectedEntry): string {
-    const supplier = warehouseReturn.supplierOptions.find((s) => String(s.id) === entry.proveedorId)
-    if (warehouseReturn.loadingSuppliers) return "Cargando…"
-    if (!supplier) return "— (opcional)"
-    return supplier.name
-  }
-
-  function rejectedMaterialsForEntry(entry: WarehouseRejectedEntry): MaterialRow[] {
-    const all = warehouseReturn.materialOptionsBad
-    const provId = entry.proveedorId.trim()
-    if (!provId) return all
-    return all.filter((m) => m.supplier_id != null && String(m.supplier_id) === provId)
+    if (!id) return "Seleccione motivo (obligatorio)"
+    return rejectReasonLabel(id)
   }
 
   return (
@@ -167,12 +152,10 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
         </div>
       ) : null}
       <p className="text-muted-foreground mb-3 text-[11px] leading-snug">
-        Buena: kilos a reingreso. Rechazada: bobinas, motivo obligatorio; proveedor y material opcionales. Use{" "}
-        <span className="font-medium text-foreground">Agregar línea</span> si hay distintos motivos. Al enviar, ver{" "}
-        <Link to="/devoluciones" className="font-medium text-primary underline underline-offset-2">
-          Inventario → Devoluciones
-        </Link>{" "}
-        y, si aplica, <span className="font-medium text-foreground">Inventario → Bobinas</span>.
+        Estas devoluciones llegan a <span className="font-medium text-foreground">Inventario → Devoluciones</span>{" "}
+        para aceptación. Las <span className="font-medium text-foreground">buenas</span> entran al inventario y las{" "}
+        <span className="font-medium text-foreground">malas</span> van a bobinas rechazadas; además alimentan el
+        reporte.
       </p>
 
       <Collapsible
@@ -191,7 +174,7 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
           >
             <span className="inline-flex min-w-0 flex-1 items-center gap-2">
               <Warehouse className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
-              <span className="min-w-0 truncate">Envío a almacén — devolución del turno</span>
+                <span className="min-w-0 truncate">Registrar envío a almacén</span>
             </span>
             <ChevronDown
               className={cn(
@@ -228,40 +211,31 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
               />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-              <div className="flex h-full flex-col rounded-xl border border-emerald-300/60 bg-gradient-to-b from-emerald-50/80 to-background p-4 dark:border-emerald-800/50 dark:from-emerald-950/35">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200/60 pb-3 dark:border-emerald-800/40">
-                  <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">Buena</span>
+            <div className="grid gap-5 xl:grid-cols-2 xl:items-start">
+              <div className="flex h-full flex-col rounded-2xl border border-emerald-300/60 bg-gradient-to-b from-emerald-50/90 via-emerald-50/50 to-background p-5 shadow-sm dark:border-emerald-800/50 dark:from-emerald-950/40 dark:via-emerald-950/20">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-2 border-b border-emerald-200/70 pb-3 dark:border-emerald-800/40">
+                  <div className="space-y-0.5">
+                    <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
+                      Devolución buena
+                    </span>
+                    <p className="text-[11px] leading-snug text-emerald-900/70 dark:text-emerald-200/80">
+                      Material que regresa a inventario.
+                    </p>
+                  </div>
                   <Badge
                     variant="outline"
-                    className="border-emerald-500/50 bg-emerald-600 text-[10px] text-white hover:bg-emerald-600"
+                    className="border-emerald-500/60 bg-emerald-600 text-[10px] text-white shadow-sm hover:bg-emerald-600"
                   >
                     Reingreso inventario
                   </Badge>
                 </div>
-                <div className="flex flex-1 flex-col gap-3">
-                  <div className="space-y-1.5">
-                    {fieldLabel(mk("devolucion-buena-kg"), PackageCheck, "Devolución buena (Kg)")}
-                    <Input
-                      id={mk("devolucion-buena-kg")}
-                      name={fn("DevolucionBuenaKg")}
-                      className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                      inputMode="decimal"
-                      value={props.devolucionBuenaRaw}
-                      onChange={(e) => props.onSetDevolucionBuena(e.target.value)}
-                      placeholder="0"
-                      disabled={inputDisabled}
-                    />
-                    <p className="text-muted-foreground text-[11px] leading-snug">
-                      Material apto para reingreso a inventario.
-                    </p>
-                  </div>
-                  <div className="space-y-1.5">
+                <div className="grid flex-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1.5 md:col-span-2">
                     <Label
                       htmlFor={mk("warehouse-material-buena")}
                       className="text-xs font-medium text-emerald-900/90 dark:text-emerald-200/90"
                     >
-                      Material (área material)
+                      Material
                     </Label>
                     <Popover open={buenaComboOpen} onOpenChange={setBuenaComboOpen}>
                       <PopoverTrigger asChild>
@@ -273,7 +247,7 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                           role="combobox"
                           aria-expanded={buenaComboOpen}
                           disabled={inputDisabled || warehouseReturn.loadingGood}
-                          className="h-9 w-full justify-between gap-2 rounded-md border border-emerald-200/80 bg-white px-3 font-normal shadow-sm dark:bg-white dark:text-slate-900"
+                          className="h-9 w-full justify-between gap-2 rounded-md border border-emerald-200/80 bg-white px-3 font-normal shadow-sm transition-colors hover:border-emerald-300 dark:bg-white dark:text-slate-900"
                         >
                           <span
                             className={cn(
@@ -317,7 +291,10 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                                   key={m.id}
                                   value={`${m.id} ${m.sku} ${m.name}`}
                                   onSelect={() => {
-                                    warehouseReturn.onDraftChange({ buenaMaterialId: String(m.id) })
+                                    warehouseReturn.onDraftChange({
+                                      buenaMaterialId: String(m.id),
+                                      buenaEspecificaciones: materialSpecificationsLabel(m),
+                                    })
                                     setBuenaComboOpen(false)
                                   }}
                                 >
@@ -341,12 +318,56 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                       </PopoverContent>
                     </Popover>
                   </div>
+                  <div className="space-y-1.5">
+                    {fieldLabel(mk("devolucion-buena-especificaciones"), FileSearch, "Especificaciones")}
+                    <Input
+                      id={mk("devolucion-buena-especificaciones")}
+                      name={fn("DevolucionBuenaEspecificaciones")}
+                      className="ot-input-unified h-9 border-emerald-200/80 bg-white dark:bg-white dark:text-slate-900"
+                      value={warehouseReturn.draft.buenaEspecificaciones}
+                      onChange={(e) =>
+                        warehouseReturn.onDraftChange({ buenaEspecificaciones: e.target.value })
+                      }
+                      placeholder="Micras, ancho, proveedor…"
+                      disabled={inputDisabled}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    {fieldLabel(mk("devolucion-buena-kg"), PackageCheck, "Kilos total")}
+                    <Input
+                      id={mk("devolucion-buena-kg")}
+                      name={fn("DevolucionBuenaKg")}
+                      className="ot-input-unified h-9 border-emerald-200/80 bg-white dark:bg-white dark:text-slate-900"
+                      inputMode="decimal"
+                      value={props.devolucionBuenaRaw}
+                      onChange={(e) => props.onSetDevolucionBuena(e.target.value)}
+                      placeholder="0"
+                      disabled={inputDisabled}
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    {fieldLabel(mk("devolucion-buena-motivo"), NotebookPen, "Motivo")}
+                    <Textarea
+                      id={mk("devolucion-buena-motivo")}
+                      name={fn("DevolucionBuenaMotivo")}
+                      className="min-h-[5rem] border-emerald-200/80 bg-white dark:bg-white dark:text-slate-900"
+                      value={warehouseReturn.draft.buenaMotivo}
+                      onChange={(e) => warehouseReturn.onDraftChange({ buenaMotivo: e.target.value })}
+                      placeholder="Motivo de la devolución buena"
+                      disabled={inputDisabled}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="flex h-full flex-col rounded-xl border border-rose-300/60 bg-gradient-to-b from-rose-50/80 to-background p-4 dark:border-rose-800/50 dark:from-rose-950/35">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-rose-200/60 pb-3 dark:border-rose-800/40">
-                  <span className="text-sm font-semibold text-rose-900 dark:text-rose-200">Rechazada</span>
+              <div className="flex h-full flex-col rounded-2xl border border-rose-300/60 bg-gradient-to-b from-rose-50/90 via-rose-50/45 to-background p-5 shadow-sm dark:border-rose-800/50 dark:from-rose-950/40 dark:via-rose-950/20">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-2 border-b border-rose-200/70 pb-3 dark:border-rose-800/40">
+                  <div className="space-y-0.5">
+                    <span className="text-sm font-semibold text-rose-900 dark:text-rose-200">Devolución mala</span>
+                    <p className="text-[11px] leading-snug text-rose-900/70 dark:text-rose-200/80">
+                      Registre cada bobina rechazada en una línea.
+                    </p>
+                  </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="destructive" className="text-[10px]">
                       Bobinas rechazadas
@@ -356,7 +377,7 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-7 gap-1 border-rose-300/80 bg-white text-xs text-rose-900 hover:bg-rose-50 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100"
+                        className="h-7 gap-1 border-rose-300/80 bg-white text-xs text-rose-900 shadow-sm hover:bg-rose-50 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100"
                         onClick={warehouseReturn.onAddRejectedEntry}
                         disabled={warehouseReturn.submitting}
                       >
@@ -368,19 +389,16 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                 </div>
                 <div className="flex flex-1 flex-col gap-4">
                   {warehouseReturn.draft.rechazadaEntries.map((entry, entryIndex) => {
-                    const entryBobinas = Math.max(0, Math.floor(num(entry.bobinas)))
-                    const motivoDisabled = inputDisabled || entryBobinas <= 0
-                    const isMotivoComboOpen = isRejectedFieldComboOpen(openRejectedCombo, entry.id, "motivo")
-                    const isProveedorComboOpen = isRejectedFieldComboOpen(openRejectedCombo, entry.id, "proveedor")
-                    const isMaterialComboOpen = isRejectedFieldComboOpen(openRejectedCombo, entry.id, "material")
+                    const entryKg = num(entry.kg)
+                    const motivoDisabled = inputDisabled || entryKg <= 0
+                    const isMotivoComboOpen = isRejectedMotivoComboOpen(openRejectedCombo, entry.id)
                     const canRemove = warehouseReturn.draft.rechazadaEntries.length > 1
-                    const entryMaterials = rejectedMaterialsForEntry(entry)
 
                     return (
                       <div
                         key={entry.id}
                         className={cn(
-                          "space-y-3 rounded-lg border border-rose-200/70 bg-white/70 p-3 dark:border-rose-900/50 dark:bg-rose-950/20",
+                          "space-y-3 rounded-xl border border-rose-200/75 bg-white/80 p-3.5 shadow-sm dark:border-rose-900/50 dark:bg-rose-950/20",
                           entryIndex > 0 && "mt-0",
                         )}
                       >
@@ -403,62 +421,88 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                           ) : null}
                         </div>
 
-                        <div className="space-y-1">
-                          {fieldLabel(
-                            mk(`devolucion-rechazada-bobinas-${entry.id}`),
-                            PackageX,
-                            "N° bobinas rechazadas",
-                          )}
-                          <Input
-                            id={mk(`devolucion-rechazada-bobinas-${entry.id}`)}
-                            name={`${fn("DevolucionRechazadaBobinas")}_${entryIndex + 1}`}
-                            className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
-                            inputMode="numeric"
-                            value={entry.bobinas}
-                            onChange={(e) => {
-                              const raw = String(e.target.value ?? "").trim().replace(",", ".")
-                              const n = raw === "" ? 0 : Number(raw)
-                              const rechZero = !Number.isFinite(n) || n <= 0
-                              const bobinas = rechZero ? "" : String(Math.max(0, Math.floor(n)))
-                              warehouseReturn.onRejectedEntryChange(entry.id, {
-                                bobinas,
-                                motivo: rechZero ? "" : entry.motivo,
-                              })
-                            }}
-                            placeholder="0"
-                            disabled={inputDisabled}
-                          />
-                          {entryIndex === 0 ? (
-                            <p className="text-muted-foreground text-[11px]">
-                              Cantidad de bobinas que pasan a inventario de rechazadas (no es peso en Kg).
-                            </p>
-                          ) : null}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            {fieldLabel(
+                              mk(`devolucion-rechazada-fecha-bobina-${entry.id}`),
+                              CalendarDays,
+                              "Fecha de la bobina",
+                            )}
+                            <Input
+                              id={mk(`devolucion-rechazada-fecha-bobina-${entry.id}`)}
+                              name={`${fn("DevolucionRechazadaFechaBobina")}_${entryIndex + 1}`}
+                              type="date"
+                              className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
+                              value={entry.fechaBobina}
+                              onChange={(e) =>
+                                warehouseReturn.onRejectedEntryChange(entry.id, {
+                                  fechaBobina: e.target.value,
+                                })
+                              }
+                              disabled={inputDisabled}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            {fieldLabel(
+                              mk(`devolucion-rechazada-creada-${entry.id}`),
+                              CalendarDays,
+                              "Creada",
+                            )}
+                            <Input
+                              id={mk(`devolucion-rechazada-creada-${entry.id}`)}
+                              name={`${fn("DevolucionRechazadaCreada")}_${entryIndex + 1}`}
+                              type="date"
+                              className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
+                              value={entry.creadaFecha || todayIsoDate()}
+                              onChange={(e) =>
+                                warehouseReturn.onRejectedEntryChange(entry.id, {
+                                  creadaFecha: e.target.value,
+                                })
+                              }
+                              disabled={inputDisabled}
+                            />
+                          </div>
                         </div>
 
                         <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            {fieldLabel(
-                              mk(`devolucion-rechazada-kg-${entry.id}`),
-                              Weight,
-                              "Peso rechazado (Kg)",
-                            )}
-                            <span className="text-[10px] text-muted-foreground">Opcional</span>
-                          </div>
+                          {fieldLabel(mk(`devolucion-rechazada-kg-${entry.id}`), Weight, "Kilos")}
                           <Input
                             id={mk(`devolucion-rechazada-kg-${entry.id}`)}
                             name={`${fn("DevolucionRechazadaKg")}_${entryIndex + 1}`}
                             className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
                             inputMode="decimal"
                             value={entry.kg}
-                            onChange={(e) =>
-                              warehouseReturn.onRejectedEntryChange(entry.id, { kg: e.target.value })
-                            }
+                            onChange={(e) => {
+                              const raw = String(e.target.value ?? "").trim().replace(",", ".")
+                              const n = raw === "" ? 0 : Number(raw)
+                              const rechZero = !Number.isFinite(n) || n <= 0
+                              warehouseReturn.onRejectedEntryChange(entry.id, {
+                                kg: e.target.value,
+                                motivo: rechZero ? "" : entry.motivo,
+                              })
+                            }}
                             placeholder="0"
                             disabled={inputDisabled}
                           />
-                          <p className="text-muted-foreground text-[11px]">
-                            Peso de referencia de las bobinas rechazadas (informativo).
-                          </p>
+                        </div>
+
+                        <div className="space-y-1">
+                          {fieldLabel(
+                            mk(`devolucion-rechazada-operador-${entry.id}`),
+                            UserRound,
+                            "Operador",
+                          )}
+                          <Input
+                            id={mk(`devolucion-rechazada-operador-${entry.id}`)}
+                            name={`${fn("DevolucionRechazadaOperador")}_${entryIndex + 1}`}
+                            className="ot-input-unified h-9 bg-white dark:bg-white dark:text-slate-900"
+                            value={entry.operador}
+                            onChange={(e) =>
+                              warehouseReturn.onRejectedEntryChange(entry.id, { operador: e.target.value })
+                            }
+                            placeholder={operadorDefault || "Operador"}
+                            disabled={inputDisabled}
+                          />
                         </div>
 
                         <div className="space-y-1">
@@ -471,7 +515,7 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                             open={isMotivoComboOpen && !motivoDisabled}
                             onOpenChange={(o) => {
                               if (!motivoDisabled) {
-                                setOpenRejectedCombo(o ? { entryId: entry.id, field: "motivo" } : null)
+                                setOpenRejectedCombo(o ? { entryId: entry.id } : null)
                               }
                             }}
                           >
@@ -559,102 +603,29 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                             </Label>
                             <span className="text-[10px] text-muted-foreground">Opcional</span>
                           </div>
-                          <Popover
-                            open={isProveedorComboOpen}
-                            onOpenChange={(o) => {
-                              setOpenRejectedCombo(o ? { entryId: entry.id, field: "proveedor" } : null)
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                id={mk(`warehouse-proveedor-rechazada-${entry.id}`)}
-                                name={`${fn("WarehouseProveedorRechazada")}_${entryIndex + 1}`}
-                                variant="outline"
-                                role="combobox"
-                                aria-expanded={isProveedorComboOpen}
-                                disabled={inputDisabled || warehouseReturn.loadingSuppliers}
-                                className="h-9 w-full justify-between gap-2 rounded-md border border-rose-200/80 bg-white px-3 font-normal shadow-sm hover:bg-white data-[state=open]:bg-white dark:bg-white dark:text-slate-900 dark:hover:bg-white dark:data-[state=open]:bg-white"
-                              >
-                                <span
-                                  className={cn(
-                                    "min-w-0 flex-1 truncate text-left text-sm",
-                                    !entry.proveedorId && "text-muted-foreground",
-                                  )}
-                                >
-                                  {rejectedSupplierLabel(entry)}
-                                </span>
-                                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
-                              align="start"
-                            >
-                              <Command shouldFilter>
-                                <CommandInput placeholder="Buscar proveedor…" />
-                                <CommandList className="max-h-60">
-                                  <CommandEmpty>Sin coincidencias.</CommandEmpty>
-                                  <CommandGroup>
-                                    <CommandItem
-                                      value="limpiar proveedor rechazada"
-                                      className="data-[selected=true]:bg-rose-100 data-[selected=true]:text-rose-950"
-                                      onSelect={() => {
-                                        const keepMaterial =
-                                          !entry.materialId ||
-                                          !entry.proveedorId ||
-                                          entryMaterials.some((m) => String(m.id) === entry.materialId)
-                                        warehouseReturn.onRejectedEntryChange(entry.id, {
-                                          proveedorId: "",
-                                          materialId: keepMaterial ? entry.materialId : "",
-                                        })
-                                        setOpenRejectedCombo(null)
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4 shrink-0",
-                                          !entry.proveedorId ? "opacity-100" : "opacity-0",
-                                        )}
-                                        aria-hidden
-                                      />
-                                      <span className="text-muted-foreground">— (sin proveedor)</span>
-                                    </CommandItem>
-                                    {warehouseReturn.supplierOptions.map((s) => (
-                                      <CommandItem
-                                        key={s.id}
-                                        value={`${s.id} ${s.name}`}
-                                        className="data-[selected=true]:bg-rose-100 data-[selected=true]:text-rose-950"
-                                        onSelect={() => {
-                                          const nextMaterials = warehouseReturn.materialOptionsBad.filter(
-                                            (m) =>
-                                              m.supplier_id != null && String(m.supplier_id) === String(s.id),
-                                          )
-                                          const keepMaterial =
-                                            !entry.materialId ||
-                                            nextMaterials.some((m) => String(m.id) === entry.materialId)
-                                          warehouseReturn.onRejectedEntryChange(entry.id, {
-                                            proveedorId: String(s.id),
-                                            materialId: keepMaterial ? entry.materialId : "",
-                                          })
-                                          setOpenRejectedCombo(null)
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            "mr-2 h-4 w-4 shrink-0",
-                                            String(s.id) === entry.proveedorId ? "opacity-100" : "opacity-0",
-                                          )}
-                                          aria-hidden
-                                        />
-                                        <span className="min-w-0 truncate">{s.name}</span>
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
+                          <Input
+                            id={mk(`warehouse-proveedor-rechazada-${entry.id}`)}
+                            name={`${fn("WarehouseProveedorRechazada")}_${entryIndex + 1}`}
+                            className="ot-input-unified h-9 border-rose-200/80 bg-white dark:bg-white dark:text-slate-900"
+                            value={entry.proveedorId}
+                            onChange={(e) =>
+                              warehouseReturn.onRejectedEntryChange(entry.id, {
+                                proveedorId: e.target.value,
+                              })
+                            }
+                            list={mk(`warehouse-proveedor-rechazada-options-${entry.id}`)}
+                            placeholder={
+                              warehouseReturn.loadingSuppliers
+                                ? "Cargando proveedores…"
+                                : "— (opcional)"
+                            }
+                            disabled={inputDisabled}
+                          />
+                          <datalist id={mk(`warehouse-proveedor-rechazada-options-${entry.id}`)}>
+                            {warehouseReturn.supplierOptions.map((s) => (
+                              <option key={s.id} value={s.name} />
+                            ))}
+                          </datalist>
                         </div>
 
                         <div className="space-y-1.5">
@@ -667,89 +638,27 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                             </Label>
                             <span className="text-[10px] text-muted-foreground">Opcional</span>
                           </div>
-                          <Popover
-                            open={isMaterialComboOpen}
-                            onOpenChange={(o) => {
-                              setOpenRejectedCombo(o ? { entryId: entry.id, field: "material" } : null)
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                id={mk(`warehouse-material-rechazada-${entry.id}`)}
-                                name={`${fn("WarehouseMaterialRechazada")}_${entryIndex + 1}`}
-                                variant="outline"
-                                role="combobox"
-                                aria-expanded={isMaterialComboOpen}
-                                disabled={inputDisabled || warehouseReturn.loadingBad}
-                                className="h-9 w-full justify-between gap-2 rounded-md border border-rose-200/80 bg-white px-3 font-normal shadow-sm hover:bg-white data-[state=open]:bg-white dark:bg-white dark:text-slate-900 dark:hover:bg-white dark:data-[state=open]:bg-white"
-                              >
-                                <span
-                                  className={cn(
-                                    "min-w-0 flex-1 truncate text-left text-sm",
-                                    !entry.materialId && "text-muted-foreground",
-                                  )}
-                                >
-                                  {rejectedMaterialLabel(entry)}
-                                </span>
-                                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
-                              align="start"
-                            >
-                              <Command shouldFilter>
-                                <CommandInput placeholder="Buscar por SKU o nombre…" />
-                                <CommandList className="max-h-60">
-                                  <CommandEmpty>Sin coincidencias.</CommandEmpty>
-                                  <CommandGroup>
-                                    <CommandItem
-                                      value="limpiar material rechazada"
-                                      className="data-[selected=true]:bg-rose-100 data-[selected=true]:text-rose-950"
-                                      onSelect={() => {
-                                        warehouseReturn.onRejectedEntryChange(entry.id, { materialId: "" })
-                                        setOpenRejectedCombo(null)
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4 shrink-0",
-                                          !entry.materialId ? "opacity-100" : "opacity-0",
-                                        )}
-                                        aria-hidden
-                                      />
-                                      <span className="text-muted-foreground">— (sin material)</span>
-                                    </CommandItem>
-                                    {entryMaterials.map((m) => (
-                                      <CommandItem
-                                        key={m.id}
-                                        value={`${m.id} ${m.sku} ${m.name}`}
-                                        className="data-[selected=true]:bg-rose-100 data-[selected=true]:text-rose-950"
-                                        onSelect={() => {
-                                          warehouseReturn.onRejectedEntryChange(entry.id, {
-                                            materialId: String(m.id),
-                                          })
-                                          setOpenRejectedCombo(null)
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            "mr-2 h-4 w-4 shrink-0",
-                                            String(m.id) === entry.materialId ? "opacity-100" : "opacity-0",
-                                          )}
-                                          aria-hidden
-                                        />
-                                        <span className="min-w-0 truncate">
-                                          {m.sku} · {m.name}
-                                        </span>
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
+                          <Input
+                            id={mk(`warehouse-material-rechazada-${entry.id}`)}
+                            name={`${fn("WarehouseMaterialRechazada")}_${entryIndex + 1}`}
+                            className="ot-input-unified h-9 border-rose-200/80 bg-white dark:bg-white dark:text-slate-900"
+                            value={entry.materialId}
+                            onChange={(e) =>
+                              warehouseReturn.onRejectedEntryChange(entry.id, {
+                                materialId: e.target.value,
+                              })
+                            }
+                            list={mk(`warehouse-material-rechazada-options-${entry.id}`)}
+                            placeholder={
+                              warehouseReturn.loadingBad ? "Cargando materiales…" : "— (opcional)"
+                            }
+                            disabled={inputDisabled}
+                          />
+                          <datalist id={mk(`warehouse-material-rechazada-options-${entry.id}`)}>
+                            {warehouseReturn.materialOptionsBad.map((m) => (
+                              <option key={m.id} value={`${m.sku} · ${m.name}`} />
+                            ))}
+                          </datalist>
                         </div>
 
                         <div className="space-y-1.5">
@@ -774,9 +683,9 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
                       </div>
                     )
                   })}
-                  {rechBobinas > 0 ? (
+                  {rechKg > 0 ? (
                     <p className="text-muted-foreground text-[11px] font-medium">
-                      Total rechazadas en este envío: {rechBobinas} bobina{rechBobinas === 1 ? "" : "s"}
+                      Total devolución mala en este envío: {rechKg.toFixed(2)} Kg
                     </p>
                   ) : null}
                 </div>
@@ -785,9 +694,8 @@ export function MesWarehouseReturnSection(props: MesWarehouseReturnSectionProps)
 
             <div className="flex flex-col-reverse gap-2 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-muted-foreground text-[11px] leading-snug sm:max-w-[55%]">
-                Complete cantidades en cada columna. En rechazadas: motivo obligatorio; proveedor y material opcionales.
-                Pulse <span className="font-medium text-foreground">Enviar a almacén</span> para registrar la
-                solicitud.
+                En rechazadas: motivo obligatorio; proveedor y material opcionales. Pulse{" "}
+                <span className="font-medium text-foreground">Enviar a almacén</span> para registrar la solicitud.
               </p>
               <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                 <Button

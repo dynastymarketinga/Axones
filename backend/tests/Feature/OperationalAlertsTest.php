@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ClientOrderStatus;
 use App\Enums\OperationalAlertType;
 use App\Enums\WorkOrderStatus;
+use App\Models\Client;
+use App\Models\ClientOrder;
 use App\Models\Material;
 use App\Models\OperationalAlert;
 use App\Models\User;
@@ -393,8 +396,54 @@ class OperationalAlertsTest extends TestCase
 
         $list = $this->getJson('/api/alerts', $this->auth(User::factory()->create(['role' => 'boss'])))->assertOk();
         $ids = collect($list->json('data'))->pluck('id')->all();
-        $alertId = OperationalAlert::query()->where('work_order_id', $wo->id)->value('id');
+        $alertId = OperationalAlert::query()
+            ->where('work_order_id', $wo->id)
+            ->where('alert_type', OperationalAlertType::OtMaterialShortage->value)
+            ->value('id');
         $this->assertContains($alertId, $ids);
+    }
+
+    public function test_planilla_sustrato_shortage_post_creates_draft_alert_by_client_order(): void
+    {
+        $user = User::factory()->create(['role' => 'calidad']);
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Pruebas', 'rif' => 'J-99']);
+        $co = ClientOrder::query()->create([
+            'client_id' => $client->id,
+            'code' => ClientOrder::nextCode(),
+            'status' => ClientOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        $mat = Material::query()->create([
+            'sku' => 'SUB-DRAFT',
+            'name' => 'BOPP borrador',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 1])->save();
+
+        $this->postJson('/api/planilla-sustrato-shortage-alerts', [
+            'client_order_id' => $co->id,
+            'lines' => [
+                [
+                    'material_id' => $mat->id,
+                    'quantity_requested' => '3',
+                    'originating_area' => 'laminacion',
+                    'area_label' => 'Laminación',
+                ],
+            ],
+        ], $h)->assertCreated();
+
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::OtMaterialShortage->value,
+            'work_order_id' => null,
+            'material_id' => $mat->id,
+        ]);
+
+        $list = $this->getJson('/api/alerts', $h)->assertOk();
+        $this->assertNotEmpty($list->json('data'));
     }
 
     public function test_mount_segment_exceeding_threshold_creates_alert(): void

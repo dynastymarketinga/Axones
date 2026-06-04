@@ -1,4 +1,6 @@
-import { Activity, AlarmClock, Clock, Gauge, PackageOpen, TimerOff } from "lucide-react"
+import { Activity, AlarmClock, Clock, Gauge, PackageOpen, TimerOff, Wrench } from "lucide-react"
+
+import { cn } from "@/lib/utils"
 
 type Props = {
   elapsedLabel: string
@@ -13,6 +15,10 @@ type Props = {
   kgHora: string
   /** Hora de arranque del cronómetro (turno en curso). Si se omite, no se muestra el cuadro. */
   horaArranque?: string
+  /** Tiempo de arranque acumulado (HMS). Si se omite, no se muestra el cuadro. */
+  arranqueHms?: string
+  /** Si true, el valor de arranque usa estilo «live» (fase en curso). */
+  arranqueMetricLive?: boolean
   /** Tiempo de desmontaje acumulado (HMS). Si se omite, no se muestra el cuadro. */
   demountHms?: string
   /** Si true, el valor de desmontaje usa estilo «live» (fase en curso). */
@@ -28,13 +34,15 @@ export function MesTimerFace({
   totalMetricLive = false,
   kgHora,
   horaArranque,
+  arranqueHms,
+  arranqueMetricLive = false,
   demountHms,
   demountMetricLive = false,
 }: Props) {
-  const metricsClass =
-    demountHms != null
-      ? "mes-timer-metrics mes-timer-metrics--with-demount"
-      : "mes-timer-metrics"
+  const metricsClass = cn(
+    "mes-timer-metrics",
+    (arranqueHms != null || demountHms != null) && "mes-timer-metrics--with-phases",
+  )
 
   return (
     <div className="mes-timer-face">
@@ -58,6 +66,23 @@ export function MesTimerFace({
               Hora de arranque
             </div>
             <div className="mes-timer-metric__value mes-timer-metric__value--arranque">{horaArranque}</div>
+          </div>
+        ) : null}
+        {arranqueHms != null ? (
+          <div className="mes-timer-metric">
+            <div className="mes-timer-metric__label">
+              <Wrench className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
+              Tiempo de arranque
+            </div>
+            <div
+              className={`mes-timer-metric__value ${
+                arranqueMetricLive
+                  ? "mes-timer-metric__value--arranque-live"
+                  : "mes-timer-metric__value--arranque-duration"
+              }`}
+            >
+              {arranqueHms}
+            </div>
           </div>
         ) : null}
         {demountHms != null ? (

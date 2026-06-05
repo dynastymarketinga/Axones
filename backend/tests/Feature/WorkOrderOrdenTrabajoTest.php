@@ -1648,7 +1648,20 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             (string) AreaRequest::query()->where('work_order_id', $wo->id)->where('area', 'corte')->value('status'),
         );
 
+        $activas = $this->getJson('/api/work-orders?mi_area=corte&area_process_tag=active&per_page=20', $h)->assertOk();
+        $activasRow = collect($activas->json('data'))->firstWhere('id', $wo->id);
+        $this->assertNotNull($activasRow, 'OT finalizada debe aparecer en En curso (subpestaña Finalizadas)');
+        $this->assertSame(
+            'finalizada',
+            data_get($activasRow, 'technical_document.form.corEstadoArea'),
+        );
+
         $historial = $this->getJson('/api/work-orders?historial_area=corte&historial_exclude_pending=1&per_page=20', $h)->assertOk();
-        $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
+        $historialRow = collect($historial->json('data'))->firstWhere('id', $wo->id);
+        $this->assertNotNull($historialRow, 'OT finalizada debe aparecer en Historial del área corte');
+        $this->assertSame(
+            'finalizada',
+            data_get($historialRow, 'technical_document.form.corEstadoArea'),
+        );
     }
 }

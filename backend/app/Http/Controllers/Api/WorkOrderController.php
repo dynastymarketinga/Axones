@@ -154,6 +154,7 @@ class WorkOrderController extends Controller
                 'montaje' => 'montEstadoArea',
                 'impresion' => 'impEstadoArea',
                 'laminacion' => 'lamEstadoArea',
+                'corte' => 'corEstadoArea',
                 default => null,
             };
             $query->where(function ($outer) use (
@@ -180,7 +181,7 @@ class WorkOrderController extends Controller
                         });
                     }
                 });
-                // Montaje / impresión / laminación: En curso incluye subpestaña «Finalizadas» (MES).
+                // Montaje / impresión / laminación / corte: En curso incluye subpestaña «Finalizadas» (MES).
                 if ($mesEstadoKeyActivas !== null) {
                     $outer->orWhereHas('technicalDocument', function ($td) use ($mesEstadoKeyActivas) {
                         $td->where("form->{$mesEstadoKeyActivas}", 'finalizada');
@@ -215,6 +216,7 @@ class WorkOrderController extends Controller
                 'montaje' => 'montEstadoArea',
                 'impresion' => 'impEstadoArea',
                 'laminacion' => 'lamEstadoArea',
+                'corte' => 'corEstadoArea',
                 default => null,
             };
             $query->where(function ($outer) use (

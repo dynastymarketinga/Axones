@@ -11,7 +11,12 @@ import { registerSW } from "virtual:pwa-register"
 import { router } from "@/routes"
 import "@/index.css"
 
-registerSW({ immediate: true })
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW(true)
+  },
+})
 
 if (typeof document !== "undefined") {
   document.title = "Axones"

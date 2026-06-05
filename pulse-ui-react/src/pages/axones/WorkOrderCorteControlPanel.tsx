@@ -1049,27 +1049,16 @@ export default function WorkOrderCorteControlPanel({
   return (
     <div className="ax-mes space-y-4">
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => void load()}
-            disabled={loading || saving}
-          >
-            Actualizar
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={requestGuardar}
-            disabled={saving || controlReadOnly || (!areaFinalizada && !canClickGuardar)}
-            title={guardarHint || undefined}
-          >
-            <Save className="mr-1.5 h-4 w-4" />
-            {saving ? "Guardando…" : "Guardar"}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={requestGuardar}
+          disabled={saving || controlReadOnly || (!areaFinalizada && !canClickGuardar)}
+          title={guardarHint || undefined}
+        >
+          <Save className="mr-1.5 h-4 w-4" />
+          {saving ? "Guardando…" : "Guardar"}
+        </Button>
       </div>
 
       <div className="ax-ot">

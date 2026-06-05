@@ -2582,7 +2582,8 @@ class InventoryReportService
     {
         $q = DB::table('work_orders as wo')
             ->join('work_order_technical_documents as td', 'wo.id', '=', 'td.work_order_id')
-            ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id');
+            ->leftJoin('clients as c', 'wo.client_id', '=', 'c.id')
+            ->leftJoin('products as p', 'wo.product_id', '=', 'p.id');
         $this->applyScrapWorkOrderPeriodFilter($q, $from, $to);
 
         if ($clientId !== null) {
@@ -2596,6 +2597,9 @@ class InventoryReportService
             'impreso_bobinas' => 0,
             'laminado_bobinas' => 0,
         ];
+        $impresoBreakdown = [];
+        $laminadoBreakdown = [];
+        $cortadoBreakdown = [];
 
         $workOrders = [];
 
@@ -2604,6 +2608,8 @@ class InventoryReportService
             'wo.code as work_order_code',
             'wo.client_id',
             'c.name as client_name',
+            'p.name as product_name',
+            'p.structure as product_structure',
             'td.form as form_json',
         ]) as $row) {
             /** @var array<string, mixed>|null $form */
@@ -2626,11 +2632,35 @@ class InventoryReportService
                 continue;
             }
 
+            $productLabel = trim(implode(' — ', array_filter([
+                trim((string) ($row->product_name ?? '')),
+                trim((string) ($row->product_structure ?? '')),
+            ], fn (string $v): bool => $v !== '')));
+
+            $materialNames = $this->resolvePlanillaMaterialNames($form);
+            $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm(
+                $form,
+                $materialNames,
+                $productLabel !== '' ? $productLabel : null,
+            );
+
             $totals['impreso_kg'] += $impKg;
             $totals['laminado_kg'] += $lamKg;
             $totals['corte_kg'] += $corKg;
             $totals['impreso_bobinas'] += $material['impreso_bobinas'];
             $totals['laminado_bobinas'] += $material['laminado_bobinas'];
+            $impresoBreakdown = WorkOrderProductionControlsAggregator::mergeBreakdownLineGroups(
+                $impresoBreakdown,
+                $breakdown['impreso'],
+            );
+            $laminadoBreakdown = WorkOrderProductionControlsAggregator::mergeBreakdownLineGroups(
+                $laminadoBreakdown,
+                $breakdown['laminado'],
+            );
+            $cortadoBreakdown = WorkOrderProductionControlsAggregator::mergeBreakdownLineGroups(
+                $cortadoBreakdown,
+                $breakdown['cortado'],
+            );
 
             $workOrders[] = [
                 'work_order_id' => (int) $row->work_order_id,
@@ -2642,6 +2672,15 @@ class InventoryReportService
                 'material_cortado_kg' => number_format($corKg, 3, '.', ''),
                 'impreso_bobinas' => $material['impreso_bobinas'],
                 'laminado_bobinas' => $material['laminado_bobinas'],
+                'material_impreso_lines' => WorkOrderProductionControlsAggregator::formatBreakdownLinesForApi(
+                    $breakdown['impreso'],
+                ),
+                'material_laminado_lines' => WorkOrderProductionControlsAggregator::formatBreakdownLinesForApi(
+                    $breakdown['laminado'],
+                ),
+                'material_cortado_lines' => WorkOrderProductionControlsAggregator::formatBreakdownLinesForApi(
+                    $breakdown['cortado'],
+                ),
             ];
         }
 
@@ -2658,10 +2697,63 @@ class InventoryReportService
                 'total_general_kg' => number_format($totalGeneral, 3, '.', ''),
                 'impreso_bobinas' => $totals['impreso_bobinas'],
                 'laminado_bobinas' => $totals['laminado_bobinas'],
+                'material_impreso_lines' => WorkOrderProductionControlsAggregator::formatBreakdownLinesForApi(
+                    $impresoBreakdown,
+                ),
+                'material_laminado_lines' => WorkOrderProductionControlsAggregator::formatBreakdownLinesForApi(
+                    $laminadoBreakdown,
+                ),
+                'material_cortado_lines' => WorkOrderProductionControlsAggregator::formatBreakdownLinesForApi(
+                    $cortadoBreakdown,
+                ),
             ],
             'work_orders' => $workOrders,
             'work_order_count' => count($workOrders),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $form
+     * @return array<int, string>
+     */
+    private function resolvePlanillaMaterialNames(?array $form): array
+    {
+        if ($form === null) {
+            return [];
+        }
+
+        $ids = [];
+        foreach (['sustratosVirgenImp', 'sustratosVirgenLam'] as $key) {
+            foreach ((array) ($form[$key] ?? []) as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                if (isset($row['material_id']) && is_numeric($row['material_id'])) {
+                    $mid = (int) $row['material_id'];
+                    if ($mid > 0) {
+                        $ids[$mid] = $mid;
+                    }
+                }
+            }
+        }
+
+        $legacyMid = trim((string) ($form['sustratoVirgenImp1'] ?? ''));
+        if ($legacyMid !== '' && is_numeric($legacyMid)) {
+            $mid = (int) $legacyMid;
+            if ($mid > 0) {
+                $ids[$mid] = $mid;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return Material::query()
+            ->whereIn('id', array_values($ids))
+            ->pluck('name', 'id')
+            ->map(fn (mixed $name): string => trim((string) $name))
+            ->all();
     }
 
     /**

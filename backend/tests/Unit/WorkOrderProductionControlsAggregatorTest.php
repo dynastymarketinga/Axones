@@ -106,4 +106,41 @@ class WorkOrderProductionControlsAggregatorTest extends TestCase
         $this->assertSame('150.500', $summary['montaje_consumo']['total_produccion_kg']);
         $this->assertSame('3.500', $summary['montaje_consumo']['total_merma_kg']);
     }
+
+    public function test_material_totals_prefers_cor_paletas_over_empty_turnos(): void
+    {
+        $totals = WorkOrderProductionControlsAggregator::materialTotalsFromForm([
+            'cor_turnos' => [[
+                'id' => 't1',
+                'closed_at' => '2026-05-03 10:00:00',
+                'metrics' => ['salida_total_kg' => '0'],
+            ]],
+            'cor_paletas' => [[
+                'id' => 'p1',
+                'label' => 'Paleta #01',
+                'rollosKg' => ['25'],
+            ]],
+            'kgSalidaCorte' => '25.00',
+        ]);
+
+        $this->assertSame(25.0, $totals['corte_kg']);
+    }
+
+    public function test_material_salida_breakdown_groups_impreso_by_referencia(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'impTurnosImpresion' => [[
+                'salidaBobinasKg' => ['40', '10'],
+                'salidaBobinasMeta' => [
+                    ['referencia' => 'BOPP', 'proveedor' => ''],
+                    ['referencia' => 'BOPP', 'proveedor' => ''],
+                ],
+            ]],
+        ]);
+
+        $this->assertCount(1, $breakdown['impreso']);
+        $this->assertSame('BOPP', $breakdown['impreso'][0]['label']);
+        $this->assertSame(50.0, $breakdown['impreso'][0]['kg']);
+        $this->assertSame(2, $breakdown['impreso'][0]['bobinas']);
+    }
 }

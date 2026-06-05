@@ -27,6 +27,12 @@ import { getReportIdentity } from "./ReportIdentityBanner"
 import { ReportPageShell, useReportRange } from "./report-shared"
 import { useReportEntityFilters } from "./use-report-entity-filters"
 
+type MaterialSalidaLine = {
+  label: string
+  kg: string
+  bobinas: number
+}
+
 type ProductionMaterialSummaryPayload = {
   totals: {
     material_impreso_kg: string
@@ -35,6 +41,9 @@ type ProductionMaterialSummaryPayload = {
     total_general_kg: string
     impreso_bobinas: number
     laminado_bobinas: number
+    material_impreso_lines?: MaterialSalidaLine[]
+    material_laminado_lines?: MaterialSalidaLine[]
+    material_cortado_lines?: MaterialSalidaLine[]
   }
   work_orders: Array<{
     work_order_id: number
@@ -45,8 +54,40 @@ type ProductionMaterialSummaryPayload = {
     material_cortado_kg: string
     impreso_bobinas: number
     laminado_bobinas: number
+    material_impreso_lines?: MaterialSalidaLine[]
+    material_laminado_lines?: MaterialSalidaLine[]
+    material_cortado_lines?: MaterialSalidaLine[]
   }>
   work_order_count: number
+}
+
+function formatMaterialLines(
+  lines: MaterialSalidaLine[] | undefined,
+  unit: "bobina" | "rollo",
+): string[] {
+  if (!lines?.length) return []
+  return lines.map((line) => {
+    const count = line.bobinas > 0 ? ` · ${line.bobinas} ${unit}${line.bobinas === 1 ? "" : "s"}` : ""
+    return `${line.label}: ${line.kg} Kg${count}`
+  })
+}
+
+function buildKpiSubtext({
+  countLabel,
+  emptyLabel,
+  lines,
+  lineUnit,
+}: {
+  countLabel?: string
+  emptyLabel: string
+  lines?: MaterialSalidaLine[]
+  lineUnit: "bobina" | "rollo"
+}): string {
+  const materialLines = formatMaterialLines(lines, lineUnit)
+  if (materialLines.length > 0) {
+    return [countLabel, ...materialLines].filter(Boolean).join("\n")
+  }
+  return countLabel ?? emptyLabel
 }
 
 function KpiCard({
@@ -60,6 +101,8 @@ function KpiCard({
   sub?: string
   icon: typeof Package
 }) {
+  const subLines = sub?.split("\n").filter(Boolean) ?? []
+
   return (
     <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] p-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -69,7 +112,13 @@ function KpiCard({
         <div className="min-w-0">
           <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">{label}</p>
           <p className="mt-1 font-mono text-xl font-semibold tabular-nums tracking-tight">{value} Kg</p>
-          {sub ? <p className="text-muted-foreground mt-1 text-xs leading-snug">{sub}</p> : null}
+          {subLines.length > 0 ? (
+            <div className="text-muted-foreground mt-1 space-y-0.5 text-xs leading-snug">
+              {subLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -120,7 +169,7 @@ export default function ReportsProductionMaterialSummaryPage() {
     <ReportPageShell
       identityKey="resumen-produccion"
       title="Resumen de producción"
-      description="Kg de material producido (salida en planilla): impreso, laminado y cortado — totales de planta por período."
+      description="Kg de material producido (salida en planilla): bobinas impresas, laminadas y rollos cortados — con desglose por referencia o sustrato."
       from={from}
       to={to}
       onFromChange={setFrom}
@@ -165,27 +214,39 @@ export default function ReportsProductionMaterialSummaryPage() {
         <KpiCard
           label="Total material impreso"
           value={totals?.material_impreso_kg ?? "0.000"}
-          sub={
-            totals && totals.impreso_bobinas > 0
-              ? `${totals.impreso_bobinas} bobina(s) de salida en impresión`
-              : "Suma de pesos de salida bobina impresa (planilla)"
-          }
+          sub={buildKpiSubtext({
+            countLabel:
+              totals && totals.impreso_bobinas > 0
+                ? `${totals.impreso_bobinas} bobina(s) de salida en impresión`
+                : undefined,
+            emptyLabel: "Suma de pesos de bobina impresa (referencia en etiqueta o sustrato planilla)",
+            lines: totals?.material_impreso_lines,
+            lineUnit: "bobina",
+          })}
           icon={Package}
         />
         <KpiCard
           label="Total material laminado"
           value={totals?.material_laminado_kg ?? "0.000"}
-          sub={
-            totals && totals.laminado_bobinas > 0
-              ? `${totals.laminado_bobinas} bobina(s) de salida en laminación`
-              : "Suma de pesos de salida laminada (planilla)"
-          }
+          sub={buildKpiSubtext({
+            countLabel:
+              totals && totals.laminado_bobinas > 0
+                ? `${totals.laminado_bobinas} bobina(s) de salida en laminación`
+                : undefined,
+            emptyLabel: "Suma de pesos de bobina laminada (referencia en etiqueta o sustrato planilla)",
+            lines: totals?.material_laminado_lines,
+            lineUnit: "bobina",
+          })}
           icon={Layers}
         />
         <KpiCard
           label="Total material cortado"
           value={totals?.material_cortado_kg ?? "0.000"}
-          sub="Suma de pesos de salida en corte (paletas / turnos)"
+          sub={buildKpiSubtext({
+            emptyLabel: "Suma de pesos de salida en corte (rollos por paleta / turnos)",
+            lines: totals?.material_cortado_lines,
+            lineUnit: "rollo",
+          })}
           icon={Scissors}
         />
       </div>

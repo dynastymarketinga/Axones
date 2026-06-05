@@ -173,7 +173,7 @@ export function ProductionMaterialSummaryReportFilters({
               Descargar resumen CSV
             </Button>
             <p className="text-muted-foreground text-[10px] leading-relaxed">
-              Material impreso, laminado y cortado (Kg) por OT y totales del período.
+              Material impreso, laminado y cortado (Kg) por OT, referencia/sustrato y totales del período.
             </p>
           </div>
         </FilterColumn>

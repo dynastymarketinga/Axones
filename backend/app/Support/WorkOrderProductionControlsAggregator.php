@@ -39,6 +39,38 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
+     * Desglose de kg de salida por referencia / sustrato (planilla).
+     *
+     * @param  array<string, mixed>|null  $form
+     * @param  array<int, string>  $materialNames  material_id => name
+     * @return array{
+     *   impreso: list<array{label: string, kg: float, bobinas: int}>,
+     *   laminado: list<array{label: string, kg: float, bobinas: int}>,
+     *   cortado: list<array{label: string, kg: float, bobinas: int}>
+     * }
+     */
+    public static function materialSalidaBreakdownFromForm(
+        ?array $form,
+        array $materialNames = [],
+        ?string $productLabel = null,
+    ): array {
+        $impresoFallback = self::planillaSustratoLabels($form, 'impresion', $materialNames);
+        $lamFallback = self::planillaSustratoLabels($form, 'laminacion', $materialNames);
+
+        return [
+            'impreso' => self::formatBreakdownBuckets(
+                self::breakdownPrintingSalidaBuckets($form, $impresoFallback),
+            ),
+            'laminado' => self::formatBreakdownBuckets(
+                self::breakdownLaminacionSalidaBuckets($form, $lamFallback),
+            ),
+            'cortado' => self::formatBreakdownBuckets(
+                self::breakdownCorteSalidaBuckets($form, $productLabel),
+            ),
+        ];
+    }
+
+    /**
      * Consumibles agregados por OT (tintas, químicos laminación, entradas de material).
      *
      * @return array{
@@ -212,20 +244,21 @@ final class WorkOrderProductionControlsAggregator
             return ['salida_kg' => 0.0];
         }
 
-        $salidaKg = 0.0;
-        foreach (self::corteClosedTurns($form) as $turn) {
-            $salidaKg += self::corteTurnSalidaKg($turn);
-        }
-        $actual = $form['corTurnoActual'] ?? null;
-        if (is_array($actual) && empty($actual['closed_at'])) {
-            $salidaKg += self::corteTurnSalidaKg($actual);
+        $fromTurns = 0.0;
+        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
+            if (is_array($turn)) {
+                $fromTurns += self::corteTurnSalidaKg($turn);
+            }
         }
 
-        if ($salidaKg < 0.0005) {
-            $salidaKg = self::readKg(CortePlanillaSalida::finishedKgFromForm($form));
+        $actual = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
+        if (is_array($actual)) {
+            $fromTurns += self::corteTurnSalidaKg($actual);
         }
 
-        return ['salida_kg' => round($salidaKg, 3)];
+        $fromForm = (float) CortePlanillaSalida::finishedKgFromForm($form);
+
+        return ['salida_kg' => round(max($fromTurns, $fromForm), 3)];
     }
 
     /**
@@ -692,5 +725,373 @@ final class WorkOrderProductionControlsAggregator
     private static function fmtKg(float $value): string
     {
         return number_format(round($value, 3), 3, '.', '');
+    }
+
+    /**
+     * @param  list<string>  $fallbackLabels
+     * @return array<string, array{kg: float, bobinas: int}>
+     */
+    private static function breakdownPrintingSalidaBuckets(?array $form, array $fallbackLabels): array
+    {
+        $buckets = [];
+        if ($form === null) {
+            return $buckets;
+        }
+
+        $defaultLabel = $fallbackLabels[0] ?? 'Bobina impresa (sin referencia)';
+
+        foreach (self::printingTurns($form) as $turn) {
+            foreach ((array) ($turn['capturas'] ?? []) as $cap) {
+                if (! is_array($cap)) {
+                    continue;
+                }
+                self::accumulateSalidaBuckets(
+                    $buckets,
+                    (array) ($cap['salidaBobinasKg'] ?? []),
+                    (array) ($cap['salidaBobinasMeta'] ?? []),
+                    $defaultLabel,
+                );
+            }
+            self::accumulateSalidaBuckets(
+                $buckets,
+                (array) ($turn['salidaBobinasKg'] ?? []),
+                (array) ($turn['salidaBobinasMeta'] ?? []),
+                $defaultLabel,
+            );
+        }
+
+        self::accumulateSalidaBuckets(
+            $buckets,
+            (array) ($form['impSalidaBobinasKg'] ?? []),
+            (array) ($form['impSalidaBobinasMeta'] ?? []),
+            $defaultLabel,
+        );
+
+        return $buckets;
+    }
+
+    /**
+     * @param  list<string>  $fallbackLabels
+     * @return array<string, array{kg: float, bobinas: int}>
+     */
+    private static function breakdownLaminacionSalidaBuckets(?array $form, array $fallbackLabels): array
+    {
+        $buckets = [];
+        if ($form === null) {
+            return $buckets;
+        }
+
+        $defaultLabel = $fallbackLabels[0] ?? 'Bobina laminada (sin referencia)';
+
+        foreach (self::laminacionTurns($form) as $turn) {
+            self::accumulateSalidaBuckets(
+                $buckets,
+                (array) ($turn['salidaBobinasKg'] ?? []),
+                (array) ($turn['salidaBobinasMeta'] ?? []),
+                $defaultLabel,
+            );
+        }
+
+        self::accumulateSalidaBuckets(
+            $buckets,
+            (array) ($form['lamSalidaBobinasKg'] ?? []),
+            (array) ($form['lamSalidaBobinasMeta'] ?? []),
+            $defaultLabel,
+        );
+
+        return $buckets;
+    }
+
+    /**
+     * @return array<string, array{kg: float, bobinas: int}>
+     */
+    private static function breakdownCorteSalidaBuckets(?array $form, ?string $productLabel): array
+    {
+        if ($form === null) {
+            return [];
+        }
+
+        $salidaKg = self::aggregateCorte($form)['salida_kg'];
+        if ($salidaKg < 0.0005) {
+            return [];
+        }
+
+        $labels = self::corteEntradaLabels($form, $productLabel);
+        $label = $labels[0] ?? ($productLabel !== null && trim($productLabel) !== ''
+            ? trim($productLabel)
+            : 'Material cortado (rollos / paletas)');
+
+        return [
+            $label => [
+                'kg' => round($salidaKg, 3),
+                'bobinas' => self::countCorteRollosWithKg($form),
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, array{kg: float, bobinas: int}>  $buckets
+     * @param  array<int|string, mixed>  $slots
+     * @param  array<int|string, mixed>  $metas
+     */
+    private static function accumulateSalidaBuckets(
+        array &$buckets,
+        array $slots,
+        array $metas,
+        string $defaultLabel,
+    ): void {
+        $size = max(count($slots), count($metas));
+        for ($i = 0; $i < $size; $i++) {
+            $kg = self::salidaKgFromSlotAndMeta($slots[$i] ?? null, $metas[$i] ?? null);
+            if ($kg < 0.0005) {
+                continue;
+            }
+            $meta = is_array($metas[$i] ?? null) ? $metas[$i] : null;
+            $label = self::bobinaMetaLabel($meta, $defaultLabel);
+            if (! isset($buckets[$label])) {
+                $buckets[$label] = ['kg' => 0.0, 'bobinas' => 0];
+            }
+            $buckets[$label]['kg'] = round($buckets[$label]['kg'] + $kg, 3);
+            $buckets[$label]['bobinas']++;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $meta
+     */
+    private static function bobinaMetaLabel(?array $meta, string $fallback): string
+    {
+        if ($meta === null) {
+            return $fallback;
+        }
+
+        $ref = trim((string) ($meta['referencia'] ?? ''));
+        $prov = trim((string) ($meta['proveedor'] ?? ''));
+        if ($ref !== '' && $prov !== '') {
+            return $ref.' ('.$prov.')';
+        }
+        if ($ref !== '') {
+            return $ref;
+        }
+        if ($prov !== '') {
+            return $prov;
+        }
+
+        foreach (['tratamiento_interno', 'tratamiento_externo', 'lote', 'pedido_lote'] as $key) {
+            $value = trim((string) ($meta[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return $fallback;
+    }
+
+    private static function salidaKgFromSlotAndMeta(mixed $slot, mixed $meta): float
+    {
+        $fromSlot = self::readKg($slot);
+        if ($fromSlot > 0) {
+            return $fromSlot;
+        }
+        if (! is_array($meta)) {
+            return 0.0;
+        }
+
+        return self::readKg($meta['peso'] ?? null);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $form
+     * @param  array<int, string>  $materialNames
+     * @return list<string>
+     */
+    private static function planillaSustratoLabels(?array $form, string $area, array $materialNames): array
+    {
+        if ($form === null) {
+            return [];
+        }
+
+        $key = $area === 'laminacion' ? 'sustratosVirgenLam' : 'sustratosVirgenImp';
+        $labels = [];
+
+        foreach ((array) ($form[$key] ?? []) as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $free = trim((string) ($row['material_free_text'] ?? ''));
+            if ($free !== '') {
+                $labels[] = $free;
+                continue;
+            }
+            $mid = isset($row['material_id']) && is_numeric($row['material_id'])
+                ? (int) $row['material_id']
+                : 0;
+            if ($mid > 0 && isset($materialNames[$mid])) {
+                $labels[] = trim((string) $materialNames[$mid]);
+            }
+        }
+
+        if ($labels === [] && $area === 'impresion') {
+            $legacyMid = trim((string) ($form['sustratoVirgenImp1'] ?? ''));
+            if ($legacyMid !== '' && is_numeric($legacyMid)) {
+                $mid = (int) $legacyMid;
+                if ($mid > 0 && isset($materialNames[$mid])) {
+                    $labels[] = trim((string) $materialNames[$mid]);
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($labels, fn (string $l): bool => $l !== '')));
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<string>
+     */
+    private static function corteEntradaLabels(array $form, ?string $productLabel): array
+    {
+        $labels = [];
+
+        foreach ((array) ($form['corEntradaBobinasMeta'] ?? []) as $meta) {
+            if (! is_array($meta)) {
+                continue;
+            }
+            $label = self::bobinaMetaLabel($meta, '');
+            if ($label !== '') {
+                $labels[] = $label;
+            }
+        }
+
+        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
+            if (! is_array($turn)) {
+                continue;
+            }
+            foreach ((array) ($turn['entradaBobinasMeta'] ?? []) as $meta) {
+                if (! is_array($meta)) {
+                    continue;
+                }
+                $label = self::bobinaMetaLabel($meta, '');
+                if ($label !== '') {
+                    $labels[] = $label;
+                }
+            }
+        }
+
+        $actual = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
+        if (is_array($actual)) {
+            foreach ((array) ($actual['entradaBobinasMeta'] ?? []) as $meta) {
+                if (! is_array($meta)) {
+                    continue;
+                }
+                $label = self::bobinaMetaLabel($meta, '');
+                if ($label !== '') {
+                    $labels[] = $label;
+                }
+            }
+        }
+
+        $substrate = trim((string) ($form['corDesperdicioSustrato'] ?? ''));
+        if ($substrate !== '') {
+            $group = ScrapSubstrateCatalog::normalizeGroupId($substrate);
+            foreach (ScrapSubstrateCatalog::groups() as $cfg) {
+                if ($cfg['id'] === $group) {
+                    $labels[] = (string) $cfg['label'];
+                    break;
+                }
+            }
+        }
+
+        if ($productLabel !== null && trim($productLabel) !== '') {
+            $labels[] = trim($productLabel);
+        }
+
+        return array_values(array_unique(array_filter($labels, fn (string $l): bool => $l !== '')));
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     */
+    private static function countCorteRollosWithKg(array $form): int
+    {
+        $count = 0;
+        foreach (CortePlanillaSalida::paletasArrayFromForm($form) as $paleta) {
+            if (! is_array($paleta)) {
+                continue;
+            }
+            $rollos = $paleta['rollosKg'] ?? null;
+            if (! is_array($rollos)) {
+                continue;
+            }
+            foreach ($rollos as $kg) {
+                if (self::readKg($kg) > 0) {
+                    $count++;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @param  array<string, array{kg: float, bobinas: int}>  $buckets
+     * @return list<array{label: string, kg: float, bobinas: int}>
+     */
+    private static function formatBreakdownBuckets(array $buckets): array
+    {
+        $lines = [];
+        foreach ($buckets as $label => $totals) {
+            if (($totals['kg'] ?? 0) < 0.0005) {
+                continue;
+            }
+            $lines[] = [
+                'label' => (string) $label,
+                'kg' => round((float) $totals['kg'], 3),
+                'bobinas' => (int) ($totals['bobinas'] ?? 0),
+            ];
+        }
+
+        usort($lines, fn (array $a, array $b): int => $b['kg'] <=> $a['kg']);
+
+        return $lines;
+    }
+
+    /**
+     * @param  list<array{label: string, kg: float, bobinas: int}>  $lines
+     * @return list<array{label: string, kg: string, bobinas: int}>
+     */
+    public static function formatBreakdownLinesForApi(array $lines): array
+    {
+        return array_map(
+            fn (array $line): array => [
+                'label' => $line['label'],
+                'kg' => self::fmtKg((float) $line['kg']),
+                'bobinas' => (int) ($line['bobinas'] ?? 0),
+            ],
+            $lines,
+        );
+    }
+
+    /**
+     * @param  list<array{label: string, kg: float, bobinas: int}>  ...$groups
+     * @return list<array{label: string, kg: float, bobinas: int}>
+     */
+    public static function mergeBreakdownLineGroups(array ...$groups): array
+    {
+        $buckets = [];
+        foreach ($groups as $lines) {
+            foreach ($lines as $line) {
+                $label = (string) ($line['label'] ?? '');
+                if ($label === '') {
+                    continue;
+                }
+                if (! isset($buckets[$label])) {
+                    $buckets[$label] = ['kg' => 0.0, 'bobinas' => 0];
+                }
+                $buckets[$label]['kg'] = round($buckets[$label]['kg'] + (float) ($line['kg'] ?? 0), 3);
+                $buckets[$label]['bobinas'] += (int) ($line['bobinas'] ?? 0);
+            }
+        }
+
+        return self::formatBreakdownBuckets($buckets);
     }
 }

@@ -84,11 +84,13 @@ export const REPORT_IDENTITIES: Record<ReportIdentityKey, ReportIdentity> = {
     key: "resumen-produccion",
     badge: "Salida Kg",
     icon: BarChart3,
-    headline: "Material producido (pesos de salida) en impresión, laminación y corte.",
+    headline:
+      "Material producido (Salida Kg en planilla): bobinas impresas, laminadas y rollos cortados — con referencia o sustrato.",
     shows: [
       "Kg impreso, laminado y cortado por OT",
+      "Desglose por referencia de bobina, sustrato de planilla o producto (corte)",
       "Totales de planta filtrados por período y cliente",
-      "Descarga CSV con resumen y detalle",
+      "Descarga CSV con resumen, materiales y detalle por OT",
     ],
     notShows: ["Tintas ni químicos", "Tiempos de producción", "Movimientos de almacén"],
     theme: {

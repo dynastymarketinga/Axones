@@ -364,7 +364,7 @@ function MesMontajeGuardarChoiceDialog(props: MesMontajeGuardarChoiceDialogProps
                 <span>
                   <span className="font-semibold text-slate-900 dark:text-slate-100">Finalizar cierre</span>
                   {" — "}
-                  Marca el área Montaje como finalizada en la OT y mueve la orden a Historial.
+                  Marca el área Montaje como finalizada en la OT y la muestra en En curso → Finalizadas.
                 </span>
               </li>
             ) : null}
@@ -2017,7 +2017,7 @@ export default function WorkOrderMontajeControlPanel({
         onOpenChange={setFinalizeOtConfirmOpen}
         icon={<Flag className="h-5 w-5" aria-hidden />}
         title="Finalizar área de montaje (OT)"
-        description="Marcará el área como finalizada, detendrá el cronómetro, mostrará «Finalizado» en la bandeja Montaje y moverá la OT a la pestaña Historial. Revise que los datos del turno estén completos."
+        description="Marcará el área como finalizada, detendrá el cronómetro y mostrará «Finalizado» en la bandeja Montaje (En curso → Finalizadas). Revise que los datos del turno estén completos."
         confirmLabel="Sí, finalizar área"
         confirmVariant="destructive"
         onConfirm={() => confirmFinalizarAreaMontaje()}

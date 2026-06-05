@@ -272,7 +272,7 @@ export function mesBandejaWorkflowBannerHint(wf: MesBandejaWorkflow): string {
   if (wf === "entre_turnos") return "Tiempos y kg de turnos cerrados."
   if (wf === "iniciado") return "Tiempo efectivo en marcha."
   if (wf === "pausado") return "Producción en pausa."
-  return "Área cerrada; OT en historial."
+  return "Área cerrada; verá «Finalizado» en En curso → Finalizadas."
 }
 
 /** Texto para banner de producción: qué verá la bandeja tras guardar. */
@@ -292,7 +292,7 @@ export function mesBandejaWorkflowBandejaHint(wf: MesBandejaWorkflow): string {
   if (wf === "pausado") {
     return "En la bandeja Montaje verá «Pausado»; el tiempo efectivo queda detenido."
   }
-  return "En la bandeja Montaje verá «Finalizado» y la OT pasará a la pestaña Historial."
+  return "En la bandeja verá «Finalizado» en En curso → Finalizadas."
 }
 
 export function buildMesBandFromTurnos(params: {
@@ -536,7 +536,7 @@ export const MES_BANDEJA_WORKFLOW_HELP: MesBandejaWorkflowHelpEntry[] = [
     workflow: "finalizado",
     title: "Finalizado",
     when: "El área de producción se marcó como finalizada en la OT (p. ej. impEstadoArea).",
-    meaning: "La OT suele pasar a Historial en la bandeja. Solo lectura salvo permisos de jefatura.",
+    meaning: "La OT aparece en En curso → Finalizadas (y también en Historial si la solicitud al área cerró). Solo lectura salvo permisos de jefatura.",
   },
 ]
 

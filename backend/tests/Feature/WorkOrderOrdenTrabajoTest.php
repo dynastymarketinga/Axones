@@ -1529,7 +1529,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         );
 
         $activas = $this->getJson('/api/work-orders?mi_area=montaje&area_process_tag=active&per_page=20', $h)->assertOk();
-        $this->assertNotContains($wo->id, collect($activas->json('data'))->pluck('id')->all());
+        $this->assertContains($wo->id, collect($activas->json('data'))->pluck('id')->all());
 
         $historial = $this->getJson('/api/work-orders?historial_area=montaje&historial_exclude_pending=1&per_page=20', $h)->assertOk();
         $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());

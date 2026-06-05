@@ -241,7 +241,7 @@ function areaSubtitle(area: AreaKey): string {
     return "Bandeja de OT activas. Las vistas filtran por temporizador de corte. Historial: solicitudes del área ya cerradas."
   }
   if (area === "montaje") {
-    return "En curso: OT en cola o en producción en Montaje (montaje no finalizado). Finalizados: montaje cerrado en producción o solicitud al área ya cerrada. El badge naranja «Pendiente» es solo la solicitud administrativa."
+    return "Bandeja de OT activas. Las vistas filtran por temporizador de montaje. En curso → Finalizadas: montaje MES cerrado. Historial: solicitudes del área ya cerradas."
   }
   if (areaHasMesTimerColumn(area)) {
     return `En curso: solicitudes pendientes y OT en cola o en ${areaTitle(area).replace("Área: ", "")}. El badge de color refleja producción (turno y cronómetro); «Pendiente» naranja es solo la solicitud al área. Historial: solicitudes cerradas.`
@@ -1584,7 +1584,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
               <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
               <span>
                 {area === "montaje"
-                  ? "OT con montaje finalizado en producción o solicitud al área ya cerrada. Use los filtros de arriba y la pestaña En curso para lo activo."
+                  ? "Archivo de OT con solicitud cerrada al área o montaje MES finalizado. Las finalizadas en producción también aparecen en En curso → Finalizadas."
                   : "Archivo de OT con solicitud cerrada al área o área MES finalizada. Misma etiqueta de producción que en En curso (p. ej. Finalizado)."}
               </span>
             </p>

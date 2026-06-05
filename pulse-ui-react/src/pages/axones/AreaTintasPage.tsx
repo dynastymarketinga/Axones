@@ -84,6 +84,10 @@ import {
   MES_BANDEJA_INDEX_COLUMN_COUNT,
   MES_BANDEJA_PROGRAMACION_COLUMN_COUNT,
 } from "@/lib/mes-timer-band-shared"
+import {
+  MES_BANDEJA_QUERY_KEY,
+  parseMesBandejaSubTabParam,
+} from "@/lib/mes-bandeja-navigation"
 import { tintasActivasBucketFromRow, tintasMesBandFromWorkOrderRow } from "@/lib/tintas-mes-band-status"
 import { cn } from "@/lib/utils"
 import type { LaravelPaginated, MaterialRow, WorkOrderListRow } from "@/types/api"
@@ -139,6 +143,7 @@ function tintasWorkOrderProduccionUrl(woId: number): string {
 
 export default function AreaTintasPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const initialBandejaSubTab = parseMesBandejaSubTabParam(searchParams.get(MES_BANDEJA_QUERY_KEY))
   const session = getStoredUser()
   const [mode, setMode] = useState<"list" | "consumo">(() =>
     searchParams.get("ot") || searchParams.get("vista") ? "consumo" : "list",
@@ -159,7 +164,9 @@ export default function AreaTintasPage() {
   const [totalActivas, setTotalActivas] = useState(0)
   const [unseenActivas, setUnseenActivas] = useState(0)
   const [mesBandNowMs, setMesBandNowMs] = useState(() => Date.now())
-  const [mesActivasSubTab, setMesActivasSubTab] = useState<MesActivasSubTabKey>("pendientes")
+  const [mesActivasSubTab, setMesActivasSubTab] = useState<MesActivasSubTabKey>(
+    initialBandejaSubTab ?? "pendientes",
+  )
 
   const showProgramacionColumns = activeTab === "activas" && mesActivasSubTab === "pendientes"
   const tintasBandejaColCount = tintasBandejaColSpan(showProgramacionColumns)
@@ -231,6 +238,13 @@ export default function AreaTintasPage() {
     setMode("list")
     setSearchParams({})
   }, [setSearchParams])
+
+  useEffect(() => {
+    const parsed = parseMesBandejaSubTabParam(searchParams.get(MES_BANDEJA_QUERY_KEY))
+    if (!parsed || mode !== "list") return
+    setActiveTab("activas")
+    setMesActivasSubTab(parsed)
+  }, [searchParams, mode])
 
   useEffect(() => {
     if (searchParams.get("vista") !== "mezcla") return

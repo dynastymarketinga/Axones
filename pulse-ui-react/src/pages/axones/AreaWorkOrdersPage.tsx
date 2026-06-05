@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import {
   ArrowUp,
   Calendar,
@@ -204,6 +204,10 @@ import {
   areaRequestCreatedAtFromRow,
   resolveAreaRequestStatusForTab,
 } from "@/lib/area-request-for-row"
+import {
+  MES_BANDEJA_QUERY_KEY,
+  parseMesBandejaSubTabParam,
+} from "@/lib/mes-bandeja-navigation"
 import { cn } from "@/lib/utils"
 
 export type AreaKey = "printing" | "montaje" | "laminacion" | "corte" | "tintas"
@@ -537,6 +541,8 @@ function areaToPendientesKey(area: AreaKey): BandejaPendientesAreaKey {
 }
 
 export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
+  const [searchParams] = useSearchParams()
+  const initialBandejaSubTab = parseMesBandejaSubTabParam(searchParams.get(MES_BANDEJA_QUERY_KEY))
   const session = getStoredUser()
   const [activeTab, setActiveTab] = useState<AreaBandejaTab>("activas")
   const [qInput, setQInput] = useState("")
@@ -556,7 +562,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const [createdTo, setCreatedTo] = useState("")
   const skipSearchPageReset = useRef(true)
   /** Evita forzar «En producción» tras elegir manualmente otra sub-vista MES. */
-  const mesActivasSubTabAutoPickedRef = useRef(false)
+  const mesActivasSubTabAutoPickedRef = useRef(!!initialBandejaSubTab)
   const mesProduccionFilterTouchedRef = useRef(false)
   /** Reloj en vivo para tiempo efectivo acumulado (bandeja impresión). */
   const [mesBandNowMs, setMesBandNowMs] = useState(() => Date.now())
@@ -565,7 +571,9 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   /** Fila expandida con devoluciones de bobina (solo impresión). */
   const [expandedBobinasOtId, setExpandedBobinasOtId] = useState<number | null>(null)
   /** Filtro de bandeja MES dentro de «En curso». */
-  const [mesActivasSubTab, setMesActivasSubTab] = useState<MesActivasSubTab>("pendientes")
+  const [mesActivasSubTab, setMesActivasSubTab] = useState<MesActivasSubTab>(
+    initialBandejaSubTab ?? "pendientes",
+  )
   const [mesProduccionWorkflow, setMesProduccionWorkflow] =
     useState<MesProduccionWorkflowFilter>("turno_abierto")
   const hasTimerColumn = areaHasMesTimerColumn(area)
@@ -890,6 +898,14 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     }
     return totalActivas
   }, [area, mesActivasBucketCounts, totalActivas])
+
+  useEffect(() => {
+    const parsed = parseMesBandejaSubTabParam(searchParams.get(MES_BANDEJA_QUERY_KEY))
+    if (!parsed) return
+    mesActivasSubTabAutoPickedRef.current = true
+    setActiveTab("activas")
+    setMesActivasSubTab(parsed)
+  }, [searchParams])
 
   useEffect(() => {
     if (activeTab !== "activas") {

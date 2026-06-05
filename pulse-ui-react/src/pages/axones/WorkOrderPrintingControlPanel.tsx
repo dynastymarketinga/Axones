@@ -2,8 +2,15 @@
 
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { MesOperativoEstadoCard, MesSectionShell } from "@/components/axones/mes"
+import {
+  MesGuardarChoiceDialog,
+  MES_GUARDAR_AREA_LABELS,
+  MesOperativoEstadoCard,
+  MesSectionShell,
+  mesGuardarChoiceHint,
+} from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
@@ -102,6 +109,7 @@ import "./work-order-planilla.css"
 import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
+import { navigateToMesBandeja } from "@/lib/mes-bandeja-navigation"
 
 type OrdenTrabajoPayload = {
   work_order_id: number
@@ -424,6 +432,7 @@ export default function WorkOrderPrintingControlPanel({
   /** Solo jefe/admin puede finalizar el área de impresión (impEstadoArea). */
   canFinalizeOrder?: boolean
 }) {
+  const navigate = useNavigate()
   const impObsTextareaId = useId().replace(/:/g, "")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -671,6 +680,7 @@ export default function WorkOrderPrintingControlPanel({
   const [timerConfirm, setTimerConfirm] = useState<MesTimerConfirmKey | null>(null)
   const [takeoverConfirmOpen, setTakeoverConfirmOpen] = useState(false)
   const [previewTimerConfirmOpen, setPreviewTimerConfirmOpen] = useState(false)
+  const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false)
   const [closeTurnConfirmOpen, setCloseTurnConfirmOpen] = useState(false)
   const [finalizeOtConfirmOpen, setFinalizeOtConfirmOpen] = useState(false)
   const [emptyShiftCloseDialogOpen, setEmptyShiftCloseDialogOpen] = useState(false)
@@ -877,19 +887,27 @@ export default function WorkOrderPrintingControlPanel({
 
   const canClickGuardar = canSaveProduction || canPersistShiftOpen || canPersistEntreTurnos
 
-  const guardarHint = useMemo(() => {
-    if (controlReadOnly) return ""
-    if (canSaveProduction) {
-      return "Guardar cierra este turno, lo deja en el historial arriba y reinicia las rejillas para abrir otro turno (Turno / Grupo / Personal)."
-    }
-    if (canPersistShiftOpen) {
-      return "Turno abierto: puede guardar cuadrilla sin producción. Para cerrar el turno con bobinas y tiempos, inicie el cronómetro (play) y pulse Guardar."
-    }
-    if (canPersistEntreTurnos) {
-      return "Entre turnos: puede guardar de nuevo el historial y los kg acumulados en el servidor (p. ej. si la bandeja no se actualizó)."
-    }
-    return MES_SAVE_BLOCKED_MESSAGE
-  }, [canPersistEntreTurnos, canPersistShiftOpen, canSaveProduction, controlReadOnly])
+  const guardarHint = useMemo(
+    () =>
+      mesGuardarChoiceHint({
+        areaLabel: MES_GUARDAR_AREA_LABELS.printing,
+        controlReadOnly,
+        hasActiveTurno,
+        canSaveProduction,
+        canPersistShiftOpen,
+        canPersistBetweenShifts: canPersistEntreTurnos,
+        closedTurnosCount: closedTurnos.length,
+        blockedMessage: MES_SAVE_BLOCKED_MESSAGE,
+      }),
+    [
+      canPersistEntreTurnos,
+      canPersistShiftOpen,
+      canSaveProduction,
+      closedTurnos.length,
+      controlReadOnly,
+      hasActiveTurno,
+    ],
+  )
 
   const canPreviewTimerReport = useMemo(() => {
     if (!hasActiveTurno) return false
@@ -1682,7 +1700,7 @@ export default function WorkOrderPrintingControlPanel({
         options?.successMessage ??
           "Turno guardado en el historial. Elija Turno, Grupo y Personal para iniciar el siguiente.",
       )
-      await load()
+      navigateToMesBandeja(navigate, "printing", "produccion")
     } else {
       toast.error("No se pudo guardar el cierre del turno en el servidor. Se restauraron los datos del servidor.")
       await load()
@@ -1794,10 +1812,8 @@ export default function WorkOrderPrintingControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesPrintingToastSuccess(
-        "Área de impresión finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
-      )
-      await load()
+      mesPrintingToastSuccess("Área de impresión finalizada.")
+      navigateToMesBandeja(navigate, "printing", "finalizadas")
     }
   }
 
@@ -2164,29 +2180,41 @@ export default function WorkOrderPrintingControlPanel({
     }
   }
 
-  async function guardar() {
-    if (canSaveProduction) {
-      await cerrarTurnoYGuardarHistorial({ notifyProductionSave: true })
+  async function handleGuardarSesion() {
+    await persistPrintingForm(undefined, {
+      skipProductionSaveGuard: true,
+      notifyProductionSave: false,
+      successMessage: "Producción acumulada sincronizada con el servidor.",
+    })
+  }
+
+  function requestGuardar() {
+    if (saving || !canClickGuardar) {
+      if (!canClickGuardar) {
+        toast.error(
+          !hasActiveTurno && closedTurnos.length === 0
+            ? "Inicie un turno de planta antes de guardar."
+            : MES_SAVE_BLOCKED_MESSAGE,
+        )
+      }
       return
     }
-    if (canPersistShiftOpen) {
-      await persistPrintingForm(undefined, {
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-        successMessage:
-          "Turno guardado. Inicie el cronómetro (play) para habilitar el guardado de producción con aviso a otras áreas.",
-      })
+    if (hasActiveTurno) {
+      const cur = parsePrintingTurnoActual(form[IMP_ACTUAL_KEY])
+      if (cur && (!cur.operador.trim() || !cur.turno || !cur.grupo)) {
+        toast.error("Complete turno, grupo y operador antes de guardar.")
+        return
+      }
+      setGuardarChoiceOpen(true)
       return
     }
     if (canPersistEntreTurnos) {
-      await persistPrintingForm(undefined, {
-        skipProductionSaveGuard: true,
-        notifyProductionSave: false,
-        successMessage: "Producción acumulada sincronizada con el servidor.",
-      })
+      setGuardarChoiceOpen(true)
       return
     }
-    toast.error(MES_SAVE_BLOCKED_MESSAGE)
+    if (canFinalizeOrder) {
+      setGuardarChoiceOpen(true)
+    }
   }
 
   if (loading) return <p className="text-muted-foreground text-sm">Cargando control de impresión…</p>
@@ -2437,12 +2465,24 @@ export default function WorkOrderPrintingControlPanel({
           <p className="max-w-md text-center text-xs text-muted-foreground">{guardarHint}</p>
         ) : null}
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button type="button" onClick={() => void guardar()} disabled={saving || !canClickGuardar}>
+          <Button type="button" onClick={requestGuardar} disabled={saving || !canClickGuardar}>
             <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
             {saving ? "Guardando…" : "Guardar"}
           </Button>
         </div>
       </div>
+
+      <MesGuardarChoiceDialog
+        open={guardarChoiceOpen}
+        onOpenChange={setGuardarChoiceOpen}
+        areaLabel={MES_GUARDAR_AREA_LABELS.printing}
+        canFinalizeArea={canFinalizeOrder}
+        hasActiveTurno={hasActiveTurno}
+        betweenShiftsMode={canPersistEntreTurnos && !hasActiveTurno}
+        onGuardarSesion={() => void handleGuardarSesion()}
+        onFinalizarTurno={requestCerrarTurnoActual}
+        onFinalizarArea={requestFinalizarAreaImpresion}
+      />
 
       {timerConfirm ? (
         <MesPrintingConfirmDialog

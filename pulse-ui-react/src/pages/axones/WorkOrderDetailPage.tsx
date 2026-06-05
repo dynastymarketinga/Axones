@@ -345,6 +345,7 @@ export default function WorkOrderDetailPage() {
                     title="Tintas"
                     areaPath="tintas"
                     usageMode="none"
+                    canFinalizeOrder={isBoss}
                   />
                 ) : (
                   <ProductionTabAccessNotice tab="tintas" />

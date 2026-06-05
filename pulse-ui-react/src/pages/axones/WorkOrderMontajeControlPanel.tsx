@@ -2,8 +2,15 @@
 
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { MesOperativoEstadoCard, MesSectionShell } from "@/components/axones/mes"
+import {
+  MesGuardarChoiceDialog,
+  MES_GUARDAR_AREA_LABELS,
+  MesOperativoEstadoCard,
+  MesSectionShell,
+  mesGuardarChoiceHint,
+} from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { Button } from "@/components/ui/button"
@@ -40,6 +47,7 @@ import {
   type MontajeMaterialFila,
 } from "./montaje-cliche-material"
 import { showAxonesSuccessSwal } from "@/lib/axones-success-swal"
+import { navigateToMesBandeja } from "@/lib/mes-bandeja-navigation"
 import {
   deriveMontajeOperativoEstado,
   MONTAJE_CONTROL_SAVED_EVENT,
@@ -305,111 +313,6 @@ function MesMontajeConfirmDialog(props: MesMontajeConfirmDialogProps) {
   )
 }
 
-type MesMontajeGuardarChoiceDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  canFinalizeArea: boolean
-  hasActiveTurno: boolean
-  betweenShiftsMode: boolean
-  onGuardarSesion: () => void
-  onFinalizarTurno: () => void
-  onFinalizarArea: () => void
-}
-
-function MesMontajeGuardarChoiceDialog(props: MesMontajeGuardarChoiceDialogProps) {
-  const skin = MES_MONTAJE_CONFIRM.violet
-  return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="gap-5 border-slate-200 bg-white sm:max-w-lg dark:border-slate-700 dark:bg-slate-950">
-        <DialogHeader className="space-y-3 text-left">
-          <div className="flex items-start gap-3">
-            <div className={skin.iconBox}>
-              <Save className="h-5 w-5" aria-hidden />
-            </div>
-            <div className="min-w-0 space-y-1">
-              <DialogTitle className="text-lg font-semibold tracking-tight">Guardar en el sistema</DialogTitle>
-              <DialogDescription className="text-sm leading-relaxed">
-                {props.betweenShiftsMode ? (
-                  <>
-                    Está <span className="font-semibold text-foreground">entre turnos</span> (sin cuadrilla activa).
-                    Confirme el registro en servidor o cierre el área Montaje si la OT terminó.
-                  </>
-                ) : (
-                  <>
-                    Turno de planta en curso. Al terminar la jornada, elija si cierra el turno o finaliza el área
-                    Montaje en el sistema.
-                  </>
-                )}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900/80">
-          <p className="font-medium text-slate-900 dark:text-slate-100">¿Qué desea hacer?</p>
-          <ul className="list-none space-y-2.5 text-slate-600 dark:text-slate-300">
-            <li className="flex gap-2">
-              <LogOut className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" aria-hidden />
-              <span>
-                <span className="font-semibold text-slate-900 dark:text-slate-100">Finalizar turno</span>
-                {" — "}
-                {props.betweenShiftsMode
-                  ? "Sincroniza tiempos, kg, mermas y datos de cliché/material acumulados."
-                  : "Cierra el turno de planta en curso y guarda arranque, producción y material."}
-              </span>
-            </li>
-            {props.canFinalizeArea ? (
-              <li className="flex gap-2">
-                <Flag className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden />
-                <span>
-                  <span className="font-semibold text-slate-900 dark:text-slate-100">Finalizar cierre</span>
-                  {" — "}
-                  Marca el área Montaje como finalizada en la OT y la muestra en En curso → Finalizadas.
-                </span>
-              </li>
-            ) : null}
-          </ul>
-        </div>
-
-        <DialogFooter className="!flex-row flex-wrap justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
-          <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!props.betweenShiftsMode && !props.hasActiveTurno}
-            onClick={() => {
-              props.onOpenChange(false)
-              if (props.betweenShiftsMode) {
-                props.onGuardarSesion()
-              } else {
-                props.onFinalizarTurno()
-              }
-            }}
-          >
-            <LogOut className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-            Finalizar turno
-          </Button>
-          {props.canFinalizeArea ? (
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => {
-                props.onOpenChange(false)
-                props.onFinalizarArea()
-              }}
-            >
-              <Flag className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-              Finalizar cierre
-            </Button>
-          ) : null}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 const MES_MONTAJE_WARNING_TOAST_CLASSNAMES = {
   toast:
     "!border !border-amber-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
@@ -517,6 +420,7 @@ export default function WorkOrderMontajeControlPanel({
   /** Solo jefe/admin puede finalizar el área de montaje (montEstadoArea). */
   canFinalizeOrder?: boolean
 }) {
+  const navigate = useNavigate()
   const montObsTextareaId = useId().replace(/:/g, "")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -904,29 +808,27 @@ export default function WorkOrderMontajeControlPanel({
 
   const canClickGuardar = canSaveProduction || canPersistShiftOpen || canPersistBetweenShifts
 
-  const guardarHint = useMemo(() => {
-    if (controlReadOnly) return ""
-    if (hasActiveTurno && (canSaveProduction || canPersistShiftOpen)) {
-      return "Al pulsar Guardar elija «Finalizar turno» o «Finalizar cierre» del área Montaje."
-    }
-    if (canPersistBetweenShifts) {
-      return "Entre turnos: pulse Guardar y elija «Finalizar turno» (sincronizar) o «Finalizar cierre» si el montaje terminó."
-    }
-    if (canSaveProduction || canPersistShiftOpen) {
-      return "Pulse Guardar para enviar datos al servidor."
-    }
-    if (!hasActiveTurno && closedTurnos.length === 0) {
-      return "Inicie un turno de planta para registrar datos."
-    }
-    return MES_SAVE_BLOCKED_MESSAGE
-  }, [
-    canPersistBetweenShifts,
-    canPersistShiftOpen,
-    canSaveProduction,
-    closedTurnos.length,
-    controlReadOnly,
-    hasActiveTurno,
-  ])
+  const guardarHint = useMemo(
+    () =>
+      mesGuardarChoiceHint({
+        areaLabel: MES_GUARDAR_AREA_LABELS.montaje,
+        controlReadOnly,
+        hasActiveTurno,
+        canSaveProduction,
+        canPersistShiftOpen,
+        canPersistBetweenShifts,
+        closedTurnosCount: closedTurnos.length,
+        blockedMessage: MES_SAVE_BLOCKED_MESSAGE,
+      }),
+    [
+      canPersistBetweenShifts,
+      canPersistShiftOpen,
+      canSaveProduction,
+      closedTurnos.length,
+      controlReadOnly,
+      hasActiveTurno,
+    ],
+  )
 
   function requestTakeover() {
     if (readOnlyOps) return
@@ -1624,8 +1526,9 @@ export default function WorkOrderMontajeControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesMontajeSwalWithBandeja(nextForm, "Turno cerrado")
-      await load()
+      toast.success("Turno cerrado.")
+      navigateToMesBandeja(navigate, "montaje", "produccion")
+      return
     }
   }
 
@@ -1685,8 +1588,8 @@ export default function WorkOrderMontajeControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesMontajeSwalWithBandeja(nextForm, "Montaje finalizado")
-      await load()
+      toast.success("Montaje finalizado.")
+      navigateToMesBandeja(navigate, "montaje", "finalizadas")
     }
   }
 
@@ -1713,11 +1616,16 @@ export default function WorkOrderMontajeControlPanel({
     }
   }
 
-  function handleGuardarSesion() {
-    void persistMontajeForm(undefined, {
+  async function handleGuardarSesion(options?: { redirectToBandeja?: boolean }) {
+    const ok = await persistMontajeForm(undefined, {
       skipProductionSaveGuard: true,
       notifyProductionSave: false,
+      suppressSuccessToast: options?.redirectToBandeja,
     })
+    if (ok && options?.redirectToBandeja) {
+      toast.success("Datos sincronizados.")
+      navigateToMesBandeja(navigate, "montaje", "produccion")
+    }
   }
 
   function requestGuardar() {
@@ -1939,13 +1847,14 @@ export default function WorkOrderMontajeControlPanel({
         </div>
       </div>
 
-      <MesMontajeGuardarChoiceDialog
+      <MesGuardarChoiceDialog
         open={guardarChoiceOpen}
         onOpenChange={setGuardarChoiceOpen}
+        areaLabel={MES_GUARDAR_AREA_LABELS.montaje}
         canFinalizeArea={canFinalizeOrder}
         hasActiveTurno={hasActiveTurno}
         betweenShiftsMode={canPersistBetweenShifts && !hasActiveTurno}
-        onGuardarSesion={handleGuardarSesion}
+        onGuardarSesion={() => void handleGuardarSesion({ redirectToBandeja: true })}
         onFinalizarTurno={requestCerrarTurnoActual}
         onFinalizarArea={requestFinalizarAreaMontaje}
       />

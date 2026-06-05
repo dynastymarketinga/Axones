@@ -4,6 +4,10 @@ import type { ReactNode } from "react"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import {
+  MesGuardarChoiceDialog,
+  MES_GUARDAR_AREA_LABELS,
+} from "@/components/axones/mes"
 import { TintasPaneHead } from "@/components/axones/TintasPaneHead"
 import { cn } from "@/lib/utils"
 
@@ -11,6 +15,7 @@ import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Save } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -88,6 +93,8 @@ export type ProductionAreaPanelProps = {
   presentation?: "default" | "tintas-premium"
   /** Columna derecha: formulario de mezcla. */
   mixColumn?: ReactNode
+  /** Solo tintas: jefatura puede ver «Finalizar cierre» (si el backend lo soporta). */
+  canFinalizeOrder?: boolean
 }
 
 type InkLineDraft = {
@@ -113,11 +120,15 @@ export function ProductionAreaPanel({
   laminacionSolvent,
   presentation = "default",
   mixColumn,
+  canFinalizeOrder = false,
 }: ProductionAreaPanelProps) {
   const base = `work-orders/${workOrderId}/${areaPath}`
   /** El área Tintas no registra tiempos MES en planta. */
   const showTimer = areaPath !== "tintas"
   const tintasPremium = presentation === "tintas-premium" && areaPath === "tintas"
+  const isTintasArea = areaPath === "tintas"
+  const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false)
+  const [savingTintas, setSavingTintas] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [state, setState] = useState<Record<string, unknown> | null>(null)
@@ -415,6 +426,90 @@ export function ProductionAreaPanel({
       else toast.error("No se pudo guardar el resumen.")
     }
   }
+
+  async function saveAllTintasData() {
+    if (!supportsInkConsumables(areaPath)) return
+    setSavingTintas(true)
+    try {
+      const ink_lines = inkLines
+        .filter((L) => L.material_id.trim() !== "")
+        .map((L, idx) => ({
+          material_id: Number(L.material_id),
+          quantity_original_kg: L.quantity_original_kg.trim()
+            ? Number(L.quantity_original_kg)
+            : 0,
+          quantity_solventada_kg: L.quantity_solventada_kg.trim()
+            ? Number(L.quantity_solventada_kg)
+            : 0,
+          quantity_return_kg: L.quantity_return_kg.trim() ? Number(L.quantity_return_kg) : 0,
+          notes: L.notes.trim() || null,
+          position: idx,
+        }))
+      const chemical_usages = chemRows.map((r) => ({
+        chemical_type: r.chemical_type,
+        quantity_loaded_kg: r.quantity_loaded_kg.trim() ? Number(r.quantity_loaded_kg) : 0,
+        quantity_return_kg: r.quantity_return_kg.trim() ? Number(r.quantity_return_kg) : 0,
+        notes: r.notes.trim() || null,
+      }))
+      await apiFetch(`work-orders/${workOrderId}/tintas/consumables`, {
+        method: "PUT",
+        body: JSON.stringify({ ink_lines, chemical_usages }),
+      })
+      const summaryBody: Record<string, unknown> = {
+        scrap_percent: scrapPct.trim() ? Number(scrapPct) : null,
+        notes: summaryNotes.trim() || null,
+      }
+      await apiFetch(`${base}/summary`, {
+        method: "PATCH",
+        body: JSON.stringify(summaryBody),
+      })
+      toast.success("Consumo y resumen de tintas guardados en el sistema.")
+      void load()
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message)
+      else toast.error("No se pudo guardar tintas en el sistema.")
+    } finally {
+      setSavingTintas(false)
+    }
+  }
+
+  function requestTintasGuardar() {
+    if (!state) {
+      toast.error("Espere a que cargue el panel de tintas.")
+      return
+    }
+    setGuardarChoiceOpen(true)
+  }
+
+  const tintasGuardarBlock = isTintasArea ? (
+    <>
+      <div className="no-print mb-12 flex flex-col items-center gap-2">
+        <p className="max-w-md text-center text-xs text-muted-foreground">
+          Al pulsar Guardar elija «Finalizar turno» o «Finalizar cierre» del área{" "}
+          {MES_GUARDAR_AREA_LABELS.tintas}.
+        </p>
+        <Button type="button" onClick={requestTintasGuardar} disabled={savingTintas || !state}>
+          <Save className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+          {savingTintas ? "Guardando…" : "Guardar"}
+        </Button>
+      </div>
+      <MesGuardarChoiceDialog
+        open={guardarChoiceOpen}
+        onOpenChange={setGuardarChoiceOpen}
+        areaLabel={MES_GUARDAR_AREA_LABELS.tintas}
+        canFinalizeArea={canFinalizeOrder}
+        hasActiveTurno={Boolean(state)}
+        betweenShiftsMode={false}
+        onGuardarSesion={() => void saveAllTintasData()}
+        onFinalizarTurno={() => void saveAllTintasData()}
+        onFinalizarArea={() => {
+          toast.message(
+            "Para cerrar la solicitud de tintas use la bandeja del área Tintas y Mezcla de tinta.",
+          )
+        }}
+      />
+    </>
+  ) : null
 
   async function saveConsumables() {
     if (!supportsInkConsumables(areaPath)) return
@@ -764,6 +859,7 @@ export function ProductionAreaPanel({
               </div>
             </div>
             <div className="tintas-workspace__summary">{summaryBlock}</div>
+            {tintasGuardarBlock}
           </>
         ) : null}
       </>
@@ -1088,6 +1184,7 @@ export function ProductionAreaPanel({
           ) : null}
 
           {summaryBlock}
+          {tintasGuardarBlock}
         </>
       ) : null}
       {showTimer ? <span className="sr-only">{tick}</span> : null}

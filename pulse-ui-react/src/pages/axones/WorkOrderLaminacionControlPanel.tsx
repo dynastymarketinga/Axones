@@ -2,6 +2,7 @@
 
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { Layers, ListChecks, Package } from "lucide-react"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
@@ -107,6 +108,7 @@ import "./work-order-planilla.css"
 import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
+import { navigateToMesBandeja } from "@/lib/mes-bandeja-navigation"
 
 type OrdenTrabajoPayload = {
   work_order_id: number
@@ -341,6 +343,7 @@ export default function WorkOrderLaminacionControlPanel({
   /** Solo jefe/admin puede finalizar el área de laminacion (lamEstadoArea). */
   canFinalizeOrder?: boolean
 }) {
+  const navigate = useNavigate()
   const lamObsTextareaId = useId().replace(/:/g, "")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -1393,7 +1396,7 @@ export default function WorkOrderLaminacionControlPanel({
         options?.successMessage ??
           "Turno guardado en el historial. Elija Turno, Grupo y Personal para iniciar el siguiente.",
       )
-      await load()
+      navigateToMesBandeja(navigate, "laminacion", "produccion")
     } else {
       toast.error("No se pudo guardar el cierre del turno en el servidor. Se restauraron los datos del servidor.")
       await load()
@@ -1477,10 +1480,8 @@ export default function WorkOrderLaminacionControlPanel({
     })
     if (ok) {
       clearLaminacionBrowserCache(workOrderId)
-      mesLaminacionToastSuccess(
-        "Área de laminación finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
-      )
-      await load()
+      mesLaminacionToastSuccess("Área de laminación finalizada.")
+      navigateToMesBandeja(navigate, "laminacion", "finalizadas")
     } else {
       toast.error("No se pudo finalizar el área de laminación. Revise su conexión o permisos de jefatura.")
     }

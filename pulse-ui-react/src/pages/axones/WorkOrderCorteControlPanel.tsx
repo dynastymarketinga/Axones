@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { FileSearch, Flag, LogOut, Save, Scissors } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { FileSearch, Save, Scissors } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -16,16 +17,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { openCortePlanillaPreviewFromSource } from "@/lib/corte-planilla-preview"
-import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  MesGuardarChoiceDialog,
+  MES_GUARDAR_AREA_LABELS,
+  mesGuardarChoiceHint,
+} from "@/components/axones/mes"
+import { Button } from "@/components/ui/button"
 import { apiFetch, ApiError } from "@/lib/api"
+import { navigateToMesBandeja } from "@/lib/mes-bandeja-navigation"
 
 type CorteDispatchSyncStatus = {
   material_resolved: boolean
@@ -191,98 +190,6 @@ function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, un
   return { ...prefill, ...(form ?? {}) }
 }
 
-type MesCorteGuardarChoiceDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  canFinalizeArea: boolean
-  hasActiveTurno: boolean
-  onGuardarSesion: () => void
-  onFinalizarTurno: () => void
-  onFinalizarCierreCorte: () => void
-}
-
-function MesCorteGuardarChoiceDialog(props: MesCorteGuardarChoiceDialogProps) {
-  return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="border-slate-200 bg-white sm:max-w-md">
-        <DialogHeader className="space-y-3 text-left">
-          <div className="flex items-start gap-3">
-            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-800">
-              <Save className="h-5 w-5" aria-hidden />
-            </div>
-            <div className="min-w-0 space-y-2">
-              <DialogTitle className="text-xl font-semibold tracking-tight">Guardar en el sistema</DialogTitle>
-              <DialogDescription className="text-sm leading-relaxed">
-                Elija qué desea hacer. Nada se envía al servidor hasta confirmar aquí (sin guardado automático ni avisos
-                de Despacho al cerrar paletas).
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-        <DialogFooter className="flex flex-col gap-2 sm:flex-col sm:items-stretch">
-          <Button
-            type="button"
-            className="h-auto min-h-10 justify-start gap-2 whitespace-normal px-4 py-3 text-left"
-            disabled={!props.hasActiveTurno}
-            onClick={() => {
-              props.onOpenChange(false)
-              props.onGuardarSesion()
-            }}
-          >
-            <Save className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            <span>
-              <span className="block font-semibold">Guardar</span>
-              <span className="block text-xs font-normal opacity-90">
-                Guarda el turno en curso sin cerrarlo (producción, paletas y saldo en Despacho si aplica).
-              </span>
-            </span>
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-auto min-h-10 justify-start gap-2 whitespace-normal border-sky-200 bg-sky-50/80 px-4 py-3 text-left text-sky-950 hover:bg-sky-100"
-            disabled={!props.hasActiveTurno}
-            onClick={() => {
-              props.onOpenChange(false)
-              props.onFinalizarTurno()
-            }}
-          >
-            <LogOut className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            <span>
-              <span className="block font-semibold">Finalizar turno</span>
-              <span className="block text-xs font-normal opacity-90">
-                Cierra el turno, guarda tiempos y producción, pasa paletas con kg a Despacho (listas para nota) y deja el formulario listo para un turno nuevo.
-              </span>
-            </span>
-          </Button>
-          {props.canFinalizeArea ? (
-            <Button
-              type="button"
-              variant="destructive"
-              className="h-auto min-h-10 justify-start gap-2 whitespace-normal px-4 py-3 text-left"
-              onClick={() => {
-                props.onOpenChange(false)
-                props.onFinalizarCierreCorte()
-              }}
-            >
-              <Flag className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              <span>
-                <span className="block font-semibold">Finalizar cierre de Corte</span>
-                <span className="block text-xs font-normal opacity-90">
-                  Marca el área de corte como finalizada en la OT (solo jefatura).
-                </span>
-              </span>
-            </Button>
-          ) : null}
-          <Button type="button" variant="ghost" className="sm:mt-1" onClick={() => props.onOpenChange(false)}>
-            Cancelar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 export default function WorkOrderCorteControlPanel({
   workOrderId,
   canFinalizeOrder = false,
@@ -290,6 +197,7 @@ export default function WorkOrderCorteControlPanel({
   workOrderId: number
   canFinalizeOrder?: boolean
 }) {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [prefill, setPrefill] = useState<Record<string, unknown>>({})
@@ -477,14 +385,34 @@ export default function WorkOrderCorteControlPanel({
 
   const canClickGuardar = canSaveProduction || canPersistShiftOpen || areaFinalizada
 
-  const guardarHint = useMemo(() => {
-    if (controlReadOnly) return ""
-    if (canSaveProduction || areaFinalizada) return ""
-    if (canPersistShiftOpen) {
-      return "Pulse Guardar y elija «Finalizar turno» o «Finalizar cierre de Corte». Para cerrar paletas en Despacho, inicie el cronómetro (play)."
-    }
-    return MES_SAVE_BLOCKED_MESSAGE
-  }, [areaFinalizada, canPersistShiftOpen, canSaveProduction, controlReadOnly])
+  const canPersistBetweenShifts = useMemo(() => {
+    if (controlReadOnly || areaFinalizada) return false
+    if (hasActiveTurno) return false
+    return closedTurnos.length > 0
+  }, [areaFinalizada, closedTurnos.length, controlReadOnly, hasActiveTurno])
+
+  const guardarHint = useMemo(
+    () =>
+      mesGuardarChoiceHint({
+        areaLabel: MES_GUARDAR_AREA_LABELS.corte,
+        controlReadOnly,
+        hasActiveTurno,
+        canSaveProduction,
+        canPersistShiftOpen,
+        canPersistBetweenShifts,
+        closedTurnosCount: closedTurnos.length,
+        blockedMessage: MES_SAVE_BLOCKED_MESSAGE,
+      }),
+    [
+      areaFinalizada,
+      canPersistBetweenShifts,
+      canPersistShiftOpen,
+      canSaveProduction,
+      closedTurnos.length,
+      controlReadOnly,
+      hasActiveTurno,
+    ],
+  )
 
   const persistCorteForm = useCallback(
     async (
@@ -720,13 +648,13 @@ export default function WorkOrderCorteControlPanel({
       if (ok) {
         toast.success(
           closedCount > 0
-            ? `Turno cerrado. ${closedCount} paleta(s) listas en Despacho · producto terminado. Inicie otro turno para seguir produciendo.`
-            : "Turno de planta cerrado y guardado. El formulario quedó en blanco para iniciar otro turno.",
+            ? `Turno cerrado. ${closedCount} paleta(s) listas en Despacho · producto terminado.`
+            : "Turno de planta cerrado y guardado.",
         )
-        await load()
+        navigateToMesBandeja(navigate, "corte", "produccion")
       }
     },
-    [form, persistCorteForm, load, timerEverStarted],
+    [form, persistCorteForm, navigate, timerEverStarted],
   )
 
   const requestGuardar = useCallback(() => {
@@ -748,6 +676,10 @@ export default function WorkOrderCorteControlPanel({
       setGuardarChoiceOpen(true)
       return
     }
+    if (canPersistBetweenShifts) {
+      setGuardarChoiceOpen(true)
+      return
+    }
     if (canFinalizeOrder && !areaFinalizada) {
       setGuardarChoiceOpen(true)
       return
@@ -757,6 +689,7 @@ export default function WorkOrderCorteControlPanel({
     areaFinalizada,
     canClickGuardar,
     canFinalizeOrder,
+    canPersistBetweenShifts,
     closedTurnos.length,
     controlReadOnly,
     form,
@@ -842,10 +775,8 @@ export default function WorkOrderCorteControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      toast.success(
-        "Área de corte finalizada. La OT pasará a Finalizadas e Historial en la bandeja.",
-      )
-      await load()
+      toast.success("Área de corte finalizada.")
+      navigateToMesBandeja(navigate, "corte", "finalizadas")
     } else {
       toast.error("No se pudo finalizar el área de corte. Revise su conexión o permisos de jefatura.")
     }
@@ -1328,14 +1259,16 @@ export default function WorkOrderCorteControlPanel({
         </div>
       </div>
 
-      <MesCorteGuardarChoiceDialog
+      <MesGuardarChoiceDialog
         open={guardarChoiceOpen}
         onOpenChange={setGuardarChoiceOpen}
+        areaLabel={MES_GUARDAR_AREA_LABELS.corte}
         canFinalizeArea={canFinalizeOrder && !areaFinalizada}
         hasActiveTurno={hasActiveTurno}
+        betweenShiftsMode={canPersistBetweenShifts && !hasActiveTurno}
         onGuardarSesion={handleGuardarSesion}
         onFinalizarTurno={handleFinalizarTurnoFromGuardar}
-        onFinalizarCierreCorte={() => setFinalizeAreaConfirmOpen(true)}
+        onFinalizarArea={() => setFinalizeAreaConfirmOpen(true)}
       />
 
       <AlertDialog open={closeTurnConfirmOpen} onOpenChange={setCloseTurnConfirmOpen}>

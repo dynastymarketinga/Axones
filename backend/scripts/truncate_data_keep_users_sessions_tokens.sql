@@ -8,7 +8,6 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 TRUNCATE TABLE area_requests;
 TRUNCATE TABLE bobinas;
-TRUNCATE TABLE cache;
 TRUNCATE TABLE cache_locks;
 TRUNCATE TABLE clients;
 TRUNCATE TABLE client_orders;
@@ -63,4 +62,4 @@ TRUNCATE TABLE work_order_technical_documents;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- NO truncar: users, sessions, personal_access_tokens, migrations
+-- NO truncar: users, cache, sessions, personal_access_tokens, migrations

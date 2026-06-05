@@ -2,7 +2,7 @@
 -- NO ejecutar sobre producción sin respaldo.
 --
 -- Tablas que NO se vacían:
---   users, sessions, cache, migrations
+--   users, sessions, cache, personal_access_tokens, migrations
 -- (migrations debe conservarse siempre en Laravel para no correr migraciones duplicadas.)
 --
 -- Uso: en phpMyAdmin, selecciona la BD axones_v2 → pestaña SQL → pegar y ejecutar.
@@ -40,7 +40,6 @@ TRUNCATE TABLE `montaje_time_segments`;
 TRUNCATE TABLE `operational_alerts`;
 TRUNCATE TABLE `password_reset_requests`;
 TRUNCATE TABLE `password_reset_tokens`;
-TRUNCATE TABLE `personal_access_tokens`;
 TRUNCATE TABLE `printing_bobina_usages`;
 TRUNCATE TABLE `printing_chemical_usages`;
 TRUNCATE TABLE `printing_ink_control_lines`;
@@ -66,6 +65,6 @@ TRUNCATE TABLE `work_order_production_items`;
 TRUNCATE TABLE `work_order_quality_records`;
 TRUNCATE TABLE `work_order_technical_documents`;
 
--- Conservadas intencionalmente: users, sessions, cache, migrations
+-- Conservadas intencionalmente: users, sessions, cache, personal_access_tokens, migrations
 
 SET FOREIGN_KEY_CHECKS = 1;

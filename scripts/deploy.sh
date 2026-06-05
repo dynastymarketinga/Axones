@@ -21,6 +21,11 @@ cd "$APP_ROOT/backend"
 composer install --no-dev --optimize-autoloader --no-interaction
 php artisan migrate --force --no-interaction
 
+if [ "${AXONES_TRUNCATE_KEEP_AUTH:-}" = "1" ]; then
+  echo "==> Limpieza BD: conserva users, cache, sessions, personal_access_tokens"
+  php artisan axones:truncate-keep-users --force --no-interaction
+fi
+
 php artisan axones:cleanup-operational-alerts --no-interaction
 php artisan optimize --no-interaction
 

@@ -69,4 +69,6 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Run deploy script
+        env:
+          AXONES_TRUNCATE_KEEP_AUTH: "1"
         run: bash /var/www/axones/scripts/deploy.sh

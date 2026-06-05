@@ -13,11 +13,14 @@ class TruncateKeepUsersCommand extends Command
                             {--force : Obligatorio en production y para omitir confirmación}
                             {--dry-run : Solo listar tablas que se vaciarían}';
 
-    protected $description = 'Vacía todas las tablas de la BD excepto users y migrations (conserva cuentas de usuario).';
+    protected $description = 'Vacía todas las tablas de la BD excepto users, cache, sessions, personal_access_tokens y migrations.';
 
     /** @var list<string> */
     private array $preserve = [
         'users',
+        'cache',
+        'sessions',
+        'personal_access_tokens',
         'migrations',
     ];
 
@@ -49,7 +52,7 @@ class TruncateKeepUsersCommand extends Command
         }
 
         if (! $this->option('force') && ! $this->confirm(
-            '¿Vaciar '.count($tables).' tablas? Se conservan solo users y migrations.',
+            '¿Vaciar '.count($tables).' tablas? Se conservan users, cache, sessions, personal_access_tokens y migrations.',
             false,
         )) {
             $this->line('Cancelado.');
@@ -154,7 +157,6 @@ class TruncateKeepUsersCommand extends Command
         return [
             'area_requests',
             'bobinas',
-            'cache',
             'cache_locks',
             'clients',
             'client_orders',
@@ -183,7 +185,6 @@ class TruncateKeepUsersCommand extends Command
             'operational_alerts',
             'password_reset_requests',
             'password_reset_tokens',
-            'personal_access_tokens',
             'printing_bobina_usages',
             'printing_chemical_usages',
             'printing_ink_control_lines',
@@ -194,7 +195,6 @@ class TruncateKeepUsersCommand extends Command
             'purchase_order_lines',
             'purchase_receipts',
             'purchase_receipt_lines',
-            'sessions',
             'suppliers',
             'tintas_time_segments',
             'tinta_mixtures',

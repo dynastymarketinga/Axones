@@ -2,9 +2,11 @@ import {
   COR_ACTUAL_KEY,
   COR_ESTADO_KEY,
   COR_TURNOS_KEY,
+  accumulateCorteFromJson,
   parseCorteTurnoActual,
   parseCorteTurnos,
   readCorteEstadoArea,
+  sumSalidaKgFromPaletas,
 } from "@/pages/axones/corte-turnos"
 
 import {
@@ -43,6 +45,36 @@ function hasCorteMesActivity(form: Record<string, unknown> | null): boolean {
   return readCorteEstadoArea(form[COR_ESTADO_KEY]) === "finalizada"
 }
 
+function readStoredProducidoKg(form: Record<string, unknown> | null): number {
+  if (!form) return 0
+  const raw = form.corAcumuladoProducidoKg
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.max(0, raw)
+  if (typeof raw === "string") {
+    const n = Number(raw.replace(",", "."))
+    return Number.isFinite(n) ? Math.max(0, n) : 0
+  }
+  return 0
+}
+
+function corteKgExtrasFromForm(form: Record<string, unknown> | null): Pick<
+  MesBandejaMes,
+  "producidoKg" | "entradaKg" | "desperdicioKg"
+> {
+  if (!form) return {}
+  const cerrados = parseCorteTurnos(form[COR_TURNOS_KEY], form)
+  const actual = parseCorteTurnoActual(form[COR_ACTUAL_KEY], form)
+  if (cerrados.length === 0 && !actual) return {}
+  const formSalidaActual = actual ? sumSalidaKgFromPaletas(actual.paletas) : undefined
+  const acum = accumulateCorteFromJson(cerrados, actual, formSalidaActual, form)
+  const storedKg = readStoredProducidoKg(form)
+  const producidoKg = Math.max(acum.producidoKg, storedKg)
+  return {
+    producidoKg: producidoKg > 0.005 ? producidoKg : undefined,
+    entradaKg: acum.entradaKg > 0.005 ? acum.entradaKg : undefined,
+    desperdicioKg: acum.scrapKg > 0.005 ? acum.scrapKg : undefined,
+  }
+}
+
 /**
  * Estado MES para la bandeja de corte.
  * Incluye OT con datos MES aunque el tablero aún no esté en columna «corte».
@@ -55,7 +87,7 @@ export function corteMesBandFromForm(
   const cerrados = f ? parseCorteTurnos(f[COR_TURNOS_KEY], f) : []
   const actual = f ? parseCorteTurnoActual(f[COR_ACTUAL_KEY], f) : null
   const estado = f ? readCorteEstadoArea(f[COR_ESTADO_KEY]) : "abierta"
-  return buildMesBandFromTurnos({
+  const mes = buildMesBandFromTurnos({
     areaLabel: "Corte",
     estado,
     cerrados,
@@ -63,6 +95,11 @@ export function corteMesBandFromForm(
     nowMs,
     form: f,
   })
+  const kgExtras = corteKgExtrasFromForm(f)
+  if (Object.keys(kgExtras).length > 0) {
+    return { ...mes, ...kgExtras }
+  }
+  return mes
 }
 
 export function deriveCorteOperativoEstado(
@@ -84,7 +121,10 @@ export function corteMesBandFromWorkOrderRow(row: CorteBandejaRow, nowMs: number
 
   if (row.area_time_summary) {
     const fromSegments = mesBandFromAreaTimeSummary(row.area_time_summary, nowMs, "Corte")
-    if (fromSegments) return fromSegments
+    if (fromSegments) {
+      const kgExtras = corteKgExtrasFromForm(form)
+      return Object.keys(kgExtras).length > 0 ? { ...fromSegments, ...kgExtras } : fromSegments
+    }
   }
 
   return corteMesBandFromForm(form, nowMs)

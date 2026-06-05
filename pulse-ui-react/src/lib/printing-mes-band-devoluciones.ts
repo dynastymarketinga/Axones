@@ -260,3 +260,30 @@ export function printingDevolucionesFromWorkOrderRow(
   }
   return printingDevolucionesFromForm(form)
 }
+
+export function emptyMesBandejaDevolucionesSnapshot(): MesBandejaDevolucionesSnapshot {
+  return { ...EMPTY_SNAPSHOT }
+}
+
+export function laminacionDevolucionesFromForm(
+  form: Record<string, unknown>,
+): MesBandejaDevolucionesSnapshot {
+  const buenaTotalKg = readNumber(form.lamDevolucionBuenaKg)
+  const malaTotalKg = readNumber(form.lamDevolucionRechazadaKg)
+  const hasAny = buenaTotalKg > 0.005 || malaTotalKg > 0.005
+  return {
+    buenaTotalKg,
+    malaTotalKg,
+    buenaLines: [],
+    malaLines: [],
+    hasAny,
+  }
+}
+
+export function laminacionDevolucionesFromWorkOrderRow(
+  row: WorkOrderListRow,
+): MesBandejaDevolucionesSnapshot {
+  const form = technicalFormFromRow(row)
+  if (!form) return { ...EMPTY_SNAPSHOT }
+  return laminacionDevolucionesFromForm(form)
+}

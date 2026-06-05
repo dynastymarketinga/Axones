@@ -40,7 +40,7 @@ export const MES_BANDEJA_KG_NUMERIC_COLUMN_COUNT = 4
 export const MES_BANDEJA_KG_TOTAL_HEAD_LABEL = "Total masa acum."
 
 export function areaShowsMesKgBreakdownColumns(area: string): boolean {
-  return area === "printing"
+  return area === "printing" || area === "laminacion" || area === "corte"
 }
 
 /** Suma producido + entrada + desperdicio (kg registrados en turnos). */

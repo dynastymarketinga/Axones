@@ -89,14 +89,19 @@ export function laminacionMesBandFromForm(
     form: f,
   })
   const acum = accumulateLaminacionFromJson(cerrados, actual)
+  const kgExtras = {
+    entradaKg: acum.entradaImpresaKg + acum.entradaVirgenKg,
+    desperdicioKg: acum.scrapKg,
+  }
   if (cerrados.length > 0 || actual) {
     const storedKg = readStoredProducidoKg(f)
     const producidoKg = Math.max(acum.producidoKg, storedKg)
-    return { ...mes, producidoKg }
-  }
-  const storedOnly = readStoredProducidoKg(f)
-  if (storedOnly > 0.005) {
-    return { ...mes, producidoKg: storedOnly }
+    return {
+      ...mes,
+      producidoKg,
+      entradaKg: kgExtras.entradaKg > 0.005 ? kgExtras.entradaKg : undefined,
+      desperdicioKg: kgExtras.desperdicioKg > 0.005 ? kgExtras.desperdicioKg : undefined,
+    }
   }
   return mes
 }

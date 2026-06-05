@@ -2,6 +2,12 @@ import { corteMesBandFromWorkOrderRow } from "@/lib/corte-mes-band-status"
 import { laminacionMesBandFromWorkOrderRow } from "@/lib/laminacion-mes-band-status"
 import { montajeMesBandFromWorkOrderRow } from "@/lib/montaje-mes-band-status"
 import type { MesBandejaMes } from "@/lib/mes-timer-band-shared"
+import {
+  emptyMesBandejaDevolucionesSnapshot,
+  laminacionDevolucionesFromWorkOrderRow,
+  printingDevolucionesFromWorkOrderRow,
+  type MesBandejaDevolucionesSnapshot,
+} from "@/lib/printing-mes-band-devoluciones"
 import { printingMesBandFromWorkOrderRow } from "@/lib/printing-mes-band-status"
 import type { WorkOrderListRow } from "@/types/api"
 
@@ -36,4 +42,14 @@ export function mesAreaDisplayName(area: MesBandejaAreaKey): string {
   if (area === "montaje") return "Montaje"
   if (area === "laminacion") return "Laminación"
   return "Corte"
+}
+
+/** Devoluciones de bobina visibles en columna «Bobinas» de la bandeja MES. */
+export function mesBandejaDevolucionesFromWorkOrderRow(
+  area: MesBandejaAreaKey,
+  row: WorkOrderListRow,
+): MesBandejaDevolucionesSnapshot {
+  if (area === "printing") return printingDevolucionesFromWorkOrderRow(row)
+  if (area === "laminacion") return laminacionDevolucionesFromWorkOrderRow(row)
+  return emptyMesBandejaDevolucionesSnapshot()
 }

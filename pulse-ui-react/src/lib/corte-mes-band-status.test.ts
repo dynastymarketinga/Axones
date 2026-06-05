@@ -100,4 +100,67 @@ describe("corteActivasBucketFromRow", () => {
 
     expect(corteMesBandFromWorkOrderRow(row, Date.now())?.workflow).toBe("entre_turnos")
   })
+
+  it("no muestra kg basura del espejo sin turnos MES", () => {
+    const row = {
+      id: 2,
+      code: "OT-2026-00001",
+      status: "open",
+      board_stage: "corte",
+      area_time_summary: {
+        effective_seconds: 10,
+        dead_seconds: 0,
+        open_segment_type: "production",
+        open_started_at: "2026-06-05T12:00:00.000Z",
+      },
+      technical_document: {
+        form: {
+          corEstadoArea: "abierta",
+          corAcumuladoProducidoKg: "342234675531",
+          cor_turnos: [],
+          corTurnoActual: null,
+        },
+      },
+    } as unknown as WorkOrderListRow
+
+    const mes = corteMesBandFromWorkOrderRow(row, Date.now())
+    expect(mes?.producidoKg).toBeUndefined()
+    expect(mes?.entradaKg).toBeUndefined()
+    expect(mes?.desperdicioKg).toBeUndefined()
+  })
+
+  it("producido acumulado desde métricas de turno cerrado", () => {
+    const row = {
+      id: 3,
+      code: "OT-3",
+      status: "open",
+      board_stage: "corte",
+      technical_document: {
+        form: {
+          corEstadoArea: "abierta",
+          cor_turnos: [
+            {
+              id: "t-1",
+              turno: "diurno",
+              grupo: "A",
+              operador: "Op",
+              closed_at: "2026-06-05T12:00:00.000Z",
+              metrics: {
+                salida_total_kg: "125.50",
+                entrada_bobinas_kg: "200.00",
+                scrap_total_kg: "4.25",
+              },
+              timer: { state: "stopped", effectiveAccSec: 90, deadAccSec: 0 },
+            },
+          ],
+          corTurnoActual: null,
+        },
+      },
+    } as unknown as WorkOrderListRow
+
+    const mes = corteMesBandFromWorkOrderRow(row, Date.now())
+    expect(mes?.producidoKg).toBe(125.5)
+    expect(mes?.entradaKg).toBe(200)
+    expect(mes?.desperdicioKg).toBe(4.25)
+  })
 })

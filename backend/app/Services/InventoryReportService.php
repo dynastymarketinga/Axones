@@ -2633,16 +2633,13 @@ class InventoryReportService
                 continue;
             }
 
-            $productLabel = trim(implode(' — ', array_filter([
-                trim((string) ($row->product_name ?? '')),
-                trim((string) ($row->product_structure ?? '')),
-            ], fn (string $v): bool => $v !== '')));
+            $productStructure = trim((string) ($row->product_structure ?? ''));
 
             $materialNames = $this->resolvePlanillaMaterialNames($form);
             $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm(
                 $form,
                 $materialNames,
-                $productLabel !== '' ? $productLabel : null,
+                $productStructure !== '' ? $productStructure : null,
             );
 
             $totals['impreso_kg'] += $impKg;

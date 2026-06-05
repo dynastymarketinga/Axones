@@ -146,10 +146,11 @@ import {
   areaHasMesTimerColumn,
   mesAreaDisplayName,
   mesBandFromWorkOrderRow,
+  mesBandejaDevolucionesFromWorkOrderRow,
   MES_CONTROL_SAVED_EVENTS,
   type MesBandejaAreaKey,
 } from "@/lib/area-mes-band-helpers"
-import { printingDevolucionesFromWorkOrderRow, mesBandejaDevolucionesTotalsFromSnapshots } from "@/lib/printing-mes-band-devoluciones"
+import { mesBandejaDevolucionesTotalsFromSnapshots } from "@/lib/printing-mes-band-devoluciones"
 import {
   areaShowsMesKgBreakdownColumns,
   MES_BANDEJA_INDEX_COLUMN_COUNT,
@@ -855,14 +856,16 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
   const activasDevolucionesTotals = useMemo(() => {
     if (!showKgBreakdown || activasTableRows.length === 0) return null
     return mesBandejaDevolucionesTotalsFromSnapshots(
-      activasTableRows.map((o) => printingDevolucionesFromWorkOrderRow(o)),
+      activasTableRows.map((o) =>
+        mesBandejaDevolucionesFromWorkOrderRow(area as MesBandejaAreaKey, o),
+      ),
     )
   }, [showKgBreakdown, activasTableRows])
 
   const historialDevolucionesTotals = useMemo(() => {
     if (!showKgBreakdown || !rows?.data.length) return null
     return mesBandejaDevolucionesTotalsFromSnapshots(
-      rows.data.map((o) => printingDevolucionesFromWorkOrderRow(o)),
+      rows.data.map((o) => mesBandejaDevolucionesFromWorkOrderRow(area as MesBandejaAreaKey, o)),
     )
   }, [showKgBreakdown, rows])
 
@@ -1509,7 +1512,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                     const planillaPreviewEnabled = canOpenPlanillaPreviewForArea(area, planillaPreviewForm)
                     const rowNumber = mesBandejaRowNumber(page, rows?.per_page ?? perPage, idx)
                     const bobinasDevoluciones = showKgBreakdown
-                      ? printingDevolucionesFromWorkOrderRow(o)
+                      ? mesBandejaDevolucionesFromWorkOrderRow(area as MesBandejaAreaKey, o)
                       : null
                     const bobinasExpanded = expandedBobinasOtId === o.id
                     return (
@@ -1694,7 +1697,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                     const planillaPreviewEnabled = canOpenPlanillaPreviewForArea(area, planillaPreviewForm)
                     const rowNumber = mesBandejaRowNumber(page, rows?.per_page ?? perPage, idx)
                     const bobinasDevoluciones = showKgBreakdown
-                      ? printingDevolucionesFromWorkOrderRow(o)
+                      ? mesBandejaDevolucionesFromWorkOrderRow(area as MesBandejaAreaKey, o)
                       : null
                     const bobinasExpanded = expandedBobinasOtId === o.id
                     return (

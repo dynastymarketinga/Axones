@@ -8,6 +8,7 @@ import {
   parseMesPhaseFieldsFromRecord,
   type MesPhaseTimerFields,
 } from "@/lib/mes-phase-timer-fields"
+import { parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 import { deadAccSecAfterResume } from "@/lib/mes-timer-band-shared"
 
 import { getMetaSeries } from "./laminacion-turnos"
@@ -209,7 +210,7 @@ export function isCorPaletaCerrada(p: CorPaleta): boolean {
 export function sumSalidaKgFromPaletas(paletas: CorPaleta[]): number {
   return paletas
     .flatMap((p) => p.rollosKg)
-    .reduce((acc, v) => acc + readNumber(v), 0)
+    .reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
 }
 
 export function sumSalidaKgFromClosedPaletas(paletas: CorPaleta[]): number {
@@ -237,12 +238,38 @@ export function sumSalidaKgFromForm(form: Record<string, unknown>): number {
 export function sumEntradaKgFromForm(form: Record<string, unknown>): number {
   const raw = form.corEntradaBobinasKg
   if (!Array.isArray(raw)) return 0
-  return raw.reduce((acc, v) => acc + readNumber(v), 0)
+  return raw.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
+}
+
+function sumScrapKgFromForm(form: Record<string, unknown>): number {
+  return (
+    parseBobinaKgSlotNumber(form.corScrapRefileKg) +
+    parseBobinaKgSlotNumber(form.corScrapImpresoKg) +
+    parseBobinaKgSlotNumber(form.corScrapMalCorteKg)
+  )
 }
 
 export function sumSalidaKgFromClosedTurno(t: CorteTurnoEntry): number {
-  if (t.metrics?.salida_total_kg) return readNumber(t.metrics.salida_total_kg)
+  if (t.metrics?.salida_total_kg) return parseBobinaKgSlotNumber(t.metrics.salida_total_kg)
   return sumSalidaKgFromPaletas(t.paletas)
+}
+
+/** Totales operativos del turno (paridad con `turnoProduccionTotals` de impresión). */
+export function corteTurnoProduccionTotals(
+  t: CorteTurnoEntry,
+  formFallback?: Record<string, unknown> | null,
+): { salidaKg: number; entradaKg: number; scrapKg: number } {
+  if (t.metrics) {
+    return {
+      salidaKg: parseBobinaKgSlotNumber(t.metrics.salida_total_kg),
+      entradaKg: parseBobinaKgSlotNumber(t.metrics.entrada_bobinas_kg),
+      scrapKg: parseBobinaKgSlotNumber(t.metrics.scrap_total_kg),
+    }
+  }
+  const salidaKg = sumSalidaKgFromPaletas(t.paletas)
+  const entradaKg = t.entradaBobinasKg.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
+  const scrapKg = !t.closed_at && formFallback ? sumScrapKgFromForm(formFallback) : parseBobinaKgSlotNumber(t.kgMerma)
+  return { salidaKg, entradaKg, scrapKg }
 }
 
 export function newCorteTurnoId(): string {
@@ -863,51 +890,26 @@ export type JsonAccumulatedCorte = {
   ultimoCierreLabel: string
 }
 
-function sumEntradaKgFromClosedTurno(t: CorteTurnoEntry): number {
-  const fromMetrics = readNumber(t.metrics?.entrada_bobinas_kg)
-  if (fromMetrics > 0) return fromMetrics
-  const fromKg = readNumber(t.kgIngresados)
-  if (fromKg > 0) return fromKg
-  return t.entradaBobinasKg.reduce((acc, v) => acc + readNumber(v), 0)
-}
-
-function sumScrapKgFromClosedTurno(t: CorteTurnoEntry): number {
-  const fromMetrics = readNumber(t.metrics?.scrap_total_kg)
-  if (fromMetrics > 0) return fromMetrics
-  return readNumber(t.kgMerma)
-}
-
-function sumScrapKgFromForm(form: Record<string, unknown>): number {
-  return (
-    readNumber(form.corScrapRefileKg) +
-    readNumber(form.corScrapImpresoKg) +
-    readNumber(form.corScrapMalCorteKg)
-  )
-}
-
 export function accumulateCorteFromJson(
   cerrados: CorteTurnoEntry[],
   actual: CorteTurnoEntry | null,
   formSalidaActual?: number,
-  form?: Record<string, unknown> | null,
+  formFallback?: Record<string, unknown> | null,
 ): JsonAccumulatedCorte {
   let producidoKg = 0
   let entradaKg = 0
   let scrapKg = 0
   for (const t of cerrados) {
-    producidoKg += sumSalidaKgFromClosedTurno(t)
-    entradaKg += sumEntradaKgFromClosedTurno(t)
-    scrapKg += sumScrapKgFromClosedTurno(t)
+    const tot = corteTurnoProduccionTotals(t)
+    producidoKg += tot.salidaKg
+    entradaKg += tot.entradaKg
+    scrapKg += tot.scrapKg
   }
   if (actual) {
-    producidoKg += formSalidaActual ?? sumSalidaKgFromPaletas(actual.paletas)
-    if (form) {
-      entradaKg += sumEntradaKgFromForm(form)
-      scrapKg += sumScrapKgFromForm(form)
-    } else {
-      entradaKg += sumEntradaKgFromClosedTurno(actual)
-      scrapKg += sumScrapKgFromClosedTurno(actual)
-    }
+    const tot = corteTurnoProduccionTotals(actual, formFallback)
+    producidoKg += formSalidaActual ?? tot.salidaKg
+    entradaKg += tot.entradaKg
+    scrapKg += tot.scrapKg
   }
 
   const ultimo = [...cerrados].sort((a, b) =>

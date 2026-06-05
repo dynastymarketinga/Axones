@@ -143,4 +143,40 @@ class WorkOrderProductionControlsAggregatorTest extends TestCase
         $this->assertSame(50.0, $breakdown['impreso'][0]['kg']);
         $this->assertSame(2, $breakdown['impreso'][0]['bobinas']);
     }
+
+    public function test_material_salida_breakdown_corte_uses_area_sustrato_not_product_name(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'corDesperdicioSustrato' => 'bopp',
+            'cor_paletas' => [[
+                'id' => 'p1',
+                'rollosKg' => ['12', '8'],
+            ]],
+            'kgSalidaCorte' => '20.00',
+        ], [], 'dsfsfd — dfgdgd');
+
+        $this->assertCount(1, $breakdown['cortado']);
+        $this->assertSame('BOPP', $breakdown['cortado'][0]['label']);
+        $this->assertSame(20.0, $breakdown['cortado'][0]['kg']);
+        $this->assertSame(2, $breakdown['cortado'][0]['bobinas']);
+    }
+
+    public function test_material_salida_breakdown_corte_falls_back_to_impreso_referencia(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'impTurnosImpresion' => [[
+                'salidaBobinasKg' => ['100'],
+                'salidaBobinasMeta' => [
+                    ['referencia' => 'Polietileno transparente', 'proveedor' => ''],
+                ],
+            ]],
+            'cor_paletas' => [[
+                'id' => 'p1',
+                'rollosKg' => ['15'],
+            ]],
+            'kgSalidaCorte' => '15.00',
+        ]);
+
+        $this->assertSame('Polietileno transparente', $breakdown['cortado'][0]['label']);
+    }
 }

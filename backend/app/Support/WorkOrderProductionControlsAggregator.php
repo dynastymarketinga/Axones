@@ -52,20 +52,17 @@ final class WorkOrderProductionControlsAggregator
     public static function materialSalidaBreakdownFromForm(
         ?array $form,
         array $materialNames = [],
-        ?string $productLabel = null,
+        ?string $productStructure = null,
     ): array {
-        $impresoFallback = self::planillaSustratoLabels($form, 'impresion', $materialNames);
-        $lamFallback = self::planillaSustratoLabels($form, 'laminacion', $materialNames);
-
         return [
             'impreso' => self::formatBreakdownBuckets(
-                self::breakdownPrintingSalidaBuckets($form, $impresoFallback),
+                self::breakdownPrintingSalidaBuckets($form, $materialNames, $productStructure),
             ),
             'laminado' => self::formatBreakdownBuckets(
-                self::breakdownLaminacionSalidaBuckets($form, $lamFallback),
+                self::breakdownLaminacionSalidaBuckets($form, $materialNames, $productStructure),
             ),
             'cortado' => self::formatBreakdownBuckets(
-                self::breakdownCorteSalidaBuckets($form, $productLabel),
+                self::breakdownCorteSalidaBuckets($form, $materialNames, $productStructure),
             ),
         ];
     }
@@ -531,17 +528,20 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
-     * @param  list<string>  $fallbackLabels
+     * @param  array<int, string>  $materialNames
      * @return array<string, array{kg: float, bobinas: int}>
      */
-    private static function breakdownPrintingSalidaBuckets(?array $form, array $fallbackLabels): array
-    {
+    private static function breakdownPrintingSalidaBuckets(
+        ?array $form,
+        array $materialNames,
+        ?string $productStructure,
+    ): array {
         $buckets = [];
         if ($form === null) {
             return $buckets;
         }
 
-        $defaultLabel = $fallbackLabels[0] ?? 'Bobina impresa (sin referencia)';
+        $defaultLabel = self::resolveDefaultMaterialLabel($form, $materialNames, $productStructure, 'impreso');
 
         foreach (self::printingTurns($form) as $turn) {
             foreach ((array) ($turn['capturas'] ?? []) as $cap) {
@@ -574,17 +574,20 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
-     * @param  list<string>  $fallbackLabels
+     * @param  array<int, string>  $materialNames
      * @return array<string, array{kg: float, bobinas: int}>
      */
-    private static function breakdownLaminacionSalidaBuckets(?array $form, array $fallbackLabels): array
-    {
+    private static function breakdownLaminacionSalidaBuckets(
+        ?array $form,
+        array $materialNames,
+        ?string $productStructure,
+    ): array {
         $buckets = [];
         if ($form === null) {
             return $buckets;
         }
 
-        $defaultLabel = $fallbackLabels[0] ?? 'Bobina laminada (sin referencia)';
+        $defaultLabel = self::resolveDefaultMaterialLabel($form, $materialNames, $productStructure, 'laminacion');
 
         foreach (self::laminacionTurns($form) as $turn) {
             self::accumulateSalidaBuckets(
@@ -606,10 +609,14 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
+     * @param  array<int, string>  $materialNames
      * @return array<string, array{kg: float, bobinas: int}>
      */
-    private static function breakdownCorteSalidaBuckets(?array $form, ?string $productLabel): array
-    {
+    private static function breakdownCorteSalidaBuckets(
+        ?array $form,
+        array $materialNames,
+        ?string $productStructure,
+    ): array {
         if ($form === null) {
             return [];
         }
@@ -619,10 +626,8 @@ final class WorkOrderProductionControlsAggregator
             return [];
         }
 
-        $labels = self::corteEntradaLabels($form, $productLabel);
-        $label = $labels[0] ?? ($productLabel !== null && trim($productLabel) !== ''
-            ? trim($productLabel)
-            : 'Material cortado (rollos / paletas)');
+        $labels = self::resolveAreaMaterialLabels($form, $materialNames, $productStructure);
+        $label = $labels[0] ?? 'Material cortado (rollos / paletas)';
 
         return [
             $label => [
@@ -748,14 +753,114 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
+     * Etiquetas de material/sustrato desde datos de áreas en la planilla OT.
+     *
      * @param  array<string, mixed>  $form
+     * @param  array<int, string>  $materialNames
      * @return list<string>
      */
-    private static function corteEntradaLabels(array $form, ?string $productLabel): array
-    {
+    private static function resolveAreaMaterialLabels(
+        array $form,
+        array $materialNames,
+        ?string $productStructure,
+    ): array {
         $labels = [];
 
-        foreach ((array) ($form['corEntradaBobinasMeta'] ?? []) as $meta) {
+        self::appendMetaLabels($labels, (array) ($form['corEntradaBobinasMeta'] ?? []));
+
+        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
+            if (! is_array($turn)) {
+                continue;
+            }
+            self::appendMetaLabels($labels, (array) ($turn['entradaBobinasMeta'] ?? []));
+        }
+
+        $actual = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
+        if (is_array($actual)) {
+            self::appendMetaLabels($labels, (array) ($actual['entradaBobinasMeta'] ?? []));
+        }
+
+        foreach (self::printingTurns($form) as $turn) {
+            foreach ((array) ($turn['capturas'] ?? []) as $cap) {
+                if (! is_array($cap)) {
+                    continue;
+                }
+                self::appendMetaLabels($labels, (array) ($cap['salidaBobinasMeta'] ?? []));
+            }
+            self::appendMetaLabels($labels, (array) ($turn['salidaBobinasMeta'] ?? []));
+            self::appendMetaLabels($labels, (array) ($turn['entradaBobinasMeta'] ?? []));
+        }
+        self::appendMetaLabels($labels, (array) ($form['impSalidaBobinasMeta'] ?? []));
+        self::appendMetaLabels($labels, (array) ($form['impEntradaBobinasMeta'] ?? []));
+
+        foreach (self::laminacionTurns($form) as $turn) {
+            self::appendMetaLabels($labels, (array) ($turn['salidaBobinasMeta'] ?? []));
+            self::appendMetaLabels($labels, (array) ($turn['entradaVirgenBobinasMeta'] ?? []));
+        }
+        self::appendMetaLabels($labels, (array) ($form['lamSalidaBobinasMeta'] ?? []));
+
+        foreach (self::planillaSustratoLabels($form, 'impresion', $materialNames) as $label) {
+            $labels[] = $label;
+        }
+        foreach (self::planillaSustratoLabels($form, 'laminacion', $materialNames) as $label) {
+            $labels[] = $label;
+        }
+
+        $substrate = trim((string) ($form['corDesperdicioSustrato'] ?? ''));
+        if ($substrate !== '') {
+            $labels[] = ScrapSubstrateCatalog::labelFor(ScrapSubstrateCatalog::normalizeGroupId($substrate));
+        }
+
+        foreach (self::structureInferenceLabels($productStructure) as $label) {
+            $labels[] = $label;
+        }
+
+        return array_values(array_unique(array_filter($labels, fn (string $l): bool => $l !== '')));
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $form
+     * @param  array<int, string>  $materialNames
+     */
+    private static function resolveDefaultMaterialLabel(
+        ?array $form,
+        array $materialNames,
+        ?string $productStructure,
+        string $area,
+    ): string {
+        if ($form !== null) {
+            $labels = self::resolveAreaMaterialLabels($form, $materialNames, $productStructure);
+            if ($labels !== []) {
+                return $labels[0];
+            }
+
+            $planilla = self::planillaSustratoLabels(
+                $form,
+                $area === 'laminacion' ? 'laminacion' : 'impresion',
+                $materialNames,
+            );
+            if ($planilla !== []) {
+                return $planilla[0];
+            }
+        }
+
+        $inferred = self::structureInferenceLabels($productStructure);
+        if ($inferred !== []) {
+            return $inferred[0];
+        }
+
+        return $area === 'laminacion'
+            ? 'Bobina laminada (sin referencia)'
+            : 'Bobina impresa (sin referencia)';
+    }
+
+    /**
+     * @param  array<int|string, mixed>  $metas
+     * @param  list<string>  $labels
+     */
+    private static function appendMetaLabels(array &$labels, array $metas): void
+    {
+        foreach ($metas as $meta) {
             if (! is_array($meta)) {
                 continue;
             }
@@ -764,51 +869,19 @@ final class WorkOrderProductionControlsAggregator
                 $labels[] = $label;
             }
         }
+    }
 
-        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
-            if (! is_array($turn)) {
-                continue;
-            }
-            foreach ((array) ($turn['entradaBobinasMeta'] ?? []) as $meta) {
-                if (! is_array($meta)) {
-                    continue;
-                }
-                $label = self::bobinaMetaLabel($meta, '');
-                if ($label !== '') {
-                    $labels[] = $label;
-                }
-            }
+    /**
+     * @return list<string>
+     */
+    private static function structureInferenceLabels(?string $productStructure): array
+    {
+        $matched = ScrapSubstrateCatalog::structureMatchedGroupIds($productStructure);
+        if (count($matched) !== 1) {
+            return [];
         }
 
-        $actual = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
-        if (is_array($actual)) {
-            foreach ((array) ($actual['entradaBobinasMeta'] ?? []) as $meta) {
-                if (! is_array($meta)) {
-                    continue;
-                }
-                $label = self::bobinaMetaLabel($meta, '');
-                if ($label !== '') {
-                    $labels[] = $label;
-                }
-            }
-        }
-
-        $substrate = trim((string) ($form['corDesperdicioSustrato'] ?? ''));
-        if ($substrate !== '') {
-            $group = ScrapSubstrateCatalog::normalizeGroupId($substrate);
-            foreach (ScrapSubstrateCatalog::groups() as $cfg) {
-                if ($cfg['id'] === $group) {
-                    $labels[] = (string) $cfg['label'];
-                    break;
-                }
-            }
-        }
-
-        if ($productLabel !== null && trim($productLabel) !== '') {
-            $labels[] = trim($productLabel);
-        }
-
-        return array_values(array_unique(array_filter($labels, fn (string $l): bool => $l !== '')));
+        return [ScrapSubstrateCatalog::labelFor($matched[0])];
     }
 
     /**

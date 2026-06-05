@@ -423,6 +423,8 @@ export default function PurchaseReceiptNewPage() {
   /** Si coincide con `purchaseOrderId`, no reemplazar `freeLines` con la hidratación de la API (p. ej. tras restaurar borrador). */
   const skipRemoteFreeLinesForPurchaseOrderRef = useRef<number | null>(null)
   const pendingRestoredFreeLinesRef = useRef<FreeLine[] | null>(null)
+  /** Catálogo actual sin re-disparar la hidratación de líneas OC al refrescar materiales. */
+  const materialsRef = useRef(materials)
   const [purchaseOrderOptions, setPurchaseOrderOptions] = useState<PurchaseOrderRow[]>([])
   const [poListLoading, setPoListLoading] = useState(false)
   const [purchaseOrderId, setPurchaseOrderId] = useState<number | null>(null)
@@ -434,6 +436,10 @@ export default function PurchaseReceiptNewPage() {
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateReceiptMatch[]>([])
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null)
+
+  useEffect(() => {
+    materialsRef.current = materials
+  }, [materials])
 
   useEffect(() => {
     let c = false
@@ -550,7 +556,7 @@ export default function PurchaseReceiptNewPage() {
         const limited = eligible.slice(0, MAX_RECEIPT_LINES)
         const poSupplierName = d.supplier?.name ?? null
         const nextLines: FreeLine[] = limited.map((pol) =>
-          buildFreeLineFromPurchaseOrderLine(pol, materials, poSupplierName),
+          buildFreeLineFromPurchaseOrderLine(pol, materialsRef.current, poSupplierName),
         )
         if (skipRemoteFreeLinesForPurchaseOrderRef.current === purchaseOrderId) {
           if (pendingRestoredFreeLinesRef.current) {
@@ -579,7 +585,8 @@ export default function PurchaseReceiptNewPage() {
     return () => {
       cancelled = true
     }
-  }, [purchaseOrderId, supplierId, materials])
+    // materials se lee vía materialsRef: refrescar catálogo no debe reemplazar filas ya editadas.
+  }, [purchaseOrderId, supplierId])
 
   useEffect(() => {
     const proveedorRaw = searchParams.get("proveedor")

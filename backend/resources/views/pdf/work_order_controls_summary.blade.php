@@ -27,6 +27,7 @@
     </style>
 </head>
 @php
+    use App\Support\NumericDisplay;
     $fmtSec = function ($s) {
         $s = max(0, (int) ($s ?? 0));
         $h = intdiv($s, 3600);
@@ -34,6 +35,7 @@
         $sec = $s % 60;
         return sprintf('%02d:%02d:%02d', $h, $m, $sec);
     };
+    $fmtQty = fn ($v) => NumericDisplay::formatQuantity($v);
     $wo = $report['work_order'] ?? [];
     $times = $report['times'] ?? [];
     $timesByArea = $times['by_area'] ?? [];
@@ -64,11 +66,11 @@
         <tbody>
             <tr>
                 <td>Impresión — total entrada (suma controles)</td>
-                <td class="num">{{ $virgin['printing_total_entrada_kg'] ?? '0.000' }} kg</td>
+                <td class="num">{{ $fmtQty($virgin['printing_total_entrada_kg'] ?? 0) }} kg</td>
             </tr>
             <tr>
                 <td>Laminación — material virgen (suma controles)</td>
-                <td class="num">{{ $virgin['laminacion_total_virgen_kg'] ?? '0.000' }} kg</td>
+                <td class="num">{{ $fmtQty($virgin['laminacion_total_virgen_kg'] ?? 0) }} kg</td>
             </tr>
         </tbody>
     </table>
@@ -88,11 +90,11 @@
             </tr>
             <tr>
                 <td>Impreso — peso total salida</td>
-                <td class="num">{{ $listo['impreso']['peso_total_kg'] ?? '0.000' }} kg</td>
+                <td class="num">{{ $fmtQty($listo['impreso']['peso_total_kg'] ?? 0) }} kg</td>
             </tr>
             <tr>
                 <td>Laminado — peso total salida</td>
-                <td class="num">{{ $listo['laminado']['peso_total_salida_kg'] ?? '0.000' }} kg</td>
+                <td class="num">{{ $fmtQty($listo['laminado']['peso_total_salida_kg'] ?? 0) }} kg</td>
             </tr>
             <tr>
                 <td>Laminado — Nº bobinas</td>
@@ -100,15 +102,15 @@
             </tr>
             <tr>
                 <td>Corte — kg salida (suma controles)</td>
-                <td class="num">{{ $listo['corte_kg_salida'] ?? '0.000' }} kg</td>
+                <td class="num">{{ $fmtQty($listo['corte_kg_salida'] ?? 0) }} kg</td>
             </tr>
             <tr>
                 <td><strong>Total listo para despachar (solo corte)</strong></td>
-                <td class="num"><strong>{{ $listo['total_listo_despacho_kg'] ?? '0.000' }} kg</strong></td>
+                <td class="num"><strong>{{ $fmtQty($listo['total_listo_despacho_kg'] ?? 0) }} kg</strong></td>
             </tr>
             <tr>
                 <td><strong>Resumen general (impreso + laminado + corte)</strong></td>
-                <td class="num"><strong>{{ $listo['total_general_kg'] ?? '0.000' }} kg</strong></td>
+                <td class="num"><strong>{{ $fmtQty($listo['total_general_kg'] ?? 0) }} kg</strong></td>
             </tr>
         </tbody>
     </table>
@@ -126,23 +128,23 @@
             <tr>
                 <td>Impresión</td>
                 <td>Transparente / Impreso</td>
-                <td class="num">{{ $scrap['printing']['transparente_kg'] ?? '0.000' }} / {{ $scrap['printing']['impreso_kg'] ?? '0.000' }}</td>
+                <td class="num">{{ $fmtQty($scrap['printing']['transparente_kg'] ?? 0) }} / {{ $fmtQty($scrap['printing']['impreso_kg'] ?? 0) }}</td>
             </tr>
             <tr>
                 <td>Laminación</td>
                 <td>Transparente / Impreso / Laminado</td>
-                <td class="num">{{ $scrap['laminacion']['transparente_kg'] ?? '0.000' }} / {{ $scrap['laminacion']['impreso_kg'] ?? '0.000' }} / {{ $scrap['laminacion']['laminado_kg'] ?? '0.000' }}</td>
+                <td class="num">{{ $fmtQty($scrap['laminacion']['transparente_kg'] ?? 0) }} / {{ $fmtQty($scrap['laminacion']['impreso_kg'] ?? 0) }} / {{ $fmtQty($scrap['laminacion']['laminado_kg'] ?? 0) }}</td>
             </tr>
             <tr>
                 <td>Corte</td>
                 <td>Refile / Impreso / Mal corte</td>
-                <td class="num">{{ $scrap['corte']['refile_kg'] ?? '0.000' }} / {{ $scrap['corte']['impreso_kg'] ?? '0.000' }} / {{ $scrap['corte']['mal_corte_kg'] ?? '0.000' }}</td>
+                <td class="num">{{ $fmtQty($scrap['corte']['refile_kg'] ?? 0) }} / {{ $fmtQty($scrap['corte']['impreso_kg'] ?? 0) }} / {{ $fmtQty($scrap['corte']['mal_corte_kg'] ?? 0) }}</td>
             </tr>
         </tbody>
         <tfoot>
             <tr>
                 <td colspan="2">Total desperdicio</td>
-                <td class="num">{{ $scrap['grand_total_kg'] ?? '0.000' }} kg</td>
+                <td class="num">{{ $fmtQty($scrap['grand_total_kg'] ?? 0) }} kg</td>
             </tr>
         </tfoot>
     </table>
@@ -164,7 +166,7 @@
                         <td>{{ $row['sticky_back'] ?? '—' }}</td>
                         <td>{{ $row['codigo'] ?? '—' }}</td>
                         <td>{{ $row['color'] ?? '—' }}</td>
-                        <td class="num">{{ $row['cantidad'] ?? '—' }}</td>
+                        <td class="num">{{ $row['cantidad'] !== null && $row['cantidad'] !== '' && $row['cantidad'] !== '—' ? $fmtQty($row['cantidad']) : '—' }}</td>
                     </tr>
                 @endforeach
             </tbody>
@@ -176,21 +178,21 @@
     <h2>Total tintas usadas</h2>
     <table>
         <tbody>
-            <tr><td>Total original</td><td class="num">{{ $tintas['total_original_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>Total solventadas</td><td class="num">{{ $tintas['total_solventadas_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>Total consumo neto</td><td class="num">{{ $tintas['total_consumed_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>Alcohol</td><td class="num">{{ $tintas['alcohol_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>Metoxil</td><td class="num">{{ $tintas['metoxil_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>NPA</td><td class="num">{{ $tintas['npa_kg'] ?? '0.000' }} kg</td></tr>
+            <tr><td>Total original</td><td class="num">{{ $fmtQty($tintas['total_original_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>Total solventadas</td><td class="num">{{ $fmtQty($tintas['total_solventadas_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>Total consumo neto</td><td class="num">{{ $fmtQty($tintas['total_consumed_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>Alcohol</td><td class="num">{{ $fmtQty($tintas['alcohol_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>Metoxil</td><td class="num">{{ $fmtQty($tintas['metoxil_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>NPA</td><td class="num">{{ $fmtQty($tintas['npa_kg'] ?? 0) }} kg</td></tr>
         </tbody>
     </table>
 
     <h2>Consumibles químicos — laminación</h2>
     <table>
         <tbody>
-            <tr><td>Adhesivo consumido</td><td class="num">{{ $lamQ['adhesivo_consumido_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>Catalizador consumido</td><td class="num">{{ $lamQ['catalizador_consumido_kg'] ?? '0.000' }} kg</td></tr>
-            <tr><td>Acetato consumido</td><td class="num">{{ $lamQ['acetato_consumido_lt'] ?? '0.000' }} Lt</td></tr>
+            <tr><td>Adhesivo consumido</td><td class="num">{{ $fmtQty($lamQ['adhesivo_consumido_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>Catalizador consumido</td><td class="num">{{ $fmtQty($lamQ['catalizador_consumido_kg'] ?? 0) }} kg</td></tr>
+            <tr><td>Acetato consumido</td><td class="num">{{ $fmtQty($lamQ['acetato_consumido_lt'] ?? 0) }} Lt</td></tr>
         </tbody>
     </table>
 
@@ -263,8 +265,8 @@
                         <tr>
                             <td>{{ $row['sku'] ?? '—' }}</td>
                             <td>{{ $row['name'] ?? '—' }}</td>
-                            <td class="num">{{ $row['quantity_used_kg'] ?? '0.000' }}</td>
-                            <td class="num">{{ $row['quantity_finished_kg'] ?? '0.000' }}</td>
+                            <td class="num">{{ $fmtQty($row['quantity_used_kg'] ?? 0) }}</td>
+                            <td class="num">{{ $fmtQty($row['quantity_finished_kg'] ?? 0) }}</td>
                             <td>{{ $row['bobina_id'] ?? '—' }}</td>
                         </tr>
                     @endforeach
@@ -293,10 +295,10 @@
                             <tr>
                                 <td>{{ $row['sku'] ?? '—' }}</td>
                                 <td>{{ $row['name'] ?? '—' }}</td>
-                                <td class="num">{{ $row['quantity_original_kg'] ?? '0.000' }}</td>
-                                <td class="num">{{ $row['quantity_solventada_kg'] ?? '0.000' }}</td>
-                                <td class="num">{{ $row['quantity_return_kg'] ?? '0.000' }}</td>
-                                <td class="num">{{ $row['quantity_consumed_kg'] ?? '0.000' }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_original_kg'] ?? 0) }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_solventada_kg'] ?? 0) }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_return_kg'] ?? 0) }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_consumed_kg'] ?? 0) }}</td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -320,9 +322,9 @@
                         @foreach($block['chemical_usages'] as $row)
                             <tr>
                                 <td>{{ ucfirst($row['chemical_type'] ?? '') }}</td>
-                                <td class="num">{{ $row['quantity_loaded_kg'] ?? '0.000' }}</td>
-                                <td class="num">{{ $row['quantity_return_kg'] ?? '0.000' }}</td>
-                                <td class="num">{{ $row['quantity_consumed_kg'] ?? '0.000' }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_loaded_kg'] ?? 0) }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_return_kg'] ?? 0) }}</td>
+                                <td class="num">{{ $fmtQty($row['quantity_consumed_kg'] ?? 0) }}</td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -338,7 +340,7 @@
                 <tbody>
                     <tr>
                         <td>Cantidad (kg)</td>
-                        <td class="num">{{ $block['solvent_quantity_kg'] ?? '0.000' }}</td>
+                        <td class="num">{{ $fmtQty($block['solvent_quantity_kg'] ?? 0) }}</td>
                     </tr>
                     @if(! empty($block['solvent_notes']))
                         <tr>

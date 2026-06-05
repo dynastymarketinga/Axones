@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { ApiError, apiDownloadFile, apiFetch } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 
 import {
   formatDurationHms,
@@ -138,6 +139,18 @@ type ControlsSummaryPayload = {
 }
 
 const CONTROL_AREA_ORDER = ["printing", "laminacion", "corte"] as const
+
+function fmtQty(value: string | number | null | undefined): string {
+  return formatQuantityDisplay(value) || "0"
+}
+
+function fmtKg(value: string | number | null | undefined): string {
+  return `${fmtQty(value)} kg`
+}
+
+function fmtLt(value: string | number | null | undefined): string {
+  return `${fmtQty(value)} Lt`
+}
 
 function parseKgNum(raw: string | undefined): number {
   const n = Number.parseFloat(String(raw ?? "0").replace(",", "."))
@@ -368,11 +381,11 @@ export default function ReportsWorkOrderSummaryPage() {
                 <CardContent className="grid gap-3 sm:grid-cols-2">
                   <SummaryMetric
                     label="Impresión — total entrada"
-                    value={`${ps?.virgin_material?.printing_total_entrada_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.virgin_material?.printing_total_entrada_kg)}
                   />
                   <SummaryMetric
                     label="Laminación — material virgen"
-                    value={`${ps?.virgin_material?.laminacion_total_virgen_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.virgin_material?.laminacion_total_virgen_kg)}
                   />
                 </CardContent>
               </Card>
@@ -388,11 +401,11 @@ export default function ReportsWorkOrderSummaryPage() {
                   />
                   <SummaryMetric
                     label="Impreso — peso total"
-                    value={`${ps?.material_listo?.impreso?.peso_total_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.material_listo?.impreso?.peso_total_kg)}
                   />
                   <SummaryMetric
                     label="Laminado — peso total salida"
-                    value={`${ps?.material_listo?.laminado?.peso_total_salida_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.material_listo?.laminado?.peso_total_salida_kg)}
                   />
                   <SummaryMetric
                     label="Laminado — Nº bobinas"
@@ -400,15 +413,15 @@ export default function ReportsWorkOrderSummaryPage() {
                   />
                   <SummaryMetric
                     label="Corte — kg salida"
-                    value={`${ps?.material_listo?.corte_kg_salida ?? "0.000"} kg`}
+                    value={fmtKg(ps?.material_listo?.corte_kg_salida)}
                   />
                   <SummaryMetric
                     label="Listo para despachar (solo corte)"
-                    value={`${ps?.material_listo?.total_listo_despacho_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.material_listo?.total_listo_despacho_kg)}
                   />
                   <SummaryMetric
                     label="Resumen general (imp. + lam. + corte)"
-                    value={`${ps?.material_listo?.total_general_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.material_listo?.total_general_kg)}
                   />
                 </CardContent>
               </Card>
@@ -421,21 +434,21 @@ export default function ReportsWorkOrderSummaryPage() {
                   <div className="grid gap-3 sm:grid-cols-3">
                     <SummaryMetric
                       label="Impresión (transp. / impreso)"
-                      value={`${ps?.scrap?.printing?.transparente_kg ?? "0.000"} / ${ps?.scrap?.printing?.impreso_kg ?? "0.000"} kg`}
+                      value={`${fmtQty(ps?.scrap?.printing?.transparente_kg)} / ${fmtQty(ps?.scrap?.printing?.impreso_kg)} kg`}
                     />
                     <SummaryMetric
                       label="Laminación (T / I / L)"
-                      value={`${ps?.scrap?.laminacion?.transparente_kg ?? "0.000"} / ${ps?.scrap?.laminacion?.impreso_kg ?? "0.000"} / ${ps?.scrap?.laminacion?.laminado_kg ?? "0.000"} kg`}
+                      value={`${fmtQty(ps?.scrap?.laminacion?.transparente_kg)} / ${fmtQty(ps?.scrap?.laminacion?.impreso_kg)} / ${fmtQty(ps?.scrap?.laminacion?.laminado_kg)} kg`}
                     />
                     <SummaryMetric
                       label="Corte (refile / impreso / mal corte)"
-                      value={`${ps?.scrap?.corte?.refile_kg ?? "0.000"} / ${ps?.scrap?.corte?.impreso_kg ?? "0.000"} / ${ps?.scrap?.corte?.mal_corte_kg ?? "0.000"} kg`}
+                      value={`${fmtQty(ps?.scrap?.corte?.refile_kg)} / ${fmtQty(ps?.scrap?.corte?.impreso_kg)} / ${fmtQty(ps?.scrap?.corte?.mal_corte_kg)} kg`}
                     />
                   </div>
                   <p className="text-muted-foreground text-xs">
                     Total general:{" "}
                     <span className="text-foreground font-mono font-semibold">
-                      {ps?.scrap?.grand_total_kg ?? "0.000"} kg
+                      {fmtKg(ps?.scrap?.grand_total_kg)}
                     </span>
                   </p>
                 </CardContent>
@@ -449,11 +462,11 @@ export default function ReportsWorkOrderSummaryPage() {
                   <div className="grid gap-3 sm:grid-cols-2">
                     <SummaryMetric
                       label="Producción montaje (kg)"
-                      value={ps?.montaje_consumo?.total_produccion_kg ?? "0.000"}
+                      value={fmtQty(ps?.montaje_consumo?.total_produccion_kg)}
                     />
                     <SummaryMetric
                       label="Merma montaje (kg)"
-                      value={ps?.montaje_consumo?.total_merma_kg ?? "0.000"}
+                      value={fmtQty(ps?.montaje_consumo?.total_merma_kg)}
                     />
                   </div>
                   {(ps?.montaje_consumo?.lines?.length ?? 0) > 0 ? (
@@ -473,7 +486,7 @@ export default function ReportsWorkOrderSummaryPage() {
                             <TableCell>{row.codigo || "—"}</TableCell>
                             <TableCell>{row.color || "—"}</TableCell>
                             <TableCell className="text-right font-mono text-sm">
-                              {row.cantidad || "—"}
+                              {row.cantidad ? fmtQty(row.cantidad) : "—"}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -492,19 +505,19 @@ export default function ReportsWorkOrderSummaryPage() {
                 <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <SummaryMetric
                     label="Total original"
-                    value={`${ps?.tintas?.total_original_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.tintas?.total_original_kg)}
                   />
                   <SummaryMetric
                     label="Total solventadas"
-                    value={`${ps?.tintas?.total_solventadas_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.tintas?.total_solventadas_kg)}
                   />
                   <SummaryMetric
                     label="Consumo neto"
-                    value={`${ps?.tintas?.total_consumed_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.tintas?.total_consumed_kg)}
                   />
-                  <SummaryMetric label="Alcohol" value={`${ps?.tintas?.alcohol_kg ?? "0.000"} kg`} />
-                  <SummaryMetric label="Metoxil" value={`${ps?.tintas?.metoxil_kg ?? "0.000"} kg`} />
-                  <SummaryMetric label="NPA" value={`${ps?.tintas?.npa_kg ?? "0.000"} kg`} />
+                  <SummaryMetric label="Alcohol" value={fmtKg(ps?.tintas?.alcohol_kg)} />
+                  <SummaryMetric label="Metoxil" value={fmtKg(ps?.tintas?.metoxil_kg)} />
+                  <SummaryMetric label="NPA" value={fmtKg(ps?.tintas?.npa_kg)} />
                 </CardContent>
               </Card>
 
@@ -515,15 +528,15 @@ export default function ReportsWorkOrderSummaryPage() {
                 <CardContent className="grid gap-3 sm:grid-cols-3">
                   <SummaryMetric
                     label="Adhesivo consumido"
-                    value={`${ps?.laminacion_quimicos?.adhesivo_consumido_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.laminacion_quimicos?.adhesivo_consumido_kg)}
                   />
                   <SummaryMetric
                     label="Catalizador consumido"
-                    value={`${ps?.laminacion_quimicos?.catalizador_consumido_kg ?? "0.000"} kg`}
+                    value={fmtKg(ps?.laminacion_quimicos?.catalizador_consumido_kg)}
                   />
                   <SummaryMetric
                     label="Acetato consumido"
-                    value={`${ps?.laminacion_quimicos?.acetato_consumido_lt ?? "0.000"} Lt`}
+                    value={fmtLt(ps?.laminacion_quimicos?.acetato_consumido_lt)}
                   />
                 </CardContent>
               </Card>
@@ -626,10 +639,10 @@ export default function ReportsWorkOrderSummaryPage() {
                                     {row.name ?? "—"}
                                   </TableCell>
                                   <TableCell className="text-right font-mono text-sm">
-                                    {row.quantity_used_kg ?? "0.000"}
+                                    {fmtQty(row.quantity_used_kg)}
                                   </TableCell>
                                   <TableCell className="text-right font-mono text-sm">
-                                    {row.quantity_finished_kg ?? "0.000"}
+                                    {fmtQty(row.quantity_finished_kg)}
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -654,7 +667,7 @@ export default function ReportsWorkOrderSummaryPage() {
                                   <TableRow key={`ink-${i}`}>
                                     <TableCell>{row.name ?? row.sku ?? "—"}</TableCell>
                                     <TableCell className="text-right font-mono text-sm">
-                                      {row.quantity_consumed_kg ?? "0.000"}
+                                      {fmtQty(row.quantity_consumed_kg)}
                                     </TableCell>
                                   </TableRow>
                                 ))}
@@ -678,7 +691,7 @@ export default function ReportsWorkOrderSummaryPage() {
                                   <TableRow key={`chem-${i}`}>
                                     <TableCell className="capitalize">{row.chemical_type ?? "—"}</TableCell>
                                     <TableCell className="text-right font-mono text-sm">
-                                      {row.quantity_consumed_kg ?? "0.000"}
+                                      {fmtQty(row.quantity_consumed_kg)}
                                     </TableCell>
                                   </TableRow>
                                 ))}
@@ -691,7 +704,7 @@ export default function ReportsWorkOrderSummaryPage() {
                           <p className="text-muted-foreground text-xs">
                             Solvente:{" "}
                             <span className="text-foreground font-mono">
-                              {block.solvent_quantity_kg ?? "0.000"} kg
+                              {fmtKg(block.solvent_quantity_kg)}
                             </span>
                             {block.solvent_notes ? ` · ${block.solvent_notes}` : ""}
                           </p>

@@ -20,6 +20,7 @@ class WorkOrderOrdenTrabajoService
         private readonly CortePlanillaDispatchSyncService $cortePlanillaDispatchSync,
         private readonly MesTimerSegmentSyncService $mesTimerSegmentSync,
         private readonly MontajeTurnosSegmentSyncService $montajeTurnosSegmentSync,
+        private readonly CorteTurnosSegmentSyncService $corteTurnosSegmentSync,
     ) {}
 
     /**
@@ -140,6 +141,7 @@ class WorkOrderOrdenTrabajoService
 
         $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $form, $user);
         $this->montajeTurnosSegmentSync->syncClosedTurnosFromForm($workOrder, $form, $user);
+        $this->corteTurnosSegmentSync->syncClosedTurnosFromForm($workOrder, $form, $user);
 
         if ($this->shouldSyncCorteDispatch($form)) {
             $this->cortePlanillaDispatchSync->syncFromForm($workOrder->fresh(), $form);
@@ -281,6 +283,7 @@ class WorkOrderOrdenTrabajoService
         );
 
         $this->mesTimerSegmentSync->syncAfterFormSave($workOrder, $previousForm, $existing, $user, ['corte']);
+        $this->corteTurnosSegmentSync->syncClosedTurnosFromForm($workOrder, $existing, $user);
         $this->syncAreaRequestsAfterProductionFinalize($workOrder->fresh(), $existing);
         $this->cortePlanillaDispatchSync->syncFromForm($workOrder->fresh(), $existing);
 

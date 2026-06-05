@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Services\CorteTurnosSegmentSyncService;
 use App\Services\MontajeTurnosSegmentSyncService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,7 @@ final class ProductionTimeLiveAggregator
 
     public function __construct(
         private readonly MontajeTurnosSegmentSyncService $montajeTurnos,
+        private readonly CorteTurnosSegmentSyncService $corteTurnos,
     ) {}
 
     /**
@@ -31,14 +33,17 @@ final class ProductionTimeLiveAggregator
     {
         $asOf = $this->resolveAsOf($to);
         $activeMontajeTurnos = $this->montajeTurnos->activeTurnoIdsByWorkOrder();
+        $activeCorteTurnos = $this->corteTurnos->activeTurnoIdsByWorkOrder();
 
         $rows = $this->filterMontajeClosedRows($closedRows, $activeMontajeTurnos);
+        $rows = $this->filterCorteClosedRows($rows, $activeCorteTurnos);
 
         foreach (self::AREA_TABLES as $area => $table) {
             $rows = array_merge($rows, $this->openSegmentsForTable($table, $area, $from, $to, $asOf));
         }
 
         $rows = array_merge($rows, $this->montajeTurnos->livePlanillaAreaRows($from, $to, $asOf));
+        $rows = array_merge($rows, $this->corteTurnos->livePlanillaAreaRows($from, $to, $asOf));
 
         return $this->mergeRows($rows);
     }
@@ -51,12 +56,14 @@ final class ProductionTimeLiveAggregator
     {
         $asOf = $this->resolveAsOf($to);
         $activeMontajeTurnos = $this->montajeTurnos->activeTurnoIdsByWorkOrder();
+        $activeCorteTurnos = $this->corteTurnos->activeTurnoIdsByWorkOrder();
 
         foreach (self::AREA_TABLES as $area => $table) {
             $this->applyOpenSegmentsByWorkOrder($byWo, $table, $area, $from, $to, $asOf);
         }
 
         $this->applyMontajePlanillaByWorkOrder($byWo, $from, $to, $asOf, $activeMontajeTurnos);
+        $this->applyCortePlanillaByWorkOrder($byWo, $from, $to, $asOf, $activeCorteTurnos);
 
         return $byWo;
     }
@@ -134,6 +141,19 @@ final class ProductionTimeLiveAggregator
             }
         }
 
+        foreach (array_keys($this->corteTurnos->activeTurnoIdsByWorkOrder()) as $woId) {
+            $woId = (int) $woId;
+            if ($woId < 1) {
+                continue;
+            }
+            if (! isset($byAreaWo['corte'][$woId])) {
+                $byAreaWo['corte'][$woId] = [
+                    'segment_types' => [],
+                    'machine_codes' => [],
+                ];
+            }
+        }
+
         $allWoIds = [];
         foreach ($byAreaWo as $perArea) {
             foreach (array_keys($perArea) as $woId) {
@@ -195,6 +215,90 @@ final class ProductionTimeLiveAggregator
         $end = $to->copy()->endOfDay();
 
         return Carbon::now()->lt($end) ? Carbon::now() : $end;
+    }
+
+    /**
+     * @param  list<array{area: string, segment_type: string, machine_code: string, total_seconds: int, segment_count: int}>  $closedRows
+     * @param  array<int, list<string>>  $activeCorteTurnos
+     * @return list<array{area: string, segment_type: string, machine_code: string, total_seconds: int, segment_count: int}>
+     */
+    private function filterCorteClosedRows(array $closedRows, array $activeCorteTurnos): array
+    {
+        if ($activeCorteTurnos === []) {
+            return $closedRows;
+        }
+
+        $excludedSeconds = $this->sumExcludedCorteSyncSeconds($activeCorteTurnos);
+        if ($excludedSeconds === []) {
+            return $closedRows;
+        }
+
+        $filtered = [];
+        foreach ($closedRows as $row) {
+            if (($row['area'] ?? '') !== 'corte') {
+                $filtered[] = $row;
+
+                continue;
+            }
+
+            $type = (string) ($row['segment_type'] ?? '');
+            $machine = (string) ($row['machine_code'] ?? '');
+            $key = $type.'|'.$machine;
+            $subtract = (int) ($excludedSeconds[$key] ?? 0);
+            $remaining = max(0, (int) ($row['total_seconds'] ?? 0) - $subtract);
+            if ($remaining < 1) {
+                continue;
+            }
+            $row['total_seconds'] = $remaining;
+            $filtered[] = $row;
+        }
+
+        return $filtered;
+    }
+
+    /**
+     * @param  array<int, list<string>>  $activeCorteTurnos
+     * @return array<string, int> segment_type|machine_code => seconds
+     */
+    private function sumExcludedCorteSyncSeconds(array $activeCorteTurnos): array
+    {
+        $woIds = array_keys($activeCorteTurnos);
+        if ($woIds === []) {
+            return [];
+        }
+
+        $query = DB::table('corte_time_segments')
+            ->whereIn('work_order_id', $woIds)
+            ->whereNotNull('ended_at');
+
+        $query->where(function ($q) use ($activeCorteTurnos): void {
+            foreach ($activeCorteTurnos as $woId => $turnoIds) {
+                foreach ($turnoIds as $turnoId) {
+                    $q->orWhere(function ($inner) use ($woId, $turnoId): void {
+                        $inner->where('work_order_id', $woId)
+                            ->where('notes', 'like', 'cor_turno_sync:'.$turnoId.'%');
+                    });
+                }
+            }
+        });
+
+        $driver = DB::connection()->getDriverName();
+        $secondsExpr = $driver === 'sqlite'
+            ? "(CAST(strftime('%s', ended_at) AS INTEGER) - CAST(strftime('%s', started_at) AS INTEGER))"
+            : 'TIMESTAMPDIFF(SECOND, started_at, ended_at)';
+
+        $out = [];
+        foreach ($query
+            ->select('segment_type')
+            ->selectRaw("COALESCE(machine_code, '') as machine_code")
+            ->selectRaw("SUM({$secondsExpr}) as total_seconds")
+            ->groupBy(['segment_type', DB::raw("COALESCE(machine_code, '')")])
+            ->get() as $row) {
+            $key = ((string) $row->segment_type).'|'.((string) $row->machine_code);
+            $out[$key] = (int) $row->total_seconds;
+        }
+
+        return $out;
     }
 
     /**
@@ -404,6 +508,104 @@ final class ProductionTimeLiveAggregator
                 $byWo[$woId]['demount_seconds'] += $seconds;
             }
         }
+    }
+
+    /**
+     * @param  array<int, array{areas: array<string, true>, production_seconds: int, downtime_seconds: int, mount_seconds: int, demount_seconds: int}>  $byWo
+     * @param  array<int, list<string>>  $activeCorteTurnos
+     */
+    private function applyCortePlanillaByWorkOrder(
+        array &$byWo,
+        Carbon $from,
+        Carbon $to,
+        Carbon $asOf,
+        array $activeCorteTurnos,
+    ): void {
+        if ($activeCorteTurnos !== []) {
+            foreach ($activeCorteTurnos as $woId => $turnoIds) {
+                $subtract = $this->sumCorteSyncSecondsForWorkOrder((int) $woId, $turnoIds);
+                if (! isset($byWo[$woId])) {
+                    $byWo[$woId] = [
+                        'areas' => [],
+                        'production_seconds' => 0,
+                        'downtime_seconds' => 0,
+                        'mount_seconds' => 0,
+                        'demount_seconds' => 0,
+                    ];
+                }
+                foreach (['production_seconds', 'downtime_seconds', 'mount_seconds', 'demount_seconds'] as $field) {
+                    $byWo[$woId][$field] = max(0, $byWo[$woId][$field] - (int) ($subtract[$field] ?? 0));
+                }
+            }
+        }
+
+        foreach ($this->corteTurnos->livePlanillaByWorkOrder($from, $to, $asOf) as $woId => $totals) {
+            if (! isset($byWo[$woId])) {
+                $byWo[$woId] = [
+                    'areas' => [],
+                    'production_seconds' => 0,
+                    'downtime_seconds' => 0,
+                    'mount_seconds' => 0,
+                    'demount_seconds' => 0,
+                ];
+            }
+            $byWo[$woId]['areas']['corte'] = true;
+            $byWo[$woId]['production_seconds'] += (int) ($totals['production_seconds'] ?? 0);
+            $byWo[$woId]['downtime_seconds'] += (int) ($totals['downtime_seconds'] ?? 0);
+            $byWo[$woId]['mount_seconds'] += (int) ($totals['mount_seconds'] ?? 0);
+            $byWo[$woId]['demount_seconds'] += (int) ($totals['demount_seconds'] ?? 0);
+        }
+    }
+
+    /**
+     * @param  list<string>  $turnoIds
+     * @return array{production_seconds: int, downtime_seconds: int, mount_seconds: int, demount_seconds: int}
+     */
+    private function sumCorteSyncSecondsForWorkOrder(int $workOrderId, array $turnoIds): array
+    {
+        $totals = [
+            'production_seconds' => 0,
+            'downtime_seconds' => 0,
+            'mount_seconds' => 0,
+            'demount_seconds' => 0,
+        ];
+
+        if ($turnoIds === []) {
+            return $totals;
+        }
+
+        $driver = DB::connection()->getDriverName();
+        $secondsExpr = $driver === 'sqlite'
+            ? "(CAST(strftime('%s', ended_at) AS INTEGER) - CAST(strftime('%s', started_at) AS INTEGER))"
+            : 'TIMESTAMPDIFF(SECOND, started_at, ended_at)';
+
+        $query = DB::table('corte_time_segments')
+            ->where('work_order_id', $workOrderId)
+            ->whereNotNull('ended_at')
+            ->where(function ($q) use ($turnoIds): void {
+                foreach ($turnoIds as $turnoId) {
+                    $q->orWhere('notes', 'like', 'cor_turno_sync:'.$turnoId.'%');
+                }
+            })
+            ->select('segment_type')
+            ->selectRaw("SUM({$secondsExpr}) as total_seconds")
+            ->groupBy('segment_type');
+
+        foreach ($query->get() as $row) {
+            $type = (string) $row->segment_type;
+            $sec = (int) $row->total_seconds;
+            if ($type === 'production') {
+                $totals['production_seconds'] += $sec;
+            } elseif ($type === 'downtime') {
+                $totals['downtime_seconds'] += $sec;
+            } elseif ($type === 'mount') {
+                $totals['mount_seconds'] += $sec;
+            } elseif ($type === 'demount') {
+                $totals['demount_seconds'] += $sec;
+            }
+        }
+
+        return $totals;
     }
 
     /**

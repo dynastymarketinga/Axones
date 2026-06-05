@@ -497,6 +497,17 @@ class CorteDispatchService
             $rows[$idx]['rollos_kg'] = array_values(array_map('strval', $rollos));
             $rows[$idx]['rollos_count'] = $rollosCount;
             $rows[$idx]['bobbin_count'] = $rollosCount;
+
+            // OT en producción: reflejar kg y rollos vivos del formulario (misma fila por paleta).
+            $finishedKg = number_format(CortePlanillaSalida::sumPaletaKg($paleta), 3, '.', '');
+            $dispatched = number_format((float) ($row['quantity_dispatched_kg'] ?? 0), 3, '.', '');
+            $remaining = bcsub($finishedKg, $dispatched, 3);
+            if (bccomp($remaining, '0', 3) < 0) {
+                $remaining = '0.000';
+            }
+            $rows[$idx]['quantity_finished_kg'] = $finishedKg;
+            $rows[$idx]['quantity_remaining_kg'] = $remaining;
+            $rows[$idx]['is_provisional'] = ! CortePlanillaSalida::isPaletaCerradaStatus($paleta['status'] ?? null);
         }
     }
 

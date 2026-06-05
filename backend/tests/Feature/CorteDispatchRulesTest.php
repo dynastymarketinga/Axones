@@ -833,4 +833,106 @@ class CorteDispatchRulesTest extends TestCase
             'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-noprod'),
         ]);
     }
+
+    public function test_open_paleta_kg_accumulates_on_same_dispatch_row_while_in_production(): void
+    {
+        ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();
+        $rollos25 = array_merge(['10', '10', '5'], array_fill(0, 45, '0'));
+        $rollos40 = array_merge(['10', '10', '20'], array_fill(0, 45, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [[
+                    'id' => 'p-01',
+                    'label' => 'Paleta #01',
+                    'status' => 'en_progreso',
+                    'rollosKg' => $rollos25,
+                ]],
+            ],
+        ], $h)->assertOk();
+
+        $row1 = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->firstWhere('paleta_id', 'p-01');
+        $this->assertNotNull($row1);
+        $this->assertTrue($row1['is_provisional']);
+        $this->assertEquals('25.000', $row1['quantity_remaining_kg']);
+        $this->assertEquals(3, $row1['rollos_count']);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [[
+                    'id' => 'p-01',
+                    'label' => 'Paleta #01',
+                    'status' => 'en_progreso',
+                    'rollosKg' => $rollos40,
+                ]],
+            ],
+        ], $h)->assertOk();
+
+        $row2 = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->firstWhere('paleta_id', 'p-01');
+        $this->assertNotNull($row2);
+        $this->assertEquals('40.000', $row2['quantity_remaining_kg']);
+        $this->assertEquals(3, $row2['rollos_count']);
+    }
+
+    public function test_closed_paleta_accumulates_kg_on_same_row_from_turno_merge(): void
+    {
+        ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();
+        $rollos100 = array_merge(['40', '30', '30'], array_fill(0, 45, '0'));
+        $rollos150 = array_merge(['40', '30', '30', '50'], array_fill(0, 44, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [[
+                    'id' => 'p-01',
+                    'label' => 'Paleta #01',
+                    'status' => 'cerrada',
+                    'rollosKg' => $rollos100,
+                ]],
+            ],
+        ], $h)->assertOk();
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [[
+                    'id' => 'p-01',
+                    'label' => 'Paleta #01',
+                    'status' => 'cerrada',
+                    'rollosKg' => $rollos100,
+                ], [
+                    'id' => 'p-02',
+                    'label' => 'Paleta #02',
+                    'status' => 'en_progreso',
+                    'rollosKg' => array_fill(0, 48, '0'),
+                ]],
+                'corTurnoActual' => [
+                    'id' => 'turn-live',
+                    'turno' => 'diurno',
+                    'grupo' => 'A',
+                    'operador' => 'Op',
+                    'paletas' => [[
+                        'id' => 'p-01',
+                        'label' => 'Paleta #01',
+                        'status' => 'en_progreso',
+                        'rollosKg' => $rollos150,
+                    ]],
+                    'timer' => ['state' => 'running', 'effectiveAccSec' => 10, 'deadAccSec' => 0],
+                ],
+            ],
+        ], $h)->assertOk();
+
+        $row = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->firstWhere('paleta_id', 'p-01');
+        $this->assertNotNull($row);
+        $this->assertEquals('150.000', $row['quantity_remaining_kg']);
+        $this->assertEquals(4, $row['rollos_count']);
+        $this->assertFalse($row['is_provisional']);
+
+        $this->assertDatabaseHas('corte_bobina_usages', [
+            'work_order_id' => $wo->id,
+            'notes' => CortePlanillaDispatchSyncService::paletaNotes('p-01'),
+            'quantity_finished_kg' => '150.000',
+        ]);
+    }
 }

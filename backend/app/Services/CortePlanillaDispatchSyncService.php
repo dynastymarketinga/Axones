@@ -109,13 +109,28 @@ class CortePlanillaDispatchSyncService
             if ($paletaId === '' || isset($closedPaletaIds[$paletaId])) {
                 continue;
             }
-            // Formulario desactualizado (p. ej. turno con en_progreso pero ya hay fila definitiva).
-            if (CorteBobinaUsage::query()
+            $definitive = CorteBobinaUsage::query()
                 ->where('work_order_id', $workOrder->getKey())
                 ->where('notes', self::paletaNotes($paletaId))
                 ->where('quantity_finished_kg', '>', 0)
-                ->exists()) {
+                ->orderByDesc('id')
+                ->first();
+
+            if ($definitive !== null) {
                 $this->deleteUsageIfUnallocated($workOrder, self::paletaProvisionalNotes($paletaId));
+                $mergedPaleta = $this->mergedPaletaFromForm($form, $paletaId);
+                if (is_array($mergedPaleta) && CortePlanillaSalida::isPaletaCerradaStatus($mergedPaleta['status'] ?? null)) {
+                    $mergedKg = number_format(CortePlanillaSalida::sumPaletaKg($mergedPaleta), 3, '.', '');
+                    if (bccomp($mergedKg, (string) $definitive->quantity_finished_kg, 3) > 0) {
+                        $this->upsertPaletaUsage(
+                            $workOrder,
+                            $materialId,
+                            self::paletaNotes($paletaId),
+                            $usedKg,
+                            $mergedKg,
+                        );
+                    }
+                }
 
                 continue;
             }
@@ -402,5 +417,27 @@ class CortePlanillaDispatchSyncService
             ->sum('delivery_note_lines.quantity_kg');
 
         return number_format((float) $sum, 3, '.', '');
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return array<string, mixed>|null
+     */
+    private function mergedPaletaFromForm(array $form, string $paletaId): ?array
+    {
+        $needle = trim($paletaId);
+        if ($needle === '') {
+            return null;
+        }
+        foreach (CortePlanillaSalida::paletasArrayFromForm($form) as $paleta) {
+            if (! is_array($paleta)) {
+                continue;
+            }
+            if (trim((string) ($paleta['id'] ?? '')) === $needle) {
+                return $paleta;
+            }
+        }
+
+        return null;
     }
 }

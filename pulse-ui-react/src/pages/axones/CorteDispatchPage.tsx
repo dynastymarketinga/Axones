@@ -366,10 +366,18 @@ export default function CorteDispatchPage() {
     return () => window.removeEventListener(CORTE_CONTROL_SAVED_EVENT, onCorteSaved)
   }, [load])
 
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [load])
+
   return (
     <CatalogPageShell
       title="Despacho · producto terminado"
-      subtitle="Paletas cerradas en Corte listas para nota de entrega. Las filas provisionales son solo consulta hasta cerrar la paleta."
+      subtitle="Misma fila por paleta: al guardar en Producción → Corte se acumulan kg y rollos aquí. Cerradas = listas para nota; provisionales = aún en producción."
       icon={Truck}
       action={
         <Button type="button" onClick={proceedToNewNote} disabled={!selectedRows.length}>

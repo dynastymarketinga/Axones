@@ -668,6 +668,7 @@ export default function CorteDispatchPage() {
                   <TableRow key={`${key}-detail`} className="bg-muted/30 hover:bg-muted/30">
                     <TableCell colSpan={10} className="p-3">
                       <CortePaletaRollosAccumulatedSummary
+                        workOrderCode={r.work_order_code}
                         paletaLabel={paletaLabel}
                         rollosKg={r.rollos_kg}
                         totalKgHint={r.quantity_finished_kg}

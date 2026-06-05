@@ -160,6 +160,13 @@ class CorteDispatchService
 
         $usages = $q->limit(500)->get();
 
+        $woIdsWithPaletaUsages = [];
+        foreach ($usages as $usage) {
+            if (CortePlanillaDispatchSyncService::paletaIdFromNotes((string) ($usage->notes ?? '')) !== null) {
+                $woIdsWithPaletaUsages[(int) $usage->work_order_id] = true;
+            }
+        }
+
         $out = [];
         foreach ($usages as $usage) {
             $wo = $usage->workOrder;
@@ -167,14 +174,25 @@ class CorteDispatchService
             if ($woId <= 0) {
                 continue;
             }
+
+            $usageNotes = (string) ($usage->notes ?? '');
+            $paletaMeta = $this->paletaMetaFromUsageNotes($usageNotes);
+
+            // No mezclar kg de toda la OT si ya hay filas por paleta.
+            if (
+                $paletaMeta['paleta_id'] === null
+                && isset($woIdsWithPaletaUsages[$woId])
+                && $usageNotes === CortePlanillaDispatchSyncService::PLANILLA_NOTES
+            ) {
+                continue;
+            }
+
             $finished = number_format((float) $usage->quantity_finished_kg, 3, '.', '');
             $allocated = $this->quantityAllocatedToCorteUsage((int) $usage->getKey());
             $remaining = $this->quantityRemainingForCorteUsage($usage);
             if (bccomp($remaining, '0', 3) <= 0) {
                 continue;
             }
-
-            $paletaMeta = $this->paletaMetaFromUsageNotes((string) ($usage->notes ?? ''));
 
             $isProvisional = CortePlanillaDispatchSyncService::isProvisionalNotes((string) ($usage->notes ?? ''));
 
@@ -206,6 +224,7 @@ class CorteDispatchService
 
         $this->mergeFormOnlyPaletaRows($out, $workOrderId, $productId, $clientId);
         $this->enrichPaletaRowsFromTechnicalDocuments($out);
+        $this->attachFilledRollosToRows($out);
 
         usort($out, fn ($a, $b) => ((int) ($b['corte_bobina_usage_id'] ?? 0)) <=> ((int) ($a['corte_bobina_usage_id'] ?? 0)));
 
@@ -509,6 +528,40 @@ class CorteDispatchService
             $rows[$idx]['quantity_remaining_kg'] = $remaining;
             $rows[$idx]['is_provisional'] = ! CortePlanillaSalida::isPaletaCerradaStatus($paleta['status'] ?? null);
         }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function attachFilledRollosToRows(array &$rows): void
+    {
+        foreach ($rows as $idx => $row) {
+            $rollos = is_array($row['rollos_kg'] ?? null) ? $row['rollos_kg'] : [];
+            $rows[$idx]['rollos_kg_filled'] = $this->filledRollosFromKgArray($rollos);
+        }
+    }
+
+    /**
+     * Solo posiciones con kg > 0 (sin los 48 huecos vacíos).
+     *
+     * @param  list<mixed>  $rollos
+     * @return list<array{rollo_number: int, kg: string}>
+     */
+    private function filledRollosFromKgArray(array $rollos): array
+    {
+        $out = [];
+        foreach ($rollos as $idx => $kg) {
+            $n = (float) str_replace(',', '.', (string) $kg);
+            if ($n <= 0) {
+                continue;
+            }
+            $out[] = [
+                'rollo_number' => (int) $idx + 1,
+                'kg' => trim((string) $kg) !== '' ? trim((string) $kg) : number_format($n, 3, '.', ''),
+            ];
+        }
+
+        return $out;
     }
 
     /**

@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils"
 
 type Props = {
+  workOrderCode?: string
   paletaLabel?: string
   rollosKg?: string[] | null
   /** Si el API trae total de paleta distinto a la suma de rollos. */
@@ -22,6 +23,7 @@ type Props = {
  * Resumen acumulado por paleta: solo rollos con peso + total (sin grilla de 48 huecos).
  */
 export function CortePaletaRollosAccumulatedSummary({
+  workOrderCode,
   paletaLabel,
   rollosKg,
   totalKgHint,
@@ -53,7 +55,14 @@ export function CortePaletaRollosAccumulatedSummary({
     <div className={cn("space-y-2", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <p className="font-medium text-foreground">
-          {paletaLabel ? `${paletaLabel} · ` : ""}
+          {workOrderCode ? (
+            <>
+              <span className="font-mono font-semibold">{workOrderCode}</span>
+              {paletaLabel ? " · " : null}
+            </>
+          ) : null}
+          {paletaLabel ?? null}
+          {workOrderCode || paletaLabel ? " · " : null}
           {rollosCount} rollo(s) registrado(s)
         </p>
         <p className="inline-flex items-center gap-1.5 font-semibold tabular-nums text-emerald-800 dark:text-emerald-200">

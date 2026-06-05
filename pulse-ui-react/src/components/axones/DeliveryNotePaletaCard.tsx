@@ -120,6 +120,7 @@ export function DeliveryNotePaletaCard({
           <span className="font-medium text-foreground">{formatDispatchKg(totalKg)}</span>
         </p>
         <CortePaletaRollosAccumulatedSummary
+          workOrderCode={workOrderCode}
           paletaLabel={paletaLabel}
           rollosKg={slots}
           totalKgHint={quantityKg}

@@ -935,4 +935,88 @@ class CorteDispatchRulesTest extends TestCase
             'quantity_finished_kg' => '150.000',
         ]);
     }
+
+    public function test_two_work_orders_same_paleta_label_isolated_dispatch_rows(): void
+    {
+        ['h' => $h, 'wo' => $woA] = $this->createCorteWoWithMaterialLine();
+        ['wo' => $woB] = $this->createCorteWoWithMaterialLine();
+
+        $rollos60 = array_merge(array_fill(0, 6, '10'), array_fill(0, 42, '0'));
+        $rollos550 = array_merge(['100', '120', '130', '30', '40', '40', '30', '40', '20'], array_fill(0, 39, '0'));
+
+        foreach ([
+            [$woA, $rollos60, '60.000', 6],
+            [$woB, $rollos550, '550.000', 9],
+        ] as [$wo, $rollos, $expectedKg, $expectedRollos]) {
+            $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+                'form' => [
+                    'cor_paletas' => [[
+                        'id' => 'p-01',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollos,
+                    ]],
+                ],
+            ], $h)->assertOk();
+        }
+
+        $rows = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->whereIn('work_order_id', [$woA->id, $woB->id])
+            ->values();
+
+        $this->assertCount(2, $rows);
+
+        $rowA = $rows->firstWhere('work_order_id', $woA->id);
+        $rowB = $rows->firstWhere('work_order_id', $woB->id);
+        $this->assertNotNull($rowA);
+        $this->assertNotNull($rowB);
+        $this->assertEquals('p-01', $rowA['paleta_id']);
+        $this->assertEquals('p-01', $rowB['paleta_id']);
+        $this->assertEquals('Paleta #01', $rowA['pallet_label']);
+        $this->assertEquals('Paleta #01', $rowB['pallet_label']);
+        $this->assertEquals('60.000', $rowA['quantity_remaining_kg']);
+        $this->assertEquals('550.000', $rowB['quantity_remaining_kg']);
+        $this->assertEquals(6, $rowA['rollos_count']);
+        $this->assertEquals(9, $rowB['rollos_count']);
+        $this->assertCount(6, $rowA['rollos_kg_filled']);
+        $this->assertCount(9, $rowB['rollos_kg_filled']);
+        $this->assertNotEquals($rowA['corte_bobina_usage_id'], $rowB['corte_bobina_usage_id']);
+    }
+
+    public function test_legacy_aggregate_row_hidden_when_paleta_rows_exist(): void
+    {
+        ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();
+        $materialId = (int) (WorkOrderLine::query()->where('work_order_id', $wo->id)->value('material_id') ?? 0);
+        $this->assertGreaterThan(0, $materialId);
+
+        CorteBobinaUsage::query()->create([
+            'work_order_id' => $wo->id,
+            'material_id' => $materialId,
+            'quantity_used_kg' => 0,
+            'quantity_finished_kg' => 610,
+            'bobina_id' => null,
+            'notes' => CortePlanillaDispatchSyncService::PLANILLA_NOTES,
+        ]);
+
+        $rollos = array_merge(['10', '20'], array_fill(0, 46, '0'));
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_paletas' => [[
+                    'id' => 'p-01',
+                    'label' => 'Paleta #01',
+                    'status' => 'cerrada',
+                    'rollosKg' => $rollos,
+                ]],
+            ],
+        ], $h)->assertOk();
+
+        $rows = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->where('work_order_id', $wo->id)
+            ->values();
+
+        $this->assertCount(1, $rows);
+        $this->assertEquals('p-01', $rows[0]['paleta_id']);
+        $this->assertEquals('30.000', $rows[0]['quantity_remaining_kg']);
+        $this->assertCount(2, $rows[0]['rollos_kg_filled']);
+    }
 }

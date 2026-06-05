@@ -72,9 +72,9 @@ final class PlanillaScrapPercent
      */
     private static function corte(array $form): ?float
     {
-        $scrap = self::parseKg($form, 'corScrapRefileKg')
-            + self::parseKg($form, 'corScrapImpresoKg')
-            + self::parseKg($form, 'corScrapMalCorteKg');
+        $parseKg = static fn (?array $f, string $key): float => self::parseKg($f, $key);
+        $resolved = PlanillaScrapAggregator::resolveCorteScrap($form, $parseKg);
+        $scrap = $resolved['refile'] + $resolved['impreso'] + $resolved['mal_corte'];
 
         $ingreso = self::parseKg($form, 'kgIngresadosCorte');
         if ($ingreso <= 0.0005) {

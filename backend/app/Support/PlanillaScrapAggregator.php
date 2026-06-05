@@ -3,9 +3,10 @@
 namespace App\Support;
 
 /**
- * Agrega kg de desperdicio desde planilla plana y/o historial de turnos (impTurnosImpresion, lamTurnosLaminacion).
+ * Agrega kg de desperdicio desde planilla plana y/o historial de turnos
+ * (impTurnosImpresion, lamTurnosLaminacion, cor_turnos / corTurnoActual).
  *
- * Tras cerrar o guardar capturas en producción, los campos planos impScrap* / lamScrap* quedan en cero;
+ * Tras cerrar o guardar capturas en producción, los campos planos impScrap* / lamScrap* / corScrap* quedan en cero;
  * el acumulado vive en turnos y capturas. El reporte debe leer ambas fuentes.
  */
 final class PlanillaScrapAggregator
@@ -59,6 +60,74 @@ final class PlanillaScrapAggregator
             'lam_impreso' => $parseKg($form, 'lamScrapImpresoKg'),
             'lam_laminado' => $parseKg($form, 'lamScrapLaminadoKg'),
         ];
+    }
+
+    /**
+     * Desperdicio de corte: métricas en turnos cerrados/activos + fallback a campos planos corScrap*Kg.
+     *
+     * @param  array<string, mixed>|null  $form
+     * @param  callable(array<string, mixed>|null, string): float  $parseKg
+     * @return array{refile: float, impreso: float, mal_corte: float}
+     */
+    public static function resolveCorteScrap(?array $form, callable $parseKg): array
+    {
+        $refile = 0.0;
+        $impreso = 0.0;
+        $malCorte = 0.0;
+
+        if ($form !== null) {
+            foreach (array_merge(self::corteClosedTurns($form), self::corteOpenTurn($form)) as $turn) {
+                $metrics = $turn['metrics'] ?? null;
+                if (! is_array($metrics)) {
+                    continue;
+                }
+                $refile += self::parseNumericField($metrics['scrap_refile_kg'] ?? null);
+                $impreso += self::parseNumericField($metrics['scrap_impreso_kg'] ?? null);
+                $malCorte += self::parseNumericField($metrics['scrap_mal_corte_kg'] ?? null);
+            }
+        }
+
+        if ($refile + $impreso + $malCorte < 0.0005) {
+            $refile = $parseKg($form, 'corScrapRefileKg');
+            $impreso = $parseKg($form, 'corScrapImpresoKg');
+            $malCorte = $parseKg($form, 'corScrapMalCorteKg');
+        }
+
+        return [
+            'refile' => round($refile, 3),
+            'impreso' => round($impreso, 3),
+            'mal_corte' => round($malCorte, 3),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<array<string, mixed>>
+     */
+    private static function corteClosedTurns(array $form): array
+    {
+        $out = [];
+        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
+            if (is_array($turn) && ! empty($turn['closed_at'])) {
+                $out[] = $turn;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<array<string, mixed>>
+     */
+    private static function corteOpenTurn(array $form): array
+    {
+        $actual = $form['corTurnoActual'] ?? null;
+        if (is_array($actual) && empty($actual['closed_at'])) {
+            return [$actual];
+        }
+
+        return [];
     }
 
     /**

@@ -223,4 +223,52 @@ class WorkOrderControlsSummaryReportTest extends TestCase
             $h,
         )->assertOk()->assertHeader('content-type', 'text/csv; charset=UTF-8');
     }
+
+    public function test_controls_summary_salida_uses_bobina_meta_and_lam_acumulado(): void
+    {
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+
+        $client = Client::query()->create(['name' => 'Salida', 'rif' => 'J-SAL']);
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Film',
+            'cpe' => 'CPE-SAL',
+        ]);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-SAL-META',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'status' => WorkOrderStatus::Open->value,
+            'created_by' => $user->id,
+        ]);
+
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'impTurnosImpresion' => [[
+                    'id' => 'pi1',
+                    'closed_at' => '2026-05-10 12:00:00',
+                    'salidaBobinasKg' => [''],
+                    'salidaBobinasMeta' => [
+                        ['peso' => '120', 'referencia' => 'BOPP-20'],
+                    ],
+                ]],
+                'lamTurnosLaminacion' => [],
+                'lamAcumuladoProducidoKg' => '45.5',
+                'cor_turnos' => [[
+                    'id' => 'c1',
+                    'closed_at' => '2026-05-11 12:00:00',
+                    'metrics' => ['salida_total_kg' => '18'],
+                ]],
+            ],
+        ]);
+
+        $this->getJson('/api/reports/work-order-controls-summary?work_order_id='.$wo->id, $h)
+            ->assertOk()
+            ->assertJsonPath('production_summary.material_listo.impreso.peso_total_kg', '120.000')
+            ->assertJsonPath('production_summary.material_listo.laminado.peso_total_salida_kg', '45.500')
+            ->assertJsonPath('production_summary.material_listo.corte_kg_salida', '18.000')
+            ->assertJsonPath('production_summary.material_listo.total_general_kg', '183.500');
+    }
 }

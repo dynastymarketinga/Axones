@@ -38,6 +38,8 @@ import WorkOrderPrintingTimerPreviewPage from "@/pages/axones/WorkOrderPrintingT
 import { WorkOrderMesTimerPreviewPage } from "@/pages/axones/WorkOrderMesTimerPreviewPage"
 import WorkOrderPrintingDesperdicioPreviewPage from "@/pages/axones/WorkOrderPrintingDesperdicioPreviewPage"
 import WorkOrderPrintingPlanillaPreviewPage from "@/pages/axones/WorkOrderPrintingPlanillaPreviewPage"
+import WorkOrderLaminacionPlanillaPreviewPage from "@/pages/axones/WorkOrderLaminacionPlanillaPreviewPage"
+import WorkOrderCortePlanillaPreviewPage from "@/pages/axones/WorkOrderCortePlanillaPreviewPage"
 import CorteDispatchPage from "@/pages/axones/CorteDispatchPage"
 import DeliveryNotesPage from "@/pages/axones/DeliveryNotesPage"
 import DeliveryNotePreviewPage from "@/pages/axones/DeliveryNotePreviewPage"
@@ -279,6 +281,20 @@ export const router = createBrowserRouter(
           element: guardAxonesRoute({
             routeKey: "ordenes-trabajo",
             element: <WorkOrderPrintingPlanillaPreviewPage />,
+          }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/laminacion/planilla/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderLaminacionPlanillaPreviewPage />,
+          }),
+        },
+        {
+          path: "ordenes-trabajo/:woId/corte/planilla/vista-previa",
+          element: guardAxonesRoute({
+            routeKey: "ordenes-trabajo",
+            element: <WorkOrderCortePlanillaPreviewPage />,
           }),
         },
         {

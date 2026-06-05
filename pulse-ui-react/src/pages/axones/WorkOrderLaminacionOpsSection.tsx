@@ -358,6 +358,8 @@ type Props = {
   closedTurnos: LaminacionTurnoEntry[]
   canPreviewTimerReport: boolean
   onPreviewTimerReport: () => void
+  canPreviewPlanillaReport?: boolean
+  onPreviewPlanillaReport?: () => void
   /** Vista piso: solo play / parada / vista previa en el cronómetro. */
   simplifiedTimerActions?: boolean
 }
@@ -675,7 +677,29 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
   const acumuladoOrdenSection = (
     <MesSectionShell
       title={mesSectionTitle(BarChart3, "Acumulado de la orden (todos los turnos)")}
-      headerRight={<MesSectionHeaderExtras isDone={doneAcumulado} />}
+      headerRight={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {props.onPreviewPlanillaReport ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 border-primary/25 text-xs"
+              disabled={!props.canPreviewPlanillaReport}
+              title={
+                props.canPreviewPlanillaReport
+                  ? "Vista previa de la planilla física de laminación"
+                  : "Disponible tras «Finalizar área de laminación»"
+              }
+              onClick={props.onPreviewPlanillaReport}
+            >
+              <FileSearch className="h-3.5 w-3.5" aria-hidden />
+              Vista previa planilla
+            </Button>
+          ) : null}
+          <MesSectionHeaderExtras isDone={doneAcumulado} />
+        </div>
+      }
     >
       <div
         className={cn(

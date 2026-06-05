@@ -1759,9 +1759,10 @@ class InventoryReportService
             $lamT = $scrapResolved['lam_transparente'];
             $lamI = $scrapResolved['lam_impreso'];
             $lamL = $scrapResolved['lam_laminado'];
-            $corR = $parseKg($form, 'corScrapRefileKg');
-            $corIkg = $parseKg($form, 'corScrapImpresoKg');
-            $corM = $parseKg($form, 'corScrapMalCorteKg');
+            $corteResolved = PlanillaScrapAggregator::resolveCorteScrap($form, $parseKg);
+            $corR = $corteResolved['refile'];
+            $corIkg = $corteResolved['impreso'];
+            $corM = $corteResolved['mal_corte'];
 
             $impDest = $this->resolveImpScrapImpresoDestino($form, $r->product_structure);
             $lamImpDest = $this->resolveLamScrapImpresoDestino($form, $r->product_structure);

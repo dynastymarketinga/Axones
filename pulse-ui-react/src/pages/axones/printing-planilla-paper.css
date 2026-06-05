@@ -573,6 +573,64 @@
   background: #f5f5f5;
 }
 
+/* Laminación: dos columnas de ingreso (impresa / transparente) */
+.pp-lam-ingreso-dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border: 1px solid var(--pp-border);
+}
+
+.pp-lam-ingreso-col {
+  border-right: 1px solid var(--pp-border);
+}
+
+.pp-lam-ingreso-col:last-child {
+  border-right: none;
+}
+
+.pp-lam-ingreso-col-title {
+  padding: 2px 4px;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+  text-align: center;
+  background: var(--pp-hdr-gray);
+  border-bottom: 1px solid var(--pp-border);
+}
+
+.pp-ingreso-grid--compact {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.pp-ingreso-grid--compact .pp-ingreso-cell:nth-child(7n) {
+  border-right: 1px solid var(--pp-border);
+}
+
+.pp-ingreso-grid--compact .pp-ingreso-cell:nth-child(6n) {
+  border-right: none;
+}
+
+/* Corte: rejilla de pesos por paleta */
+.pp-corte-paleta-table th,
+.pp-corte-paleta-table td {
+  border: 1px solid var(--pp-border);
+  padding: 2px 3px;
+  text-align: center;
+  font-size: 8px;
+}
+
+.pp-corte-paleta-table th {
+  background: var(--pp-hdr-gray);
+  font-weight: 800;
+}
+
+.pp-corte-paleta-table .pp-proc {
+  font-weight: 700;
+  text-align: left;
+  font-size: 7px;
+}
+
 @media print {
   .printing-planilla-paper-root {
     background: #fff;

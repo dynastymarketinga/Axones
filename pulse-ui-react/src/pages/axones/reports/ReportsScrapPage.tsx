@@ -1016,7 +1016,7 @@ export default function ReportsScrapPage() {
             <TabsContent key={group.id} value={group.id} className="space-y-3">
               <p className="text-muted-foreground text-sm">
                 Desperdicio en kg de OTs clasificadas como <strong>{group.label}</strong>. Los datos salen de la planilla
-                técnica (incluye turnos guardados en Impresión y Laminación); cargue primero los kg en producción y, si hace falta, el sustrato en Corte.
+                técnica (incluye turnos guardados en Impresión, Laminación y Corte); cargue primero los kg en producción y, si hace falta, el sustrato en Corte.
                 {hideTransparent ? (
                   <> Los kg de film transparente en impresión/laminación se ven en la pestaña Transparente.</>
                 ) : (

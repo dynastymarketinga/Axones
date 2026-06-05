@@ -41,6 +41,7 @@ import {
   MES_SAVE_BLOCKED_MESSAGE,
 } from "@/lib/mes-timer-guards"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
+import { openLaminacionPlanillaPreviewFromSource } from "@/lib/laminacion-planilla-preview"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -571,6 +572,7 @@ export default function WorkOrderLaminacionControlPanel({
 
   const areaEstado = readLaminacionEstadoArea(form[LAM_ESTADO_KEY])
   const areaFinalizada = areaEstado === "finalizada"
+  const canPreviewPlanillaReport = areaFinalizada
   const readOnlyOps = areaFinalizada && !canFinalizeOrder
   const hasActiveTurno = activeTurno !== null
   const jsonAccum = useMemo(
@@ -868,6 +870,24 @@ export default function WorkOrderLaminacionControlPanel({
       return
     }
     setPreviewTimerConfirmOpen(true)
+  }
+
+  function openPlanillaPreview() {
+    if (!areaFinalizada) {
+      toast.error("Finalice el área de laminación para ver la planilla.")
+      return
+    }
+    const ok = openLaminacionPlanillaPreviewFromSource({
+      work_order_id: workOrderId,
+      work_order_code: readString(prefill.code) || `OT-${workOrderId}`,
+      client: readString((prefill as Record<string, unknown>).clientName) || null,
+      product: readString((prefill as Record<string, unknown>).productName) || null,
+      form: form as Record<string, unknown>,
+      board_stage: "laminacion",
+    })
+    if (!ok) {
+      toast.error("No se pudo abrir la vista previa de planilla.")
+    }
   }
 
   function confirmOpenTimerReportPreview() {
@@ -2010,6 +2030,8 @@ export default function WorkOrderLaminacionControlPanel({
         onSetMetraje={(v) => patchActiveTurn((t) => ({ ...t, metrajeProduccion: v }))}
         canPreviewTimerReport={canPreviewTimerReport}
         onPreviewTimerReport={requestOpenTimerReportPreview}
+        canPreviewPlanillaReport={canPreviewPlanillaReport}
+        onPreviewPlanillaReport={openPlanillaPreview}
         simplifiedTimerActions
       />
 

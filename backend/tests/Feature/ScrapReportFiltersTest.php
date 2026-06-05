@@ -770,4 +770,111 @@ class ScrapReportFiltersTest extends TestCase
             ->assertOk()
             ->assertJsonPath('substrate_group', 'polietileno');
     }
+
+    public function test_scrap_history_kg_reads_laminacion_from_closed_turn_metrics(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-01 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Lam turn', 'rif' => 'J-LT1']);
+
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'BOPP lam',
+            'structure' => 'BOPP 20',
+        ]);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-LAM-TURN',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'created_at' => now(),
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'updated_at' => now(),
+            'form' => [
+                'lamScrapImpresoDestino' => 'bopp',
+                'lamScrapLaminadoDestino' => 'bopp',
+                'lamTurnosLaminacion' => [[
+                    'id' => 'lam-1',
+                    'closed_at' => '2026-08-01T10:00:00.000Z',
+                    'scrapImpresoKg' => '4',
+                    'scrapLaminadoKg' => '2.5',
+                ]],
+            ],
+        ]);
+
+        $q = [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+            'layout' => 'by_work_order',
+        ];
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query($q), $h)
+            ->assertOk()
+            ->assertJsonPath('rows.0.work_order_code', 'OT-LAM-TURN')
+            ->assertJsonPath('rows.0.laminacion_scrap_kg', '6.500');
+
+        Carbon::setTestNow();
+    }
+
+    public function test_scrap_history_kg_reads_corte_from_closed_turn_metrics(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-02 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = $this->auth($user);
+        $client = Client::query()->create(['name' => 'Cor turn', 'rif' => 'J-CT1']);
+
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'BOPP cor',
+            'structure' => 'BOPP 20',
+        ]);
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-COR-TURN',
+            'client_id' => $client->id,
+            'product_id' => $product->id,
+            'created_at' => now(),
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'updated_at' => now(),
+            'form' => [
+                'corDesperdicioSustrato' => 'bopp',
+                'cor_turnos' => [[
+                    'id' => 'cor-1',
+                    'closed_at' => '2026-08-02T10:00:00.000Z',
+                    'metrics' => [
+                        'scrap_refile_kg' => '3',
+                        'scrap_impreso_kg' => '1.5',
+                        'scrap_mal_corte_kg' => '0.5',
+                    ],
+                ]],
+            ],
+        ]);
+
+        $q = [
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+            'layout' => 'by_work_order',
+        ];
+
+        $this->getJson('/api/reports/scrap-by-filters?'.http_build_query($q), $h)
+            ->assertOk()
+            ->assertJsonPath('rows.0.work_order_code', 'OT-COR-TURN')
+            ->assertJsonPath('rows.0.corte_scrap_kg', '5.000');
+
+        $this->getJson('/api/reports/scrap-monthly-summary?'.http_build_query([
+            'from' => '2026-01-01',
+            'to' => '2026-12-31',
+        ]), $h)
+            ->assertOk()
+            ->assertJsonPath('rows.7.corte_kg', '5.000');
+
+        Carbon::setTestNow();
+    }
 }

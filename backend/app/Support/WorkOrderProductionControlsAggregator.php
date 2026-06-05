@@ -181,26 +181,7 @@ final class WorkOrderProductionControlsAggregator
      */
     private static function aggregatePrinting(?array $form): array
     {
-        $entradaKg = 0.0;
-        $salidaKg = 0.0;
-        $salidaBobinas = 0;
-
-        if ($form === null) {
-            return compact('entradaKg', 'salidaKg', 'salidaBobinas');
-        }
-
-        foreach (self::printingTurns($form) as $turn) {
-            $tot = self::printingTurnTotals($turn);
-            $entradaKg += $tot['entrada_kg'];
-            $salidaKg += $tot['salida_kg'];
-            $salidaBobinas += $tot['salida_bobinas'];
-        }
-
-        return [
-            'entrada_kg' => round($entradaKg, 3),
-            'salida_kg' => round($salidaKg, 3),
-            'salida_bobinas' => $salidaBobinas,
-        ];
+        return PlanillaSalidaAggregator::resolvePrintingSalida($form);
     }
 
     /**
@@ -209,29 +190,7 @@ final class WorkOrderProductionControlsAggregator
      */
     private static function aggregateLaminacion(?array $form): array
     {
-        $entradaVirgenKg = 0.0;
-        $salidaKg = 0.0;
-        $salidaBobinas = 0;
-
-        if ($form === null) {
-            return [
-                'entrada_virgen_kg' => 0.0,
-                'salida_kg' => 0.0,
-                'salida_bobinas' => 0,
-            ];
-        }
-
-        foreach (self::laminacionTurns($form) as $turn) {
-            $entradaVirgenKg += self::sumSeriesKg($turn['entradaVirgenBobinasKg'] ?? []);
-            $salidaKg += self::sumSeriesKg($turn['salidaBobinasKg'] ?? []);
-            $salidaBobinas += self::countBobinasWithKg($turn['salidaBobinasKg'] ?? []);
-        }
-
-        return [
-            'entrada_virgen_kg' => round($entradaVirgenKg, 3),
-            'salida_kg' => round($salidaKg, 3),
-            'salida_bobinas' => $salidaBobinas,
-        ];
+        return PlanillaSalidaAggregator::resolveLaminacionSalida($form);
     }
 
     /**
@@ -240,25 +199,7 @@ final class WorkOrderProductionControlsAggregator
      */
     private static function aggregateCorte(?array $form): array
     {
-        if ($form === null) {
-            return ['salida_kg' => 0.0];
-        }
-
-        $fromTurns = 0.0;
-        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
-            if (is_array($turn)) {
-                $fromTurns += self::corteTurnSalidaKg($turn);
-            }
-        }
-
-        $actual = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
-        if (is_array($actual)) {
-            $fromTurns += self::corteTurnSalidaKg($actual);
-        }
-
-        $fromForm = (float) CortePlanillaSalida::finishedKgFromForm($form);
-
-        return ['salida_kg' => round(max($fromTurns, $fromForm), 3)];
+        return PlanillaSalidaAggregator::resolveCorteSalida($form);
     }
 
     /**
@@ -277,7 +218,10 @@ final class WorkOrderProductionControlsAggregator
         $lamI = $resolved['lam_impreso'];
         $lamL = $resolved['lam_laminado'];
 
-        [$corR, $corI, $corM] = self::aggregateCorteScrap($form);
+        $corteResolved = PlanillaScrapAggregator::resolveCorteScrap($form, $parseKg);
+        $corR = $corteResolved['refile'];
+        $corI = $corteResolved['impreso'];
+        $corM = $corteResolved['mal_corte'];
 
         $impTotal = $impT + $impI;
         $lamTotal = $lamT + $lamI + $lamL;
@@ -303,39 +247,6 @@ final class WorkOrderProductionControlsAggregator
             ],
             'grand_total_kg' => self::fmtKg($impTotal + $lamTotal + $corTotal),
         ];
-    }
-
-    /**
-     * @param  array<string, mixed>|null  $form
-     * @return array{0: float, 1: float, 2: float}
-     */
-    private static function aggregateCorteScrap(?array $form): array
-    {
-        $refile = 0.0;
-        $impreso = 0.0;
-        $malCorte = 0.0;
-
-        if ($form === null) {
-            return [0.0, 0.0, 0.0];
-        }
-
-        foreach (array_merge(self::corteClosedTurns($form), self::corteOpenTurn($form)) as $turn) {
-            $metrics = $turn['metrics'] ?? null;
-            if (! is_array($metrics)) {
-                continue;
-            }
-            $refile += self::readKg($metrics['scrap_refile_kg'] ?? null);
-            $impreso += self::readKg($metrics['scrap_impreso_kg'] ?? null);
-            $malCorte += self::readKg($metrics['scrap_mal_corte_kg'] ?? null);
-        }
-
-        if ($refile + $impreso + $malCorte < 0.0005) {
-            $refile = self::readKg($form['corScrapRefileKg'] ?? null);
-            $impreso = self::readKg($form['corScrapImpresoKg'] ?? null);
-            $malCorte = self::readKg($form['corScrapMalCorteKg'] ?? null);
-        }
-
-        return [$refile, $impreso, $malCorte];
     }
 
     /**
@@ -563,46 +474,6 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
-     * @param  array<string, mixed>  $turn
-     * @return array{entrada_kg: float, salida_kg: float, salida_bobinas: int}
-     */
-    private static function printingTurnTotals(array $turn): array
-    {
-        $entradaKg = 0.0;
-        $salidaKg = 0.0;
-        $salidaBobinas = 0;
-
-        foreach ((array) ($turn['capturas'] ?? []) as $cap) {
-            if (! is_array($cap)) {
-                continue;
-            }
-            $entradaKg += self::sumSeriesKg($cap['entradaBobinasKg'] ?? []);
-            $salidaKg += self::sumSeriesKg($cap['salidaBobinasKg'] ?? []);
-            $salidaBobinas += self::countBobinasWithKg($cap['salidaBobinasKg'] ?? []);
-        }
-
-        $entradaKg += self::sumSeriesKg($turn['entradaBobinasKg'] ?? []);
-        $salidaKg += self::sumSeriesKg($turn['salidaBobinasKg'] ?? []);
-        $salidaBobinas += self::countBobinasWithKg($turn['salidaBobinasKg'] ?? []);
-
-        if ($salidaKg < 0.0005) {
-            $resumen = $turn['resumenCierre'] ?? null;
-            if (is_array($resumen)) {
-                $salidaKg = self::readKg($resumen['pesoSalidaKg'] ?? null);
-                if ($salidaBobinas === 0 && isset($resumen['numBobinasSalida'])) {
-                    $salidaBobinas = (int) $resumen['numBobinasSalida'];
-                }
-            }
-        }
-
-        return [
-            'entrada_kg' => round($entradaKg, 3),
-            'salida_kg' => round($salidaKg, 3),
-            'salida_bobinas' => $salidaBobinas,
-        ];
-    }
-
-    /**
      * @param  array<string, mixed>  $form
      * @return list<array<string, mixed>>
      */
@@ -623,59 +494,6 @@ final class WorkOrderProductionControlsAggregator
     }
 
     /**
-     * @param  array<string, mixed>  $form
-     * @return list<array<string, mixed>>
-     */
-    private static function corteClosedTurns(array $form): array
-    {
-        $out = [];
-        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
-            if (is_array($turn) && ! empty($turn['closed_at'])) {
-                $out[] = $turn;
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * @param  array<string, mixed>  $form
-     * @return list<array<string, mixed>>
-     */
-    private static function corteOpenTurn(array $form): array
-    {
-        $actual = $form['corTurnoActual'] ?? null;
-        if (is_array($actual) && empty($actual['closed_at'])) {
-            return [$actual];
-        }
-
-        return [];
-    }
-
-    /**
-     * @param  array<string, mixed>  $turn
-     */
-    private static function corteTurnSalidaKg(array $turn): float
-    {
-        $metrics = $turn['metrics'] ?? null;
-        if (is_array($metrics)) {
-            $fromMetrics = self::readKg($metrics['salida_total_kg'] ?? null);
-            if ($fromMetrics > 0) {
-                return $fromMetrics;
-            }
-        }
-
-        $sum = 0.0;
-        foreach ((array) ($turn['paletas'] ?? []) as $paleta) {
-            if (is_array($paleta)) {
-                $sum += CortePlanillaSalida::sumPaletaKg($paleta);
-            }
-        }
-
-        return $sum;
-    }
-
-    /**
      * @param  array<int|string, mixed>  $series
      */
     private static function sumSeriesKg(array $series): float
@@ -686,21 +504,6 @@ final class WorkOrderProductionControlsAggregator
         }
 
         return round($sum, 3);
-    }
-
-    /**
-     * @param  array<int|string, mixed>  $series
-     */
-    private static function countBobinasWithKg(array $series): int
-    {
-        $count = 0;
-        foreach ($series as $value) {
-            if (self::readKg($value) > 0) {
-                $count++;
-            }
-        }
-
-        return $count;
     }
 
     private static function readKg(mixed $raw): float

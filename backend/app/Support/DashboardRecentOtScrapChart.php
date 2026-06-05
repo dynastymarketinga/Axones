@@ -183,9 +183,8 @@ final class DashboardRecentOtScrapChart
 
         $corKg = 0.0;
         if ($areas['corte']) {
-            $corKg = $parseKg($form, 'corScrapRefileKg')
-                + $parseKg($form, 'corScrapImpresoKg')
-                + $parseKg($form, 'corScrapMalCorteKg');
+            $corte = PlanillaScrapAggregator::resolveCorteScrap($form, $parseKg);
+            $corKg = $corte['refile'] + $corte['impreso'] + $corte['mal_corte'];
         }
 
         $total = $impKg + $lamKg + $corKg;

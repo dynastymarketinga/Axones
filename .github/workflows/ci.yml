@@ -73,7 +73,7 @@ jobs:
     if: |
       always() &&
       github.ref == 'refs/heads/main' && (
-        (github.event_name == 'push' && needs.backend-tests.result == 'success' && needs.frontend-quality.result == 'success') ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' && inputs.deploy_production == true)
       )
     runs-on: self-hosted

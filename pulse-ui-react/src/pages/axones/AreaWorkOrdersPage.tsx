@@ -161,7 +161,6 @@ import {
   mesBandejaWorkflowTitle,
   mesBandejaKgTotalsFromBands,
   mesProduccionWorkflowCountsEmpty,
-  type MesBandejaWorkflow,
   type MesProduccionWorkflowFilter,
 } from "@/lib/mes-timer-band-shared"
 import {
@@ -180,6 +179,14 @@ import {
   printingActivasBucketFromRow,
   type PrintingActivasSubTab,
 } from "@/lib/printing-mes-band-status"
+import {
+  canOpenCortePlanillaPreview,
+  openCortePlanillaPreviewFromSource,
+} from "@/lib/corte-planilla-preview"
+import {
+  canOpenLaminacionPlanillaPreview,
+  openLaminacionPlanillaPreviewFromSource,
+} from "@/lib/laminacion-planilla-preview"
 import {
   canOpenPrintingPlanillaPreview,
   openPrintingPlanillaPreviewFromSource,
@@ -249,9 +256,29 @@ function areaSubtitle(area: AreaKey): string {
   return "En curso: solicitud pendiente y OT en cola o ya en la etapa de este área. Historial: solicitudes cerradas en el área (hechas o canceladas)."
 }
 
-function printingFormRecord(row: WorkOrderListRow): Record<string, unknown> | null {
+function technicalFormRecord(row: WorkOrderListRow): Record<string, unknown> | null {
   const f = row.technical_document?.form
   return f && typeof f === "object" && !Array.isArray(f) ? (f as Record<string, unknown>) : null
+}
+
+const PLANILLA_PREVIEW_AREAS = new Set<AreaKey>(["printing", "laminacion", "corte"])
+
+function planillaPreviewAreaLabel(area: AreaKey): string {
+  if (area === "printing") return "impresión"
+  if (area === "laminacion") return "laminación"
+  if (area === "corte") return "corte"
+  return area
+}
+
+function canOpenPlanillaPreviewForArea(
+  area: AreaKey,
+  form: Record<string, unknown> | null,
+): boolean {
+  if (!form) return false
+  if (area === "printing") return canOpenPrintingPlanillaPreview(form)
+  if (area === "laminacion") return canOpenLaminacionPlanillaPreview(form)
+  if (area === "corte") return canOpenCortePlanillaPreview(form)
+  return false
 }
 
 function MesBandejaTableHeaderCells() {
@@ -362,7 +389,7 @@ function MesBandejaAccionesCell({
     <TableCell className={cn(mesBandejaRowTopCellClass, "px-2 text-center sm:px-3")}>
       <TooltipProvider delayDuration={220}>
         <div className="flex items-center justify-center gap-2">
-          {area === "printing" ? (
+          {PLANILLA_PREVIEW_AREAS.has(area) ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -383,8 +410,8 @@ function MesBandejaAccionesCell({
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-[14rem] text-center">
                 {planillaPreviewEnabled
-                  ? "Vista previa de la planilla física de impresión"
-                  : "Disponible tras «Finalizar área de impresión»"}
+                  ? `Vista previa de la planilla física de ${planillaPreviewAreaLabel(area)}`
+                  : `Disponible tras «Finalizar área de ${planillaPreviewAreaLabel(area)}»`}
               </TooltipContent>
             </Tooltip>
           ) : null}
@@ -943,25 +970,35 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
     return `/ordenes-trabajo/${woId}?tab=${encodeURIComponent(tab)}`
   }
 
-  function openPrintingPlanillaPreview(row: WorkOrderListRow) {
-    const form = printingFormRecord(row)
+  function openPlanillaPreview(row: WorkOrderListRow) {
+    const form = technicalFormRecord(row)
     if (!form) {
-      toast.error("Esta OT no tiene datos de impresión para la vista previa.")
+      toast.error(`Esta OT no tiene datos de ${planillaPreviewAreaLabel(area)} para la vista previa.`)
       return
     }
-    if (!canOpenPrintingPlanillaPreview(form)) {
-      toast.error("La vista previa de planilla está disponible tras «Finalizar área de impresión».")
+    if (!canOpenPlanillaPreviewForArea(area, form)) {
+      toast.error(
+        `La vista previa de planilla está disponible tras «Finalizar área de ${planillaPreviewAreaLabel(area)}».`,
+      )
       return
     }
-    const ok = openPrintingPlanillaPreviewFromSource({
+    const source = {
       work_order_id: row.id,
       work_order_code: row.code,
       client: row.client?.name ?? null,
       product: row.product?.name ?? null,
       form,
       technical_document: row.technical_document ?? undefined,
-      board_stage: row.board_stage ?? "impresion",
-    })
+      board_stage: row.board_stage ?? area,
+    }
+    const ok =
+      area === "printing"
+        ? openPrintingPlanillaPreviewFromSource(source)
+        : area === "laminacion"
+          ? openLaminacionPlanillaPreviewFromSource(source)
+          : area === "corte"
+            ? openCortePlanillaPreviewFromSource(source)
+            : false
     if (!ok) {
       toast.error("No se pudo abrir la vista previa de planilla.")
     }
@@ -1468,8 +1505,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                         ? mesBandejaRowAccentClass(mesBand.workflow)
                         : ""
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
-                    const planillaPreviewForm = area === "printing" ? printingFormRecord(o) : null
-                    const planillaPreviewEnabled = canOpenPrintingPlanillaPreview(planillaPreviewForm)
+                    const planillaPreviewForm = PLANILLA_PREVIEW_AREAS.has(area) ? technicalFormRecord(o) : null
+                    const planillaPreviewEnabled = canOpenPlanillaPreviewForArea(area, planillaPreviewForm)
                     const rowNumber = mesBandejaRowNumber(page, rows?.per_page ?? perPage, idx)
                     const bobinasDevoluciones = showKgBreakdown
                       ? printingDevolucionesFromWorkOrderRow(o)
@@ -1547,7 +1584,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                           openUrl={openUrl}
                           workOrderId={o.id}
                           planillaPreviewEnabled={planillaPreviewEnabled}
-                          onPlanillaPreview={() => openPrintingPlanillaPreview(o)}
+                          onPlanillaPreview={() => openPlanillaPreview(o)}
                         />
                       </TableRow>
                       {showKgBreakdown && bobinasExpanded && bobinasDevoluciones ? (
@@ -1653,8 +1690,8 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                       : null
                     const rowAccent = mesBand ? mesBandejaRowAccentClass(mesBand.workflow) : ""
                     const materialTitle = [o.product?.name, o.client?.name].filter(Boolean).join(" · ") || "—"
-                    const planillaPreviewForm = area === "printing" ? printingFormRecord(o) : null
-                    const planillaPreviewEnabled = canOpenPrintingPlanillaPreview(planillaPreviewForm)
+                    const planillaPreviewForm = PLANILLA_PREVIEW_AREAS.has(area) ? technicalFormRecord(o) : null
+                    const planillaPreviewEnabled = canOpenPlanillaPreviewForArea(area, planillaPreviewForm)
                     const rowNumber = mesBandejaRowNumber(page, rows?.per_page ?? perPage, idx)
                     const bobinasDevoluciones = showKgBreakdown
                       ? printingDevolucionesFromWorkOrderRow(o)
@@ -1742,7 +1779,7 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
                           openUrl={openUrl}
                           workOrderId={o.id}
                           planillaPreviewEnabled={planillaPreviewEnabled}
-                          onPlanillaPreview={() => openPrintingPlanillaPreview(o)}
+                          onPlanillaPreview={() => openPlanillaPreview(o)}
                         />
                       </TableRow>
                       {showKgBreakdown && bobinasExpanded && bobinasDevoluciones ? (

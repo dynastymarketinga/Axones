@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Clock,
   Factory,
+  FileSearch,
   Hash,
   History,
   Hourglass,
@@ -260,6 +261,8 @@ type Props = {
   timerActionFlags?: MesTimerActionFlags
   onRequestTimerConfirm?: (key: MesTimerConfirmKey) => void
   onPreviewTimerReport?: () => void
+  canPreviewPlanillaReport?: boolean
+  onPreviewPlanillaReport?: () => void
   formatTimerHms?: (s: number) => string
   /** Espejo planilla (paridad impresión: impTurno / impGrupo). */
   corTurno?: string
@@ -519,6 +522,8 @@ export default function WorkOrderCorteOpsSection({
   timerActionFlags,
   onRequestTimerConfirm,
   onPreviewTimerReport,
+  canPreviewPlanillaReport,
+  onPreviewPlanillaReport,
   formatTimerHms: formatTimerHmsProp,
   corTurno: corTurnoProp = "",
   corGrupo: corGrupoProp = "",
@@ -1311,7 +1316,29 @@ export default function WorkOrderCorteOpsSection({
   const acumuladoOrdenSection = (
     <MesSectionShell
       title={mesSectionTitle(BarChart3, "Acumulado de la orden (todos los turnos)")}
-      headerRight={<MesSectionHeaderExtras isDone={doneAcumulado} />}
+      headerRight={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {onPreviewPlanillaReport ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 border-primary/25 text-xs"
+              disabled={!canPreviewPlanillaReport}
+              title={
+                canPreviewPlanillaReport
+                  ? "Vista previa de la planilla física de corte"
+                  : "Disponible tras «Finalizar área de corte»"
+              }
+              onClick={onPreviewPlanillaReport}
+            >
+              <FileSearch className="h-3.5 w-3.5" aria-hidden />
+              Vista previa planilla
+            </Button>
+          ) : null}
+          <MesSectionHeaderExtras isDone={doneAcumulado} />
+        </div>
+      }
     >
         <div
           className={cn(

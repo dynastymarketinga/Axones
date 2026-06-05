@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
+import { openCortePlanillaPreviewFromSource } from "@/lib/corte-planilla-preview"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -329,6 +330,7 @@ export default function WorkOrderCorteControlPanel({
   const pedidoTotalKg = readNumber(form.pedidoKg ?? prefill.pedidoKg)
   const areaEstado = readCorteEstadoArea(form[COR_ESTADO_KEY])
   const areaFinalizada = areaEstado === "finalizada"
+  const canPreviewPlanillaReport = areaFinalizada
   const controlReadOnly = areaFinalizada && !canFinalizeOrder
   const activeTurno = useMemo(() => materializeOpenCorteTurnoActual(form), [form])
   const closedTurnos = useMemo(() => parseCorteTurnos(form[COR_TURNOS_KEY], form), [form])
@@ -968,6 +970,24 @@ export default function WorkOrderCorteControlPanel({
     setPreviewTimerConfirmOpen(true)
   }
 
+  function openPlanillaPreview() {
+    if (!areaFinalizada) {
+      toast.error("Finalice el área de corte para ver la planilla.")
+      return
+    }
+    const ok = openCortePlanillaPreviewFromSource({
+      work_order_id: workOrderId,
+      work_order_code: readString(prefill.code) || `OT-${workOrderId}`,
+      client: readString((prefill as Record<string, unknown>).clientName) || null,
+      product: readString((prefill as Record<string, unknown>).productName) || null,
+      form: form as Record<string, unknown>,
+      board_stage: "corte",
+    })
+    if (!ok) {
+      toast.error("No se pudo abrir la vista previa de planilla.")
+    }
+  }
+
   function confirmOpenTimerReportPreview() {
     setPreviewTimerConfirmOpen(false)
     runOpenTimerReportPreview()
@@ -1224,6 +1244,8 @@ export default function WorkOrderCorteControlPanel({
         timerActionFlags={timerActionFlags}
         onRequestTimerConfirm={requestTimerConfirm}
         onPreviewTimerReport={requestOpenTimerReportPreview}
+        canPreviewPlanillaReport={canPreviewPlanillaReport}
+        onPreviewPlanillaReport={openPlanillaPreview}
         formatTimerHms={formatTimerHms}
         corTurno={readString(form.corTurno)}
         corGrupo={readString(form.corGrupo)}

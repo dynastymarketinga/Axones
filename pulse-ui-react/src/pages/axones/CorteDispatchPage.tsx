@@ -40,6 +40,7 @@ import { apiFetch, ApiError } from "@/lib/api"
 import { corteDispatchRowMatchesSearch } from "@/lib/corte-dispatch-search"
 import { CORTE_CONTROL_SAVED_EVENT } from "@/lib/corte-mes-band-status"
 import {
+  formatDispatchKg,
   mergeDispatchSelection,
   readDispatchSelection,
   type DispatchSelectionItem,
@@ -124,17 +125,15 @@ type CorteDispatchRow = {
 }
 
 function formatKg(value: string | number | undefined): string {
+  if (value === undefined || value === null || value === "") return "-"
   const parsed =
     typeof value === "number"
       ? value
       : typeof value === "string"
-        ? Number(value)
+        ? Number(value.replace(",", "."))
         : NaN
   if (!Number.isFinite(parsed)) return "-"
-  return `${parsed.toLocaleString("es-DO", {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  })} kg`
+  return formatDispatchKg(parsed)
 }
 
 function rowKey(r: CorteDispatchRow, idx: number): string {
@@ -445,13 +444,7 @@ export default function CorteDispatchPage() {
         <CardContent className="p-4 text-sm">
           <p>
             Seleccionadas: <span className="font-medium">{selectedRows.length}</span> paleta(s) · Total:{" "}
-            <span className="font-medium">
-              {selectedTotalKg.toLocaleString("es-DO", {
-                minimumFractionDigits: 3,
-                maximumFractionDigits: 3,
-              })}{" "}
-              kg
-            </span>
+            <span className="font-medium">{formatDispatchKg(selectedTotalKg)}</span>
           </p>
           <p className="text-muted-foreground mt-1 text-xs">
             Marque el checkbox en paletas cerradas. «Crear nota con seleccionadas» suma a la nota en curso

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  formatDispatchKg,
   mergeDispatchSelection,
   sumDispatchSelectionKg,
   type DispatchSelectionItem,
@@ -28,5 +29,18 @@ describe("mergeDispatchSelection", () => {
     const merged = mergeDispatchSelection([base(1, "10")], [base(1, "15")])
     expect(merged).toHaveLength(1)
     expect(merged[0]?.quantity_kg).toBe("15")
+  })
+})
+
+describe("formatDispatchKg", () => {
+  it("no fuerza decimales en enteros", () => {
+    expect(formatDispatchKg(60)).toBe("60 kg")
+    expect(formatDispatchKg("60.000")).toBe("60 kg")
+    expect(formatDispatchKg(0)).toBe("0 kg")
+  })
+
+  it("conserva decimales significativos", () => {
+    expect(formatDispatchKg(10.5)).toBe("10.5 kg")
+    expect(formatDispatchKg("10.25")).toBe("10.25 kg")
   })
 })

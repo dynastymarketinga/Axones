@@ -83,11 +83,11 @@ export function formatDispatchKg(value: string | number | undefined): string {
     typeof value === "number"
       ? value
       : typeof value === "string"
-        ? Number(value)
+        ? Number(value.replace(",", "."))
         : NaN
-  if (!Number.isFinite(parsed)) return "0.000 kg"
+  if (!Number.isFinite(parsed)) return "0 kg"
   return `${parsed.toLocaleString("es-DO", {
-    minimumFractionDigits: 3,
+    minimumFractionDigits: 0,
     maximumFractionDigits: 3,
   })} kg`
 }

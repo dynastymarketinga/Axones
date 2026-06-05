@@ -295,10 +295,115 @@ final class CortePlanillaSalida
     }
 
     /**
+     * Todas las paletas de la OT: cor_turnos (historial), turno activo y cor_paletas (prioridad creciente).
+     *
      * @param  array<string, mixed>  $form
-     * @return list<mixed>
+     * @return list<array<string, mixed>>
      */
     public static function paletasArrayFromForm(array $form): array
+    {
+        $byId = [];
+        foreach (self::paletasSourcesFromForm($form) as $batch) {
+            foreach ($batch as $paleta) {
+                if (! is_array($paleta)) {
+                    continue;
+                }
+                $id = trim((string) ($paleta['id'] ?? ''));
+                if ($id === '') {
+                    continue;
+                }
+                $byId[$id] = self::mergePaletaEntries($byId[$id] ?? null, $paleta);
+            }
+        }
+
+        return array_values($byId);
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<list<array<string, mixed>>>
+     */
+    private static function paletasSourcesFromForm(array $form): array
+    {
+        $sources = [];
+        foreach ((array) ($form['cor_turnos'] ?? []) as $turn) {
+            if (! is_array($turn)) {
+                continue;
+            }
+            $paletas = $turn['paletas'] ?? null;
+            if (is_array($paletas) && $paletas !== []) {
+                $sources[] = $paletas;
+            }
+        }
+        $turno = $form['corTurnoActual'] ?? $form['cor_turno_actual'] ?? null;
+        if (is_array($turno) && is_array($turno['paletas'] ?? null) && $turno['paletas'] !== []) {
+            $sources[] = $turno['paletas'];
+        }
+        $raw = $form['cor_paletas'] ?? null;
+        if (is_array($raw) && $raw !== []) {
+            $sources[] = $raw;
+        }
+
+        return $sources;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $existing
+     * @param  array<string, mixed>  $incoming
+     * @return array<string, mixed>
+     */
+    private static function mergePaletaEntries(?array $existing, array $incoming): array
+    {
+        if ($existing === null) {
+            return self::sanitizePaletaShape($incoming);
+        }
+        $existingRollos = is_array($existing['rollosKg'] ?? null) ? $existing['rollosKg'] : [];
+        $incomingRollos = is_array($incoming['rollosKg'] ?? null) ? $incoming['rollosKg'] : [];
+        $mergedRollos = [];
+        for ($i = 0; $i < self::ROLLOS_PER_PALETA; $i++) {
+            $a = self::readNumber($existingRollos[$i] ?? 0);
+            $b = self::readNumber($incomingRollos[$i] ?? 0);
+            $mergedRollos[] = $b > $a ? self::kgCellToString($incomingRollos[$i] ?? '') : self::kgCellToString($existingRollos[$i] ?? '');
+        }
+        $closed = self::isPaletaCerradaStatus($existing['status'] ?? null)
+            || self::isPaletaCerradaStatus($incoming['status'] ?? null);
+        $status = $closed
+            ? (self::isPaletaCerradaStatus($incoming['status'] ?? null)
+                ? (string) ($incoming['status'] ?? 'cerrada')
+                : (string) ($existing['status'] ?? 'cerrada'))
+            : 'en_progreso';
+
+        return self::sanitizePaletaShape([
+            ...$existing,
+            ...$incoming,
+            'label' => trim((string) ($incoming['label'] ?? '')) !== ''
+                ? (string) $incoming['label']
+                : (string) ($existing['label'] ?? ''),
+            'rollosKg' => $mergedRollos,
+            'status' => $status,
+            'closed_at' => $existing['closed_at'] ?? $incoming['closed_at'] ?? null,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $paleta
+     * @return array<string, mixed>
+     */
+    private static function sanitizePaletaShape(array $paleta): array
+    {
+        if (isset($paleta['rollosKg']) && is_array($paleta['rollosKg'])) {
+            $paleta['rollosKg'] = self::sanitizeKgStringArray($paleta['rollosKg'], self::ROLLOS_PER_PALETA);
+        }
+
+        return $paleta;
+    }
+
+    /**
+     * @param  array<string, mixed>  $form
+     * @return list<mixed>
+     * @deprecated Use paletasArrayFromForm; kept for callers expecting legacy single-source list.
+     */
+    public static function paletasArrayFromFormLegacyTopOnly(array $form): array
     {
         $raw = $form['cor_paletas'] ?? null;
         if (is_array($raw) && $raw !== []) {

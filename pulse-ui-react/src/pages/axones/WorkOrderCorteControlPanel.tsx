@@ -135,6 +135,10 @@ import {
   type CortePauseEntry,
   type CorteTurnTimer,
   sanitizeCorEntradaBobinasKg,
+  isCorPaletaCerrada,
+  autoClosePaletasWithKgForTurnEnd,
+  buildCorPaletasPersistedAfterTurnClose,
+  getCorPaletas,
   resolveCorPaletasForSave,
   sumEntradaKgFromForm,
   sumSalidaKgFromOpenPaletas,
@@ -247,7 +251,7 @@ function MesCorteGuardarChoiceDialog(props: MesCorteGuardarChoiceDialogProps) {
             <span>
               <span className="block font-semibold">Finalizar turno</span>
               <span className="block text-xs font-normal opacity-90">
-                Cierra el turno de planta, guarda tiempos y producción, y deja el formulario listo para un turno nuevo.
+                Cierra el turno, guarda tiempos y producción, pasa paletas con kg a Despacho (listas para nota) y deja el formulario listo para un turno nuevo.
               </span>
             </span>
           </Button>
@@ -665,7 +669,13 @@ export default function WorkOrderCorteControlPanel({
     async (cur: CorteTurnoEntry) => {
       const finalizedTimer = finalizeTurnTimerNow(cur.timer)
       const u = getStoredUser()
-      const paletasForClose = resolveCorPaletasForSave({ ...form, [COR_ACTUAL_KEY]: cur })
+      const paletasForClose = autoClosePaletasWithKgForTurnEnd(
+        resolveCorPaletasForSave({ ...form, [COR_ACTUAL_KEY]: cur }),
+      )
+      const otPaletas = buildCorPaletasPersistedAfterTurnClose(paletasForClose, getCorPaletas(form))
+      const closedCount = paletasForClose.filter(
+        (p) => isCorPaletaCerrada(p) && sumSalidaKgFromPaletas([p]) > 0,
+      ).length
       const closed: CorteTurnoEntry = {
         ...cur,
         timer: finalizedTimer,
@@ -694,8 +704,10 @@ export default function WorkOrderCorteControlPanel({
         [COR_ACTUAL_KEY]: null,
         corRegistrosTurnos: turnosClosed.length,
         ...clearCorteMirrorKeys(),
+        cor_paletas: otPaletas,
+        corSalidaPaletasKg: otPaletas.map((p) => p.rollosKg),
         ...corteAggregatedTimerMirrorFromTurnos(turnosClosed),
-        ...syncCorteSalidaFields({ ...form, cor_paletas: clearCorteMirrorKeys().cor_paletas }),
+        ...syncCorteSalidaFields({ ...form, cor_paletas: otPaletas }),
       }
       setForm(bootstrapCorteFormState(nextForm))
       const ok = await persistCorteForm(nextForm, {
@@ -707,7 +719,9 @@ export default function WorkOrderCorteControlPanel({
       })
       if (ok) {
         toast.success(
-          "Turno de planta cerrado y guardado. El formulario quedó en blanco para iniciar otro turno.",
+          closedCount > 0
+            ? `Turno cerrado. ${closedCount} paleta(s) listas en Despacho · producto terminado. Inicie otro turno para seguir produciendo.`
+            : "Turno de planta cerrado y guardado. El formulario quedó en blanco para iniciar otro turno.",
         )
         await load()
       }
@@ -785,8 +799,16 @@ export default function WorkOrderCorteControlPanel({
     let turnos = parseCorteTurnos(prev[COR_TURNOS_KEY], prev)
     const cur = parseCorteTurnoActual(prev[COR_ACTUAL_KEY], prev)
     const u = getStoredUser()
+    let otPaletas = buildCorPaletasPersistedAfterTurnClose(
+      autoClosePaletasWithKgForTurnEnd(getCorPaletas(prev)),
+      getCorPaletas(prev),
+    )
     if (cur) {
       const finalizedTimer = finalizeTurnTimerNow(cur.timer)
+      const paletasForClose = autoClosePaletasWithKgForTurnEnd(
+        resolveCorPaletasForSave({ ...prev, [COR_ACTUAL_KEY]: cur }),
+      )
+      otPaletas = buildCorPaletasPersistedAfterTurnClose(paletasForClose, getCorPaletas(prev))
       const closed: CorteTurnoEntry = {
         ...cur,
         timer: finalizedTimer,
@@ -794,10 +816,10 @@ export default function WorkOrderCorteControlPanel({
         closed_by: u ? { id: u.id, name: u.name } : null,
         metrics: snapshotCorteTurnMetrics({
           ...prev,
-          cor_paletas: cur.paletas,
+          cor_paletas: paletasForClose,
           corEntradaBobinasKg: cur.entradaBobinasKg,
         }),
-        paletas: cur.paletas,
+        paletas: paletasForClose,
         entradaBobinasKg: cur.entradaBobinasKg,
       }
       turnos = [...turnos, closed]
@@ -808,7 +830,10 @@ export default function WorkOrderCorteControlPanel({
       [COR_ACTUAL_KEY]: null,
       [COR_ESTADO_KEY]: "finalizada",
       ...clearCorteMirrorKeys(),
+      cor_paletas: otPaletas,
+      corSalidaPaletasKg: otPaletas.map((p) => p.rollosKg),
       ...corteAggregatedTimerMirrorFromTurnos(turnos),
+      ...syncCorteSalidaFields({ ...prev, cor_paletas: otPaletas }),
     }
     setForm(bootstrapCorteFormState(nextForm))
     const ok = await persistCorteForm(nextForm, {

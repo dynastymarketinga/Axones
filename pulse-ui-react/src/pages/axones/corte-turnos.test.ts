@@ -12,6 +12,9 @@ import {
   pickAuthoritativeCorPaletas,
   mergeCorPaletasForSave,
   resolveCorPaletasForSave,
+  autoClosePaletasWithKgForTurnEnd,
+  buildCorPaletasPersistedAfterTurnClose,
+  isCorPaletaCerrada,
   pauseCorteProductionTimerOnForm,
   shouldPreferTopCorPaletas,
   resolveCorteDisplayTimer,
@@ -384,5 +387,26 @@ describe("corte paletas cerradas / despacho", () => {
       [COR_ACTUAL_KEY]: turno,
     }
     expect(sumSalidaKgFromPaletas(resolveCorPaletasForSave(form))).toBe(15.5)
+  })
+
+  it("autoClosePaletasWithKgForTurnEnd cierra paletas con peso al finalizar turno", () => {
+    const rollos = ["15.5", ...Array(47).fill("")]
+    const paletas: CorPaleta[] = [
+      { id: "p-01", label: "Paleta #01", rollosKg: rollos, status: "en_progreso" },
+    ]
+    const closed = autoClosePaletasWithKgForTurnEnd(paletas)
+    expect(closed[0]?.status).toBe("cerrada")
+    expect(sumSalidaKgFromPaletas(closed)).toBe(15.5)
+  })
+
+  it("buildCorPaletasPersistedAfterTurnClose conserva cerradas en OT y deja una abierta", () => {
+    const rollos = ["20", ...Array(47).fill("")]
+    const turnPaletas: CorPaleta[] = [
+      { id: "p-01", label: "Paleta #01", rollosKg: rollos, status: "en_progreso" },
+    ]
+    const ot = buildCorPaletasPersistedAfterTurnClose(turnPaletas, [])
+    expect(ot.filter(isCorPaletaCerrada)).toHaveLength(1)
+    expect(ot.some((p) => !isCorPaletaCerrada(p))).toBe(true)
+    expect(sumSalidaKgFromClosedPaletas(ot)).toBe(20)
   })
 })

@@ -55,4 +55,33 @@ class CortePlanillaSalidaTest extends TestCase
 
         $this->assertSame('100.500', CortePlanillaSalida::usedKgFromForm($form));
     }
+
+    public function test_paletas_array_merges_cor_turnos_and_cor_paletas(): void
+    {
+        $rollos = array_merge(['15.500'], array_fill(0, 47, ''));
+        $form = [
+            'cor_turnos' => [[
+                'id' => 't1',
+                'closed_at' => '2026-01-01T12:00:00Z',
+                'paletas' => [[
+                    'id' => 'p-hist',
+                    'label' => 'Paleta hist',
+                    'status' => 'en_progreso',
+                    'rollosKg' => $rollos,
+                ]],
+            ]],
+            'cor_paletas' => [[
+                'id' => 'p-hist',
+                'label' => 'Paleta hist',
+                'status' => 'cerrada',
+                'rollosKg' => $rollos,
+            ]],
+        ];
+
+        $paletas = CortePlanillaSalida::paletasArrayFromForm($form);
+        $this->assertCount(1, $paletas);
+        $this->assertSame('cerrada', $paletas[0]['status']);
+        $this->assertSame('15.500', number_format(CortePlanillaSalida::sumPaletaKg($paletas[0]), 3, '.', ''));
+        $this->assertCount(1, CortePlanillaSalida::closedPaletasFromForm($form));
+    }
 }

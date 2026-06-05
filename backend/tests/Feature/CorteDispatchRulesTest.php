@@ -652,6 +652,51 @@ class CorteDispatchRulesTest extends TestCase
         $this->assertEquals('15.500', $row['quantity_remaining_kg']);
     }
 
+    public function test_closed_paleta_in_cor_turnos_syncs_definitive_dispatch_after_turn_close(): void
+    {
+        ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();
+        $rollos = array_merge(['22.000'], array_fill(0, 47, '0'));
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'cor_turnos' => [[
+                    'id' => 'turn-1',
+                    'closed_at' => '2026-06-05T12:00:00Z',
+                    'turno' => 'nocturno',
+                    'grupo' => 'A',
+                    'operador' => 'Op',
+                    'paletas' => [[
+                        'id' => 'p-turn',
+                        'label' => 'Paleta #01',
+                        'status' => 'cerrada',
+                        'rollosKg' => $rollos,
+                    ]],
+                ]],
+                'cor_paletas' => [[
+                    'id' => 'p-turn',
+                    'label' => 'Paleta #01',
+                    'status' => 'cerrada',
+                    'rollosKg' => $rollos,
+                ], [
+                    'id' => 'p-02',
+                    'label' => 'Paleta #02',
+                    'status' => 'en_progreso',
+                    'rollosKg' => array_fill(0, 48, '0'),
+                ]],
+            ],
+        ], $h)
+            ->assertOk()
+            ->assertJsonPath('dispatch_sync.closed_paletas_with_kg', 1)
+            ->assertJsonPath('dispatch_sync.usages_synced', 1);
+
+        $rows = collect($this->getJson('/api/corte-dispatch/available', $h)->assertOk()->json('rows'))
+            ->where('work_order_id', $wo->id);
+        $this->assertCount(1, $rows);
+        $row = $rows->first();
+        $this->assertFalse($row['is_provisional']);
+        $this->assertEquals('22.000', $row['quantity_remaining_kg']);
+    }
+
     public function test_closing_paleta_promotes_provisional_to_definitive_usage(): void
     {
         ['h' => $h, 'wo' => $wo] = $this->createCorteWoWithMaterialLine();

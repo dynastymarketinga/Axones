@@ -771,6 +771,39 @@ export function resolveCorPaletasForSave(form: Record<string, unknown>): CorPale
   return mergeCorPaletasForSave(topPaletas, actual?.paletas ?? [])
 }
 
+/** Al cerrar turno de planta: paletas con kg pasan a cerrada (listas para nota de entrega). */
+export function autoClosePaletasWithKgForTurnEnd(paletas: CorPaleta[]): CorPaleta[] {
+  const now = new Date().toISOString()
+  return paletas.map((p) => {
+    if (isCorPaletaCerrada(p)) return p
+    if (sumKgFromPaleta(p) <= 0) return p
+    return { ...p, status: "cerrada" as const, closed_at: p.closed_at ?? now }
+  })
+}
+
+/**
+ * Tras finalizar turno: conserva paletas cerradas en cor_paletas (despacho) y deja una abierta vacía.
+ */
+export function buildCorPaletasPersistedAfterTurnClose(
+  turnPaletas: CorPaleta[],
+  existingOtPaletas: CorPaleta[],
+): CorPaleta[] {
+  const autoClosed = autoClosePaletasWithKgForTurnEnd(
+    mergeCorPaletasForSave(existingOtPaletas, turnPaletas),
+  )
+  const cerradas = autoClosed.filter(isCorPaletaCerrada)
+  const nextIndex = cerradas.length + 1
+  return sanitizeCorPaletasForPersistence([
+    ...cerradas,
+    {
+      id: `p-${String(nextIndex).padStart(2, "0")}`,
+      label: `Paleta #${String(nextIndex).padStart(2, "0")}`,
+      rollosKg: emptyPaletaRollos(),
+      status: "en_progreso",
+    },
+  ])
+}
+
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   const turnos = parseCorteTurnos(mergedForm[COR_TURNOS_KEY], mergedForm)
   const estado = readCorteEstadoArea(mergedForm[COR_ESTADO_KEY])
@@ -823,20 +856,58 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
 
 export type JsonAccumulatedCorte = {
   producidoKg: number
+  entradaKg: number
+  scrapKg: number
   turnosCerrados: number
   turnosRegistrados: number
   ultimoCierreLabel: string
+}
+
+function sumEntradaKgFromClosedTurno(t: CorteTurnoEntry): number {
+  const fromMetrics = readNumber(t.metrics?.entrada_bobinas_kg)
+  if (fromMetrics > 0) return fromMetrics
+  const fromKg = readNumber(t.kgIngresados)
+  if (fromKg > 0) return fromKg
+  return t.entradaBobinasKg.reduce((acc, v) => acc + readNumber(v), 0)
+}
+
+function sumScrapKgFromClosedTurno(t: CorteTurnoEntry): number {
+  const fromMetrics = readNumber(t.metrics?.scrap_total_kg)
+  if (fromMetrics > 0) return fromMetrics
+  return readNumber(t.kgMerma)
+}
+
+function sumScrapKgFromForm(form: Record<string, unknown>): number {
+  return (
+    readNumber(form.corScrapRefileKg) +
+    readNumber(form.corScrapImpresoKg) +
+    readNumber(form.corScrapMalCorteKg)
+  )
 }
 
 export function accumulateCorteFromJson(
   cerrados: CorteTurnoEntry[],
   actual: CorteTurnoEntry | null,
   formSalidaActual?: number,
+  form?: Record<string, unknown> | null,
 ): JsonAccumulatedCorte {
   let producidoKg = 0
-  for (const t of cerrados) producidoKg += sumSalidaKgFromClosedTurno(t)
+  let entradaKg = 0
+  let scrapKg = 0
+  for (const t of cerrados) {
+    producidoKg += sumSalidaKgFromClosedTurno(t)
+    entradaKg += sumEntradaKgFromClosedTurno(t)
+    scrapKg += sumScrapKgFromClosedTurno(t)
+  }
   if (actual) {
     producidoKg += formSalidaActual ?? sumSalidaKgFromPaletas(actual.paletas)
+    if (form) {
+      entradaKg += sumEntradaKgFromForm(form)
+      scrapKg += sumScrapKgFromForm(form)
+    } else {
+      entradaKg += sumEntradaKgFromClosedTurno(actual)
+      scrapKg += sumScrapKgFromClosedTurno(actual)
+    }
   }
 
   const ultimo = [...cerrados].sort((a, b) =>
@@ -855,6 +926,8 @@ export function accumulateCorteFromJson(
 
   return {
     producidoKg,
+    entradaKg,
+    scrapKg,
     turnosCerrados: cerrados.length,
     turnosRegistrados: cerrados.length + (actual ? 1 : 0),
     ultimoCierreLabel,

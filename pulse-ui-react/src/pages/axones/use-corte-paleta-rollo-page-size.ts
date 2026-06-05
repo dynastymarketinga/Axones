@@ -2,11 +2,10 @@ import { useEffect, useState } from "react"
 
 import { COR_ROLLOS_PER_PALETA } from "@/pages/axones/corte-turnos"
 
-/** Rollos visibles por página dentro de cada paleta (4 filas × columnas del grid). */
+/** Rollos visibles por página (2 columnas en tarjeta ancha; 1 columna en pantallas estrechas). */
 export function resolveCortePaletaRolloPageSize(width: number): number {
-  if (width >= 1024) return 16
-  if (width >= 640) return 12
-  return 8
+  if (width >= 420) return 8
+  return 6
 }
 
 export function cortePaletaRolloTotalPages(pageSize: number): number {
@@ -19,7 +18,7 @@ export function clampCortePaletaRolloPage(page: number, pageSize: number): numbe
 
 export function useCortePaletaRolloPageSize(): number {
   const [pageSize, setPageSize] = useState(() =>
-    typeof window !== "undefined" ? resolveCortePaletaRolloPageSize(window.innerWidth) : 16,
+    typeof window !== "undefined" ? resolveCortePaletaRolloPageSize(window.innerWidth) : 8,
   )
 
   useEffect(() => {

@@ -1,8 +1,15 @@
 import { cn } from "@/lib/utils"
 
-/** Contenedor de tarjetas de paleta por cuadro (2 / 3 / 4 columnas). */
+/** Contenedor de tarjetas de paleta: pocas columnas para que los inputs de kg tengan ancho. */
 export const CORTE_PALETAS_CONTAINER_GRID =
-  "grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4"
+  "grid gap-4 grid-cols-1 md:grid-cols-2 2xl:grid-cols-3"
+
+/** Resumen Rollos / Total Kg: Total Kg ocupa el resto del ancho de la tarjeta. */
+export const cortePaletaSummaryGridClass = () =>
+  "grid w-full grid-cols-[minmax(4.5rem,6rem)_1fr] gap-2"
+
+export const cortePaletaSummaryTotalKgInputClass = () =>
+  "ot-input-unified ot-input-paleta-total h-9 min-w-0 w-full tabular-nums font-semibold"
 
 export type CortePaletaTheme = {
   card: string
@@ -86,17 +93,17 @@ export function cortePaletaCardClass(paletaIdx: number, closed?: boolean): strin
 
 export function cortePaletaRollosGridClass(compact?: boolean): string {
   return cn(
-    "grid gap-2",
+    "grid w-full gap-2",
     compact
       ? "max-h-[18rem] grid-cols-4 overflow-y-auto sm:grid-cols-6"
-      : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4",
+      : "grid-cols-1 min-[420px]:grid-cols-2",
   )
 }
 
 export function cortePaletaRolloCellClass(compact?: boolean, theme?: CortePaletaTheme): string {
   return cn(
-    "space-y-1.5 rounded-md border p-2",
-    compact ? "p-1.5" : "",
+    "min-w-0 space-y-1.5 rounded-md border",
+    compact ? "p-1.5" : "p-2.5",
     theme?.rolloCell ?? "border-border/60 bg-muted/15",
   )
 }
@@ -104,18 +111,18 @@ export function cortePaletaRolloCellClass(compact?: boolean, theme?: CortePaleta
 export function cortePaletaRolloNumberClass(compact?: boolean, theme?: CortePaletaTheme): string {
   return cn(
     "font-semibold tabular-nums",
-    compact ? "text-[10px]" : "text-xs",
+    compact ? "text-[10px]" : "text-sm",
     theme?.title ?? "text-muted-foreground",
   )
 }
 
 export function cortePaletaRolloKgLabelClass(compact?: boolean): string {
-  return cn("ot-label font-medium leading-none", compact ? "text-[10px]" : "text-[11px]")
+  return cn("ot-label font-medium leading-none", compact ? "text-[10px]" : "text-xs")
 }
 
 export function cortePaletaRolloKgInputClass(compact?: boolean): string {
   return cn(
-    "ot-input-unified w-full tabular-nums",
-    compact ? "h-7 px-2 text-xs" : "h-9 px-2.5 text-sm",
+    "ot-input-unified ot-input-paleta-rollo min-w-0 w-full tabular-nums font-semibold text-left",
+    compact ? "h-8 px-2 text-sm md:text-sm" : "h-10 px-3 text-base md:text-base",
   )
 }

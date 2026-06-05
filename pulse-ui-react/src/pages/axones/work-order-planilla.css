@@ -959,6 +959,25 @@
   background: #ffffff !important;
 }
 
+/* Kg neto por rollo en paleta: ancho completo y texto legible al escribir */
+.ax-ot .ot-input-paleta-rollo {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  max-height: none;
+  font-size: 16px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+/* Total Kg de paleta: sin tope de ancho; números largos visibles */
+.ax-ot .ot-input-paleta-total {
+  max-height: none;
+  font-size: 15px;
+  text-align: left;
+}
+
 /* Segmentado (ToggleGroup) dentro de la planilla: que se vea “de plantilla” y ocupe el ancho */
 .ax-ot [data-radix-toggle-group-root] {
   width: 100%;
@@ -995,6 +1014,15 @@
   .ax-ot .ot-input-unified {
     min-height: 40px;
     max-height: 40px;
+  }
+  .ax-ot .ot-input-paleta-rollo {
+    min-height: 40px;
+    max-height: none;
+    font-size: 16px;
+  }
+  .ax-ot .ot-input-paleta-total {
+    max-height: none;
+    font-size: 15px;
   }
 }
 

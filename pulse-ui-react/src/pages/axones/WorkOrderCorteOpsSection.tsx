@@ -119,6 +119,8 @@ import type { MesTimerActionFlags, MesTimerConfirmKey } from "./mes-timer-action
 import {
   CORTE_PALETAS_CONTAINER_GRID,
   cortePaletaCardClass,
+  cortePaletaSummaryGridClass,
+  cortePaletaSummaryTotalKgInputClass,
   getCortePaletaTheme,
 } from "@/pages/axones/corte-paleta-rollos-ui"
 import {
@@ -2268,27 +2270,27 @@ export default function WorkOrderCorteOpsSection({
               </div>
 
               <div className="space-y-3 p-3">
-                <div className="grid grid-cols-2 gap-2 sm:max-w-md">
-                  <div>
+                <div className={cortePaletaSummaryGridClass()}>
+                  <div className="min-w-0">
                     <Label htmlFor={mk(`paleta-${paletaIdx}-rollos-count`)} className="ot-label">
                       Rollos
                     </Label>
                     <Input
                       id={mk(`paleta-${paletaIdx}-rollos-count`)}
                       name={`corPaleta${paletaIdx + 1}RollosCount`}
-                      className={cn("ot-input-unified h-9", theme.summaryInput)}
+                      className={cn("ot-input-unified h-9 tabular-nums", theme.summaryInput)}
                       value={String(salidaPaletasRollos[paletaIdx] ?? 0)}
                       readOnly
                     />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <Label htmlFor={mk(`paleta-${paletaIdx}-total-kg`)} className="ot-label">
                       Total Kg
                     </Label>
                     <Input
                       id={mk(`paleta-${paletaIdx}-total-kg`)}
                       name={`corPaleta${paletaIdx + 1}TotalKg`}
-                      className={cn("ot-input-unified h-9 font-semibold", theme.summaryInput)}
+                      className={cn(cortePaletaSummaryTotalKgInputClass(), theme.summaryInput)}
                       value={(salidaPaletasTotales[paletaIdx] ?? 0).toFixed(2)}
                       readOnly
                     />

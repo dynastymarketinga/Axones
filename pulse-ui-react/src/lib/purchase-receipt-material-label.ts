@@ -162,13 +162,13 @@ export function formatOcLineReference(
   })
 }
 
-/** Avance de recepción por línea OC: Pedido · Recibido · Pendiente. */
+/** Referencia informativa de la línea OC: pedido · recibido · pendiente según pedido. */
 export function formatOcLineReceiptProgress(pol: OcLineReferenceInput): string {
   const ordered = Number(pol.quantity_ordered ?? 0)
   const received = Number(pol.quantity_received ?? 0)
   const unit = (pol.unit ?? "kg").trim() || "kg"
   const pending = Math.max(0, ordered - (Number.isFinite(received) ? received : 0))
-  return `Pedido ${formatQtyEs(ordered)} · Recibido ${formatQtyEs(received)} · Pendiente ${formatQtyEs(pending)} ${unit}`
+  return `Ref. pedido ${formatQtyEs(ordered)} · ya recibido ${formatQtyEs(received)} · pendiente OC ${formatQtyEs(pending)} ${unit}`
 }
 
 /** Banner de OC vinculada: código · proveedor · estado */

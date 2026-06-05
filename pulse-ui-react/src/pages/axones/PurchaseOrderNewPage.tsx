@@ -1049,6 +1049,7 @@ export default function PurchaseOrderNewPage() {
         }),
       })
       toast.success("Orden de compra creada.")
+      window.dispatchEvent(new Event("alerts:refresh"))
       try {
         sessionStorage.removeItem(PURCHASE_ORDER_NEW_DRAFT_KEY)
       } catch {

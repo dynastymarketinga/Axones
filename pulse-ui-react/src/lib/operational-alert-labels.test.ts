@@ -10,6 +10,9 @@ describe("operationalAlertTypeLabel", () => {
     expect(operationalAlertTypeLabel("inventory_return_pending")).toBe(
       "Devolución pendiente de revisión",
     )
+    expect(operationalAlertTypeLabel("purchase_order_pending_receipt")).toBe(
+      "Orden de compra pendiente de recepción",
+    )
   })
 
   it("no expone guiones bajos en tipos desconocidos", () => {

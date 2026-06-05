@@ -1,38 +1,58 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
   Building2,
   Calendar as CalendarIcon,
+  Check,
+  ChevronDown,
+  ChevronsUpDown,
   ClipboardList,
   FileText,
   Hash,
   Info,
   Loader2,
+  MapPin,
   Save,
   ShoppingCart,
+  UserPlus,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { translateApiValidationMessage } from "@/lib/api-validation-es"
+import { cn } from "@/lib/utils"
+import type { LaravelPaginated, SupplierRecord } from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import {
   PurchaseOrderLinesEditor,
   type PoLineFieldErrors,
 } from "@/components/axones/PurchaseOrderLinesEditor"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Calendar as UiCalendar } from "@/components/ui/calendar"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  formatDateTime,
-  PurchaseOrderStatusBadge,
+  formatDateInputDisplay,
+  parseDateInputValue,
+  poFieldIconClass,
+  purchaseOrderStatusLabel,
   toDateInputValue,
+  toDateTimeLocalInputValue,
 } from "@/pages/axones/purchase-order-shared"
 import {
   apiLineToDraft,
@@ -56,7 +76,7 @@ type PurchaseOrderEditDetail = {
   created_at?: string | null
   notes: string | null
   manually_closed_at?: string | null
-  supplier?: { id: number; name: string } | null
+  supplier?: { id: number; name: string; rif?: string | null; address?: string | null } | null
   lines?: Array<{
     id: number
     description?: string | null
@@ -69,6 +89,8 @@ type PurchaseOrderEditDetail = {
 }
 
 type EditBaseline = {
+  supplierId: string
+  registeredAt: string
   notes: string
   orderedAt: string
   linesSnapshot: string
@@ -136,13 +158,65 @@ export default function PurchaseOrderEditPage() {
 
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<PurchaseOrderEditDetail | null>(null)
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
+  const [supplierOpen, setSupplierOpen] = useState(false)
+  const [supplierId, setSupplierId] = useState("")
+  const [registeredAt, setRegisteredAt] = useState("")
   const [notes, setNotes] = useState("")
   const [orderedAt, setOrderedAt] = useState("")
+  const [orderedAtOpen, setOrderedAtOpen] = useState(false)
   const [changeReason, setChangeReason] = useState("")
   const [lines, setLines] = useState<PoLineEditDraft[]>([emptyLine()])
   const [lineErrors, setLineErrors] = useState<Record<number, PoLineFieldErrors>>({})
   const [saving, setSaving] = useState(false)
   const baselineRef = useRef<EditBaseline | null>(null)
+
+  const selectedSupplier = useMemo(
+    () => suppliers.find((x) => String(x.id) === supplierId) ?? null,
+    [suppliers, supplierId],
+  )
+
+  const supplierTriggerDisplay = useMemo(() => {
+    if (!supplierId.trim()) return { text: "Seleccione…", muted: true }
+    if (selectedSupplier) {
+      const name = selectedSupplier.name?.trim() || "Sin nombre"
+      return {
+        text: `${name}${selectedSupplier.rif ? ` · ${selectedSupplier.rif}` : ""}`,
+        muted: false,
+      }
+    }
+    const fallbackName = detail?.supplier?.name?.trim()
+    if (fallbackName) {
+      return {
+        text: `${fallbackName}${detail?.supplier?.rif ? ` · ${detail.supplier.rif}` : ""}`,
+        muted: false,
+      }
+    }
+    return { text: `#${supplierId}`, muted: false }
+  }, [supplierId, selectedSupplier, detail?.supplier])
+
+  const supplierAddress = useMemo(() => {
+    const fromList = selectedSupplier?.address?.trim()
+    if (fromList) return fromList
+    return detail?.supplier?.address?.trim() ?? ""
+  }, [selectedSupplier, detail?.supplier?.address])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch<LaravelPaginated<SupplierRecord>>("suppliers", {
+          query: { per_page: 200, page: 1 },
+        })
+        if (!cancelled) setSuppliers(res.data)
+      } catch {
+        if (!cancelled) setSuppliers([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!Number.isFinite(id) || id < 1) {
@@ -156,16 +230,22 @@ export default function PurchaseOrderEditPage() {
         const data = await apiFetch<PurchaseOrderEditDetail>(`purchase-orders/${id}`)
         if (cancelled) return
         setDetail(data)
+        const sid = String(data.supplier_id)
+        const reg = toDateTimeLocalInputValue(data.created_at)
         const notesVal = (data.notes ?? "").trim()
         const ord = toDateInputValue(data.ordered_at)
         const mappedLines =
           data.lines?.length && data.lines.length > 0
             ? data.lines.map((ln) => apiLineToDraft(ln))
             : [emptyLine()]
+        setSupplierId(sid)
+        setRegisteredAt(reg)
         setNotes(data.notes ?? "")
         setOrderedAt(ord)
         setLines(mappedLines)
         baselineRef.current = {
+          supplierId: sid,
+          registeredAt: reg,
           notes: notesVal,
           orderedAt: ord,
           linesSnapshot: serializeLinesSnapshot(mappedLines),
@@ -192,10 +272,19 @@ export default function PurchaseOrderEditPage() {
       return
     }
 
+    const sid = Number(supplierId)
+    if (!Number.isFinite(sid) || sid < 1) {
+      toast.error("Seleccione un proveedor.")
+      return
+    }
+
+    const registeredTrim = registeredAt.trim()
     const notesTrim = notes.trim()
     const orderedTrim = orderedAt.trim()
     const linesSnapshot = serializeLinesSnapshot(lines)
     const changed =
+      supplierId !== base.supplierId ||
+      registeredTrim !== base.registeredAt ||
       notesTrim !== base.notes ||
       orderedTrim !== base.orderedAt ||
       linesSnapshot !== base.linesSnapshot
@@ -231,6 +320,8 @@ export default function PurchaseOrderEditPage() {
       await apiFetch(`purchase-orders/${detail.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          supplier_id: sid,
+          created_at: registeredTrim === "" ? undefined : registeredTrim,
           notes: notesTrim === "" ? null : notesTrim,
           ordered_at: orderedTrim === "" ? null : orderedTrim,
           change_reason: reason,
@@ -253,11 +344,11 @@ export default function PurchaseOrderEditPage() {
     } finally {
       setSaving(false)
     }
-  }, [detail, notes, orderedAt, changeReason, lines, navigate, listFrom])
+  }, [detail, supplierId, registeredAt, notes, orderedAt, changeReason, lines, navigate, listFrom])
 
   if (!Number.isFinite(id) || id < 1) {
     return (
-      <div className="po-list-shell po-edit-shell space-y-4 p-4 md:p-6">
+      <div className="space-y-4 p-4 md:p-6">
         <p className="text-muted-foreground">Identificador de orden no válido.</p>
         <Button type="button" variant="outline" asChild>
           <Link to="/ordenes-compra">Volver al listado</Link>
@@ -267,177 +358,364 @@ export default function PurchaseOrderEditPage() {
   }
 
   return (
-    <div className="po-list-shell po-edit-shell mx-auto w-full max-w-[1400px] space-y-6 p-4 md:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <Button type="button" variant="outline" size="icon" className="size-10 shrink-0" asChild>
-            <Link to={listFrom} aria-label="Volver al listado">
-              <ArrowLeft className="size-5" />
-            </Link>
-          </Button>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <ShoppingCart className="size-7 text-primary" aria-hidden />
-              <h1 className="text-3xl font-semibold tracking-tight">Editar orden de compra</h1>
-            </div>
-            <p className="text-muted-foreground mt-2 text-base">
-              Modifique cabecera y artículos del pedido. Cualquier cambio requiere motivo registrado en
-              auditoría.
-            </p>
+    <TooltipProvider delayDuration={200}>
+      <div className="space-y-6 p-4 md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-3">
+            <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
+              <ShoppingCart className="size-7 shrink-0 text-primary" aria-hidden />
+              Editar orden de compra
+            </h1>
+            <Alert className="border-primary/40 bg-gradient-to-r from-primary/12 via-primary/8 to-primary/5 shadow-sm">
+              <Info className="h-5 w-5 text-primary" aria-hidden />
+              <AlertTitle className="text-base font-semibold text-foreground">
+                ¿Qué puede modificar en esta pantalla?
+              </AlertTitle>
+              <AlertDescription className="space-y-2 text-sm leading-relaxed text-foreground/90">
+                <p>
+                  <strong>Proveedor, fechas, notas y artículos del pedido.</strong> Cualquier cambio
+                  requiere <strong>motivo registrado en auditoría</strong> (mínimo 5 caracteres).
+                </p>
+                <p>
+                  Las líneas con material recibido <strong>no se pueden eliminar</strong> y su
+                  cantidad no puede quedar por debajo de lo ya recibido.
+                </p>
+              </AlertDescription>
+            </Alert>
           </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" variant="outline" size="icon" className="shrink-0 shadow-sm" asChild>
+                <Link to={listFrom} aria-label="Volver al listado de órdenes de compra">
+                  <ArrowLeft aria-hidden />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="max-w-[16rem] text-left">
+              Vuelve al listado de órdenes de compra.
+            </TooltipContent>
+          </Tooltip>
         </div>
-      </div>
 
-      <Alert className="border-primary/20 bg-primary/5">
-        <Info className="size-5 text-primary" aria-hidden />
-        <AlertDescription className="text-base">
-          Puede editar notas, fecha y líneas del pedido. Las líneas con material recibido no se
-          pueden eliminar y su cantidad no puede quedar por debajo de lo recibido.
-        </AlertDescription>
-      </Alert>
-
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-24 text-base text-muted-foreground">
-          <Loader2 className="size-7 animate-spin" aria-hidden />
-          <span>Cargando orden…</span>
-        </div>
-      ) : !detail ? (
-        <div className="space-y-4">
-          <p className="text-muted-foreground">No se encontró la orden solicitada.</p>
-          <Button type="button" variant="outline" asChild>
-            <Link to={listFrom}>Volver al listado</Link>
-          </Button>
-        </div>
-      ) : (
-        <>
-          <div className="rounded-2xl border bg-card shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-5">
-              <Badge variant="secondary" className="border-primary/20 bg-primary/10 px-3 py-1 text-sm text-primary">
-                Orden de compra
-              </Badge>
-              <p className="font-mono text-2xl font-bold tracking-tight text-primary">{detail.code}</p>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground">
+            <Loader2 className="size-7 animate-spin" aria-hidden />
+            <span>Cargando orden…</span>
+          </div>
+        ) : !detail ? (
+          <div className="space-y-4">
+            <p className="text-muted-foreground">No se encontró la orden solicitada.</p>
+            <Button type="button" variant="outline" asChild>
+              <Link to={listFrom}>Volver al listado</Link>
+            </Button>
+          </div>
+        ) : (
+          <form
+            noValidate
+            onSubmit={(ev) => {
+              ev.preventDefault()
+              void submit()
+            }}
+            className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-muted-foreground text-xs">Documento de compra</p>
+                <Badge
+                  variant="outline"
+                  className="mt-1 rounded-md border-primary/35 bg-primary/5 px-2.5 py-1 text-sm font-semibold text-primary shadow-sm"
+                >
+                  <ClipboardList className="mr-1.5 size-3.5" aria-hidden />
+                  Orden de compra · {purchaseOrderStatusLabel(detail.status)}
+                </Badge>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-muted-foreground text-xs">Código del pedido</p>
+                <h2 className="text-primary text-3xl font-bold tracking-tight">{detail.code}</h2>
+              </div>
             </div>
 
-            <div className="space-y-6 px-6 py-6">
-              <div className="po-detail-hero grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="flex items-start gap-2.5">
-                  <Hash className="mt-0.5 size-5 shrink-0 text-primary/70" aria-hidden />
-                  <div>
-                    <p className="text-muted-foreground text-sm">Código</p>
-                    <p className="font-mono text-base font-semibold">{detail.code}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <Building2 className="mt-0.5 size-5 shrink-0 text-primary/70" aria-hidden />
-                  <div>
-                    <p className="text-muted-foreground text-sm">Proveedor</p>
-                    <p className="text-base font-medium">
-                      {detail.supplier?.name ?? `#${detail.supplier_id}`}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <ClipboardList className="mt-0.5 size-5 shrink-0 text-primary/70" aria-hidden />
-                  <div>
-                    <p className="text-muted-foreground text-sm">Estado</p>
-                    <PurchaseOrderStatusBadge
-                      status={detail.status}
-                      manuallyClosedAt={detail.manually_closed_at ?? null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="po-edit-supplier">Proveedor *</Label>
+                <div className="flex items-center gap-2">
+                  <div className="group/field relative min-w-0 flex-1">
+                    <Building2
+                      className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
+                      aria-hidden
                     />
+                    <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          id="po-edit-supplier"
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={supplierOpen}
+                          disabled={saving}
+                          className={cn(
+                            "h-10 w-full justify-between pl-10 pr-3 font-normal",
+                            "border-primary/25 bg-background/90",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "truncate text-left",
+                              supplierTriggerDisplay.muted && "text-muted-foreground",
+                            )}
+                          >
+                            {supplierTriggerDisplay.text}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+                        align="start"
+                      >
+                        <Command shouldFilter>
+                          <CommandInput placeholder="Buscar proveedor..." />
+                          <CommandList className="max-h-60">
+                            <CommandEmpty>Sin resultados.</CommandEmpty>
+                            <CommandGroup>
+                              {suppliers.map((s) => (
+                                <CommandItem
+                                  key={s.id}
+                                  value={`${s.name} ${s.rif ?? ""}`}
+                                  onSelect={() => {
+                                    setSupplierId(String(s.id))
+                                    setSupplierOpen(false)
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      String(s.id) === supplierId ? "opacity-100" : "opacity-0",
+                                    )}
+                                    aria-hidden
+                                  />
+                                  <span className="truncate">{s.name}</span>
+                                  {s.rif ? (
+                                    <span className="text-muted-foreground ml-2 shrink-0 text-xs">
+                                      {s.rif}
+                                    </span>
+                                  ) : null}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <CalendarIcon className="mt-0.5 size-5 shrink-0 text-primary/70" aria-hidden />
-                  <div>
-                    <p className="text-muted-foreground text-sm">Registrada</p>
-                    <p className="text-base font-medium">{formatDateTime(detail.created_at)}</p>
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10 shrink-0 shadow-sm"
+                        disabled={saving}
+                        aria-label="Crear proveedor nuevo"
+                        asChild
+                      >
+                        <Link
+                          to="/proveedores/form"
+                          state={{ from: editPath }}
+                        >
+                          <UserPlus aria-hidden />
+                        </Link>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Crear proveedor nuevo</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
-              <div className="grid gap-5 lg:grid-cols-2">
-                <div className="grid gap-2 lg:col-span-2">
-                  <Label htmlFor="po-edit-notes" className="text-base">
-                    Notas / observación
-                  </Label>
-                  <div className="relative">
-                    <FileText
-                      className="text-muted-foreground pointer-events-none absolute left-3 top-3.5 size-5"
-                      aria-hidden
-                    />
-                    <Textarea
-                      id="po-edit-notes"
-                      value={notes}
-                      onChange={(ev) => setNotes(ev.target.value)}
-                      rows={4}
-                      className="resize-y pl-11 text-base"
-                      placeholder="Observaciones para el proveedor o el equipo interno…"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="po-edit-ordered" className="text-base">
-                    Fecha de pedido
-                  </Label>
-                  <div className="relative">
-                    <CalendarIcon
-                      className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2"
-                      aria-hidden
-                    />
-                    <Input
-                      id="po-edit-ordered"
-                      type="date"
-                      value={orderedAt}
-                      onChange={(ev) => setOrderedAt(ev.target.value)}
-                      className="h-12 pl-11 text-base"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-2 lg:col-span-2">
-                  <Label htmlFor="po-edit-reason" className="text-base">
-                    Motivo del cambio
-                  </Label>
-                  <Textarea
-                    id="po-edit-reason"
-                    value={changeReason}
-                    onChange={(ev) => setChangeReason(ev.target.value)}
-                    placeholder="Obligatorio al guardar cualquier cambio. Mínimo 5 caracteres."
-                    rows={4}
-                    className="resize-y text-base"
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="po-edit-code" className="inline-flex w-fit items-center gap-1.5">
+                  <Hash className="size-3.5 text-primary" aria-hidden />
+                  Código único
+                </Label>
+                <div className="group/field relative">
+                  <Hash
+                    className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
+                    aria-hidden
+                  />
+                  <Input
+                    id="po-edit-code"
+                    value={detail.code}
+                    readOnly
+                    disabled={saving}
+                    className="cursor-default bg-muted/40 pl-10"
                   />
                 </div>
               </div>
             </div>
-          </div>
 
-          <PurchaseOrderLinesEditor
-            lines={lines}
-            onLinesChange={setLines}
-            saving={saving}
-            lineErrors={lineErrors}
-            returnPath={editPath}
-            supplierId={detail.supplier_id}
-          />
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+              <div className="grid gap-2">
+                <Label htmlFor="po-edit-date" className="inline-flex items-center gap-1.5">
+                  <CalendarIcon className="size-3.5 text-primary" aria-hidden />
+                  Fecha pedido
+                </Label>
+                <Popover open={orderedAtOpen} onOpenChange={setOrderedAtOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="po-edit-date"
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={orderedAtOpen}
+                      disabled={saving}
+                      className={cn(
+                        "group/field h-9 w-full justify-between pl-3 pr-3 font-normal",
+                        "border-primary/25 bg-background/90 shadow-sm",
+                        !orderedAt && "text-muted-foreground",
+                      )}
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        <CalendarIcon
+                          className={cn(
+                            "size-4 shrink-0 transition-colors",
+                            saving
+                              ? "text-muted-foreground/50"
+                              : "text-muted-foreground group-focus-visible:text-primary",
+                          )}
+                          aria-hidden
+                        />
+                        <span className="truncate">{formatDateInputDisplay(orderedAt)}</span>
+                      </span>
+                      <ChevronDown className="ml-1 size-4 shrink-0 opacity-50" aria-hidden />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <UiCalendar
+                      mode="single"
+                      selected={parseDateInputValue(orderedAt)}
+                      defaultMonth={parseDateInputValue(orderedAt) ?? new Date()}
+                      onSelect={(date) => {
+                        if (!date) return
+                        const y = date.getFullYear()
+                        const m = String(date.getMonth() + 1).padStart(2, "0")
+                        const day = String(date.getDate()).padStart(2, "0")
+                        setOrderedAt(`${y}-${m}-${day}`)
+                        setOrderedAtOpen(false)
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
 
-          <div className="flex flex-wrap justify-center gap-4 pb-6">
-            <Button type="button" variant="outline" size="lg" className="min-w-[140px]" asChild>
-              <Link to={listFrom}>Cancelar</Link>
-            </Button>
-            <Button
-              type="button"
-              size="lg"
-              className="min-w-[180px]"
-              disabled={saving}
-              onClick={() => void submit()}
-            >
-              <Save className="mr-2 size-5" aria-hidden />
-              <LoadingButtonLabel loading={saving} loadingText="Guardando…" idleText="Guardar cambios" />
-            </Button>
-          </div>
-        </>
-      )}
-    </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="po-edit-notes" className="inline-flex items-center gap-1.5">
+                  <FileText className="size-3.5 text-primary" aria-hidden />
+                  Notas / observación
+                </Label>
+                <div className="group/field relative">
+                  <FileText
+                    className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
+                    aria-hidden
+                  />
+                  <Input
+                    id="po-edit-notes"
+                    value={notes}
+                    disabled={saving}
+                    onChange={(ev) => setNotes(ev.target.value)}
+                    placeholder="Ej: Entrega 15 días · FOB Caracas · Ref. cotización #4521"
+                    className="h-9 pl-10"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+              <div className="grid gap-2">
+                <Label htmlFor="po-edit-registered" className="inline-flex items-center gap-1.5">
+                  <CalendarIcon className="size-3.5 text-primary" aria-hidden />
+                  Registrada
+                </Label>
+                <div className="group/field relative">
+                  <CalendarIcon
+                    className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
+                    aria-hidden
+                  />
+                  <Input
+                    id="po-edit-registered"
+                    type="datetime-local"
+                    value={registeredAt}
+                    disabled={saving}
+                    onChange={(ev) => setRegisteredAt(ev.target.value)}
+                    className="h-9 pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="po-edit-reason" className="inline-flex items-center gap-1.5">
+                  <FileText className="size-3.5 text-primary" aria-hidden />
+                  Motivo del cambio *
+                </Label>
+                <div className="group/field relative">
+                  <FileText
+                    className={cn(poFieldIconClass(false, saving), "top-1/2 -translate-y-1/2")}
+                    aria-hidden
+                  />
+                  <Input
+                    id="po-edit-reason"
+                    value={changeReason}
+                    disabled={saving}
+                    onChange={(ev) => setChangeReason(ev.target.value)}
+                    placeholder="Obligatorio al guardar. Mínimo 5 caracteres."
+                    className="h-9 pl-10"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {supplierId && (selectedSupplier || detail.supplier) ? (
+              <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-muted/30 p-4 text-sm shadow-sm">
+                <p className="flex items-center gap-2 font-medium text-foreground">
+                  <MapPin className="size-4 text-primary" aria-hidden />
+                  Dirección del proveedor
+                </p>
+                <p className="text-muted-foreground mt-1 whitespace-pre-wrap">
+                  {supplierAddress || "Sin dirección registrada en el proveedor."}
+                </p>
+                {!supplierAddress ? (
+                  <Link
+                    to={`/proveedores/form?id=${supplierId}`}
+                    state={{ from: editPath }}
+                    className="text-primary mt-2 inline-block text-xs underline underline-offset-4"
+                  >
+                    Registrar dirección del proveedor
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
+
+            <PurchaseOrderLinesEditor
+              lines={lines}
+              onLinesChange={setLines}
+              saving={saving}
+              lineErrors={lineErrors}
+              returnPath={editPath}
+              supplierId={Number(supplierId) || detail.supplier_id}
+            />
+
+            <div className="flex w-full justify-center pt-1">
+              <Button type="submit" disabled={saving} className="min-w-[12rem] shadow-md">
+                <Save aria-hidden />
+                <LoadingButtonLabel
+                  loading={saving}
+                  loadingText="Guardando…"
+                  idleText="Guardar cambios"
+                />
+              </Button>
+            </div>
+          </form>
+        )}
+      </div>
+    </TooltipProvider>
   )
 }

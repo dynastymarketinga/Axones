@@ -11,7 +11,6 @@ import type { StreamAlertPayload } from "@/lib/operational-alerts-stream"
 import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
 import type { LaravelPaginated } from "@/types/api"
 import { operationalAlertTypeLabel } from "@/lib/operational-alert-labels"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -40,6 +39,7 @@ const MATERIAL_OPERATIONAL_TYPES = new Set([
   "material_low_stock",
   "material_request_pending_warehouse",
   "inventory_return_pending",
+  "purchase_order_pending_receipt",
 ])
 
 function alertTypeLabel(alertType?: string | null): string {
@@ -54,21 +54,7 @@ function severityLabel(severity?: string | null): string {
   return severity || "—"
 }
 
-function areaLabelFromRole(role?: string | null, userId?: number | null): string {
-  if (Number(userId) === 1) return "Acceso total (ID 1)"
-  const r = (role ?? "").toLowerCase().trim()
-  if (r === "boss" || r === "admin" || r === "jefe_supremo" || r === "superadmin") return "Acceso total"
-  if (r === "printing" || r === "impresion") return "Impresión"
-  if (r === "laminacion") return "Laminación"
-  if (r === "corte") return "Corte"
-  if (r === "montaje") return "Montaje"
-  if (r === "tintas") return "Tintas"
-  return "General"
-}
-
 export default function AxonesOperationalAlertsPage() {
-  const session = getStoredUser()
-  const areaLabel = areaLabelFromRole(session?.role, session?.id)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<AlertRow> | null>(null)
@@ -153,21 +139,13 @@ export default function AxonesOperationalAlertsPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Alertas operativas
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Mermas, falta de material, insumos por despachar, devoluciones y stock bajo.
-          </p>
-          <div className="mt-2">
-            <Badge variant="outline">Área actual: {areaLabel}</Badge>
-          </div>
-        </div>
-        <Button type="button" variant="secondary" onClick={() => void load()}>
-          Actualizar
-        </Button>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Alertas operativas
+        </h1>
+        <p className="text-muted-foreground text-sm">
+          Mermas, falta de material, insumos por despachar, devoluciones, stock bajo y órdenes de compra pendientes de recepción.
+        </p>
       </div>
 
       <div className="bg-card border rounded-2xl shadow-sm overflow-x-auto">
@@ -193,7 +171,7 @@ export default function AxonesOperationalAlertsPage() {
             ) : !rows?.data.length ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-muted-foreground">
-                  Sin alertas de desperdicio o escasez de material.
+                  Sin alertas operativas pendientes.
                 </TableCell>
               </TableRow>
             ) : (

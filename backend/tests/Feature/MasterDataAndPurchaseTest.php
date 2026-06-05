@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OperationalAlertType;
 use App\Enums\PurchaseOrderStatus;
 use App\Models\Material;
+use App\Models\OperationalAlert;
 use App\Models\PurchaseOrder;
 use App\Models\Supplier;
 use App\Models\User;
@@ -51,6 +53,16 @@ class MasterDataAndPurchaseTest extends TestCase
         $poResponse->assertCreated();
         $lineId = $poResponse->json('lines.0.id');
 
+        $this->assertDatabaseHas('operational_alerts', [
+            'alert_type' => OperationalAlertType::PurchaseOrderPendingReceipt->value,
+            'metadata->purchase_order_id' => $poResponse->json('id'),
+        ]);
+
+        $pendingCount = $this->getJson('/api/purchase-orders/pending-receipt-count', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+        $this->assertGreaterThanOrEqual(1, (int) $pendingCount->json('count'));
+
         $recResponse = $this->postJson('/api/purchase-receipts', [
             'purchase_order_id' => $poResponse->json('id'),
             'supplier_id' => $supplier->id,
@@ -90,6 +102,21 @@ class MasterDataAndPurchaseTest extends TestCase
         ])->assertOk();
         $this->assertFalse(
             collect($pendingIndex->json('data'))->contains('id', $po->id),
+        );
+
+        $alert = OperationalAlert::query()
+            ->where('alert_type', OperationalAlertType::PurchaseOrderPendingReceipt->value)
+            ->where('metadata->purchase_order_id', $po->id)
+            ->first();
+        $this->assertNotNull($alert);
+        $this->assertNotNull($alert->acknowledged_at);
+
+        $pendingCountAfter = $this->getJson('/api/purchase-orders/pending-receipt-count', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertOk();
+        $this->assertLessThan(
+            (int) $pendingCount->json('count'),
+            (int) $pendingCountAfter->json('count'),
         );
     }
 

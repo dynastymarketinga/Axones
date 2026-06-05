@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sidebar"
 import { getStoredUser } from "@/lib/auth-storage"
 import { useAreaBandejaCounts } from "@/hooks/useAreaBandejaCounts"
+import { usePendingPurchaseOrdersCount } from "@/hooks/usePendingPurchaseOrdersCount"
 import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
 import { AXONES_MENU_TREE, getAccountLeaves } from "@/lib/axones-menu"
 import { filterAxonesMenuTree } from "@/lib/axones-roles"
@@ -46,6 +47,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     areas: [...AREA_COUNT_AREAS],
   })
   const { count: warehouseInsumosPending } = useWarehouseInsumosPendingCount()
+  const { count: pendingPurchaseOrders } = usePendingPurchaseOrdersCount()
 
   const axonesFiltered = React.useMemo(
     () => filterAxonesMenuTree(AXONES_MENU_TREE, session?.role, session?.id),
@@ -61,6 +63,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       tintas: counts.tintas ?? 0,
       montaje: counts.montaje ?? 0,
       "solicitudes-area": warehouseInsumosPending,
+      "recepciones-oc": pendingPurchaseOrders,
     }
 
     const add = (nodes: any[]): any[] =>
@@ -74,7 +77,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       })
 
     return add(axonesFiltered as any)
-  }, [areaCounts.counts, axonesFiltered, warehouseInsumosPending])
+  }, [areaCounts.counts, axonesFiltered, pendingPurchaseOrders, warehouseInsumosPending])
 
   const accountLeaves = React.useMemo(
     () => getAccountLeaves(session?.role, session?.id),

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\AlertSeverity;
 use App\Enums\DeliveryNoteStatus;
+use App\Enums\OperationalAlertType;
 use App\Enums\PurchaseOrderStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePurchaseOrderRequest;
@@ -11,6 +13,7 @@ use App\Models\DeliveryNote;
 use App\Models\InventoryMovement;
 use App\Models\LaminacionBobinaUsage;
 use App\Models\PrintingBobinaUsage;
+use App\Models\OperationalAlert;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderLine;
 use App\Models\WorkOrder;
@@ -129,7 +132,25 @@ class PurchaseOrderController extends Controller
             return $po->fresh()->load('lines.material', 'supplier');
         });
 
+        $this->notifyPurchaseOrderPendingReceipt($order, $request->user());
+
         return response()->json($order, 201);
+    }
+
+    public function pendingReceiptCount(Request $request): JsonResponse
+    {
+        $linkedReceiptsFilter = static function ($q): void {
+            $q->where('without_purchase_order', false);
+        };
+
+        $count = PurchaseOrder::query()
+            ->where('is_active', true)
+            ->whereDoesntHave('receipts', $linkedReceiptsFilter)
+            ->count();
+
+        return response()->json([
+            'count' => $count,
+        ]);
     }
 
     public function show(PurchaseOrder $purchase_order): JsonResponse
@@ -142,8 +163,10 @@ class PurchaseOrderController extends Controller
     public function update(Request $request, PurchaseOrder $purchase_order): JsonResponse
     {
         $payload = $request->validate([
+            'supplier_id' => ['sometimes', 'integer', 'exists:suppliers,id'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'ordered_at' => ['sometimes', 'nullable', 'date'],
+            'created_at' => ['sometimes', 'date'],
             'tax_applies' => ['sometimes', 'boolean'],
             'status' => ['nullable', 'string', Rule::in(PurchaseOrderStatus::values())],
             'is_active' => ['sometimes', 'boolean'],
@@ -206,6 +229,8 @@ class PurchaseOrderController extends Controller
         } else {
             $headerOrLinesChange = $request->exists('notes')
                 || $request->exists('ordered_at')
+                || $request->exists('supplier_id')
+                || $request->exists('created_at')
                 || $request->exists('tax_applies')
                 || $request->exists('lines');
 
@@ -219,11 +244,17 @@ class PurchaseOrderController extends Controller
                 $data['last_change_reason'] = $cr;
             }
 
+            if (array_key_exists('supplier_id', $payload)) {
+                $data['supplier_id'] = (int) $payload['supplier_id'];
+            }
             if (array_key_exists('notes', $payload)) {
                 $data['notes'] = $payload['notes'];
             }
             if (array_key_exists('ordered_at', $payload)) {
                 $data['ordered_at'] = $payload['ordered_at'];
+            }
+            if (array_key_exists('created_at', $payload)) {
+                $data['created_at'] = $payload['created_at'];
             }
             if (array_key_exists('tax_applies', $payload)) {
                 $data['tax_applies'] = (bool) $payload['tax_applies'];
@@ -232,7 +263,7 @@ class PurchaseOrderController extends Controller
             if ($request->exists('lines')) {
                 DB::transaction(function () use ($purchase_order, $payload, &$data): void {
                     if ($data !== []) {
-                        $purchase_order->update($data);
+                        $purchase_order->forceFill($data)->save();
                     }
                     $this->syncPurchaseOrderLines($purchase_order, $payload['lines'] ?? []);
                 });
@@ -242,7 +273,7 @@ class PurchaseOrderController extends Controller
         }
 
         if ($data !== []) {
-            $purchase_order->update($data);
+            $purchase_order->forceFill($data)->save();
         }
 
         return response()->json($purchase_order->fresh()->load('lines.material', 'supplier'));
@@ -421,5 +452,31 @@ class PurchaseOrderController extends Controller
         if (! BossAccess::allows($request->user())) {
             throw new AuthorizationException('Solo jefatura/admin puede ejecutar esta acción.');
         }
+    }
+
+    private function notifyPurchaseOrderPendingReceipt(PurchaseOrder $order, ?\Illuminate\Contracts\Auth\Authenticatable $user): void
+    {
+        $order->loadMissing('supplier');
+        $supplierName = (string) ($order->supplier?->name ?? '—');
+        $lineCount = $order->lines?->count() ?? 0;
+
+        OperationalAlert::query()->create([
+            'alert_type' => OperationalAlertType::PurchaseOrderPendingReceipt->value,
+            'severity' => AlertSeverity::Info->value,
+            'message' => sprintf(
+                'Nueva orden de compra · %s · %s · %d línea(s) · Pendiente de recepción.',
+                (string) $order->code,
+                $supplierName,
+                $lineCount,
+            ),
+            'metadata' => [
+                'target_area' => 'inventario',
+                'channel' => 'bell',
+                'purchase_order_id' => $order->getKey(),
+                'purchase_order_code' => (string) $order->code,
+                'supplier_name' => $supplierName,
+            ],
+            'created_by' => $user ? (int) $user->getAuthIdentifier() : null,
+        ]);
     }
 }

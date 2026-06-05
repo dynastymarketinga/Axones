@@ -133,6 +133,53 @@ type PaginatedLineEntry = {
 const ADD_RECEIPT_LINE_TOOLTIP =
   "Agregar otra linea a la recepcion. Las filas vacias se omiten al guardar si hay al menos una linea valida."
 
+const ADD_RECEIPT_LINE_WITH_OC_TOOLTIP =
+  "Agregar un ítem vinculado a una línea pendiente de la orden de compra."
+
+function OcLinePicker({
+  polId,
+  onPolIdChange,
+  lines,
+  formatOcLineLabel,
+  disabled,
+}: {
+  polId: string
+  onPolIdChange: (id: string) => void
+  lines: PurchaseOrderLineDetail[]
+  formatOcLineLabel: (pol: PurchaseOrderLineDetail) => string
+  disabled?: boolean
+}) {
+  if (lines.length <= 1) {
+    const only = lines[0]
+    if (!only) return null
+    return (
+      <div className="rounded-lg border border-primary/15 bg-muted/30 px-3 py-2.5 text-sm">
+        <p className="font-medium text-foreground">{formatOcLineLabel(only)}</p>
+        <p className="text-muted-foreground mt-0.5 text-xs">{formatOcLineReceiptProgress(only)}</p>
+      </div>
+    )
+  }
+  return (
+    <Select value={polId} disabled={disabled} onValueChange={onPolIdChange}>
+      <SelectTrigger className="h-auto min-h-10 w-full py-2">
+        <SelectValue placeholder="Seleccione línea del pedido…" />
+      </SelectTrigger>
+      <SelectContent>
+        {lines.map((pol) => (
+          <SelectItem key={pol.id} value={String(pol.id)} className="items-start py-2">
+            <span className="flex min-w-0 flex-col gap-0.5 text-left">
+              <span className="text-sm font-medium leading-snug">{formatOcLineLabel(pol)}</span>
+              <span className="text-muted-foreground text-xs leading-snug">
+                {formatOcLineReceiptProgress(pol)}
+              </span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 export type PurchaseReceiptNewPageViewProps = {
   saving: boolean
   supplierComboOpen: boolean
@@ -171,8 +218,25 @@ export type PurchaseReceiptNewPageViewProps = {
   updateFreeLine: (index: number, patch: Partial<FreeLine>) => void
   allowedUnitsByItemType: (itemType: string) => readonly UnitOption[]
   removeFreeLine: (index: number) => void
-  addFreeLine: () => void
+  requestAddFreeLine: () => void
   reachedItemLimit: boolean
+  addOcLineDialogOpen: boolean
+  setAddOcLineDialogOpen: (open: boolean) => void
+  addOcLinePolId: string
+  setAddOcLinePolId: (id: string) => void
+  poLinesAvailableForAdd: PurchaseOrderLineDetail[]
+  confirmAddOcLine: () => void
+  associateOcLineDialogOpen: boolean
+  setAssociateOcLineDialogOpen: (open: boolean) => void
+  associateOcLineRowIndex: number | null
+  associateOcLinePolId: string
+  setAssociateOcLinePolId: (id: string) => void
+  poLinesAvailableForAssociate: PurchaseOrderLineDetail[]
+  confirmAssociateOcLine: () => void
+  noMoreOcLinesDialogOpen: boolean
+  setNoMoreOcLinesDialogOpen: (open: boolean) => void
+  poReceiptLineSummary: { pendingCount: number; linkedCount: number }
+  switchToDirectEntryAndAddLine: () => void
   maxReceiptLines: number
   goToCreateMaterialFromReceipt: (preferredRowIndex?: number) => void
   goToMaterialMaster: (
@@ -291,8 +355,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                   Si no existe, créelo primero en <strong>Materiales</strong> con el botón de la fila.
                 </p>
                 <p>
-                  Con OC vinculada, cada fila se asocia a la línea del pedido y actualiza lo recibido.
-                  Sin OC puede registrar una <strong>entrada directa</strong>.
+                  Con OC vinculada, la columna de referencia muestra lo pedido; la{" "}
+                  <strong>cantidad</strong> que registre es la entrada física real y puede diferir del
+                  pedido. Sin OC puede registrar una <strong>entrada directa</strong>.
                 </p>
               </AlertDescription>
             </Alert>
@@ -375,27 +440,21 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       <CommandInput placeholder="Buscar proveedor..." />
                       <CommandList className="max-h-60">
                         <CommandEmpty>
-                          {props.supplierOptions.length === 0 ? (
-                            <div className="space-y-3 px-2 py-4 text-center">
-                              <p className="text-muted-foreground text-sm">No hay proveedores registrados.</p>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                disabled={props.saving}
-                                onClick={() => {
-                                  props.setSupplierComboOpen(false)
-                                  props.persistReceiptDraftAndGoToNewSupplier()
-                                }}
-                              >
-                                Crear proveedor
-                              </Button>
-                            </div>
-                          ) : (
-                            "No hay coincidencias."
-                          )}
+                          {props.supplierOptions.length === 0
+                            ? "No hay proveedores registrados."
+                            : "No hay coincidencias."}
                         </CommandEmpty>
                         <CommandGroup>
+                          <CommandItem
+                            value="crear proveedor nuevo"
+                            onSelect={() => {
+                              props.setSupplierComboOpen(false)
+                              props.persistReceiptDraftAndGoToNewSupplier()
+                            }}
+                          >
+                            <UserPlus className="mr-2 size-4" aria-hidden />
+                            Crear proveedor
+                          </CommandItem>
                           {props.supplierOptions.map((supplier) => (
                             <CommandItem
                               key={supplier.id}
@@ -597,7 +656,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                         <CommandEmpty>
                           {props.poListLoading
                             ? "Cargando ordenes de compra..."
-                            : "No hay ordenes abiertas. Use 'Sin orden de compra' para entrada directa."}
+                            : props.purchaseOrderOptions.length === 0
+                              ? "No hay ordenes abiertas."
+                              : "No hay coincidencias."}
                         </CommandEmpty>
                         <CommandGroup>
                           <CommandItem
@@ -617,6 +678,16 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                                 Entrada directa — sin vincular pedido
                               </p>
                             </div>
+                          </CommandItem>
+                          <CommandItem
+                            value="crear orden de compra nueva"
+                            onSelect={() => {
+                              props.setPoComboOpen(false)
+                              props.navigateToNewPurchaseOrder()
+                            }}
+                          >
+                            <ShoppingCart className="mr-2 size-4" aria-hidden />
+                            Crear orden de compra
                           </CommandItem>
                           {props.purchaseOrderOptions.map((po) => {
                             const labelInput = purchaseOrderOptionLabelFromRow(po)
@@ -753,6 +824,13 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
               <p className="text-muted-foreground text-xs">
                 Elija material del inventario (código · descripción · proveedor). Si no existe, use{" "}
                 <strong>Crear material</strong> antes de registrar.
+                {props.hasPurchaseOrder ? (
+                  <>
+                    {" "}
+                    La columna <strong>Referencia OC</strong> es solo informativa; indique en{" "}
+                    <strong>Cantidad</strong> lo que realmente ingresa.
+                  </>
+                ) : null}
               </p>
               </div>
               <div className="flex items-center gap-2">
@@ -780,7 +858,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       disabled={props.saving || props.reachedItemLimit}
                       className="h-8 w-8 shrink-0 shadow-md"
                       aria-label="Agregar linea de recepcion"
-                      onClick={props.addFreeLine}
+                      onClick={props.requestAddFreeLine}
                     >
                       <Plus aria-hidden />
                     </Button>
@@ -788,7 +866,9 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                   <TooltipContent side="left" className="max-w-[15rem] text-left">
                     {props.reachedItemLimit
                       ? `Limite alcanzado (${props.maxReceiptLines} items)`
-                      : ADD_RECEIPT_LINE_TOOLTIP}
+                      : props.hasPurchaseOrder
+                        ? ADD_RECEIPT_LINE_WITH_OC_TOOLTIP
+                        : ADD_RECEIPT_LINE_TOOLTIP}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -803,7 +883,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                       <TableHead className="min-w-[230px]">
                         <span className="inline-flex items-center gap-1.5">
                           <ClipboardList className="size-3.5 text-primary" aria-hidden />
-                          Ítem solicitado (OC)
+                          Referencia OC (informativo)
                         </span>
                       </TableHead>
                     ) : null}
@@ -1169,7 +1249,7 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
                               onChange={(ev) =>
                                 props.updateFreeLine(i, { quantity: sanitizePositiveDecimalInput(ev.target.value, 2) })
                               }
-                              placeholder="Cantidad"
+                              placeholder={props.hasPurchaseOrder ? "Entrada física" : "Cantidad"}
                               disabled={props.saving}
                               className={cn(
                                 "h-9 pl-9",
@@ -1289,6 +1369,150 @@ export function PurchaseReceiptNewPageView(props: PurchaseReceiptNewPageViewProp
             </Button>
           </div>
         </form>
+
+        <AlertDialog open={props.addOcLineDialogOpen} onOpenChange={props.setAddOcLineDialogOpen}>
+          <AlertDialogContent className="flex w-[min(calc(100vw-1.5rem),28rem)] flex-col gap-4 sm:max-w-none">
+            <AlertDialogTitle>¿Añadir como parte de la OC?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-left text-sm text-muted-foreground">
+                <p>
+                  Este ítem se vinculará a una línea pendiente de la orden de compra{" "}
+                  {linkedPoCode ? (
+                    <strong className="text-foreground">{linkedPoCode}</strong>
+                  ) : (
+                    "seleccionada"
+                  )}
+                  .
+                </p>
+                <OcLinePicker
+                  polId={props.addOcLinePolId}
+                  onPolIdChange={props.setAddOcLinePolId}
+                  lines={props.poLinesAvailableForAdd}
+                  formatOcLineLabel={props.formatOcLineLabel}
+                  disabled={props.saving}
+                />
+              </div>
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={props.saving}>No</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={props.saving || !props.addOcLinePolId}
+                onClick={(ev) => {
+                  ev.preventDefault()
+                  props.confirmAddOcLine()
+                }}
+              >
+                Sí, añadir a la OC
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={props.noMoreOcLinesDialogOpen}
+          onOpenChange={props.setNoMoreOcLinesDialogOpen}
+        >
+          <AlertDialogContent className="flex w-[min(calc(100vw-1.5rem),30rem)] flex-col gap-4 sm:max-w-none">
+            <AlertDialogTitle>¿Añadir más ítems?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-left text-sm text-muted-foreground">
+                <p>
+                  La orden{" "}
+                  {linkedPoCode ? (
+                    <strong className="text-foreground">{linkedPoCode}</strong>
+                  ) : (
+                    "de compra seleccionada"
+                  )}{" "}
+                  tiene{" "}
+                  <strong className="text-foreground">
+                    {props.poReceiptLineSummary.pendingCount}
+                  </strong>{" "}
+                  {props.poReceiptLineSummary.pendingCount === 1 ? "línea pendiente" : "líneas pendientes"}
+                  , y {props.poReceiptLineSummary.linkedCount === 1 ? "ya está" : "ya están"} en esta
+                  recepción.
+                </p>
+                <p>
+                  Ya no quedan líneas de la OC sin vincular en esta recepción. Puede registrar otra
+                  cantidad en las filas existentes, usar <strong className="text-foreground">entrada directa</strong>{" "}
+                  (sin OC) o crear otra orden de compra.
+                </p>
+              </div>
+            </AlertDialogDescription>
+            <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+              <AlertDialogAction
+                disabled={props.saving}
+                className="w-full"
+                onClick={(ev) => {
+                  ev.preventDefault()
+                  props.switchToDirectEntryAndAddLine()
+                }}
+              >
+                Entrada directa y añadir fila
+              </AlertDialogAction>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={props.saving}
+                onClick={() => {
+                  props.setNoMoreOcLinesDialogOpen(false)
+                  props.navigateToNewPurchaseOrder()
+                }}
+              >
+                Crear otra OC
+              </Button>
+              <AlertDialogCancel disabled={props.saving} className="mt-0 w-full">
+                Cancelar
+              </AlertDialogCancel>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={props.associateOcLineDialogOpen}
+          onOpenChange={props.setAssociateOcLineDialogOpen}
+        >
+          <AlertDialogContent className="flex w-[min(calc(100vw-1.5rem),28rem)] flex-col gap-4 sm:max-w-none">
+            <AlertDialogTitle>¿Vincular a la orden de compra?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-left text-sm text-muted-foreground">
+                <p>
+                  La línea{" "}
+                  <strong className="text-foreground">
+                    {props.associateOcLineRowIndex != null ? props.associateOcLineRowIndex + 1 : "—"}
+                  </strong>{" "}
+                  no está asociada a la OC
+                  {linkedPoCode ? (
+                    <>
+                      {" "}
+                      <strong className="text-foreground">{linkedPoCode}</strong>
+                    </>
+                  ) : null}
+                  . ¿Desea vincularla a una línea del pedido?
+                </p>
+                <OcLinePicker
+                  polId={props.associateOcLinePolId}
+                  onPolIdChange={props.setAssociateOcLinePolId}
+                  lines={props.poLinesAvailableForAssociate}
+                  formatOcLineLabel={props.formatOcLineLabel}
+                  disabled={props.saving}
+                />
+              </div>
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={props.saving}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={props.saving || !props.associateOcLinePolId}
+                onClick={(ev) => {
+                  ev.preventDefault()
+                  props.confirmAssociateOcLine()
+                }}
+              >
+                Sí, vincular
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <AlertDialog open={props.confirmCreateOpen} onOpenChange={props.setConfirmCreateOpen}>
           <AlertDialogContent className="po-detail-dialog po-confirm-dialog flex flex-col gap-0 overflow-hidden border-primary/15 p-0 sm:max-w-none">

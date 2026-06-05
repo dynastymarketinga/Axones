@@ -18,6 +18,7 @@ import { shouldPlayOperationalToast } from "@/lib/operational-alert-toast-policy
 import type { StreamAlertPayload } from "@/lib/operational-alerts-stream"
 import { getStoredUser } from "@/lib/auth-storage"
 import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
+import { usePendingPurchaseOrdersCount } from "@/hooks/usePendingPurchaseOrdersCount"
 import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
 import { isAxonesFullAccess, normalizeRole } from "@/lib/axones-roles"
 import { operationalAlertTypeLabel } from "@/lib/operational-alert-labels"
@@ -42,6 +43,7 @@ type Notification = {
   workOrderId?: number
   targetArea?: string | null
   materialRequestId?: number
+  purchaseOrderId?: number
   hiddenCount?: number
 }
 
@@ -92,8 +94,16 @@ function routeForAlertType(
   workOrderId?: number,
   targetArea?: string | null,
   materialRequestId?: number,
+  purchaseOrderId?: number,
 ): string {
   const key = alertType.toLowerCase().trim()
+  if (key === "purchase_order_pending_receipt") {
+    const poId = Number(purchaseOrderId ?? 0)
+    if (Number.isFinite(poId) && poId > 0) {
+      return `/recepciones-oc/nuevo?purchase_order_id=${poId}`
+    }
+    return "/recepciones-oc?tab=pending"
+  }
   if (key === "inventory_return_pending") {
     return "/devoluciones"
   }
@@ -137,9 +147,12 @@ export function NotificationDropdown() {
   const showWarehouseBadge = canSeeWarehouseBellBadge(session?.role)
   const { count: warehousePending, reload: reloadWarehousePending } =
     useWarehouseInsumosPendingCount()
+  const { count: pendingPurchaseOrders, reload: reloadPendingPurchaseOrders } =
+    usePendingPurchaseOrdersCount()
 
   async function load() {
     try {
+      await reloadPendingPurchaseOrders()
       if (showWarehouseBadge) {
         await reloadWarehousePending()
       }
@@ -249,6 +262,7 @@ export function NotificationDropdown() {
           item.workOrderId,
           item.targetArea,
           item.materialRequestId,
+          item.purchaseOrderId,
         ),
       )
     } catch {
@@ -298,6 +312,10 @@ export function NotificationDropdown() {
             Number(row.metadata?.material_request_id ?? 0) > 0
               ? Number(row.metadata?.material_request_id)
               : undefined,
+          purchaseOrderId:
+            Number(row.metadata?.purchase_order_id ?? 0) > 0
+              ? Number(row.metadata?.purchase_order_id)
+              : undefined,
           hiddenCount: hidden,
         } satisfies Notification
       })
@@ -315,8 +333,8 @@ export function NotificationDropdown() {
   )
   const unreadCount = unreadNotifications.length
   const bellBadgeCount = showWarehouseBadge
-    ? Math.max(unreadCount, warehousePending)
-    : unreadCount
+    ? Math.max(unreadCount, warehousePending, pendingPurchaseOrders)
+    : Math.max(unreadCount, pendingPurchaseOrders)
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>

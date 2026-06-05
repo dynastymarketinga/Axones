@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { usePendingPurchaseOrdersCount } from "@/hooks/usePendingPurchaseOrdersCount"
 import { apiFetch, ApiError } from "@/lib/api"
 import { formatQuantityDisplay } from "@/lib/numeric-display"
 import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
@@ -177,6 +178,7 @@ function receiptMaterialNamesSummary(row: ReceiptRow): string {
 }
 
 export default function PurchaseReceiptsPage() {
+  const { count: pendingPurchaseOrders } = usePendingPurchaseOrdersCount()
   const [searchParams, setSearchParams] = useSearchParams()
   const [viewTab, setViewTab] = useState<ViewTab>(() => parseViewTab(searchParams.get("tab")))
   const isPendingTab = viewTab === "pending"
@@ -503,7 +505,14 @@ export default function PurchaseReceiptsPage() {
                   Historial
                 </TabsTrigger>
                 <TabsTrigger value="pending" className="po-tab-trigger text-xs sm:text-sm">
-                  OC pendientes
+                  <span className="inline-flex items-center gap-2">
+                    OC pendientes
+                    {pendingPurchaseOrders > 0 ? (
+                      <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                        {pendingPurchaseOrders > 99 ? "99+" : pendingPurchaseOrders}
+                      </span>
+                    ) : null}
+                  </span>
                 </TabsTrigger>
               </TabsList>
             </Tabs>

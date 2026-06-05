@@ -8,6 +8,7 @@ export const OPERATIONAL_ALERT_TYPE_LABEL_ES: Record<string, string> = {
   low_stock: "Stock por debajo del mínimo",
   material_request_pending_warehouse: "Insumos pendientes de despacho",
   inventory_return_pending: "Devolución pendiente de revisión",
+  purchase_order_pending_receipt: "Orden de compra pendiente de recepción",
   mount_time_exceeded: "Tiempo de montaje excedido",
   downtime_exceeded: "Parada prolongada en producción",
   password_reset_requested: "Solicitud de cambio de contraseña",

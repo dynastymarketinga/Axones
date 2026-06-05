@@ -142,6 +142,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/vendors/{vendor}', [VendorController::class, 'update']);
 
     Route::get('/purchase-orders', [PurchaseOrderController::class, 'index']);
+    Route::get('/purchase-orders/pending-receipt-count', [PurchaseOrderController::class, 'pendingReceiptCount']);
     Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
     Route::get('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'show']);
     Route::patch('/purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'update']);

@@ -139,7 +139,7 @@ describe("formatOcLineReceiptProgress", () => {
         quantity_received: "400",
         unit: "kg",
       }),
-    ).toBe("Pedido 500 · Recibido 400 · Pendiente 100 kg")
+    ).toBe("Ref. pedido 500 · ya recibido 400 · pendiente OC 100 kg")
   })
 })
 

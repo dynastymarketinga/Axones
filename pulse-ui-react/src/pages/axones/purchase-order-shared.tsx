@@ -54,6 +54,56 @@ export function toDateInputValue(value: string | null | undefined): string {
   return `${y}-${m}-${day}`
 }
 
+export function parseDateInputValue(value: string): Date | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return undefined
+  const [, year, month, day] = match
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+  if (
+    parsed.getFullYear() !== Number(year) ||
+    parsed.getMonth() !== Number(month) - 1 ||
+    parsed.getDate() !== Number(day)
+  ) {
+    return undefined
+  }
+  return parsed
+}
+
+export function formatDateInputDisplay(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return "Seleccione fecha…"
+  return `${match[3]}/${match[2]}/${match[1]}`
+}
+
+export function poInvalidHighlightClass(hasError: boolean) {
+  return hasError
+    ? "border-destructive/80 bg-destructive/[0.06] shadow-[inset_0_0_0_1px_rgba(239,68,68,0.35),0_0_0_3px_rgba(239,68,68,0.12)]"
+    : ""
+}
+
+export function poFieldIconClass(hasError: boolean, disabled?: boolean) {
+  return cn(
+    "pointer-events-none absolute left-3 h-4 w-4 transition-colors",
+    hasError
+      ? "text-red-500"
+      : disabled
+        ? "text-muted-foreground/50"
+        : "text-muted-foreground group-focus-within/field:text-primary",
+  )
+}
+
+export function toDateTimeLocalInputValue(value: string | null | undefined): string {
+  if (!value) return ""
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  const h = String(d.getHours()).padStart(2, "0")
+  const min = String(d.getMinutes()).padStart(2, "0")
+  return `${y}-${m}-${day}T${h}:${min}`
+}
+
 export function formatQuantityEs(value: string | number | null | undefined): string {
   return formatQuantityDisplay(value) || "0"
 }

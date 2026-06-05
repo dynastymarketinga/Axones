@@ -65,7 +65,7 @@ import {
 const ADD_LINE_TOOLTIP =
   "Agregar otra línea al pedido. Las filas vacías se omiten al guardar si hay al menos una línea válida."
 
-const PO_ROW_FIELD_CLASS = "border-white/60 bg-background/90 shadow-sm h-10 text-base"
+const PO_ROW_FIELD_CLASS = "border-white/60 bg-background/90 shadow-sm"
 
 function normalizeKey(value: string) {
   return value
@@ -291,11 +291,11 @@ export function PurchaseOrderLinesEditor({
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-primary/15 bg-gradient-to-b from-muted/20 to-background p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
+    <div className="space-y-3 rounded-xl border border-primary/15 bg-gradient-to-b from-muted/20 to-background p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
         <div className="grid min-w-0 gap-1">
-          <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
-            <Package className="size-5 text-primary" aria-hidden />
+          <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+            <Package className="size-4 text-primary" aria-hidden />
             Artículos del pedido
             <Badge
               variant="outline"
@@ -304,7 +304,7 @@ export function PurchaseOrderLinesEditor({
               {lines.length}
             </Badge>
           </h2>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-xs">
             Edite material, cantidad y unidad por línea. Puede agregar o quitar filas (no se eliminan
             líneas con recepciones registradas).
           </p>
@@ -317,7 +317,7 @@ export function PurchaseOrderLinesEditor({
                 size="icon"
                 variant="outline"
                 disabled={saving}
-                className="h-9 w-9 shrink-0 shadow-sm"
+                className="h-8 w-8 shrink-0 shadow-sm"
                 aria-label="Crear material en inventario"
                 onClick={() => goToCreateMaterial(0)}
               >
@@ -332,7 +332,7 @@ export function PurchaseOrderLinesEditor({
                 type="button"
                 size="icon"
                 disabled={saving}
-                className="h-9 w-9 shrink-0 shadow-md"
+                className="h-8 w-8 shrink-0 shadow-md"
                 aria-label="Agregar línea al pedido"
                 onClick={addLine}
               >
@@ -350,23 +350,28 @@ export function PurchaseOrderLinesEditor({
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
-              <TableHead className="w-14 text-sm">N°</TableHead>
-              <TableHead className="min-w-[280px] text-sm">
+              <TableHead className="w-14">N°</TableHead>
+              <TableHead className="min-w-[260px]">
                 <span className="inline-flex items-center gap-1.5">
                   <Package className="size-3.5 text-primary" aria-hidden />
                   Material solicitado
                 </span>
               </TableHead>
-              <TableHead className="w-40 text-sm">Tipo</TableHead>
+              <TableHead className="w-36">Tipo</TableHead>
               {showDimensionColumns ? (
                 <>
-                  <TableHead className="w-28 text-sm">Micras</TableHead>
-                  <TableHead className="w-28 text-sm">Ancho</TableHead>
+                  <TableHead className="w-24">Micras</TableHead>
+                  <TableHead className="w-24">Ancho</TableHead>
                 </>
               ) : null}
-              <TableHead className="w-36 text-sm">Cantidad *</TableHead>
-              <TableHead className="w-36 text-sm">Unidad</TableHead>
-              <TableHead className="w-24 text-sm">Recibido</TableHead>
+              <TableHead className="w-32 align-middle whitespace-nowrap">
+                <span className="inline-flex items-center gap-1.5">
+                  <Scale className="size-3.5 shrink-0 text-primary" aria-hidden />
+                  Cantidad *
+                </span>
+              </TableHead>
+              <TableHead className="w-36">Unidad</TableHead>
+              <TableHead className="w-24">Recibido</TableHead>
               <TableHead className="w-[4.5rem] p-0 text-center">
                 <span className="sr-only">Acciones</span>
               </TableHead>
@@ -388,7 +393,7 @@ export function PurchaseOrderLinesEditor({
                   <TableCell className="align-middle">
                     <div
                       className={cn(
-                        "flex h-10 items-center justify-center rounded-md border px-2 text-sm font-semibold",
+                        "flex h-9 items-center justify-center rounded-md border px-2 text-sm font-semibold",
                         typeMeta.rowNumberClass,
                       )}
                     >
@@ -504,7 +509,7 @@ export function PurchaseOrderLinesEditor({
                         })
                       }}
                     >
-                      <SelectTrigger className={cn("h-10 font-medium text-base", typeMeta.selectTriggerClass)}>
+                      <SelectTrigger className={cn("h-9 font-medium", typeMeta.selectTriggerClass)}>
                         <SelectValue placeholder="Tipo..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -582,7 +587,7 @@ export function PurchaseOrderLinesEditor({
                       onValueChange={(v) => updateLine(i, { unit: v as PoLineUnit })}
                       disabled={saving}
                     >
-                      <SelectTrigger className={cn("h-10 text-base", PO_ROW_FIELD_CLASS)}>
+                      <SelectTrigger className={cn("h-9", PO_ROW_FIELD_CLASS)}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -603,7 +608,7 @@ export function PurchaseOrderLinesEditor({
                         type="button"
                         size="icon"
                         variant="ghost"
-                        className="h-9 w-9 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                        className="h-8 w-8 text-muted-foreground hover:bg-primary/10 hover:text-primary"
                         disabled={saving}
                         onClick={() => goToCreateMaterial(i)}
                         aria-label={`Crear material desde fila ${i + 1}`}
@@ -614,7 +619,7 @@ export function PurchaseOrderLinesEditor({
                         type="button"
                         size="icon"
                         variant="ghost"
-                        className="h-9 w-9 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        className="h-8 w-8 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         disabled={!canRemove}
                         onClick={() => removeLine(i)}
                         aria-label={`Eliminar fila ${i + 1}`}
@@ -628,39 +633,42 @@ export function PurchaseOrderLinesEditor({
             })}
           </TableBody>
         </Table>
-      </div>
-
-      {lines.length > PO_LINES_PAGE_SIZE ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <p className="text-muted-foreground">
-            Mostrando {(safeLinesPage - 1) * PO_LINES_PAGE_SIZE + 1}–
+        {lines.length > PO_LINES_PAGE_SIZE ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-primary/10 bg-muted/20 px-3 py-2 text-sm">
+          <p className="text-muted-foreground text-xs">
+            Líneas {(safeLinesPage - 1) * PO_LINES_PAGE_SIZE + 1}–
             {Math.min(safeLinesPage * PO_LINES_PAGE_SIZE, lines.length)} de {lines.length}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Button
               type="button"
-              size="sm"
               variant="outline"
+              size="icon"
+              className="h-8 w-8 shadow-sm"
               disabled={safeLinesPage <= 1 || saving}
               onClick={() => setLinesPage((p) => Math.max(1, p - 1))}
+              aria-label="Página anterior de líneas"
             >
               <ChevronLeft className="size-4" aria-hidden />
             </Button>
-            <span className="text-muted-foreground tabular-nums">
+            <span className="text-muted-foreground min-w-[5.5rem] text-center text-xs font-medium">
               Pág. {safeLinesPage} / {linesPageCount}
             </span>
             <Button
               type="button"
-              size="sm"
               variant="outline"
+              size="icon"
+              className="h-8 w-8 shadow-sm"
               disabled={safeLinesPage >= linesPageCount || saving}
               onClick={() => setLinesPage((p) => Math.min(linesPageCount, p + 1))}
+              aria-label="Página siguiente de líneas"
             >
               <ChevronRight className="size-4" aria-hidden />
             </Button>
           </div>
         </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   )
 }

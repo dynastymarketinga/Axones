@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Enums\InventoryMovementType;
+use App\Enums\OperationalAlertType;
 use App\Enums\PurchaseOrderStatus;
+use App\Models\OperationalAlert;
 use App\Models\Bobina;
 use App\Models\Material;
 use App\Models\PurchaseOrder;
@@ -123,12 +125,6 @@ class PurchaseReceiptService
                             "lines.$index.material_id" => ['El material debe coincidir con el definido en la línea de OC.'],
                         ]);
                     }
-                    $remaining = bcsub((string) $pol->quantity_ordered, (string) $pol->quantity_received, 3);
-                    if (bccomp($qty, $remaining, 3) === 1) {
-                        throw ValidationException::withMessages([
-                            "lines.$index.quantity" => ['La cantidad excede lo pendiente de la línea ('.$remaining.').'],
-                        ]);
-                    }
                     $pol->quantity_received = bcadd((string) $pol->quantity_received, $qty, 3);
                     $pol->save();
                 }
@@ -198,6 +194,14 @@ class PurchaseReceiptService
             if ($po) {
                 $po->refresh()->load('lines');
                 $this->purchaseOrderClosing->recompute($po);
+                OperationalAlert::query()
+                    ->unread()
+                    ->where('alert_type', OperationalAlertType::PurchaseOrderPendingReceipt->value)
+                    ->where('metadata->purchase_order_id', $po->getKey())
+                    ->update([
+                        'acknowledged_at' => now(),
+                        'acknowledged_by' => $user->getKey(),
+                    ]);
             }
 
             return $receipt->fresh(['supplier', 'lines.material', 'purchaseOrder.supplier', 'user']);

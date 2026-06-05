@@ -216,7 +216,6 @@ function materialsForReceiptItemType(materialsList: MaterialRow[], itemType: str
 function receiptLineValidationMessage(
   row: FreeLine,
   requirePurchaseOrderLine: boolean,
-  purchaseOrderLines?: PurchaseOrderLineDetail[] | null,
 ): string | null {
   const hasPol = row.purchase_order_line_id.trim().length > 0
   const hasType = row.item_type.trim().length > 0
@@ -242,18 +241,6 @@ function receiptLineValidationMessage(
     (!Number.isFinite(micras) || micras <= 0 || !Number.isFinite(ancho) || ancho <= 0)
   ) {
     return "En Sustrato indique Micras y Ancho mayores que 0."
-  }
-  if (requirePurchaseOrderLine && row.purchase_order_line_id.trim()) {
-    const pol = purchaseOrderLines?.find(
-      (ln) => String(ln.id) === row.purchase_order_line_id.trim(),
-    )
-    if (pol) {
-      const pending = polRemainingQty(pol)
-      if (quantity > pending + 0.0001) {
-        const unit = (row.unit || pol.unit || "kg").trim() || "kg"
-        return `La cantidad no puede superar lo pendiente (${formatQuantityDisplay(pending)} ${unit}).`
-      }
-    }
   }
   return null
 }
@@ -291,7 +278,6 @@ function buildFreeLineFromPurchaseOrderLine(
   materialsList: MaterialRow[],
   poSupplierName?: string | null,
 ): FreeLine {
-  const rem = polRemainingQty(pol)
   const parsed = parseOcLineMeta(pol.description)
   const matId =
     pol.material_id != null && pol.material_id !== undefined ? String(pol.material_id) : ""
@@ -328,7 +314,7 @@ function buildFreeLineFromPurchaseOrderLine(
     material_id,
     micras: formatMaterialDimensionDisplay(matFromList?.micras) || formatMaterialDimensionDisplay(parsed.micras),
     ancho_mm: formatMaterialDimensionDisplay(matFromList?.ancho) || formatMaterialDimensionDisplay(parsed.ancho_mm),
-    quantity: String(rem),
+    quantity: "",
     unit: unitRaw || "kg",
   })
 }
@@ -346,6 +332,22 @@ function polRemainingQty(line: PurchaseOrderLineDetail): number {
   const r = Number(line.quantity_received ?? 0)
   if (!Number.isFinite(o) || !Number.isFinite(r)) return 0
   return Math.max(0, o - r)
+}
+
+function getPoLinesAvailableForRow(
+  lines: FreeLine[],
+  poDetail: PurchaseOrderDetailPayload | null,
+  excludeRowIndex?: number,
+): PurchaseOrderLineDetail[] {
+  const used = new Set<string>()
+  lines.forEach((row, index) => {
+    if (excludeRowIndex != null && index === excludeRowIndex) return
+    const id = row.purchase_order_line_id.trim()
+    if (id) used.add(id)
+  })
+  return (poDetail?.lines ?? []).filter(
+    (pol) => polRemainingQty(pol) > 0 && !used.has(String(pol.id)),
+  )
 }
 
 /** Etiqueta de estado en recepciones: no mostrar «Parcial»; las OC elegibles se presentan como «Abierta». */
@@ -434,6 +436,12 @@ export default function PurchaseReceiptNewPage() {
   const [materialPickerOpenRow, setMaterialPickerOpenRow] = useState<number | null>(null)
   const [estimatedNextReceiptId, setEstimatedNextReceiptId] = useState<number | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
+  const [addOcLineDialogOpen, setAddOcLineDialogOpen] = useState(false)
+  const [addOcLinePolId, setAddOcLinePolId] = useState("")
+  const [associateOcLineDialogOpen, setAssociateOcLineDialogOpen] = useState(false)
+  const [associateOcLineRowIndex, setAssociateOcLineRowIndex] = useState<number | null>(null)
+  const [associateOcLinePolId, setAssociateOcLinePolId] = useState("")
+  const [noMoreOcLinesDialogOpen, setNoMoreOcLinesDialogOpen] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateReceiptMatch[]>([])
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null)
 
@@ -793,6 +801,20 @@ export default function PurchaseReceiptNewPage() {
     scheduleFieldErrorsAutoClear()
     toastReceiptValidationErrors(nextField, nextLine)
     focusFirstReceiptValidationError(nextField, nextLine)
+
+    const hasPo = purchaseOrderId != null && purchaseOrderId > 0
+    const firstOrphan = Object.keys(nextLine)
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && nextLine[n]?.purchaseOrderLine)
+      .sort((a, b) => a - b)[0]
+    if (hasPo && firstOrphan != null) {
+      const available = getPoLinesAvailableForRow(freeLines, purchaseOrderDetail, firstOrphan)
+      if (available.length > 0) {
+        setAssociateOcLineRowIndex(firstOrphan)
+        setAssociateOcLinePolId(String(available[0].id))
+        setAssociateOcLineDialogOpen(true)
+      }
+    }
   }
 
   function toastReceiptValidationErrors(
@@ -923,7 +945,7 @@ export default function PurchaseReceiptNewPage() {
 
     for (const i of editedRowIndexes) {
       const row = freeLines[i]
-      const msg = receiptLineValidationMessage(row, hasPurchaseOrder, purchaseOrderDetail?.lines)
+      const msg = receiptLineValidationMessage(row, hasPurchaseOrder)
       if (!msg) continue
       const errs: ReceiptLineFieldErrors = {}
       if (msg.includes("línea de la orden")) errs.purchaseOrderLine = msg
@@ -1003,13 +1025,10 @@ export default function PurchaseReceiptNewPage() {
     () =>
       freeLines.filter(
         (row) =>
-          receiptLineValidationMessage(
-            row,
-            purchaseOrderId != null && purchaseOrderId > 0,
-            purchaseOrderDetail?.lines,
-          ) === null && receiptLineHasAnyValue(row),
+          receiptLineValidationMessage(row, purchaseOrderId != null && purchaseOrderId > 0) === null &&
+          receiptLineHasAnyValue(row),
       ).length,
-    [freeLines, purchaseOrderDetail?.lines, purchaseOrderId],
+    [freeLines, purchaseOrderId],
   )
 
   function saveReceiptDraftToSession(): boolean {
@@ -1094,18 +1113,98 @@ export default function PurchaseReceiptNewPage() {
     })
   }
 
-  function addFreeLine() {
-    setLinesPage((p) => p)
+  function appendFreeLine(line: FreeLine) {
     setFreeLines((prev) => {
       if (prev.length >= MAX_RECEIPT_LINES) {
         documentToastError(`Solo puede agregar hasta ${MAX_RECEIPT_LINES} ítems por recepción.`)
         return prev
       }
-      const next = [...prev, emptyLine()]
+      const next = [...prev, line]
       setLinesPage(Math.ceil(next.length / DOCUMENT_LINES_PAGE_SIZE))
       return next
     })
     setLineErrors({})
+  }
+
+  function requestAddFreeLine() {
+    if (freeLines.length >= MAX_RECEIPT_LINES) {
+      documentToastError(`Solo puede agregar hasta ${MAX_RECEIPT_LINES} ítems por recepción.`)
+      return
+    }
+    const hasPo = purchaseOrderId != null && purchaseOrderId > 0
+    if (!hasPo) {
+      appendFreeLine(emptyLine())
+      return
+    }
+    const available = getPoLinesAvailableForRow(freeLines, purchaseOrderDetail)
+    if (available.length === 0) {
+      setNoMoreOcLinesDialogOpen(true)
+      return
+    }
+    setAddOcLinePolId(String(available[0].id))
+    setAddOcLineDialogOpen(true)
+  }
+
+  function confirmAddOcLine() {
+    const pol = purchaseOrderDetail?.lines?.find((ln) => String(ln.id) === addOcLinePolId)
+    if (!pol) {
+      toast.error("No se encontró la línea de la orden de compra.")
+      return
+    }
+    const poSupplierName = purchaseOrderDetail?.supplier?.name ?? null
+    appendFreeLine(buildFreeLineFromPurchaseOrderLine(pol, materials, poSupplierName))
+    setAddOcLineDialogOpen(false)
+  }
+
+  function switchToDirectEntryAndAddLine() {
+    setPurchaseOrderId(null)
+    setPurchaseOrderDetail(null)
+    skipRemoteFreeLinesForPurchaseOrderRef.current = null
+    pendingRestoredFreeLinesRef.current = null
+    setPoComboOpen(false)
+    setFieldErrors((prev) => {
+      if (!prev.purchaseOrder) return prev
+      const next = { ...prev }
+      delete next.purchaseOrder
+      return next
+    })
+    setFreeLines((prev) => {
+      const stripped = prev.map((row) => ({ ...row, purchase_order_line_id: "" }))
+      if (stripped.length >= MAX_RECEIPT_LINES) {
+        setLinesPage(Math.ceil(stripped.length / DOCUMENT_LINES_PAGE_SIZE))
+        return stripped
+      }
+      const next = [...stripped, emptyLine()]
+      setLinesPage(Math.ceil(next.length / DOCUMENT_LINES_PAGE_SIZE))
+      return next
+    })
+    setLineErrors({})
+    setNoMoreOcLinesDialogOpen(false)
+    toast.info("Entrada directa: puede añadir más ítems; esta recepción ya no actualizará la OC.")
+  }
+
+  function confirmAssociateOcLine() {
+    if (associateOcLineRowIndex == null) return
+    const pol = purchaseOrderDetail?.lines?.find((ln) => String(ln.id) === associateOcLinePolId)
+    if (!pol) {
+      toast.error("No se encontró la línea de la orden de compra.")
+      return
+    }
+    const poSupplierName = purchaseOrderDetail?.supplier?.name ?? null
+    const built = buildFreeLineFromPurchaseOrderLine(pol, materials, poSupplierName)
+    const existing = freeLines[associateOcLineRowIndex]
+    updateFreeLine(associateOcLineRowIndex, {
+      purchase_order_line_id: built.purchase_order_line_id,
+      item_type: existing?.item_type?.trim() ? existing.item_type : built.item_type,
+      material_id: existing?.material_id?.trim() ? existing.material_id : built.material_id,
+      material_label: existing?.material_label?.trim() ? existing.material_label : built.material_label,
+      micras: existing?.micras?.trim() ? existing.micras : built.micras,
+      ancho_mm: existing?.ancho_mm?.trim() ? existing.ancho_mm : built.ancho_mm,
+      quantity: existing?.quantity?.trim() ? existing.quantity : built.quantity,
+      unit: existing?.unit?.trim() ? existing.unit : built.unit,
+    })
+    setAssociateOcLineDialogOpen(false)
+    setAssociateOcLineRowIndex(null)
   }
 
   function updateFreeLine(i: number, patch: Partial<FreeLine>) {
@@ -1252,6 +1351,7 @@ export default function PurchaseReceiptNewPage() {
         body: JSON.stringify(payload),
       })
       toast.success("Recepción registrada y sumada al inventario.")
+      window.dispatchEvent(new Event("alerts:refresh"))
       try {
         sessionStorage.removeItem(PURCHASE_RECEIPT_NEW_DRAFT_KEY)
       } catch {
@@ -1331,7 +1431,27 @@ export default function PurchaseReceiptNewPage() {
   const reachedItemLimit = freeLines.length >= MAX_RECEIPT_LINES
   const hasPurchaseOrder = purchaseOrderId != null && purchaseOrderId > 0
 
+  const poLinesAvailableForAdd = useMemo(
+    () => getPoLinesAvailableForRow(freeLines, purchaseOrderDetail),
+    [freeLines, purchaseOrderDetail],
+  )
+
+  const poLinesAvailableForAssociate = useMemo(
+    () =>
+      associateOcLineRowIndex != null
+        ? getPoLinesAvailableForRow(freeLines, purchaseOrderDetail, associateOcLineRowIndex)
+        : [],
+    [associateOcLineRowIndex, freeLines, purchaseOrderDetail],
+  )
+
+  const poReceiptLineSummary = useMemo(() => {
+    const pendingLines = (purchaseOrderDetail?.lines ?? []).filter((pol) => polRemainingQty(pol) > 0)
+    const linkedCount = freeLines.filter((row) => row.purchase_order_line_id.trim().length > 0).length
+    return { pendingCount: pendingLines.length, linkedCount }
+  }, [freeLines, purchaseOrderDetail])
+
   function navigateToNewPurchaseOrder() {
+    if (!saveReceiptDraftToSession()) return
     navigate("/ordenes-compra/nueva", {
       state: {
         from: "/recepciones-nueva",
@@ -1379,8 +1499,25 @@ export default function PurchaseReceiptNewPage() {
       updateFreeLine={updateFreeLine}
       allowedUnitsByItemType={allowedUnitsByItemType}
       removeFreeLine={removeFreeLine}
-      addFreeLine={addFreeLine}
+      requestAddFreeLine={requestAddFreeLine}
       reachedItemLimit={reachedItemLimit}
+      addOcLineDialogOpen={addOcLineDialogOpen}
+      setAddOcLineDialogOpen={setAddOcLineDialogOpen}
+      addOcLinePolId={addOcLinePolId}
+      setAddOcLinePolId={setAddOcLinePolId}
+      poLinesAvailableForAdd={poLinesAvailableForAdd}
+      confirmAddOcLine={confirmAddOcLine}
+      associateOcLineDialogOpen={associateOcLineDialogOpen}
+      setAssociateOcLineDialogOpen={setAssociateOcLineDialogOpen}
+      associateOcLineRowIndex={associateOcLineRowIndex}
+      associateOcLinePolId={associateOcLinePolId}
+      setAssociateOcLinePolId={setAssociateOcLinePolId}
+      poLinesAvailableForAssociate={poLinesAvailableForAssociate}
+      confirmAssociateOcLine={confirmAssociateOcLine}
+      noMoreOcLinesDialogOpen={noMoreOcLinesDialogOpen}
+      setNoMoreOcLinesDialogOpen={setNoMoreOcLinesDialogOpen}
+      poReceiptLineSummary={poReceiptLineSummary}
+      switchToDirectEntryAndAddLine={switchToDirectEntryAndAddLine}
       maxReceiptLines={MAX_RECEIPT_LINES}
       goToCreateMaterialFromReceipt={goToCreateMaterialFromReceipt}
       goToMaterialMaster={goToMaterialMaster}

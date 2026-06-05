@@ -14,6 +14,8 @@ enum OperationalAlertType: string
     case InventoryReturnPending = 'inventory_return_pending';
     /** Solicitud de insumos / sustratos planilla OT pendiente de despacho en almacén. */
     case MaterialRequestPendingWarehouse = 'material_request_pending_warehouse';
+    /** Orden de compra creada y pendiente de primera recepción en inventario. */
+    case PurchaseOrderPendingReceipt = 'purchase_order_pending_receipt';
 
     /** Tipos mostrados en /alertas (desperdicio y escasez de material). */
     public static function materialOperationalValues(): array
@@ -31,6 +33,7 @@ enum OperationalAlertType: string
         return [
             self::MaterialRequestPendingWarehouse->value,
             self::InventoryReturnPending->value,
+            self::PurchaseOrderPendingReceipt->value,
         ];
     }
 

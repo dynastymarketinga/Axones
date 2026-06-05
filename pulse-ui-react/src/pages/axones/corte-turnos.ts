@@ -712,9 +712,46 @@ export function shouldPreferTopCorPaletas(
   const topKg = sumSalidaKgFromPaletas(topPaletas)
   const nestedKg = sumSalidaKgFromPaletas(nestedPaletas)
   if (topKg > nestedKg + 0.001 || (topKg > 0 && nestedKg <= 0)) return true
+  if (topKg > 0 && topKg >= nestedKg) return true
   if (topClosed) return true
 
   return false
+}
+
+function mergeCorPaletaRollosKg(a: string, b: string): string {
+  const ka = readNumber(a)
+  const kb = readNumber(b)
+  return kb > ka ? sanitizeKgCell(b) : sanitizeKgCell(a)
+}
+
+/**
+ * Fusiona cor_paletas (nivel OT) y paletas del turno activo por id, conservando el mayor kg por rollo.
+ * Evita perder pesos al guardar cuando el espejo del turno quedó desincronizado.
+ */
+export function mergeCorPaletasForSave(topPaletas: CorPaleta[], nestedPaletas: CorPaleta[]): CorPaleta[] {
+  const byId = new Map<string, CorPaleta>()
+  for (const p of [...nestedPaletas, ...topPaletas]) {
+    const existing = byId.get(p.id)
+    if (!existing) {
+      byId.set(p.id, {
+        ...p,
+        rollosKg: ensureStringArray(p.rollosKg, COR_ROLLOS_PER_PALETA),
+      })
+      continue
+    }
+    const mergedRollos = Array.from({ length: COR_ROLLOS_PER_PALETA }, (_, i) =>
+      mergeCorPaletaRollosKg(existing.rollosKg[i] ?? "", p.rollosKg[i] ?? ""),
+    )
+    const closed = isCorPaletaCerrada(existing) || isCorPaletaCerrada(p)
+    byId.set(p.id, {
+      ...existing,
+      label: p.label || existing.label,
+      rollosKg: mergedRollos,
+      status: closed ? (isCorPaletaCerrada(p) ? p.status : existing.status) : "en_progreso",
+      closed_at: existing.closed_at ?? p.closed_at,
+    })
+  }
+  return sanitizeCorPaletasForPersistence(Array.from(byId.values()))
 }
 
 /**
@@ -724,9 +761,14 @@ export function pickAuthoritativeCorPaletas(
   topPaletas: CorPaleta[],
   nestedPaletas: CorPaleta[],
 ): CorPaleta[] {
-  return sanitizeCorPaletasForPersistence(
-    shouldPreferTopCorPaletas(topPaletas, nestedPaletas) ? topPaletas : nestedPaletas,
-  )
+  return mergeCorPaletasForSave(topPaletas, nestedPaletas)
+}
+
+/** Paletas definitivas para PATCH corte-control (incluye saldo provisional en Despacho). */
+export function resolveCorPaletasForSave(form: Record<string, unknown>): CorPaleta[] {
+  const topPaletas = getCorPaletas(form)
+  const actual = materializeOpenCorteTurnoActual(form)
+  return mergeCorPaletasForSave(topPaletas, actual?.paletas ?? [])
 }
 
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
@@ -746,7 +788,7 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
       actual = { ...actual, timer: flatTimer }
     }
     const topPaletas = getCorPaletas(mergedForm)
-    const paletas = pickAuthoritativeCorPaletas(topPaletas, actual.paletas)
+    const paletas = mergeCorPaletasForSave(topPaletas, actual.paletas)
     actual = { ...actual, paletas }
   }
 

@@ -134,11 +134,10 @@ import {
   startCorteProductionTimerOnForm,
   type CortePauseEntry,
   type CorteTurnTimer,
-  getCorPaletas,
   sanitizeCorEntradaBobinasKg,
-  sanitizeCorPaletasForPersistence,
-  pickAuthoritativeCorPaletas,
+  resolveCorPaletasForSave,
   sumEntradaKgFromForm,
+  sumSalidaKgFromOpenPaletas,
   sumSalidaKgFromPaletas,
   sumSalidaKgFromForm,
   syncCorteFormMetrics,
@@ -302,6 +301,11 @@ export default function WorkOrderCorteControlPanel({
   const [timerTick, setTimerTick] = useState(0)
   const wasTimerPausedRef = useRef(false)
   const [dispatchSyncAlert, setDispatchSyncAlert] = useState<string | null>(null)
+  const formRef = useRef(form)
+
+  useEffect(() => {
+    formRef.current = form
+  }, [form])
 
   const load = useCallback(async () => {
     if (!Number.isFinite(workOrderId) || workOrderId < 1) return
@@ -490,7 +494,13 @@ export default function WorkOrderCorteControlPanel({
         clearTurnoActual?: boolean
       },
     ): Promise<boolean> => {
-      const src = withCorteAutoFields(srcBase ?? form)
+      const rawForm = srcBase ?? formRef.current
+      const paletasForSave = resolveCorPaletasForSave(rawForm)
+      const src = withCorteAutoFields({
+        ...rawForm,
+        cor_paletas: paletasForSave,
+        corSalidaPaletasKg: paletasForSave.map((p) => p.rollosKg),
+      })
       if (!Number.isFinite(workOrderId) || workOrderId < 1) return false
 
       const notifyProductionSave = options?.notifyProductionSave !== false
@@ -516,10 +526,6 @@ export default function WorkOrderCorteControlPanel({
       }
 
       let actualP = materializeOpenCorteTurnoActual(src)
-      const topPaletas = getCorPaletas(src)
-      const paletasForSave = sanitizeCorPaletasForPersistence(
-        actualP ? pickAuthoritativeCorPaletas(topPaletas, actualP.paletas) : topPaletas,
-      )
 
       if (actualP) {
         if (!actualP.operador.trim() || !actualP.turno || !actualP.grupo) {
@@ -603,6 +609,13 @@ export default function WorkOrderCorteControlPanel({
         if (!options?.suppressSuccessToast) {
           toast.success(options?.successMessage ?? "Control de corte guardado.")
           const entradaKg = sumEntradaKgFromForm(normalizedForm)
+          const provisionalKg = sumSalidaKgFromOpenPaletas(paletasForSave)
+          if (provisionalKg > 0 && (res.dispatch_sync?.provisional_synced ?? 0) > 0) {
+            toast.message(
+              `Saldo provisional en Despacho: ${provisionalKg.toFixed(2)} kg (${res.dispatch_sync?.provisional_synced ?? 0} paleta(s)). Vuelva a Despacho · producto terminado.`,
+              { duration: 9000 },
+            )
+          }
           if (entradaKg > 0 && salidaActual <= 0) {
             toast.message(
               "El ingreso de bobinas no genera saldo en Despacho. Registre kg en los rollos de «Bobinas de salida por paleta», pulse Guardar y, para la nota de entrega, Cerrar paleta.",
@@ -652,6 +665,7 @@ export default function WorkOrderCorteControlPanel({
     async (cur: CorteTurnoEntry) => {
       const finalizedTimer = finalizeTurnTimerNow(cur.timer)
       const u = getStoredUser()
+      const paletasForClose = resolveCorPaletasForSave({ ...form, [COR_ACTUAL_KEY]: cur })
       const closed: CorteTurnoEntry = {
         ...cur,
         timer: finalizedTimer,
@@ -659,7 +673,7 @@ export default function WorkOrderCorteControlPanel({
         closed_by: u ? { id: u.id, name: u.name } : null,
         metrics: snapshotCorteTurnMetrics({
           ...form,
-          cor_paletas: cur.paletas,
+          cor_paletas: paletasForClose,
           corEntradaBobinasKg: cur.entradaBobinasKg,
           kgIngresadosCorte: sumEntradaKgFromForm({
             ...form,
@@ -670,7 +684,7 @@ export default function WorkOrderCorteControlPanel({
           corObservaciones: cur.observaciones || form.corObservaciones,
         }),
         observaciones: readString(form.corObservaciones),
-        paletas: cur.paletas,
+        paletas: paletasForClose,
         entradaBobinasKg: cur.entradaBobinasKg,
       }
       const turnosClosed = [...parseCorteTurnos(form[COR_TURNOS_KEY], form), closed]

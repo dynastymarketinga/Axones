@@ -899,15 +899,25 @@ export default function WorkOrderCorteOpsSection({
   function writePaletas(nextPaletas: CorPaleta[]) {
     if (opsReadOnly) return
     setForm((prev) => {
-      const patch = {
+      let next: Record<string, unknown> = {
+        ...prev,
         cor_paletas: nextPaletas,
         corSalidaPaletasKg: nextPaletas.map((p) => p.rollosKg),
       }
-      return { ...prev, ...patch, ...syncCorteFormMetrics({ ...prev, ...patch }) }
+      next = { ...next, ...syncCorteFormMetrics(next) }
+      if (hasActiveTurno) {
+        const cur = materializeOpenCorteTurnoActual(next)
+        if (cur) {
+          const nextTurn = { ...cur, paletas: nextPaletas }
+          next = {
+            ...next,
+            [COR_ACTUAL_KEY]: nextTurn,
+            ...corteTurnoToMirror(nextTurn),
+          }
+        }
+      }
+      return next
     })
-    if (hasActiveTurno) {
-      patchActiveTurn((t) => ({ ...t, paletas: nextPaletas }))
-    }
   }
 
   function addPaleta() {

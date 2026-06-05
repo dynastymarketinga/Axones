@@ -10,6 +10,8 @@ import {
   legacyActiveTurnoFromForm,
   materializeOpenCorteTurnoActual,
   pickAuthoritativeCorPaletas,
+  mergeCorPaletasForSave,
+  resolveCorPaletasForSave,
   pauseCorteProductionTimerOnForm,
   shouldPreferTopCorPaletas,
   resolveCorteDisplayTimer,
@@ -351,5 +353,36 @@ describe("corte paletas cerradas / despacho", () => {
     expect(sumSalidaKgFromPaletas(getCorPaletas(boot))).toBe(15)
     const actual = boot[COR_ACTUAL_KEY] as { paletas: CorPaleta[] }
     expect(sumSalidaKgFromPaletas(actual.paletas)).toBe(15)
+  })
+
+  it("mergeCorPaletasForSave conserva kg de cor_paletas si el turno tiene rollos vacíos", () => {
+    const rollosWithKg = ["324432", "23424", ...Array(46).fill("")]
+    const top: CorPaleta[] = [
+      { id: "p-01", label: "Paleta #01", rollosKg: rollosWithKg, status: "en_progreso" },
+    ]
+    const nested: CorPaleta[] = [
+      { id: "p-01", label: "Paleta #01", rollosKg: Array.from({ length: 48 }, () => ""), status: "en_progreso" },
+    ]
+    const merged = mergeCorPaletasForSave(top, nested)
+    expect(sumSalidaKgFromPaletas(merged)).toBe(347856)
+  })
+
+  it("resolveCorPaletasForSave fusiona turno y nivel OT antes del PATCH", () => {
+    const rollosWithKg = ["15.5", ...Array(47).fill("")]
+    const turno = createNewCorteTurno({
+      turno: "nocturno",
+      grupo: "A",
+      operador: "Op",
+      ayudante: "",
+      supervisor: "",
+    })
+    turno.paletas = [
+      { id: "p-01", label: "Paleta #01", rollosKg: Array.from({ length: 48 }, () => ""), status: "en_progreso" },
+    ]
+    const form = {
+      cor_paletas: [{ id: "p-01", label: "Paleta #01", rollosKg: rollosWithKg, status: "en_progreso" }],
+      [COR_ACTUAL_KEY]: turno,
+    }
+    expect(sumSalidaKgFromPaletas(resolveCorPaletasForSave(form))).toBe(15.5)
   })
 })

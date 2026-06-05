@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ApiError, apiFetch } from "@/lib/api"
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import { cn } from "@/lib/utils"
 
 import { ConsumablesSummaryReportFilters } from "./consumables-summary-report-filters"
@@ -68,6 +69,10 @@ type ConsumablesSummaryPayload = {
     laminacion_virgen_entrada_kg: string
   }>
   work_order_count: number
+}
+
+function fmtQty(value: string | number | null | undefined): string {
+  return formatQuantityDisplay(value) || "0"
 }
 
 function MetricCard({
@@ -208,17 +213,17 @@ export default function ReportsConsumablesSummaryPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <MetricCard
             label="Total original"
-            value={totals?.tintas.total_original_kg ?? "0.000"}
+            value={fmtQty(totals?.tintas.total_original_kg)}
             icon={FlaskConical}
           />
           <MetricCard
             label="Total solventadas"
-            value={totals?.tintas.total_solventadas_kg ?? "0.000"}
+            value={fmtQty(totals?.tintas.total_solventadas_kg)}
             icon={FlaskConical}
           />
-          <MetricCard label="Alcohol" value={totals?.tintas.alcohol_kg ?? "0.000"} icon={Droplets} />
-          <MetricCard label="Metoxil" value={totals?.tintas.metoxil_kg ?? "0.000"} icon={Droplets} />
-          <MetricCard label="NPA" value={totals?.tintas.npa_kg ?? "0.000"} icon={Droplets} />
+          <MetricCard label="Alcohol" value={fmtQty(totals?.tintas.alcohol_kg)} icon={Droplets} />
+          <MetricCard label="Metoxil" value={fmtQty(totals?.tintas.metoxil_kg)} icon={Droplets} />
+          <MetricCard label="NPA" value={fmtQty(totals?.tintas.npa_kg)} icon={Droplets} />
         </div>
       </SectionBlock>
 
@@ -226,17 +231,17 @@ export default function ReportsConsumablesSummaryPage() {
         <div className="grid gap-3 sm:grid-cols-3">
           <MetricCard
             label="Adhesivo sobro"
-            value={totals?.laminacion.adhesivo_sobra_kg ?? "0.000"}
+            value={fmtQty(totals?.laminacion.adhesivo_sobra_kg)}
             icon={Layers2}
           />
           <MetricCard
             label="Catalizador sobro"
-            value={totals?.laminacion.catalizador_sobra_kg ?? "0.000"}
+            value={fmtQty(totals?.laminacion.catalizador_sobra_kg)}
             icon={Layers2}
           />
           <MetricCard
             label="Acetato sobro"
-            value={totals?.laminacion.acetato_sobra_lt ?? "0.000"}
+            value={fmtQty(totals?.laminacion.acetato_sobra_lt)}
             unit="Lt"
             icon={Layers2}
           />
@@ -247,12 +252,12 @@ export default function ReportsConsumablesSummaryPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           <MetricCard
             label="Material consumido en impresión"
-            value={totals?.impresion.material_consumido_kg ?? "0.000"}
+            value={fmtQty(totals?.impresion.material_consumido_kg)}
             icon={Factory}
           />
           <MetricCard
             label="Total entrada laminación (virgen)"
-            value={totals?.laminacion.material_virgen_entrada_kg ?? "0.000"}
+            value={fmtQty(totals?.laminacion.material_virgen_entrada_kg)}
             icon={Layers2}
           />
         </div>
@@ -262,23 +267,23 @@ export default function ReportsConsumablesSummaryPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Adhesivo consumido"
-            value={totals?.laminacion.adhesivo_consumido_kg ?? "0.000"}
+            value={fmtQty(totals?.laminacion.adhesivo_consumido_kg)}
             icon={Layers2}
           />
           <MetricCard
             label="Catalizador consumido"
-            value={totals?.laminacion.catalizador_consumido_kg ?? "0.000"}
+            value={fmtQty(totals?.laminacion.catalizador_consumido_kg)}
             icon={Layers2}
           />
           <MetricCard
             label="Acetato consumido"
-            value={totals?.laminacion.acetato_consumido_lt ?? "0.000"}
+            value={fmtQty(totals?.laminacion.acetato_consumido_lt)}
             unit="Lt"
             icon={Layers2}
           />
           <MetricCard
             label="Total consumible (adhesivo + catalizador)"
-            value={totals?.laminacion.total_consumible_kg ?? "0.000"}
+            value={fmtQty(totals?.laminacion.total_consumible_kg)}
             icon={Layers2}
           />
         </div>
@@ -337,43 +342,43 @@ export default function ReportsConsumablesSummaryPage() {
                   </TableCell>
                   <TableCell className={catalogTableBodyCellClass}>{r.client_name ?? "—"}</TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.tintas_original_kg}
+                    {fmtQty(r.tintas_original_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.tintas_solventadas_kg}
+                    {fmtQty(r.tintas_solventadas_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.tintas_alcohol_kg}
+                    {fmtQty(r.tintas_alcohol_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.tintas_metoxil_kg}
+                    {fmtQty(r.tintas_metoxil_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.tintas_npa_kg}
+                    {fmtQty(r.tintas_npa_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.lam_adhesivo_sobra_kg}
+                    {fmtQty(r.lam_adhesivo_sobra_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.lam_catalizador_sobra_kg}
+                    {fmtQty(r.lam_catalizador_sobra_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.lam_acetato_sobra_lt}
+                    {fmtQty(r.lam_acetato_sobra_lt)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.impresion_entrada_kg}
+                    {fmtQty(r.impresion_entrada_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.laminacion_virgen_entrada_kg}
+                    {fmtQty(r.laminacion_virgen_entrada_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.lam_adhesivo_consumido_kg}
+                    {fmtQty(r.lam_adhesivo_consumido_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.lam_catalizador_consumido_kg}
+                    {fmtQty(r.lam_catalizador_consumido_kg)}
                   </TableCell>
                   <TableCell className={cn("text-right font-mono tabular-nums text-xs", catalogTableBodyCellClass)}>
-                    {r.lam_acetato_consumido_lt}
+                    {fmtQty(r.lam_acetato_consumido_lt)}
                   </TableCell>
                 </TableRow>
               ))

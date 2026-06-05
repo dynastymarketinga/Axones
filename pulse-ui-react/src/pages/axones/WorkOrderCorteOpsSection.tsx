@@ -107,7 +107,7 @@ import {
 } from "@/lib/corte-paleta-flow"
 import { normalizeScrapSubstrate, SCRAP_POLIETILENO } from "@/lib/scrap-substrate"
 import { showAxonesSuccessSwal } from "@/lib/axones-success-swal"
-import { isBobinaKgSlotFilled } from "@/lib/bobina-kg-slot"
+import { isBobinaKgSlotFilled, parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 import { cumulativeArranqueSeconds, cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
 import { formatHoraArranqueFromMs, horaArranqueMsFromTimer } from "@/lib/mes-timer-band-shared"
 import { cn } from "@/lib/utils"
@@ -627,9 +627,16 @@ export default function WorkOrderCorteOpsSection({
     [form],
   )
   const doneEntradaImpresa =
-    entradaBobinas.some((v) => readNumber(v) > 0) || entradaBobinasMeta.some((m) => hasBobinaLabelMeta(m))
-  const entradaBobinasCount = useMemo(() => entradaBobinas.filter((v) => Number(v) > 0).length, [entradaBobinas])
-  const entradaBobinasTotal = useMemo(() => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [entradaBobinas])
+    entradaBobinas.some((v) => parseBobinaKgSlotNumber(v) > 0) ||
+    entradaBobinasMeta.some((m) => hasBobinaLabelMeta(m))
+  const entradaBobinasCount = useMemo(
+    () => entradaBobinas.filter((v) => parseBobinaKgSlotNumber(v) > 0).length,
+    [entradaBobinas],
+  )
+  const entradaBobinasTotal = useMemo(
+    () => entradaBobinas.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0),
+    [entradaBobinas],
+  )
   const corPaletas = useMemo(() => getCorPaletas(form), [form])
   const paletaPageSize = useCortePaletaPageSize()
   const [paletaPage, setPaletaPage] = useState(1)

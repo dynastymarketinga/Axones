@@ -160,6 +160,7 @@ class WorkOrderOrdenTrabajoService
             'montaje' => 'montEstadoArea',
             'impresion' => 'impEstadoArea',
             'laminacion' => 'lamEstadoArea',
+            'corte' => 'corEstadoArea',
         ];
 
         foreach ($areaEstadoKeys as $area => $estadoKey) {

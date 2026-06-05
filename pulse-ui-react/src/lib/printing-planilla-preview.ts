@@ -16,6 +16,7 @@ import {
   personnelLinesFromPrintingTurno,
   turnoGrupoLabelPrinting,
 } from "@/pages/axones/printing-shift-history"
+import { parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 import { formatHmsFromSeconds, printingMesBandFromWorkOrderRow } from "@/lib/printing-mes-band-status"
 
 export const PRINTING_PLANILLA_PREVIEW_STORAGE_PREFIX = "axones.printing.planilla-preview."
@@ -187,7 +188,7 @@ function flattenSalidaKg(t: PrintingTurnoEntry): string[] {
 }
 
 function sumKgStrings(values: string[]): number {
-  return values.reduce((acc, v) => acc + readNumber(v.replace(",", ".")), 0)
+  return values.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
 }
 
 function fmtTimeFromIso(iso: string | null | undefined): string {

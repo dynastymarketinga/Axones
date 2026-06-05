@@ -10,6 +10,7 @@ import {
   parseMesPhaseFieldsFromRecord,
   type MesPhaseTimerFields,
 } from "@/lib/mes-phase-timer-fields"
+import { parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 
 export { cumulativeDemountSeconds } from "@/lib/mes-phase-timer-fields"
 
@@ -278,7 +279,7 @@ export function computeLamLiveTimer(
 }
 
 export function sumSeriesKg(values: string[]): number {
-  return values.reduce((acc, v) => acc + readLamNumber(v), 0)
+  return values.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
 }
 
 export function snapshotSalidaKgFromForm(prev: Record<string, unknown>): number {

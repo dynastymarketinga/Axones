@@ -117,6 +117,7 @@ import {
   PRINTING_REJECT_REASONS,
   salidaBobinaLabelTooltipText,
   isBobinaKgSlotFilled,
+  parseBobinaKgSlotNumber,
   sumRejectedEntryBobinas,
   sumRejectedEntryKg,
   sumSalidaKg,
@@ -510,12 +511,7 @@ export default function WorkOrderPrintingOpsSection(props: Props) {
   }, [activeStageName, activeStageRole, activeSaved, props])
 
   const inputDisabled = props.readOnlyOps || !props.hasActiveTurno
-  const num = (v: string): number => {
-    const raw = String(v ?? "").trim().replace(",", ".")
-    if (!raw) return 0
-    const n = Number(raw)
-    return Number.isFinite(n) ? n : 0
-  }
+  const num = (v: string): number => parseBobinaKgSlotNumber(v)
 
   /** Pedido de cliente cubierto por salida acumulada (no marcar “Completo” sin criterio). */
   const doneAcumulado =

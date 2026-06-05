@@ -85,6 +85,7 @@ import {
   normalizeSalidaBobinaLabelMeta,
   rejectedEntriesWithBobinas,
   sanitizeBobinaKgSlotInput,
+  parseBobinaKgSlotNumber,
   sumRejectedEntryBobinas,
   sumRejectedEntryKg,
   type WarehouseRejectedEntry,
@@ -565,10 +566,13 @@ export default function WorkOrderPrintingControlPanel({
   const entradaBobinasMeta = useMemo(() => getMetaSeries(form, "impEntradaBobinasMeta", IMP_BOBINAS_SLOTS), [form])
   const salidaBobinasMeta = useMemo(() => getMetaSeries(form, "impSalidaBobinasMeta", IMP_BOBINAS_SLOTS), [form])
   const totalEntradaTurnoActual = useMemo(
-    () => entradaBobinas.reduce((acc, v) => acc + readNumber(v), 0),
+    () => entradaBobinas.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0),
     [entradaBobinas],
   )
-  const totalSalida = useMemo(() => salidaBobinas.reduce((acc, v) => acc + readNumber(v), 0), [salidaBobinas])
+  const totalSalida = useMemo(
+    () => salidaBobinas.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0),
+    [salidaBobinas],
+  )
   const scrapTransparente = readNumber(form.impScrapTransparenteKg)
   const scrapImpreso = readNumber(form.impScrapImpresoKg)
   const totalScrap = scrapTransparente + scrapImpreso
@@ -1140,11 +1144,11 @@ export default function WorkOrderPrintingControlPanel({
       )
     }
     entradaBobinas.forEach((v, idx) => {
-      const n = readNumber(v)
+      const n = parseBobinaKgSlotNumber(v)
       if (n > MAX_BOBINA_KG) warnings.push(`Entrada bobina ${idx + 1} fuera de rango (${n.toFixed(2)} Kg).`)
     })
     salidaBobinas.forEach((v, idx) => {
-      const n = readNumber(v)
+      const n = parseBobinaKgSlotNumber(v)
       if (n > MAX_BOBINA_KG) warnings.push(`Salida bobina ${idx + 1} fuera de rango (${n.toFixed(2)} Kg).`)
     })
     if (pedidoTotalKg > 0 && producidoAcumuladoKg > pedidoTotalKg + 0.01) {

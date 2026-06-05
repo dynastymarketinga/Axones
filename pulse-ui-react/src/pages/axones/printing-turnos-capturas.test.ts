@@ -7,7 +7,9 @@ import {
   IMP_BOBINAS_SLOTS,
   normalizePrintingTurno,
   isBobinaKgSlotFilled,
+  parseBobinaKgSlotNumber,
   sanitizeBobinaKgSlotInput,
+  sumEntradaKgSlots,
   turnoProduccionTotals,
   type PrintingTurnoEntry,
 } from "./printing-turnos"
@@ -84,6 +86,20 @@ describe("sanitizeBobinaKgSlotInput", () => {
     expect(isBobinaKgSlotFilled("0")).toBe(false)
     expect(isBobinaKgSlotFilled("1")).toBe(true)
     expect(isBobinaKgSlotFilled("12,5")).toBe(true)
+    expect(isBobinaKgSlotFilled("12,")).toBe(true)
+    expect(isBobinaKgSlotFilled("12.")).toBe(true)
+  })
+
+  it("parseBobinaKgSlotNumber acepta coma o punto y separador parcial", () => {
+    expect(parseBobinaKgSlotNumber("12,")).toBe(12)
+    expect(parseBobinaKgSlotNumber("12.")).toBe(12)
+    expect(parseBobinaKgSlotNumber("12,5")).toBe(12.5)
+    expect(parseBobinaKgSlotNumber("12.5")).toBe(12.5)
+  })
+
+  it("sumEntradaKgSlots no pierde kg con separador decimal al final", () => {
+    expect(sumEntradaKgSlots(["12,", "", "0"])).toBe(12)
+    expect(sumEntradaKgSlots(["12.", "3,25"])).toBe(15.25)
   })
 
   it("normaliza turnos al cargar JSON con basura en casillas", () => {

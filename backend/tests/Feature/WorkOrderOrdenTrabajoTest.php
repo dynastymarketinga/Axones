@@ -1603,4 +1603,52 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $historial = $this->getJson('/api/work-orders?historial_area=impresion&historial_exclude_pending=1&per_page=20', $h)->assertOk();
         $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
     }
+
+    public function test_corte_finalizada_closes_pending_area_request_and_in_historial(): void
+    {
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-CORTE-FIN',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Corte->value,
+            'created_by' => $boss->id,
+        ]);
+
+        AreaRequest::query()->create([
+            'area' => 'corte',
+            'title' => sprintf('OT %s — corte', $wo->code),
+            'body' => 'test',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'requested_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/corte-control", [
+            'form' => [
+                'corEstadoArea' => 'finalizada',
+                'cor_turnos' => [
+                    [
+                        'id' => 't1',
+                        'operador' => 'Ana',
+                        'turno' => 'diurno',
+                        'grupo' => 'A',
+                        'closed_at' => now()->toIso8601String(),
+                        'timer' => ['state' => 'completed', 'effectiveAccSec' => 158, 'deadAccSec' => 0],
+                    ],
+                ],
+                'corTurnoActual' => null,
+            ],
+            'origin_area' => 'corte',
+            'notify_on_production_save' => false,
+        ], $h)->assertOk();
+
+        $this->assertSame(
+            AreaRequestStatus::Done->value,
+            (string) AreaRequest::query()->where('work_order_id', $wo->id)->where('area', 'corte')->value('status'),
+        );
+
+        $historial = $this->getJson('/api/work-orders?historial_area=corte&historial_exclude_pending=1&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
+    }
 }

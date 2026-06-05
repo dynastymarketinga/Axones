@@ -16,3 +16,9 @@ export function isBobinaKgSlotFilled(raw: unknown): boolean {
   const n = parseDecimalTwoInput(raw)
   return n !== null && n > 0
 }
+
+/** Kg numérico de casilla bobina: acepta `,` o `.` y tolera separador al final (ej. `12,`). */
+export function parseBobinaKgSlotNumber(raw: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw
+  return parseDecimalTwoInput(raw) ?? 0
+}

@@ -73,14 +73,20 @@ export function deriveCorteOperativoEstado(
 }
 
 export function corteMesBandFromWorkOrderRow(row: CorteBandejaRow, nowMs: number): MesBandejaMes | null {
+  const form = technicalFormFromRow(row)
+  const bs = (row.board_stage ?? "").toLowerCase()
+  if (bs !== "corte" && !hasCorteMesActivity(form)) return null
+
+  // corEstadoArea vive en el formulario; el resumen de segmentos no expone finalización.
+  if (form && readCorteEstadoArea(form[COR_ESTADO_KEY]) === "finalizada") {
+    return corteMesBandFromForm(form, nowMs)
+  }
+
   if (row.area_time_summary) {
     const fromSegments = mesBandFromAreaTimeSummary(row.area_time_summary, nowMs, "Corte")
     if (fromSegments) return fromSegments
   }
 
-  const form = technicalFormFromRow(row)
-  const bs = (row.board_stage ?? "").toLowerCase()
-  if (bs !== "corte" && !hasCorteMesActivity(form)) return null
   return corteMesBandFromForm(form, nowMs)
 }
 
@@ -88,14 +94,29 @@ export function corteMesBandFromWorkOrderRow(row: CorteBandejaRow, nowMs: number
  * Subpestaña En curso (corte), misma lógica que impresión y laminación.
  */
 export function corteActivasBucketFromRow(
-  row: { technical_document?: { form?: Record<string, unknown> } | null; board_stage?: string | null },
+  row: {
+    technical_document?: { form?: Record<string, unknown> } | null
+    board_stage?: string | null
+    area_time_summary?: AreaTimeSummary | null
+  },
   nowMs: number,
 ): CorteActivasSubTab {
+  const form = technicalFormFromRow(row)
+  if (form && readCorteEstadoArea(form[COR_ESTADO_KEY]) === "finalizada") {
+    return "finalizadas"
+  }
+
   const mes = corteMesBandFromWorkOrderRow(row, nowMs)
   if (!mes) return "pendientes"
   if (mes.workflow === "finalizado") return "finalizadas"
-  if (mes.workflow === "iniciado" || mes.workflow === "pausado") return "produccion"
-  const form = technicalFormFromRow(row)
+  if (
+    mes.workflow === "iniciado" ||
+    mes.workflow === "pausado" ||
+    mes.workflow === "entre_turnos" ||
+    mes.workflow === "turno_abierto"
+  ) {
+    return "produccion"
+  }
   const cerrados = form ? parseCorteTurnos(form[COR_TURNOS_KEY], form) : []
   const actual = form ? parseCorteTurnoActual(form[COR_ACTUAL_KEY], form) : null
   if (cerrados.length > 0 || actual) return "produccion"

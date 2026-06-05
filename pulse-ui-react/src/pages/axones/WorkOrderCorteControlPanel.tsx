@@ -136,7 +136,7 @@ import {
   getCorPaletas,
   sanitizeCorEntradaBobinasKg,
   sanitizeCorPaletasForPersistence,
-  shouldPreferTopCorPaletas,
+  pickAuthoritativeCorPaletas,
   sumEntradaKgFromForm,
   sumSalidaKgFromPaletas,
   sumSalidaKgFromForm,
@@ -514,17 +514,15 @@ export default function WorkOrderCorteControlPanel({
       }
 
       let actualP = materializeOpenCorteTurnoActual(src)
+      const topPaletas = getCorPaletas(src)
+      const paletasForSave = sanitizeCorPaletasForPersistence(
+        actualP ? pickAuthoritativeCorPaletas(topPaletas, actualP.paletas) : topPaletas,
+      )
+
       if (actualP) {
         if (!actualP.operador.trim() || !actualP.turno || !actualP.grupo) {
           toast.error("Corte: complete turno, grupo y operador antes de guardar.")
           return false
-        }
-        const topPaletas = getCorPaletas(src)
-        if (shouldPreferTopCorPaletas(topPaletas, actualP.paletas)) {
-          actualP = {
-            ...actualP,
-            paletas: sanitizeCorPaletasForPersistence(topPaletas),
-          }
         }
         const entradaKg = sanitizeCorEntradaBobinasKg(
           src.corEntradaBobinasKg ?? actualP.entradaBobinasKg,
@@ -532,14 +530,12 @@ export default function WorkOrderCorteControlPanel({
         const entradaMeta = getMetaSeries(src, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
         actualP = {
           ...actualP,
-          paletas: sanitizeCorPaletasForPersistence(topPaletas),
+          paletas: paletasForSave,
           entradaBobinasKg: entradaKg,
           entradaBobinasMeta: entradaMeta,
           kgIngresados: sumEntradaKgFromForm({ ...src, corEntradaBobinasKg: entradaKg }).toFixed(2),
         }
       }
-
-      const paletasForSave = sanitizeCorPaletasForPersistence(getCorPaletas(src))
       const entradaForSave = sanitizeCorEntradaBobinasKg(src.corEntradaBobinasKg)
       const entradaMetaForSave = getMetaSeries(src, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
       const salidaFields = syncCorteSalidaFields({

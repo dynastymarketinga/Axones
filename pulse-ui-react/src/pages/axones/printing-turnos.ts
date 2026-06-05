@@ -1,7 +1,12 @@
 import { parseDecimalTwoInput, sanitizeDecimalTwoInput } from "@/lib/decimal-two-input"
+import { parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 import { sanitizeBobinaKgSlotInput } from "@/lib/bobina-kg-slot"
 
-export { isBobinaKgSlotFilled, sanitizeBobinaKgSlotInput } from "@/lib/bobina-kg-slot"
+export {
+  isBobinaKgSlotFilled,
+  parseBobinaKgSlotNumber,
+  sanitizeBobinaKgSlotInput,
+} from "@/lib/bobina-kg-slot"
 import {
   emptyMesPhaseTimerFields,
   finalizeMesPhaseSlotsOnTimer,
@@ -777,26 +782,26 @@ export function bootstrapPrintingFormState(mergedForm: Record<string, unknown>):
 }
 
 export function sumSalidaKgSlots(slots: string[]): number {
-  return slots.reduce((acc, v) => acc + readNumber(v), 0)
+  return slots.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
 }
 
 /** Kg de salida por casilla: rejilla operativa o peso en etiqueta si la casilla está vacía. */
 export function salidaKgFromSlotsAndMeta(slots: string[], metas: BobinaLabelMeta[]): number {
   let sum = 0
   for (let i = 0; i < slots.length; i++) {
-    const slotKg = readNumber(slots[i])
+    const slotKg = parseBobinaKgSlotNumber(slots[i])
     if (slotKg > 0.005) {
       sum += slotKg
       continue
     }
-    sum += readNumber(metas[i]?.peso)
+    sum += parseBobinaKgSlotNumber(metas[i]?.peso)
   }
   return sum
 }
 
 function mergeKgSlotSeries(turnoSlots: string[], mirrorSlots: string[]): string[] {
   return turnoSlots.map((v, i) => {
-    const best = Math.max(readNumber(v), readNumber(mirrorSlots[i]))
+    const best = Math.max(parseBobinaKgSlotNumber(v), parseBobinaKgSlotNumber(mirrorSlots[i]))
     return best > 0.005 ? readNumberString(best) : ""
   })
 }
@@ -856,7 +861,7 @@ export function syncPrintingTurnoFromFormMirror(
 }
 
 export function sumEntradaKgSlots(slots: string[]): number {
-  return slots.reduce((acc, v) => acc + readNumber(v), 0)
+  return slots.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0)
 }
 
 export function sumSalidaKg(t: PrintingTurnoEntry): number {

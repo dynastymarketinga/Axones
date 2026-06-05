@@ -6,6 +6,15 @@ on:
       - "**"
   pull_request:
   workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: "Desplegar a producción (runner SERVIDOR)"
+        type: boolean
+        default: true
+      truncate_production_db:
+        description: "Limpiar BD producción (conserva users, cache, sessions, personal_access_tokens)"
+        type: boolean
+        default: false
 
 jobs:
   backend-tests:
@@ -64,9 +73,15 @@ jobs:
 
   deploy-production:
     name: Deploy to SERVIDOR
-    if: github.ref == 'refs/heads/main'
     needs: [backend-tests, frontend-quality]
+    if: |
+      github.ref == 'refs/heads/main' && (
+        (github.event_name == 'push' && needs.backend-tests.result == 'success' && needs.frontend-quality.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy_production == true)
+      )
     runs-on: self-hosted
     steps:
       - name: Run deploy script
+        env:
+          AXONES_TRUNCATE_KEEP_AUTH: ${{ github.event_name == 'workflow_dispatch' && inputs.truncate_production_db == true && '1' || '' }}
         run: bash /var/www/axones/scripts/deploy.sh

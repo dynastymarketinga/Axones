@@ -2609,6 +2609,7 @@ class InventoryReportService
             'wo.code as work_order_code',
             'wo.client_id',
             'c.name as client_name',
+            'p.id as product_id',
             'p.name as product_name',
             'p.structure as product_structure',
             'td.form as form_json',
@@ -2636,10 +2637,13 @@ class InventoryReportService
             $productStructure = trim((string) ($row->product_structure ?? ''));
 
             $materialNames = $this->resolvePlanillaMaterialNames($form);
+            $productId = $row->product_id !== null ? (int) $row->product_id : null;
             $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm(
                 $form,
                 $materialNames,
                 $productStructure !== '' ? $productStructure : null,
+                $this->resolveProductSubstrateLabels($productId),
+                $this->resolveProductFinishedLabel($productId),
             );
 
             $totals['impreso_kg'] += $impKg;
@@ -2749,9 +2753,77 @@ class InventoryReportService
 
         return Material::query()
             ->whereIn('id', array_values($ids))
-            ->pluck('name', 'id')
-            ->map(fn (mixed $name): string => trim((string) $name))
+            ->get(['id', 'sku', 'name'])
+            ->mapWithKeys(fn (Material $material): array => [
+                (int) $material->getKey() => $this->formatMaterialCatalogLabel(
+                    (string) ($material->sku ?? ''),
+                    (string) ($material->name ?? ''),
+                ),
+            ])
             ->all();
+    }
+
+    /**
+     * Sustratos del producto (excluye material terminado de despacho).
+     *
+     * @return list<string>
+     */
+    private function resolveProductSubstrateLabels(?int $productId): array
+    {
+        if ($productId === null || $productId < 1) {
+            return [];
+        }
+
+        return Material::query()
+            ->join('material_product', 'material_product.material_id', '=', 'materials.id')
+            ->where('material_product.product_id', $productId)
+            ->orderBy('materials.id')
+            ->get(['materials.sku', 'materials.name'])
+            ->map(fn (Material $material): string => $this->formatMaterialCatalogLabel(
+                (string) ($material->sku ?? ''),
+                (string) ($material->name ?? ''),
+            ))
+            ->filter(fn (string $label): bool => $label !== '' && ! $this->isFinishedProductMaterialLabel($label))
+            ->values()
+            ->all();
+    }
+
+    private function resolveProductFinishedLabel(?int $productId): ?string
+    {
+        if ($productId === null || $productId < 1) {
+            return null;
+        }
+
+        $labels = Material::query()
+            ->join('material_product', 'material_product.material_id', '=', 'materials.id')
+            ->where('material_product.product_id', $productId)
+            ->orderBy('materials.id')
+            ->get(['materials.sku', 'materials.name'])
+            ->map(fn (Material $material): string => $this->formatMaterialCatalogLabel(
+                (string) ($material->sku ?? ''),
+                (string) ($material->name ?? ''),
+            ))
+            ->filter(fn (string $label): bool => $label !== '' && $this->isFinishedProductMaterialLabel($label))
+            ->values()
+            ->all();
+
+        return $labels[0] ?? null;
+    }
+
+    private function isFinishedProductMaterialLabel(string $label): bool
+    {
+        return str_contains(mb_strtolower($label), 'terminado');
+    }
+
+    private function formatMaterialCatalogLabel(string $sku, string $name): string
+    {
+        $sku = trim($sku);
+        $name = trim($name);
+        if ($sku !== '' && $name !== '') {
+            return $sku.' — '.$name;
+        }
+
+        return $name !== '' ? $name : $sku;
     }
 
     /**

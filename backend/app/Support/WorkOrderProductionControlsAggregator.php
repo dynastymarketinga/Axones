@@ -53,16 +53,18 @@ final class WorkOrderProductionControlsAggregator
         ?array $form,
         array $materialNames = [],
         ?string $productStructure = null,
+        array $productSubstrateLabels = [],
+        ?string $productFinishedLabel = null,
     ): array {
         return [
             'impreso' => self::formatBreakdownBuckets(
-                self::breakdownPrintingSalidaBuckets($form, $materialNames, $productStructure),
+                self::breakdownPrintingSalidaBuckets($form, $materialNames, $productStructure, $productSubstrateLabels),
             ),
             'laminado' => self::formatBreakdownBuckets(
-                self::breakdownLaminacionSalidaBuckets($form, $materialNames, $productStructure),
+                self::breakdownLaminacionSalidaBuckets($form, $materialNames, $productStructure, $productSubstrateLabels),
             ),
             'cortado' => self::formatBreakdownBuckets(
-                self::breakdownCorteSalidaBuckets($form, $materialNames, $productStructure),
+                self::breakdownCorteSalidaBuckets($form, $materialNames, $productStructure, $productFinishedLabel),
             ),
         ];
     }
@@ -535,15 +537,25 @@ final class WorkOrderProductionControlsAggregator
         ?array $form,
         array $materialNames,
         ?string $productStructure,
+        array $productMaterialLabels = [],
     ): array {
         $buckets = [];
         if ($form === null) {
             return $buckets;
         }
 
-        $defaultLabel = self::resolveDefaultMaterialLabel($form, $materialNames, $productStructure, 'impreso');
+        $defaultLabel = self::resolveDefaultMaterialLabel(
+            $form,
+            $materialNames,
+            $productStructure,
+            'impreso',
+            $productMaterialLabels,
+        );
+        $planillaSustratoLabels = self::planillaSustratoLabels($form, 'impresion', $materialNames);
 
         foreach (self::printingTurns($form) as $turn) {
+            $slotKgBeforeTurn = self::sumBucketKg($buckets);
+
             foreach ((array) ($turn['capturas'] ?? []) as $cap) {
                 if (! is_array($cap)) {
                     continue;
@@ -553,6 +565,8 @@ final class WorkOrderProductionControlsAggregator
                     (array) ($cap['salidaBobinasKg'] ?? []),
                     (array) ($cap['salidaBobinasMeta'] ?? []),
                     $defaultLabel,
+                    (array) ($cap['entradaBobinasMeta'] ?? []),
+                    $planillaSustratoLabels,
                 );
             }
             self::accumulateSalidaBuckets(
@@ -560,6 +574,16 @@ final class WorkOrderProductionControlsAggregator
                 (array) ($turn['salidaBobinasKg'] ?? []),
                 (array) ($turn['salidaBobinasMeta'] ?? []),
                 $defaultLabel,
+                (array) ($turn['entradaBobinasMeta'] ?? []),
+                $planillaSustratoLabels,
+            );
+
+            self::accumulatePrintingResumenCierreGap(
+                $buckets,
+                $turn,
+                $slotKgBeforeTurn,
+                $defaultLabel,
+                $planillaSustratoLabels,
             );
         }
 
@@ -568,9 +592,16 @@ final class WorkOrderProductionControlsAggregator
             (array) ($form['impSalidaBobinasKg'] ?? []),
             (array) ($form['impSalidaBobinasMeta'] ?? []),
             $defaultLabel,
+            (array) ($form['impEntradaBobinasMeta'] ?? []),
+            $planillaSustratoLabels,
         );
 
-        return $buckets;
+        return self::rebuildBucketsFromPlanillaSustratosIfUnlabeled(
+            $buckets,
+            $form,
+            'impresion',
+            $materialNames,
+        );
     }
 
     /**
@@ -581,13 +612,21 @@ final class WorkOrderProductionControlsAggregator
         ?array $form,
         array $materialNames,
         ?string $productStructure,
+        array $productMaterialLabels = [],
     ): array {
         $buckets = [];
         if ($form === null) {
             return $buckets;
         }
 
-        $defaultLabel = self::resolveDefaultMaterialLabel($form, $materialNames, $productStructure, 'laminacion');
+        $defaultLabel = self::resolveDefaultMaterialLabel(
+            $form,
+            $materialNames,
+            $productStructure,
+            'laminacion',
+            $productMaterialLabels,
+        );
+        $planillaSustratoLabels = self::planillaSustratoLabels($form, 'laminacion', $materialNames);
 
         foreach (self::laminacionTurns($form) as $turn) {
             self::accumulateSalidaBuckets(
@@ -595,6 +634,8 @@ final class WorkOrderProductionControlsAggregator
                 (array) ($turn['salidaBobinasKg'] ?? []),
                 (array) ($turn['salidaBobinasMeta'] ?? []),
                 $defaultLabel,
+                (array) ($turn['entradaVirgenBobinasMeta'] ?? []),
+                $planillaSustratoLabels,
             );
         }
 
@@ -603,9 +644,16 @@ final class WorkOrderProductionControlsAggregator
             (array) ($form['lamSalidaBobinasKg'] ?? []),
             (array) ($form['lamSalidaBobinasMeta'] ?? []),
             $defaultLabel,
+            [],
+            $planillaSustratoLabels,
         );
 
-        return $buckets;
+        return self::rebuildBucketsFromPlanillaSustratosIfUnlabeled(
+            $buckets,
+            $form,
+            'laminacion',
+            $materialNames,
+        );
     }
 
     /**
@@ -616,6 +664,7 @@ final class WorkOrderProductionControlsAggregator
         ?array $form,
         array $materialNames,
         ?string $productStructure,
+        ?string $productFinishedLabel = null,
     ): array {
         if ($form === null) {
             return [];
@@ -627,7 +676,8 @@ final class WorkOrderProductionControlsAggregator
         }
 
         $labels = self::resolveAreaMaterialLabels($form, $materialNames, $productStructure);
-        $label = $labels[0] ?? 'Material cortado (rollos / paletas)';
+        $finished = trim((string) ($productFinishedLabel ?? ''));
+        $label = $labels[0] ?? ($finished !== '' ? $finished : 'Material cortado (rollos / paletas)');
 
         return [
             $label => [
@@ -641,27 +691,167 @@ final class WorkOrderProductionControlsAggregator
      * @param  array<string, array{kg: float, bobinas: int}>  $buckets
      * @param  array<int|string, mixed>  $slots
      * @param  array<int|string, mixed>  $metas
+     * @param  array<int|string, mixed>  $entradaMetas
+     * @param  list<string>  $planillaSustratoLabels
      */
     private static function accumulateSalidaBuckets(
         array &$buckets,
         array $slots,
         array $metas,
         string $defaultLabel,
+        array $entradaMetas = [],
+        array $planillaSustratoLabels = [],
     ): void {
-        $size = max(count($slots), count($metas));
+        $size = max(count($slots), count($metas), count($entradaMetas));
         for ($i = 0; $i < $size; $i++) {
             $kg = self::salidaKgFromSlotAndMeta($slots[$i] ?? null, $metas[$i] ?? null);
             if ($kg < 0.0005) {
                 continue;
             }
-            $meta = is_array($metas[$i] ?? null) ? $metas[$i] : null;
-            $label = self::bobinaMetaLabel($meta, $defaultLabel);
+            $salidaMeta = is_array($metas[$i] ?? null) ? $metas[$i] : null;
+            $entradaMeta = is_array($entradaMetas[$i] ?? null) ? $entradaMetas[$i] : null;
+            $planillaLabel = $planillaSustratoLabels[$i] ?? $planillaSustratoLabels[0] ?? null;
+            $label = self::resolveSalidaSlotLabel($salidaMeta, $entradaMeta, $planillaLabel, $defaultLabel);
             if (! isset($buckets[$label])) {
                 $buckets[$label] = ['kg' => 0.0, 'bobinas' => 0];
             }
             $buckets[$label]['kg'] = round($buckets[$label]['kg'] + $kg, 3);
             $buckets[$label]['bobinas']++;
         }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $salidaMeta
+     * @param  array<string, mixed>|null  $entradaMeta
+     */
+    private static function resolveSalidaSlotLabel(
+        ?array $salidaMeta,
+        ?array $entradaMeta,
+        ?string $planillaSustratoLabel,
+        string $defaultLabel,
+    ): string {
+        $label = self::bobinaMetaLabel($salidaMeta, '');
+        if ($label !== '') {
+            return $label;
+        }
+
+        $label = self::bobinaMetaLabel($entradaMeta, '');
+        if ($label !== '') {
+            return $label;
+        }
+
+        $planilla = trim((string) ($planillaSustratoLabel ?? ''));
+        if ($planilla !== '') {
+            return $planilla;
+        }
+
+        return $defaultLabel;
+    }
+
+    /**
+     * @param  array<string, mixed>  $turn
+     * @param  list<string>  $planillaSustratoLabels
+     */
+    private static function accumulatePrintingResumenCierreGap(
+        array &$buckets,
+        array $turn,
+        float $slotKgBeforeTurn,
+        string $defaultLabel,
+        array $planillaSustratoLabels,
+    ): void {
+        $resumen = $turn['resumenCierre'] ?? null;
+        if (! is_array($resumen)) {
+            return;
+        }
+
+        $resumenKg = self::readKg($resumen['pesoSalidaKg'] ?? null);
+        if ($resumenKg < 0.0005) {
+            return;
+        }
+
+        $slotKgAfterTurn = self::sumBucketKg($buckets);
+        $gapKg = round($resumenKg - ($slotKgAfterTurn - $slotKgBeforeTurn), 3);
+        if ($gapKg < 0.0005) {
+            return;
+        }
+
+        $label = $planillaSustratoLabels[0] ?? $defaultLabel;
+        if (! isset($buckets[$label])) {
+            $buckets[$label] = ['kg' => 0.0, 'bobinas' => 0];
+        }
+        $buckets[$label]['kg'] = round($buckets[$label]['kg'] + $gapKg, 3);
+
+        $resumenBobinas = (int) ($resumen['numBobinasSalida'] ?? 0);
+        $slotBobinasThisTurn = self::countBobinasFromTurnSlots($turn);
+        if ($slotBobinasThisTurn === 0 && $resumenBobinas > 0) {
+            $buckets[$label]['bobinas'] += $resumenBobinas;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $turn
+     */
+    private static function countBobinasFromTurnSlots(array $turn): int
+    {
+        $count = 0;
+        foreach ((array) ($turn['capturas'] ?? []) as $cap) {
+            if (! is_array($cap)) {
+                continue;
+            }
+            $count += self::countBobinasWithKg(
+                (array) ($cap['salidaBobinasKg'] ?? []),
+                (array) ($cap['salidaBobinasMeta'] ?? []),
+            );
+        }
+        $count += self::countBobinasWithKg(
+            (array) ($turn['salidaBobinasKg'] ?? []),
+            (array) ($turn['salidaBobinasMeta'] ?? []),
+        );
+
+        return $count;
+    }
+
+    /**
+     * @param  array<int|string, mixed>  $slots
+     * @param  array<int|string, mixed>  $metas
+     */
+    private static function countBobinasWithKg(array $slots, array $metas): int
+    {
+        $count = 0;
+        $size = max(count($slots), count($metas));
+        for ($i = 0; $i < $size; $i++) {
+            if (self::salidaKgFromSlotAndMeta($slots[$i] ?? null, $metas[$i] ?? null) > 0) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @param  array<string, array{kg: float, bobinas: int}>  $buckets
+     */
+    private static function sumBucketKg(array $buckets): float
+    {
+        $sum = 0.0;
+        foreach ($buckets as $totals) {
+            $sum += (float) ($totals['kg'] ?? 0);
+        }
+
+        return round($sum, 3);
+    }
+
+    /**
+     * @param  array<string, array{kg: float, bobinas: int}>  $buckets
+     */
+    private static function sumBucketBobinas(array $buckets): int
+    {
+        $sum = 0;
+        foreach ($buckets as $totals) {
+            $sum += (int) ($totals['bobinas'] ?? 0);
+        }
+
+        return $sum;
     }
 
     /**
@@ -715,41 +905,169 @@ final class WorkOrderProductionControlsAggregator
      */
     private static function planillaSustratoLabels(?array $form, string $area, array $materialNames): array
     {
+        return array_map(
+            fn (array $row): string => (string) $row['label'],
+            self::planillaSustratoRows($form, $area, $materialNames),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $form
+     * @param  array<int, string>  $materialNames
+     * @return list<array{label: string, kg: float}>
+     */
+    private static function planillaSustratoRows(?array $form, string $area, array $materialNames): array
+    {
         if ($form === null) {
             return [];
         }
 
         $key = $area === 'laminacion' ? 'sustratosVirgenLam' : 'sustratosVirgenImp';
-        $labels = [];
+        $rows = [];
 
         foreach ((array) ($form[$key] ?? []) as $row) {
             if (! is_array($row)) {
                 continue;
             }
-            $free = trim((string) ($row['material_free_text'] ?? ''));
-            if ($free !== '') {
-                $labels[] = $free;
+            $label = self::sustratoLabelFromPlanillaRow($row, $materialNames);
+            if ($label === '') {
                 continue;
             }
-            $mid = isset($row['material_id']) && is_numeric($row['material_id'])
-                ? (int) $row['material_id']
-                : 0;
-            if ($mid > 0 && isset($materialNames[$mid])) {
-                $labels[] = trim((string) $materialNames[$mid]);
-            }
+            $rows[] = [
+                'label' => $label,
+                'kg' => self::readKg($row['kg'] ?? null),
+            ];
         }
 
-        if ($labels === [] && $area === 'impresion') {
+        if ($rows === [] && $area === 'impresion') {
             $legacyMid = trim((string) ($form['sustratoVirgenImp1'] ?? ''));
+            $legacyKg = self::readKg($form['kgUtilizarImp1'] ?? null);
             if ($legacyMid !== '' && is_numeric($legacyMid)) {
                 $mid = (int) $legacyMid;
-                if ($mid > 0 && isset($materialNames[$mid])) {
-                    $labels[] = trim((string) $materialNames[$mid]);
+                $label = $mid > 0 && isset($materialNames[$mid])
+                    ? trim((string) $materialNames[$mid])
+                    : '';
+                if ($label !== '') {
+                    $rows[] = ['label' => $label, 'kg' => $legacyKg];
                 }
             }
         }
 
-        return array_values(array_unique(array_filter($labels, fn (string $l): bool => $l !== '')));
+        return $rows;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array<int, string>  $materialNames
+     */
+    private static function sustratoLabelFromPlanillaRow(array $row, array $materialNames): string
+    {
+        $free = trim((string) ($row['material_free_text'] ?? ''));
+        if ($free !== '') {
+            return $free;
+        }
+
+        $mid = isset($row['material_id']) && is_numeric($row['material_id'])
+            ? (int) $row['material_id']
+            : 0;
+        if ($mid > 0 && isset($materialNames[$mid])) {
+            return trim((string) $materialNames[$mid]);
+        }
+
+        return '';
+    }
+
+    private static function isUnlabeledFallbackLabel(string $label): bool
+    {
+        return in_array($label, [
+            'Bobina impresa (sin referencia)',
+            'Bobina laminada (sin referencia)',
+        ], true);
+    }
+
+    /**
+     * @param  array<string, array{kg: float, bobinas: int}>  $buckets
+     * @param  array<string, mixed>|null  $form
+     * @param  array<int, string>  $materialNames
+     * @return array<string, array{kg: float, bobinas: int}>
+     */
+    private static function rebuildBucketsFromPlanillaSustratosIfUnlabeled(
+        array $buckets,
+        ?array $form,
+        string $area,
+        array $materialNames,
+    ): array {
+        if ($buckets === []) {
+            return $buckets;
+        }
+
+        $planillaRows = self::planillaSustratoRows($form, $area, $materialNames);
+        if ($planillaRows === []) {
+            return $buckets;
+        }
+
+        $planillaLabelSet = array_map(fn (array $row): string => (string) $row['label'], $planillaRows);
+
+        $onlyUnlabeled = true;
+        foreach (array_keys($buckets) as $label) {
+            if (! self::isUnlabeledFallbackLabel((string) $label)) {
+                $onlyUnlabeled = false;
+                break;
+            }
+        }
+
+        $singleBucketMatchesFirstPlanilla = count($buckets) === 1
+            && count($planillaRows) > 1
+            && array_key_exists($planillaRows[0]['label'], $buckets);
+
+        if (! $onlyUnlabeled && ! $singleBucketMatchesFirstPlanilla) {
+            return $buckets;
+        }
+
+        $totalKg = self::sumBucketKg($buckets);
+        $totalBobinas = self::sumBucketBobinas($buckets);
+        if ($totalKg < 0.0005) {
+            return $buckets;
+        }
+
+        if (count($planillaRows) === 1) {
+            return [
+                $planillaRows[0]['label'] => [
+                    'kg' => $totalKg,
+                    'bobinas' => $totalBobinas,
+                ],
+            ];
+        }
+
+        $weightSum = 0.0;
+        foreach ($planillaRows as $row) {
+            $weightSum += $row['kg'] > 0 ? $row['kg'] : 1.0;
+        }
+
+        $rebuilt = [];
+        $allocatedKg = 0.0;
+        $allocatedBobinas = 0;
+        $lastIndex = count($planillaRows) - 1;
+        foreach ($planillaRows as $index => $row) {
+            $weight = $row['kg'] > 0 ? $row['kg'] : 1.0;
+            $share = $weight / $weightSum;
+            $kg = $index === $lastIndex
+                ? round($totalKg - $allocatedKg, 3)
+                : round($totalKg * $share, 3);
+            $bobinas = $index === $lastIndex
+                ? max(0, $totalBobinas - $allocatedBobinas)
+                : (int) round($totalBobinas * $share);
+            $label = $row['label'];
+            if (! isset($rebuilt[$label])) {
+                $rebuilt[$label] = ['kg' => 0.0, 'bobinas' => 0];
+            }
+            $rebuilt[$label]['kg'] = round($rebuilt[$label]['kg'] + $kg, 3);
+            $rebuilt[$label]['bobinas'] += $bobinas;
+            $allocatedKg += $kg;
+            $allocatedBobinas += $bobinas;
+        }
+
+        return $rebuilt;
     }
 
     /**
@@ -827,13 +1145,9 @@ final class WorkOrderProductionControlsAggregator
         array $materialNames,
         ?string $productStructure,
         string $area,
+        array $productSubstrateLabels = [],
     ): string {
         if ($form !== null) {
-            $labels = self::resolveAreaMaterialLabels($form, $materialNames, $productStructure);
-            if ($labels !== []) {
-                return $labels[0];
-            }
-
             $planilla = self::planillaSustratoLabels(
                 $form,
                 $area === 'laminacion' ? 'laminacion' : 'impresion',
@@ -842,11 +1156,23 @@ final class WorkOrderProductionControlsAggregator
             if ($planilla !== []) {
                 return $planilla[0];
             }
+
+            $labels = self::resolveAreaMaterialLabels($form, $materialNames, $productStructure);
+            if ($labels !== []) {
+                return $labels[0];
+            }
         }
 
         $inferred = self::structureInferenceLabels($productStructure);
         if ($inferred !== []) {
             return $inferred[0];
+        }
+
+        foreach ($productSubstrateLabels as $label) {
+            $label = trim((string) $label);
+            if ($label !== '') {
+                return $label;
+            }
         }
 
         return $area === 'laminacion'
@@ -877,11 +1203,14 @@ final class WorkOrderProductionControlsAggregator
     private static function structureInferenceLabels(?string $productStructure): array
     {
         $matched = ScrapSubstrateCatalog::structureMatchedGroupIds($productStructure);
-        if (count($matched) !== 1) {
+        if ($matched === []) {
             return [];
         }
 
-        return [ScrapSubstrateCatalog::labelFor($matched[0])];
+        return array_values(array_map(
+            fn (string $id): string => ScrapSubstrateCatalog::labelFor($id),
+            $matched,
+        ));
     }
 
     /**
@@ -899,7 +1228,7 @@ final class WorkOrderProductionControlsAggregator
                 continue;
             }
             foreach ($rollos as $kg) {
-                if (self::readKg($kg) > 0) {
+                if (CortePlanillaSalida::readPlausibleRollKg($kg) > 0) {
                     $count++;
                 }
             }

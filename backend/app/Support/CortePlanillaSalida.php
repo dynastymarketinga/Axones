@@ -12,6 +12,12 @@ final class CortePlanillaSalida
 
     public const ENTRADA_BOBINAS_SLOTS = 30;
 
+    /** Kg máximo aceptable por rollo en paleta (evita metraje/IDs capturados como kg). */
+    public const MAX_KG_PER_ROLLO = 10_000.0;
+
+    /** Kg máximo aceptable de salida total en corte por OT. */
+    public const MAX_KG_SALIDA_CORTE = 100_000.0;
+
     /**
      * Normaliza celdas kg (null → '') en arrays del formulario de corte antes de persistir.
      *
@@ -200,7 +206,7 @@ final class CortePlanillaSalida
         }
         $sum = 0.0;
         foreach ($rollos as $kg) {
-            $sum += self::readNumber($kg);
+            $sum += self::readPlausibleRollKg($kg);
         }
 
         return $sum;
@@ -214,12 +220,12 @@ final class CortePlanillaSalida
     public static function finishedKgFromForm(array $form): string
     {
         $fromSalida = self::parsePositiveKg($form['kgSalidaCorte'] ?? null);
-        if ($fromSalida !== null) {
+        if ($fromSalida !== null && self::isPlausibleSalidaKg((float) $fromSalida)) {
             return $fromSalida;
         }
 
         $fromAcum = self::parsePositiveKg($form['corAcumuladoProducidoKg'] ?? null);
-        if ($fromAcum !== null) {
+        if ($fromAcum !== null && self::isPlausibleSalidaKg((float) $fromAcum)) {
             return $fromAcum;
         }
 
@@ -451,6 +457,21 @@ final class CortePlanillaSalida
         }
 
         return $sum;
+    }
+
+    public static function readPlausibleRollKg(mixed $v): float
+    {
+        $n = self::readNumber($v);
+        if ($n <= 0 || $n > self::MAX_KG_PER_ROLLO) {
+            return 0.0;
+        }
+
+        return $n;
+    }
+
+    public static function isPlausibleSalidaKg(float $kg): bool
+    {
+        return $kg > 0 && $kg <= self::MAX_KG_SALIDA_CORTE;
     }
 
     private static function readNumber(mixed $v): float

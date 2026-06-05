@@ -179,4 +179,87 @@ class WorkOrderProductionControlsAggregatorTest extends TestCase
 
         $this->assertSame('Polietileno transparente', $breakdown['cortado'][0]['label']);
     }
+
+    public function test_material_salida_breakdown_impreso_uses_planilla_sustrato_when_meta_empty(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'sustratosVirgenImp' => [
+                ['material_id' => '', 'kg' => '420.50', 'material_free_text' => 'BOPP 20µ'],
+            ],
+            'impTurnosImpresion' => [[
+                'salidaBobinasKg' => ['200', '50'],
+                'salidaBobinasMeta' => [
+                    ['referencia' => '', 'proveedor' => ''],
+                    ['referencia' => '', 'proveedor' => ''],
+                ],
+            ]],
+        ]);
+
+        $this->assertCount(1, $breakdown['impreso']);
+        $this->assertSame('BOPP 20µ', $breakdown['impreso'][0]['label']);
+        $this->assertSame(250.0, $breakdown['impreso'][0]['kg']);
+        $this->assertSame(2, $breakdown['impreso'][0]['bobinas']);
+    }
+
+    public function test_material_salida_breakdown_impreso_splits_multiple_planilla_sustratos(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'sustratosVirgenImp' => [
+                ['material_id' => '', 'kg' => '300', 'material_free_text' => 'BOPP 20µ'],
+                ['material_id' => '', 'kg' => '100', 'material_free_text' => 'PET 12µ'],
+            ],
+            'impTurnosImpresion' => [[
+                'salidaBobinasKg' => ['400'],
+                'salidaBobinasMeta' => [
+                    ['referencia' => '', 'proveedor' => ''],
+                ],
+            ]],
+        ]);
+
+        $this->assertCount(2, $breakdown['impreso']);
+        $labels = array_column($breakdown['impreso'], 'label');
+        $this->assertContains('BOPP 20µ', $labels);
+        $this->assertContains('PET 12µ', $labels);
+        $this->assertSame(400.0, array_sum(array_column($breakdown['impreso'], 'kg')));
+    }
+
+    public function test_material_salida_breakdown_impreso_uses_entrada_meta_when_salida_meta_empty(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'impTurnosImpresion' => [[
+                'salidaBobinasKg' => ['75'],
+                'salidaBobinasMeta' => [
+                    ['referencia' => '', 'proveedor' => ''],
+                ],
+                'entradaBobinasMeta' => [
+                    ['referencia' => 'Poliéster metalizado', 'proveedor' => 'Proveedor X'],
+                ],
+            ]],
+        ]);
+
+        $this->assertSame('Poliéster metalizado (Proveedor X)', $breakdown['impreso'][0]['label']);
+        $this->assertSame(75.0, $breakdown['impreso'][0]['kg']);
+    }
+
+    public function test_material_salida_breakdown_impreso_uses_resumen_cierre_with_planilla_sustrato(): void
+    {
+        $breakdown = WorkOrderProductionControlsAggregator::materialSalidaBreakdownFromForm([
+            'sustratosVirgenImp' => [
+                ['material_id' => '', 'kg' => '420.50', 'material_free_text' => 'BOPP 20µ'],
+            ],
+            'impTurnosImpresion' => [[
+                'salidaBobinasKg' => [],
+                'salidaBobinasMeta' => [],
+                'resumenCierre' => [
+                    'pesoSalidaKg' => 1269,
+                    'numBobinasSalida' => 5,
+                ],
+            ]],
+        ]);
+
+        $this->assertCount(1, $breakdown['impreso']);
+        $this->assertSame('BOPP 20µ', $breakdown['impreso'][0]['label']);
+        $this->assertSame(1269.0, $breakdown['impreso'][0]['kg']);
+        $this->assertSame(5, $breakdown['impreso'][0]['bobinas']);
+    }
 }

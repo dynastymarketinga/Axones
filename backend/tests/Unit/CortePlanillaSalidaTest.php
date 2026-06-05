@@ -49,6 +49,19 @@ class CortePlanillaSalidaTest extends TestCase
         $this->assertSame('0.000', CortePlanillaSalida::finishedKgFromForm([]));
     }
 
+    public function test_finished_kg_ignores_implausible_roll_and_salida_values(): void
+    {
+        $form = [
+            'kgSalidaCorte' => '342234675531',
+            'cor_paletas' => [[
+                'id' => 'p1',
+                'rollosKg' => ['324432', '23424', '50', ''],
+            ]],
+        ];
+
+        $this->assertSame('50.000', CortePlanillaSalida::finishedKgFromForm($form));
+    }
+
     public function test_used_kg_from_ingresados(): void
     {
         $form = ['kgIngresadosCorte' => '100.5'];

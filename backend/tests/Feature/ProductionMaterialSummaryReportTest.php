@@ -164,4 +164,74 @@ class ProductionMaterialSummaryReportTest extends TestCase
 
         Carbon::setTestNow();
     }
+
+    public function test_production_material_summary_shows_planilla_sustrato_instead_of_sin_referencia(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-15 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = ['Authorization' => 'Bearer '.$user->createToken('t')->plainTextToken];
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-SUSTRATO',
+            'document_date' => '2026-06-05',
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'sustratosVirgenImp' => [
+                    ['material_id' => '', 'kg' => '420.50', 'material_free_text' => 'BOPP 20µ'],
+                ],
+                'impTurnosImpresion' => [[
+                    'salidaBobinasKg' => ['500', '769'],
+                    'salidaBobinasMeta' => [
+                        ['referencia' => '', 'proveedor' => ''],
+                        ['referencia' => '', 'proveedor' => ''],
+                    ],
+                ]],
+            ],
+        ]);
+
+        $this->getJson('/api/reports/production-material-summary?from=2026-06-01&to=2026-06-30', $h)
+            ->assertOk()
+            ->assertJsonPath('totals.material_impreso_kg', '1269.000')
+            ->assertJsonPath('totals.material_impreso_lines.0.label', 'BOPP 20µ')
+            ->assertJsonPath('totals.material_impreso_lines.0.kg', '1269.000')
+            ->assertJsonPath('totals.material_impreso_lines.0.bobinas', 2);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_production_material_summary_does_not_use_finished_product_for_impreso_label(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-15 12:00:00'));
+
+        $user = User::factory()->create();
+        $h = ['Authorization' => 'Bearer '.$user->createToken('t')->plainTextToken];
+
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-IMP-NO-TERM',
+            'document_date' => '2026-06-05',
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo->id,
+            'form' => [
+                'sustratosVirgenImp' => [
+                    ['material_id' => '', 'kg' => '', 'material_free_text' => ''],
+                ],
+                'impTurnosImpresion' => [[
+                    'salidaBobinasKg' => ['80'],
+                    'salidaBobinasMeta' => [
+                        ['referencia' => '', 'proveedor' => ''],
+                    ],
+                ]],
+            ],
+        ]);
+
+        $this->getJson('/api/reports/production-material-summary?from=2026-06-01&to=2026-06-30', $h)
+            ->assertOk()
+            ->assertJsonPath('totals.material_impreso_lines.0.label', 'Bobina impresa (sin referencia)');
+
+        Carbon::setTestNow();
+    }
 }

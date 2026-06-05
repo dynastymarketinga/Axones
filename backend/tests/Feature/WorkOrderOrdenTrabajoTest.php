@@ -1562,6 +1562,48 @@ class WorkOrderOrdenTrabajoTest extends TestCase
         $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
     }
 
+    public function test_laminacion_finalizada_in_activas_and_historial(): void
+    {
+        $boss = User::factory()->create(['role' => 'boss']);
+        $h = $this->auth($boss);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-LAM-FIN',
+            'status' => 'open',
+            'board_stage' => WorkOrderBoardStage::Laminacion->value,
+            'created_by' => $boss->id,
+        ]);
+
+        AreaRequest::query()->create([
+            'area' => 'laminacion',
+            'title' => sprintf('OT %s — laminación', $wo->code),
+            'body' => 'test',
+            'status' => AreaRequestStatus::Pending->value,
+            'work_order_id' => $wo->id,
+            'requested_by' => $boss->id,
+        ]);
+
+        $this->patchJson("/api/work-orders/{$wo->id}/orden-trabajo/laminacion-control", [
+            'form' => [
+                'lamEstadoArea' => 'finalizada',
+                'lamTurnosLaminacion' => [],
+                'lamTurnoActual' => null,
+            ],
+            'origin_area' => 'laminacion',
+            'notify_on_production_save' => false,
+        ], $h)->assertOk();
+
+        $this->assertSame(
+            AreaRequestStatus::Done->value,
+            (string) AreaRequest::query()->where('work_order_id', $wo->id)->where('area', 'laminacion')->value('status'),
+        );
+
+        $activas = $this->getJson('/api/work-orders?mi_area=laminacion&area_process_tag=active&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($activas->json('data'))->pluck('id')->all());
+
+        $historial = $this->getJson('/api/work-orders?historial_area=laminacion&historial_exclude_pending=1&per_page=20', $h)->assertOk();
+        $this->assertContains($wo->id, collect($historial->json('data'))->pluck('id')->all());
+    }
+
     public function test_impresion_finalizada_excluded_from_activas_and_in_historial(): void
     {
         $boss = User::factory()->create(['role' => 'boss']);

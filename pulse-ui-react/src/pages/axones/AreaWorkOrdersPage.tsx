@@ -901,11 +901,16 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
 
   useEffect(() => {
     const parsed = parseMesBandejaSubTabParam(searchParams.get(MES_BANDEJA_QUERY_KEY))
-    if (!parsed) return
-    mesActivasSubTabAutoPickedRef.current = true
-    setActiveTab("activas")
-    setMesActivasSubTab(parsed)
-  }, [searchParams])
+    if (parsed) {
+      mesActivasSubTabAutoPickedRef.current = true
+      setActiveTab("activas")
+      setMesActivasSubTab(parsed)
+      return
+    }
+    setMesActivasSubTab("pendientes")
+    mesActivasSubTabAutoPickedRef.current = false
+    mesProduccionFilterTouchedRef.current = false
+  }, [area, searchParams])
 
   useEffect(() => {
     if (activeTab !== "activas") {
@@ -914,12 +919,6 @@ export default function AreaWorkOrdersPage({ area }: { area: AreaKey }) {
       mesProduccionFilterTouchedRef.current = false
     }
   }, [activeTab])
-
-  useEffect(() => {
-    setMesActivasSubTab("pendientes")
-    mesActivasSubTabAutoPickedRef.current = false
-    mesProduccionFilterTouchedRef.current = false
-  }, [area])
 
   useEffect(() => {
     if (mesActivasSubTab !== "produccion" || mesProduccionFilterTouchedRef.current) return

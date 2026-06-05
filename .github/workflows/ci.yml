@@ -5,6 +5,7 @@ on:
     branches:
       - "**"
   pull_request:
+  workflow_dispatch:
 
 jobs:
   backend-tests:
@@ -61,3 +62,11 @@ jobs:
       - name: Run frontend build
         run: npm run build
 
+  deploy-production:
+    name: Deploy to SERVIDOR
+    if: github.ref == 'refs/heads/main'
+    needs: [backend-tests, frontend-quality]
+    runs-on: self-hosted
+    steps:
+      - name: Run deploy script
+        run: bash /var/www/axones/scripts/deploy.sh

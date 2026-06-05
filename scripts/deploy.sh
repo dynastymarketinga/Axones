@@ -24,6 +24,8 @@ php artisan migrate --force --no-interaction
 if [ "${AXONES_TRUNCATE_KEEP_AUTH:-}" = "1" ]; then
   echo "==> Limpieza BD: conserva users, cache, sessions, personal_access_tokens"
   php artisan axones:truncate-keep-users --force --no-interaction
+else
+  echo "==> BD: sin cambios (deploy normal, no se vacían tablas)"
 fi
 
 php artisan axones:cleanup-operational-alerts --no-interaction

@@ -1,0 +1,16 @@
+name: Production DB Cleanup
+
+# Solo limpieza puntual de BD. NO usar en deploys normales.
+on:
+  workflow_dispatch:
+
+jobs:
+  truncate-keep-auth:
+    name: Limpiar BD producción (una vez)
+    runs-on: self-hosted
+    steps:
+      - name: Vaciar tablas de negocio
+        run: |
+          cd /var/www/axones/backend
+          echo "==> Limpieza BD: conserva users, cache, sessions, personal_access_tokens"
+          php artisan axones:truncate-keep-users --force --no-interaction

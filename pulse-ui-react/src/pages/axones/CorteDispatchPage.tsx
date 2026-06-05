@@ -19,7 +19,7 @@ import {
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
-import { CortePaletaRollosPreview } from "@/components/axones/CortePaletaRollosPreview"
+import { CortePaletaRollosAccumulatedSummary } from "@/components/axones/CortePaletaRollosAccumulatedSummary"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
@@ -234,6 +234,18 @@ export default function CorteDispatchPage() {
     () => readDispatchSelection().length,
     [selectedRows],
   )
+
+  const filteredRowsTotals = useMemo(() => {
+    let terminado = 0
+    let enNotas = 0
+    let disponible = 0
+    for (const r of filteredRows) {
+      terminado += Number(r.quantity_finished_kg) || 0
+      enNotas += Number(r.quantity_dispatched_kg) || 0
+      disponible += Number(r.quantity_remaining_kg) || 0
+    }
+    return { terminado, enNotas, disponible, count: filteredRows.length }
+  }, [filteredRows])
 
   function explainProvisionalSelection() {
     toast.message(
@@ -470,7 +482,8 @@ export default function CorteDispatchPage() {
       </Card>
 
       <p className="text-muted-foreground text-xs">
-        Expanda una fila para ver rollos. Use el icono de vista previa en paletas cerradas.
+        Expanda una fila para ver el acumulado por rollo (solo los que tienen kg). Use el icono de vista previa en
+        paletas cerradas.
       </p>
 
       <div className="w-full min-w-0 overflow-x-auto rounded-2xl border bg-card shadow-sm">
@@ -543,7 +556,7 @@ export default function CorteDispatchPage() {
                           className="h-8 w-8"
                           onClick={() => toggleExpanded(key)}
                           aria-expanded={expanded}
-                          title="Ver rollos (solo lectura)"
+                          title="Ver acumulado por rollo"
                         >
                           {expanded ? (
                             <ChevronDown className="h-4 w-4" />
@@ -654,17 +667,33 @@ export default function CorteDispatchPage() {
                   mainRow,
                   <TableRow key={`${key}-detail`} className="bg-muted/30 hover:bg-muted/30">
                     <TableCell colSpan={10} className="p-3">
-                      <p className="text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wide">
-                        Rollos de {paletaLabel} (solo lectura)
-                      </p>
-                      <div className="max-w-3xl rounded-lg border bg-background p-2">
-                        <CortePaletaRollosPreview rollosKg={r.rollos_kg} compact />
-                      </div>
+                      <CortePaletaRollosAccumulatedSummary
+                        paletaLabel={paletaLabel}
+                        rollosKg={r.rollos_kg}
+                        totalKgHint={r.quantity_finished_kg}
+                      />
                     </TableCell>
                   </TableRow>,
                 ]
               })
             )}
+            {!loading && filteredRows.length > 0 ? (
+              <TableRow className="bg-muted/50 font-semibold hover:bg-muted/50">
+                <TableCell colSpan={5} className={cn("text-right", catalogTableBodyCellClass)}>
+                  Total ({filteredRowsTotals.count} paleta(s) en esta vista)
+                </TableCell>
+                <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                  {formatKg(filteredRowsTotals.terminado)}
+                </TableCell>
+                <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                  {formatKg(filteredRowsTotals.enNotas)}
+                </TableCell>
+                <TableCell className={cn("text-right tabular-nums", catalogTableBodyCellClass)}>
+                  {formatKg(filteredRowsTotals.disponible)}
+                </TableCell>
+                <TableCell colSpan={2} className={catalogTableBodyCellClass} />
+              </TableRow>
+            ) : null}
           </TableBody>
         </Table>
       </div>

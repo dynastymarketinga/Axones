@@ -34,3 +34,24 @@ export function countRollosWithKg(rollosKg?: string[] | null): number {
 export function sumRollosKg(rollosKg?: string[] | null): number {
   return normalizeRollosKg(rollosKg).reduce((acc, v) => acc + readRolloKg(v), 0)
 }
+
+export type FilledRolloEntry = {
+  rolloNumber: number
+  kg: number
+  kgDisplay: string
+}
+
+/** Solo posiciones con kg &gt; 0 (sin los 48 huecos vacíos). */
+export function filledRollosFromKg(rollosKg?: string[] | null): FilledRolloEntry[] {
+  const out: FilledRolloEntry[] = []
+  normalizeRollosKg(rollosKg).forEach((raw, idx) => {
+    const kg = readRolloKg(raw)
+    if (kg <= 0) return
+    out.push({
+      rolloNumber: idx + 1,
+      kg,
+      kgDisplay: raw.trim() || String(kg),
+    })
+  })
+  return out
+}

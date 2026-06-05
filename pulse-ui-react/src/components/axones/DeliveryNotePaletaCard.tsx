@@ -2,7 +2,7 @@
 
 import { Barcode, Package, Users } from "lucide-react"
 
-import { CortePaletaRollosPreview } from "@/components/axones/CortePaletaRollosPreview"
+import { CortePaletaRollosAccumulatedSummary } from "@/components/axones/CortePaletaRollosAccumulatedSummary"
 import {
   countRollosWithKg,
   normalizeRollosKg,
@@ -119,7 +119,11 @@ export function DeliveryNotePaletaCard({
           Disponible para nota:{" "}
           <span className="font-medium text-foreground">{formatDispatchKg(totalKg)}</span>
         </p>
-        <CortePaletaRollosPreview rollosKg={slots} useInputs />
+        <CortePaletaRollosAccumulatedSummary
+          paletaLabel={paletaLabel}
+          rollosKg={slots}
+          totalKgHint={quantityKg}
+        />
       </div>
     </article>
   )

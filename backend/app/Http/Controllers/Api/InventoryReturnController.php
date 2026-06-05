@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\AlertSeverity;
-use App\Enums\InventoryMovementType;
+use App\Enums\InventoryArea;
 use App\Enums\OperationalAlertType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreInventoryReturnRequest;
@@ -11,7 +11,7 @@ use App\Models\Bobina;
 use App\Models\InventoryReturn;
 use App\Models\Material;
 use App\Models\OperationalAlert;
-use App\Services\InventoryLedgerService;
+use App\Services\InventoryReturnAcceptService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 class InventoryReturnController extends Controller
 {
     public function __construct(
-        private readonly InventoryLedgerService $ledger,
+        private readonly InventoryReturnAcceptService $acceptService,
     ) {}
 
     public function show(InventoryReturn $inventoryReturn): JsonResponse
@@ -72,7 +72,12 @@ class InventoryReturnController extends Controller
             ]);
         }
 
-        $return = DB::transaction(function () use ($data, $material) {
+        $user = $request->user();
+        if ($user === null) {
+            throw new AuthorizationException('Usuario no autenticado.');
+        }
+
+        $return = DB::transaction(function () use ($data, $material, $user) {
             /** @var InventoryReturn $return */
             $return = InventoryReturn::query()->create([
                 'material_id' => $material?->getKey(),
@@ -87,7 +92,7 @@ class InventoryReturnController extends Controller
             // para que aparezca en /axones/bobinas sin un paso manual adicional.
             if (
                 $material !== null &&
-                ($data['destination_area'] ?? null) === 'bobinas_rechazadas' &&
+                ($data['destination_area'] ?? null) === InventoryArea::BobinasRechazadas->value &&
                 ($data['work_order_id'] ?? null) &&
                 ! Bobina::query()->where('inventory_return_id', $return->getKey())->exists()
             ) {
@@ -101,12 +106,24 @@ class InventoryReturnController extends Controller
                 ]);
             }
 
+            // Devolución buena a sustrato: reingresa al inventario de materiales de inmediato.
+            if ($this->acceptService->isGoodSubstrateReturn($return, $material)) {
+                $reason = trim((string) ($data['reason'] ?? ''));
+                if ($reason === '') {
+                    $reason = 'Ingreso automático por devolución buena desde producción';
+                }
+
+                return $this->acceptService->accept($return, $user, $reason);
+            }
+
             return $return;
         });
 
         $return->load(['material.supplier:id,name', 'workOrder']);
 
-        $this->notifyInventoryReturnPending($return, $request->user());
+        if ($return->status === 'pending') {
+            $this->notifyInventoryReturnPending($return, $user);
+        }
 
         return response()->json($return, 201);
     }
@@ -151,65 +168,18 @@ class InventoryReturnController extends Controller
 
     public function accept(Request $request, InventoryReturn $inventoryReturn): JsonResponse
     {
-        if ($inventoryReturn->status !== 'pending') {
-            throw ValidationException::withMessages([
-                'status' => ['Esta devolución ya fue procesada.'],
-            ]);
-        }
-
         $user = $request->user();
         if ($user === null || ! $user->canAcceptInventoryReturns()) {
             throw new AuthorizationException('No autorizado para aceptar devoluciones a inventario.');
         }
-        $userId = (int) $user->getAuthIdentifier();
 
         $reasonText = trim((string) $request->input('reason', ''));
         if ($reasonText === '') {
             $reasonText = trim((string) ($inventoryReturn->reason ?? ''));
         }
-        if ($reasonText === '') {
-            throw ValidationException::withMessages([
-                'reason' => ['Debe indicar una razón.'],
-            ]);
-        }
 
-        $inventoryReturn = DB::transaction(function () use ($request, $inventoryReturn, $user, $userId) {
-            $inventoryReturn->load('material');
-            $material = $inventoryReturn->material;
-            $isRejectedWithoutMaterial =
-                ($inventoryReturn->destination_area === 'bobinas_rechazadas') && ! $material;
-
-            if (! $material && ! $isRejectedWithoutMaterial) {
-                throw ValidationException::withMessages([
-                    'material_id' => ['Material no encontrado para esta devolución.'],
-                ]);
-            }
-
-            if (! $isRejectedWithoutMaterial) {
-                $this->ledger->apply(
-                    $material,
-                    InventoryMovementType::In,
-                    (string) $inventoryReturn->quantity,
-                    $user,
-                    'inventory_return',
-                    $inventoryReturn->getKey(),
-                    [
-                        'note' => 'Ingreso por devolución aceptada',
-                        'reason_scope' => 'manual_adjustment',
-                        'reason_code' => 'inventory_return_accept',
-                        'reason_text' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
-                    ],
-                );
-            }
-
-            $inventoryReturn->update([
-                'status' => 'accepted',
-                'accepted_by' => $userId,
-                'accepted_at' => now(),
-                'reason' => trim((string) ($request->input('reason') ?: $inventoryReturn->reason)),
-            ]);
-
-            return $inventoryReturn->fresh(['material.supplier:id,name', 'workOrder']);
+        $inventoryReturn = DB::transaction(function () use ($inventoryReturn, $user, $reasonText) {
+            return $this->acceptService->accept($inventoryReturn, $user, $reasonText);
         });
 
         return response()->json($inventoryReturn);

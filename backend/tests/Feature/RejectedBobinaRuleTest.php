@@ -223,7 +223,7 @@ class RejectedBobinaRuleTest extends TestCase
         ], $headers)->assertUnprocessable();
     }
 
-    public function test_inventory_return_to_material_creates_operational_alert_and_keeps_work_order(): void
+    public function test_good_return_to_material_auto_accepts_and_increments_substrate_stock(): void
     {
         $user = User::factory()->create();
         $headers = $this->authHeaders($user);
@@ -252,12 +252,52 @@ class RejectedBobinaRuleTest extends TestCase
             'id' => $retId,
             'work_order_id' => $woId,
             'destination_area' => 'material',
+            'status' => 'accepted',
         ]);
-        $this->assertDatabaseHas('operational_alerts', [
+        $this->assertDatabaseMissing('operational_alerts', [
             'alert_type' => 'inventory_return_pending',
             'work_order_id' => $woId,
             'material_id' => $mat->id,
         ]);
+
+        $mat->refresh();
+        $this->assertEquals('103.500', $mat->quantity_on_hand);
+        $this->assertDatabaseHas('inventory_movements', [
+            'material_id' => $mat->id,
+            'reference_type' => 'inventory_return',
+            'reference_id' => $retId,
+            'movement_type' => 'in',
+        ]);
+    }
+
+    public function test_good_return_accept_increments_substrate_stock_when_still_pending(): void
+    {
+        $user = User::factory()->create();
+        $headers = $this->authHeaders($user);
+        $mat = Material::query()->create([
+            'sku' => 'MAT-GOOD-ACCEPT',
+            'name' => 'Sustrato verificación manual',
+            'inventory_area' => 'material',
+            'unit' => 'kg',
+            'min_stock' => 0,
+        ]);
+        $mat->forceFill(['quantity_on_hand' => 50])->save();
+
+        /** @var InventoryReturn $ret */
+        $ret = InventoryReturn::query()->create([
+            'material_id' => $mat->id,
+            'destination_area' => 'material',
+            'quantity' => '2.250',
+            'status' => 'pending',
+            'reason' => 'Devolución buena pendiente',
+        ]);
+
+        $this->postJson("/api/inventory-returns/{$ret->id}/accept", [
+            'reason' => 'Verificado en devoluciones',
+        ], $headers)->assertOk();
+
+        $mat->refresh();
+        $this->assertEquals('52.250', $mat->quantity_on_hand);
     }
 
     public function test_inventory_return_to_rejected_bobinas_allows_null_material(): void

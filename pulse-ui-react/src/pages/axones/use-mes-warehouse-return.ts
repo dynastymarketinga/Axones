@@ -503,7 +503,9 @@ export function useMesWarehouseReturn(options: {
         rechazadaEntries: [newWarehouseRejectedEntry()],
       })
       setReturnWarehouseOpen(false)
-      const successMessage = "Solicitud enviada a almacén. Devoluciones registradas."
+      const successMessage = hasBuena
+        ? "Devolución buena registrada: el stock de sustrato se actualizó en Materiales."
+        : "Solicitud enviada a almacén. Devoluciones registradas."
       if (onSuccess) onSuccess(successMessage)
       else toast.success(successMessage)
       window.dispatchEvent(new Event("alerts:refresh"))

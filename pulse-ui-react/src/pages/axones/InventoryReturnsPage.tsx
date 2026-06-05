@@ -70,11 +70,11 @@ type ReturnRow = {
 function viewHint(kind: "all" | "good" | "rejected"): string {
   const kindText =
     kind === "good"
-      ? "Se muestran solo devoluciones buenas (reingreso a inventario)."
+      ? "Las devoluciones buenas incrementan el stock de sustrato en Materiales al registrarse desde producción."
       : kind === "rejected"
-        ? "Se muestran solo devoluciones malas (bobinas rechazadas)."
-        : "Se muestran devoluciones buenas y malas."
-  return `Las devoluciones registradas desde otros flujos aparecerán aquí hasta que se verifique el ingreso. ${kindText}`
+        ? "Las devoluciones malas quedan pendientes hasta verificar el ingreso en bobinas rechazadas."
+        : "Las buenas alimentan sustrato de inmediato; las malas quedan pendientes hasta verificar."
+  return `Las devoluciones registradas desde Impresión, Laminación u otros flujos aparecen aquí. ${kindText}`
 }
 
 export default function InventoryReturnsPage() {
@@ -138,7 +138,7 @@ export default function InventoryReturnsPage() {
     <div className="mat-list-shell">
       <CatalogPageShell
         title="Devoluciones a inventario"
-        subtitle="Pendiente hasta verificar ingreso."
+        subtitle="Buenas → sustrato al registrar; malas → verificar ingreso."
         icon={PackageOpen}
       >
         <AxonesInventoryModuleNav active="devoluciones" variant="catalog" />

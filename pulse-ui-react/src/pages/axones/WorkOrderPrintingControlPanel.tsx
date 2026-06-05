@@ -2150,7 +2150,11 @@ export default function WorkOrderPrintingControlPanel({
         rechazadaEntries: [newWarehouseRejectedEntry()],
       })
       setReturnWarehouseOpen(false)
-      mesPrintingToastSuccess("Solicitud enviada a almacén. Devoluciones registradas.")
+      mesPrintingToastSuccess(
+        hasBuena
+          ? "Devolución buena registrada: el stock de sustrato se actualizó en Materiales."
+          : "Solicitud enviada a almacén. Devoluciones registradas.",
+      )
       window.dispatchEvent(new Event("alerts:refresh"))
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)

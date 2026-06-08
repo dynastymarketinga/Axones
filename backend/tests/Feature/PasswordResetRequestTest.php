@@ -41,7 +41,7 @@ class PasswordResetRequestTest extends TestCase
     public function test_guest_request_with_unknown_username_still_returns_ok_without_row(): void
     {
         $this->postJson('/api/auth/password-reset-request', [
-            'login' => 'byemail@example.test',
+            'login' => 'unknown_user_xyz',
         ])->assertOk();
 
         $this->assertDatabaseCount('password_reset_requests', 0);

@@ -87,6 +87,10 @@ export const catalogPaginationOutlineButtonClass =
 export const catalogMasterFormPanelClass =
   "mx-auto w-full max-w-5xl space-y-6 overflow-hidden rounded-2xl border border-primary/15 bg-card/95 p-6 shadow-md ring-1 ring-black/[0.03] dark:bg-card/90 dark:ring-white/[0.05] sm:p-8"
 
+/** Panel cuadrado parejo en login / solicitud de contraseña (grid 2 columnas, mismo ancho → mismo alto). */
+export const authPanelClass =
+  "flex w-full min-h-0 flex-col space-y-4 overflow-hidden rounded-2xl border border-primary/15 bg-card/95 p-6 shadow-md ring-1 ring-black/[0.03] dark:bg-card/90 dark:ring-white/[0.05] sm:space-y-6 sm:p-8 md:aspect-square"
+
 /** Panel ancho (p. ej. órdenes de compra con tabla de líneas). */
 export const catalogMasterFormPanelWideClass =
   "mx-auto w-full space-y-6 overflow-hidden rounded-2xl border border-primary/15 bg-card/95 p-6 shadow-md ring-1 ring-black/[0.03] dark:bg-card/90 dark:ring-white/[0.05] sm:p-8"

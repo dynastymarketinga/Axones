@@ -1,4 +1,3 @@
-import { Smartphone } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt"
@@ -17,11 +16,10 @@ export function PwaInstallGuide() {
 
   const context = useMemo(() => {
     if (typeof window === "undefined") {
-      return { host: "", secure: true, mobile: false }
+      return { host: "", mobile: false }
     }
     return {
       host: window.location.hostname,
-      secure: window.isSecureContext,
       mobile: isMobileUa(),
     }
   }, [])
@@ -38,11 +36,6 @@ export function PwaInstallGuide() {
     context.mobile &&
     (context.host === "localhost" || context.host === "127.0.0.1")
 
-  const needsHttpsHint =
-    !context.secure &&
-    context.host !== "localhost" &&
-    context.host !== "127.0.0.1"
-
   return (
     <div className="space-y-3">
       {wrongLocalhostOnDevice ? (
@@ -56,42 +49,6 @@ export function PwaInstallGuide() {
           </p>
         </div>
       ) : null}
-
-      <div className="rounded-lg border border-border bg-muted/50 p-4 text-sm">
-        <p className="mb-2 flex items-center gap-2 font-medium text-foreground">
-          <Smartphone className="size-4 shrink-0" aria-hidden />
-          Icono de Axones en el escritorio
-        </p>
-        <ol className="list-decimal space-y-1.5 pl-4 text-xs text-muted-foreground">
-          <li>
-            Menú <span className="font-medium text-foreground">⋮</span> del navegador (arriba a
-            la derecha).
-          </li>
-          <li>
-            Toca{" "}
-            <span className="font-medium text-foreground">
-              Agregar a la pantalla principal
-            </span>
-            {needsHttpsHint ? (
-              <span> (en HTTP/IP suele ser esta opción, no «Instalar aplicación»).</span>
-            ) : (
-              <span>.</span>
-            )}
-          </li>
-          <li>
-            Confirma el nombre <span className="font-medium text-foreground">Axones</span>. El
-            icono sale de{" "}
-            <span className="font-medium text-foreground">logo Axones</span> (
-            <code className="rounded bg-black/5 px-1">apple-touch-icon</code> / PWA).
-          </li>
-        </ol>
-        {needsHttpsHint ? (
-          <p className="mt-3 text-xs text-muted-foreground">
-            En producción con <span className="font-medium text-foreground">HTTPS</span> Chrome
-            puede mostrar además «Instalar aplicación» y el botón morado abajo.
-          </p>
-        ) : null}
-      </div>
 
       <PwaInstallPrompt variant="login" />
     </div>

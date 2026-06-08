@@ -29,6 +29,13 @@ export function isAxonesFullAccess(
   return BOSS_ROLES.has(r)
 }
 
+/** Contadores y campana de almacén (insumos + tintas pendientes). */
+export function canSeeWarehouseInventoryCounts(role?: string | null): boolean {
+  const r = normalizeRole(role)
+  if (isAxonesFullAccess(role)) return true
+  return ["inventory", "inventario", "inventory_chief", "jefe_inventario", "jefe_almacen"].includes(r)
+}
+
 const INVENTORY_CHIEF_URLS = new Set([
   "resumen",
   "alertas",
@@ -157,7 +164,11 @@ export function isAxonesUrlAllowed(
 ): boolean {
   if (url === "asistente") return false
   if (isAxonesFullAccess(role, userId)) return true
-  if (url === "account/password-reset-requests") {
+  if (
+    url === "account/password-reset-requests" ||
+    url === "account/users" ||
+    url === "account/users/form"
+  ) {
     return isAxonesFullAccess(role, userId)
   }
   // Hub de datos maestros: página contenedora (filtra internamente por rol).

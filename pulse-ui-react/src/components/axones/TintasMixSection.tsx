@@ -15,6 +15,7 @@ import { toast } from "sonner"
 
 import { CatalogTableHead } from "@/components/axones/CatalogTableHead"
 import { TintasPaneHead } from "@/components/axones/TintasPaneHead"
+import { TintaColorSwatch } from "@/components/axones/TintaColorSwatch"
 import { catalogSelectTriggerClass } from "@/components/axones/catalog-list-classes"
 import {
   catalogTableBodyCellClass,
@@ -22,6 +23,7 @@ import {
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
 import { apiFetch, ApiError } from "@/lib/api"
+import { formatQuantityDisplayEs } from "@/lib/numeric-display"
 import { cn } from "@/lib/utils"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import { Button } from "@/components/ui/button"
@@ -236,7 +238,10 @@ export function TintasMixSection({
                     <SelectContent>
                       {tintaMaterials.map((m) => (
                         <SelectItem key={m.id} value={String(m.id)}>
-                          {m.sku} — {m.name} ({m.quantity_on_hand} {m.unit})
+                          <span className="flex items-center gap-2">
+                            <TintaColorSwatch name={m.name} size="sm" />
+                            {m.sku} — {m.name} ({formatQuantityDisplayEs(m.quantity_on_hand)} {m.unit})
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>

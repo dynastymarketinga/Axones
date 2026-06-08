@@ -24,3 +24,13 @@ export function formatQuantityDisplay(
 ): string {
   return formatPlainNumberDisplay(value, maxFractionDigits)
 }
+
+/** Cantidades en UI tintas / inventario (es-VE): sin ceros de relleno y coma decimal. */
+export function formatQuantityDisplayEs(
+  value: string | number | null | undefined,
+  maxFractionDigits = 3,
+): string {
+  const formatted = formatPlainNumberDisplay(value, maxFractionDigits)
+  if (!formatted) return ""
+  return formatted.replace(".", ",")
+}

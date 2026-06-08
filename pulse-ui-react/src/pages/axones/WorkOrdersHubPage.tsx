@@ -31,7 +31,12 @@ import {
 
 import { apiFetch, ApiError } from "@/lib/api"
 import { MES_CONTROL_SAVED_EVENTS } from "@/lib/area-mes-band-helpers"
-import { groupWorkOrdersForHub, latestRowInGroup, sumPedidoKgDisplay } from "@/lib/axones-work-order-grouping"
+import {
+  groupWorkOrdersForHub,
+  latestRowInGroup,
+  pedidoKgDisplay,
+  sumPedidoKgDisplay,
+} from "@/lib/axones-work-order-grouping"
 import {
   classifyWorkOrderHubRow,
   hubBucketEtapaHint,
@@ -137,18 +142,6 @@ function formMachine(row: WorkOrderListRow): string {
   const m = readString(doc.maquina) // Normaliza a string por si acaso el formato es extraño
   return m || "—" // Si hay máquina la devuelve, sino "—"
 }
-
-function formPedidoKg(row: WorkOrderListRow): string {
-  // Accede al campo 'pedidoKg' dentro de 'technical_document.form'
-  const doc = row.technical_document?.form
-  if (!doc) return "—" // Si no existe, regresa "—"
-  const v = doc.pedidoKg
-  // Si es número, lo convierte a string. Si es string no vacío, lo deja igual. Sino, regresa "—".
-  if (typeof v === "number") return String(v)
-  if (typeof v === "string" && v.trim()) return v.trim()
-  return "—"
-}
-
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—"
@@ -526,7 +519,7 @@ function HubWorkOrderTableRow({
       </TableCell>
       <TableCell className={cn(catalogTableBodyCellClass)}>{statusLabel(o.status)}</TableCell>
       <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>{o.creator?.name ?? "—"}</TableCell>
-      <TableCell className={cn(catalogTableBodyCellClass)}>{formPedidoKg(o)}</TableCell>
+      <TableCell className={cn(catalogTableBodyCellClass, "tabular-nums")}>{pedidoKgDisplay(o)}</TableCell>
       <TableCell className={cn("whitespace-nowrap text-right", catalogTableBodyCellClass)}>
         <div className="inline-flex flex-wrap justify-end gap-1.5">
           <Tooltip>

@@ -1,0 +1,36 @@
+.tinta-color-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: 2px solid;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.04);
+}
+
+.tinta-color-swatch--sm {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.35rem;
+}
+
+.tinta-color-swatch--md {
+  width: 2rem;
+  height: 2rem;
+}
+
+.tinta-color-swatch--lg {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.65rem;
+}
+
+.tinta-color-swatch__icon {
+  width: 55%;
+  height: 55%;
+  color: rgb(109 40 217 / 0.85);
+}
+
+.tinta-color-swatch--sm .tinta-color-swatch__icon {
+  width: 70%;
+  height: 70%;
+}

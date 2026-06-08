@@ -4,6 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
+import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormPanelClass,
+  catalogMasterFormPlainInputClass,
+  catalogMasterFormSectionClass,
+} from "@/components/axones/catalog-list-classes"
+import { PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, VendorRecord } from "@/types/api"
 import { Button } from "@/components/ui/button"
@@ -16,19 +26,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
+import {
+  clampStr,
+  MASTER_FORM_PHONE_MAX_CHARS,
+  masterFormPhoneError,
+  sanitizePhoneInput,
+} from "@/lib/masters-form-phone"
 import { cn } from "@/lib/utils"
-import { ArrowLeft, Phone, UserRound } from "lucide-react"
-
-const fieldLabelClass = "leading-snug"
-
-const fieldIconClass =
-  "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors"
-
-const inputWithIconClass = "h-9 pl-10 leading-none md:text-sm"
-
-const PHONE_MAX_DIGITS = 15
+import { Phone, UserRound, Users } from "lucide-react"
 
 const VENDOR_VALIDATION_TOAST_ORDER = [
   { key: "name", label: "Nombre" },
@@ -39,16 +45,8 @@ const VENDOR_VALIDATION_TOAST_ORDER = [
 /** Límites alineados con ClientFormPage (teléfono); API vendors permite 64, UI igual que clientes. */
 const LIM = {
   name: 255,
-  phone: 22,
+  phone: MASTER_FORM_PHONE_MAX_CHARS,
 } as const
-
-function clampStr(s: string, max: number): string {
-  return s.slice(0, max)
-}
-
-function sanitizePhoneInput(raw: string): string {
-  return raw.replace(/[^\d+().\-\s]/g, "").slice(0, LIM.phone)
-}
 
 export default function VendorFormPage() {
   const location = useLocation()
@@ -81,6 +79,11 @@ export default function VendorFormPage() {
     return from && from.startsWith("/") ? from : "/vendedores"
   }, [location.state])
 
+  const pageTitle = isEdit ? "Editar vendedor" : "Nuevo vendedor"
+  const pageSubtitle = isEdit
+    ? "Actualice el nombre y teléfonos de contacto del vendedor."
+    : "Registre el nombre y teléfonos de contacto del vendedor."
+
   const load = useCallback(async () => {
     if (!isEdit || !vendorId) return
     setLoading(true)
@@ -111,20 +114,8 @@ export default function VendorFormPage() {
       if (!n) next.name = "El nombre es obligatorio."
       else if (n.length > LIM.name) next.name = `Máximo ${LIM.name} caracteres.`
 
-      function phoneErr(p: string): string | undefined {
-        if (!p) return undefined
-        if (p.length > LIM.phone) return `Máximo ${LIM.phone} caracteres.`
-        if (/[a-zA-Z]/.test(p)) return "No use letras en el teléfono."
-        const compact = p.replace(/[^\d]/g, "")
-        if (compact.length < 7) return "Teléfono inválido: se requieren al menos 7 dígitos."
-        if (compact.length > PHONE_MAX_DIGITS)
-          return `Teléfono inválido: máximo ${PHONE_MAX_DIGITS} dígitos.`
-        if (!/^[+\d()\-\s.]+$/.test(p)) return "Teléfono inválido: use dígitos y separadores habituales."
-        return undefined
-      }
-
-      const e1 = phoneErr(p1)
-      const e2 = phoneErr(p2)
+      const e1 = masterFormPhoneError(p1)
+      const e2 = masterFormPhoneError(p2)
       if (e1) next.phonePrimary = e1
       if (e2) next.phoneSecondary = e2
 
@@ -243,145 +234,127 @@ export default function VendorFormPage() {
     await doSubmit()
   }
 
-  return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {isEdit ? "Editar vendedor" : "Nuevo vendedor"}
-          </h1>
-          <p className="text-muted-foreground text-sm">Complete o actualice los datos del vendedor.</p>
-        </div>
-        <Button type="button" variant="outline" size="icon" asChild>
-          <Link to={returnTo} title="Volver al listado" aria-label="Volver al listado">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-      </div>
+  const backButton = <CatalogMasterFormBackButton to={returnTo} />
 
+  return (
+    <CatalogPageShell
+      title={pageTitle}
+      subtitle={pageSubtitle}
+      icon={Users}
+      headerVariant="elevated"
+      action={backButton}
+    >
       {loading ? (
-        <p className="text-muted-foreground text-sm">Cargando…</p>
+        <PageLoadingBlock />
       ) : (
         <form
           noValidate
           onSubmit={(ev) => void submit(ev)}
-          className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
+          className={catalogMasterFormPanelClass}
         >
-          <div className="grid gap-4 md:grid-cols-2 md:items-start">
-            <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="v-name" className={fieldLabelClass}>
-                Nombre *
-              </Label>
-              <div className="group/field relative">
-                <UserRound
-                  className={cn(
-                    fieldIconClass,
-                    errors.name
-                      ? "text-destructive"
-                      : "text-muted-foreground group-focus-within/field:text-primary",
-                  )}
-                  aria-hidden
-                />
-                <Input
-                  ref={nameRef}
-                  id="v-name"
-                  value={name}
-                  maxLength={LIM.name}
-                  onChange={(ev) => {
-                    const next = clampStr(ev.target.value, LIM.name)
-                    setName(next)
-                    if (errors.name) validate({ name: next })
-                  }}
-                  onBlur={() => {
-                    validate({ name })
-                    void checkDuplicateVendorName(name)
-                  }}
-                  aria-invalid={Boolean(errors.name)}
-                  className={cn(inputWithIconClass, errors.name ? "border-destructive focus-visible:ring-destructive" : "")}
-                  autoComplete="name"
-                  placeholder="Ej. María Pérez"
-                />
-              </div>
-              {errors.name ? <p className="text-destructive text-xs">{errors.name}</p> : null}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="v-phone-primary" className={fieldLabelClass}>
-                Teléfono principal (opcional)
-              </Label>
-              <div className="group/field relative">
-                <Phone
-                  className={cn(
-                    fieldIconClass,
-                    errors.phonePrimary
-                      ? "text-destructive"
-                      : "text-muted-foreground group-focus-within/field:text-primary",
-                  )}
-                  aria-hidden
-                />
-                <Input
-                  ref={phonePrimaryRef}
-                  id="v-phone-primary"
-                  value={phonePrimary}
-                  maxLength={LIM.phone}
-                  onChange={(ev) => {
-                    const next = sanitizePhoneInput(ev.target.value)
-                    setPhonePrimary(next)
-                    if (errors.phonePrimary) validate({ phonePrimary: next })
-                  }}
-                  onBlur={() => validate({ phonePrimary })}
-                  placeholder="+58 412 0000000"
-                  aria-invalid={Boolean(errors.phonePrimary)}
-                  autoComplete="tel"
-                  className={cn(
-                    inputWithIconClass,
-                    errors.phonePrimary ? "border-destructive focus-visible:ring-destructive" : "",
-                  )}
-                />
-              </div>
-              {errors.phonePrimary ? <p className="text-destructive text-xs">{errors.phonePrimary}</p> : null}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="v-phone-secondary" className={fieldLabelClass}>
-                Teléfono secundario (opcional)
-              </Label>
-              <div className="group/field relative">
-                <Phone
-                  className={cn(
-                    fieldIconClass,
-                    errors.phoneSecondary
-                      ? "text-destructive"
-                      : "text-muted-foreground group-focus-within/field:text-primary",
-                  )}
-                  aria-hidden
-                />
-                <Input
-                  ref={phoneSecondaryRef}
-                  id="v-phone-secondary"
-                  value={phoneSecondary}
-                  maxLength={LIM.phone}
-                  onChange={(ev) => {
-                    const next = sanitizePhoneInput(ev.target.value)
-                    setPhoneSecondary(next)
-                    if (errors.phoneSecondary) validate({ phoneSecondary: next })
-                  }}
-                  onBlur={() => validate({ phoneSecondary })}
-                  placeholder="+58 414 0000000"
-                  aria-invalid={Boolean(errors.phoneSecondary)}
-                  autoComplete="tel"
-                  className={cn(
-                    inputWithIconClass,
-                    errors.phoneSecondary ? "border-destructive focus-visible:ring-destructive" : "",
-                  )}
-                />
-              </div>
-              {errors.phoneSecondary ? <p className="text-destructive text-xs">{errors.phoneSecondary}</p> : null}
-            </div>
+          <div className={catalogMasterFormSectionClass}>
+            <h2 className="text-base font-semibold tracking-tight">Datos del vendedor</h2>
+            <p className="text-muted-foreground text-sm">
+              El nombre es obligatorio. Los teléfonos ayudan al seguimiento comercial.
+            </p>
           </div>
 
-          <div className="flex justify-center pt-2">
-            <Button type="submit" disabled={saving} className="min-w-[12rem]">
+          <div className="grid gap-5 md:grid-cols-2 md:items-start">
+            <CatalogLabeledField
+              label="Nombre *"
+              htmlFor="v-name"
+              icon={UserRound}
+              className="md:col-span-2"
+            >
+              <Input
+                ref={nameRef}
+                id="v-name"
+                value={name}
+                maxLength={LIM.name}
+                onChange={(ev) => {
+                  const next = clampStr(ev.target.value, LIM.name)
+                  setName(next)
+                  if (errors.name) validate({ name: next })
+                }}
+                onBlur={() => {
+                  validate({ name })
+                  void checkDuplicateVendorName(name)
+                }}
+                aria-invalid={Boolean(errors.name)}
+                autoComplete="name"
+                placeholder="Ej. María Pérez"
+                className={cn(
+                  catalogMasterFormPlainInputClass,
+                  errors.name && "border-destructive focus-visible:ring-destructive",
+                )}
+              />
+              {errors.name ? <p className="text-destructive text-xs">{errors.name}</p> : null}
+            </CatalogLabeledField>
+
+            <CatalogLabeledField
+              label="Teléfono principal (opcional)"
+              htmlFor="v-phone-primary"
+              icon={Phone}
+            >
+              <Input
+                ref={phonePrimaryRef}
+                id="v-phone-primary"
+                value={phonePrimary}
+                maxLength={LIM.phone}
+                onChange={(ev) => {
+                  const next = sanitizePhoneInput(ev.target.value)
+                  setPhonePrimary(next)
+                  if (errors.phonePrimary) validate({ phonePrimary: next })
+                }}
+                onBlur={() => validate({ phonePrimary })}
+                placeholder="+58 412 0000000"
+                aria-invalid={Boolean(errors.phonePrimary)}
+                autoComplete="tel"
+                className={cn(
+                  catalogMasterFormPlainInputClass,
+                  errors.phonePrimary && "border-destructive focus-visible:ring-destructive",
+                )}
+              />
+              {errors.phonePrimary ? (
+                <p className="text-destructive text-xs">{errors.phonePrimary}</p>
+              ) : null}
+            </CatalogLabeledField>
+
+            <CatalogLabeledField
+              label="Teléfono secundario (opcional)"
+              htmlFor="v-phone-secondary"
+              icon={Phone}
+            >
+              <Input
+                ref={phoneSecondaryRef}
+                id="v-phone-secondary"
+                value={phoneSecondary}
+                maxLength={LIM.phone}
+                onChange={(ev) => {
+                  const next = sanitizePhoneInput(ev.target.value)
+                  setPhoneSecondary(next)
+                  if (errors.phoneSecondary) validate({ phoneSecondary: next })
+                }}
+                onBlur={() => validate({ phoneSecondary })}
+                placeholder="+58 414 0000000"
+                aria-invalid={Boolean(errors.phoneSecondary)}
+                autoComplete="tel"
+                className={cn(
+                  catalogMasterFormPlainInputClass,
+                  errors.phoneSecondary && "border-destructive focus-visible:ring-destructive",
+                )}
+              />
+              {errors.phoneSecondary ? (
+                <p className="text-destructive text-xs">{errors.phoneSecondary}</p>
+              ) : null}
+            </CatalogLabeledField>
+          </div>
+
+          <div className={catalogMasterFormActionsClass}>
+            <Button type="button" variant="outline" className="border-primary/25" asChild>
+              <Link to={returnTo}>Cancelar</Link>
+            </Button>
+            <Button type="submit" disabled={saving} className="min-w-[10rem] shadow-sm">
               {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear vendedor"}
             </Button>
           </div>
@@ -433,6 +406,6 @@ export default function VendorFormPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </CatalogPageShell>
   )
 }

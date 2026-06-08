@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import {
-  ArrowLeft,
   Building2,
   Calendar as CalendarIcon,
   Check,
@@ -39,6 +38,12 @@ import {
 } from "@/lib/api-validation-es"
 import type { LaravelPaginated, MaterialRow, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import "./purchase-order-list.css"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormPanelWideClass,
+} from "@/components/axones/catalog-list-classes"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
 import {
   AlertDialog,
@@ -1130,13 +1135,12 @@ export default function PurchaseOrderNewPage() {
   return (
     <>
       <TooltipProvider delayDuration={200}>
-      <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1 space-y-3">
-          <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
-            <ShoppingCart className="size-7 shrink-0 text-primary" aria-hidden />
-            Nueva orden de compra
-          </h1>
+      <CatalogPageShell
+        title="Nueva orden de compra"
+        subtitle="Documente lo que se pide al proveedor; el inventario se actualiza al recepcionar."
+        icon={ShoppingCart}
+        headerVariant="elevated"
+        headerExtras={
           <Alert className="border-primary/40 bg-gradient-to-r from-primary/12 via-primary/8 to-primary/5 shadow-sm">
             <Info className="h-5 w-5 text-primary" aria-hidden />
             <AlertTitle className="text-base font-semibold text-foreground">
@@ -1154,26 +1158,28 @@ export default function PurchaseOrderNewPage() {
               </p>
             </AlertDescription>
           </Alert>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button type="button" variant="outline" size="icon" className="shrink-0 shadow-sm" asChild>
-              <Link to={returnTo} aria-label="Volver al listado de órdenes de compra">
-                <ArrowLeft aria-hidden />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left" className="max-w-[16rem] text-left">
-            Vuelve al listado de órdenes de compra. Si tenía borrador en esta pantalla, se conserva
-            al regresar desde proveedores.
-          </TooltipContent>
-        </Tooltip>
-      </div>
-
+        }
+        action={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <CatalogMasterFormBackButton
+                  to={returnTo}
+                  title="Volver al listado de órdenes de compra"
+                />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="max-w-[16rem] text-left">
+              Vuelve al listado de órdenes de compra. Si tenía borrador en esta pantalla, se conserva
+              al regresar desde proveedores.
+            </TooltipContent>
+          </Tooltip>
+        }
+      >
       <form
         noValidate
         onSubmit={(ev) => void submit(ev)}
-        className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
+        className={catalogMasterFormPanelWideClass}
       >
         <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-3">
           <div className="min-w-0 flex-1">
@@ -1973,7 +1979,10 @@ export default function PurchaseOrderNewPage() {
           </div>
         </div>
 
-        <div className="flex w-full justify-center pt-1">
+        <div className={catalogMasterFormActionsClass}>
+          <Button type="button" variant="outline" className="border-primary/25" asChild>
+            <Link to={returnTo}>Cancelar</Link>
+          </Button>
           <Button type="submit" disabled={saving} className="min-w-[12rem] shadow-md">
             <ShoppingCart aria-hidden />
             <LoadingButtonLabel
@@ -2210,7 +2219,7 @@ export default function PurchaseOrderNewPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      </div>
+      </CatalogPageShell>
       </TooltipProvider>
     </>
   )

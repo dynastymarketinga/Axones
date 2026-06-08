@@ -9,6 +9,7 @@ import {
   MES_GUARDAR_AREA_LABELS,
 } from "@/components/axones/mes"
 import { TintasPaneHead } from "@/components/axones/TintasPaneHead"
+import { TintaColorSwatch } from "@/components/axones/TintaColorSwatch"
 import { cn } from "@/lib/utils"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -598,7 +599,10 @@ export function ProductionAreaPanel({
                 <SelectContent>
                   {tintaMaterials.map((m) => (
                     <SelectItem key={m.id} value={String(m.id)}>
-                      {m.sku} — {m.name}
+                      <span className="flex items-center gap-2">
+                        <TintaColorSwatch name={m.name} size="sm" />
+                        {m.sku} — {m.name}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1050,7 +1054,10 @@ export function ProductionAreaPanel({
                     <SelectContent>
                       {materials.map((m) => (
                         <SelectItem key={m.id} value={String(m.id)}>
-                          {m.sku} — {m.name}
+                          <span className="flex items-center gap-2">
+                            <TintaColorSwatch name={m.name} size="sm" />
+                            {m.sku} — {m.name}
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>

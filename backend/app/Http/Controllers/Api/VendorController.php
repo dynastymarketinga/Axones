@@ -38,14 +38,6 @@ class VendorController extends Controller
         // Al crear un vendedor se asume activo (la desactivación se maneja en listado).
         $payload['active'] = true;
 
-        // Compatibilidad: si algún cliente aún manda `phone`, lo mapeamos a principal.
-        if (! array_key_exists('phone_primary', $payload)) {
-            $phoneLegacy = $request->input('phone');
-            if (is_string($phoneLegacy) && trim($phoneLegacy) !== '') {
-                $payload['phone_primary'] = trim($phoneLegacy);
-            }
-        }
-
         $vendor = Vendor::query()->create($payload);
 
         return response()->json($vendor, 201);
@@ -59,14 +51,6 @@ class VendorController extends Controller
     public function update(UpdateVendorRequest $request, Vendor $vendor): JsonResponse
     {
         $payload = $request->validated();
-
-        // Compatibilidad: permitir `phone` como alias de principal.
-        if (! array_key_exists('phone_primary', $payload)) {
-            $phoneLegacy = $request->input('phone');
-            if (is_string($phoneLegacy) && trim($phoneLegacy) !== '') {
-                $payload['phone_primary'] = trim($phoneLegacy);
-            }
-        }
 
         $vendor->update($payload);
 

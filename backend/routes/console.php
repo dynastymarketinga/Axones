@@ -39,11 +39,6 @@ Artisan::command('axones:demo {--clean : Borra los datos demo} {--minimal : Poca
     $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 })->purpose('Cargar o limpiar datos demo Axones');
 
-Artisan::command('axones:users:drop-demo', function () {
-    $deleted = User::query()->where('email', 'like', '%@axones.demo')->delete();
-    $this->info("Usuarios demo eliminados: {$deleted}");
-})->purpose('Eliminar usuarios @axones.demo para preparación de producción');
-
 Artisan::command('axones:users:audit-usernames', function () {
     $nulls = User::query()->whereNull('username')->orWhere('username', '')->count();
     $duplicates = DB::table('users')

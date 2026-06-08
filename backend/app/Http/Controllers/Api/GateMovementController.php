@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Módulo Vigilancia — API desactivada (UI: Próximamente).
+ * Descomentar esta clase y las rutas en routes/api.php para reactivar.
+ * Tabla `gate_movements` y modelo GateMovement se conservan.
+ */
+
+/*
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -42,3 +49,4 @@ class GateMovementController extends Controller
         return response()->json($movement->fresh()->load('user:id,name'), 201);
     }
 }
+*/

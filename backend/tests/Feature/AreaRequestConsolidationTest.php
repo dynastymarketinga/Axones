@@ -118,24 +118,23 @@ class AreaRequestConsolidationTest extends TestCase
         $this->assertSame([$otAr->id], $otIds);
     }
 
-    public function test_saved_broadcast_supersedes_older_pending_coordination(): void
+    public function test_production_save_supersedes_older_pending_coordination(): void
     {
         $user = User::factory()->create();
         $wo = $this->createWorkOrder($user);
         $notifications = app(ProductionNotificationService::class);
 
-        $notifications->notifyOnWorkOrderCreated($wo, $user);
-        $createdId = (int) AreaRequest::query()
+        $notifications->notifyAssignedAreasWithReason($wo, $user, ['corte'], 'Primera asignación', 'normal');
+        $assignmentId = (int) AreaRequest::query()
             ->where('work_order_id', $wo->id)
             ->where('area', 'corte')
-            ->where('title', sprintf('OT %s creada', $wo->code))
             ->value('id');
 
-        $notifications->notifyOnWorkOrderSavedBroadcast($wo, $user, 'fp-1');
+        $notifications->notifyOnProductionSave($wo, $user, 'impresion');
 
         $this->assertSame(
             AreaRequestStatus::Done->value,
-            (string) AreaRequest::query()->find($createdId)?->status,
+            (string) AreaRequest::query()->find($assignmentId)?->status,
         );
         $this->assertSame(
             1,

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\OperationalAlert;
 use App\Models\PasswordResetRequest;
 use App\Models\User;
+use App\Services\UserAdminAuditService;
 use App\Support\BossAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,9 @@ use Illuminate\Support\Facades\DB;
 
 class PasswordResetRequestController extends Controller
 {
+    public function __construct(
+        private readonly UserAdminAuditService $audit,
+    ) {}
     /**
      * Solicitud anónima (notificación interna, sin correo).
      */
@@ -106,6 +110,14 @@ class PasswordResetRequestController extends Controller
             'notes' => $request->input('notes'),
         ]);
 
-        return response()->json($password_reset_request->fresh()->load(['user:id,name,email,username,role', 'resolver:id,name']));
+        $fresh = $password_reset_request->fresh()->load(['user:id,name,email,username,role', 'resolver:id,name']);
+        $target = $fresh->user;
+        if ($target instanceof User) {
+            $this->audit->record($actor, $target, 'password_reset_resolved', [
+                'password_reset_request_id' => $fresh->getKey(),
+            ], $request);
+        }
+
+        return response()->json($fresh);
     }
 }

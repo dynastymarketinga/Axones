@@ -2,6 +2,11 @@
 
 namespace App\Models;
 
+/**
+ * Vigilancia — modelo activo; tabla `gate_movements` conservada.
+ * API/UI desactivados (Próximamente). Usado por seeders demo.
+ */
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 

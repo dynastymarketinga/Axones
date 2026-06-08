@@ -162,7 +162,7 @@ class ClientOrderWorkOrderLinkTest extends TestCase
         $this->assertSame('OC-ASC-0002', $byProduct->json('data.0.code'));
     }
 
-    public function test_work_order_creation_notifies_departments_immediately(): void
+    public function test_work_order_creation_does_not_notify_areas_until_assignment(): void
     {
         $user = User::factory()->create();
         $h = $this->auth($user);
@@ -183,16 +183,11 @@ class ClientOrderWorkOrderLinkTest extends TestCase
         ], $h)->assertCreated();
         $woId = (int) $woResp->json('id');
 
-        $this->assertDatabaseCount('area_requests', 5);
-        $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'montaje']);
-        $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'impresion']);
-        $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'laminacion']);
-        $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'corte']);
-        $this->assertDatabaseHas('area_requests', ['work_order_id' => $woId, 'area' => 'tintas']);
-        $this->assertDatabaseCount('operational_alerts', 0);
+        $this->assertDatabaseCount('area_requests', 0);
         $this->assertSame(
-            5,
+            0,
             AreaRequest::query()->where('work_order_id', $woId)->count()
         );
+        $this->assertDatabaseCount('operational_alerts', 0);
     }
 }

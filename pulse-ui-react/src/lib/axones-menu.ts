@@ -137,6 +137,18 @@ const AXONES_ACCOUNT_LEAVES_BASE: { title: string; url: string }[] = [
   { title: "Perfil", url: "account/profile" },
 ]
 
+/** Rutas Cuenta para migas de pan (independiente del rol visible en menú). */
+export const AXONES_ACCOUNT_BREADCRUMB_LEAVES: { title: string; url: string }[] = [
+  { title: "Perfil", url: "account/profile" },
+  { title: "Usuarios", url: "account/users" },
+  { title: "Solicitudes de contraseña", url: "account/password-reset-requests" },
+]
+
+const ACCOUNT_USERS: { title: string; url: string } = {
+  title: "Usuarios",
+  url: "account/users",
+}
+
 const ACCOUNT_PASSWORD_RESET_REQUESTS: { title: string; url: string } = {
   title: "Solicitudes de contraseña",
   url: "account/password-reset-requests",
@@ -149,7 +161,7 @@ export function getAccountLeaves(
 ): { title: string; url: string }[] {
   const leaves = [...AXONES_ACCOUNT_LEAVES_BASE]
   if (isAxonesFullAccess(role, userId)) {
-    leaves.push(ACCOUNT_PASSWORD_RESET_REQUESTS)
+    leaves.push(ACCOUNT_USERS, ACCOUNT_PASSWORD_RESET_REQUESTS)
   }
   return leaves
 }

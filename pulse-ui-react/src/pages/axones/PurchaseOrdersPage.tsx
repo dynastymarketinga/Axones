@@ -9,8 +9,6 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   CircleDot,
   ClipboardList,
   Eye,
@@ -18,16 +16,20 @@ import {
   Layers,
   ListOrdered,
   Pencil,
+  Plus,
   Printer,
   RotateCcw,
   Scale,
+  SearchX,
   Settings2,
   ShoppingCart,
   Truck,
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { CatalogEmptyState } from "@/components/axones/CatalogEmptyState"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogListPagination } from "@/components/axones/CatalogListPagination"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
@@ -35,9 +37,13 @@ import {
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
 import {
-  catalogPaginationOutlineButtonClass,
-  catalogPaginationSelectTriggerClass,
+  catalogFilterCol3Class,
+  catalogFilterCol4Class,
+  catalogFilterCol5Class,
+  catalogFilterGridClass,
+  catalogMasterFilterPanelClass,
   catalogSelectTriggerClass,
+  mesBandejaFilterActiveControlClass,
 } from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Badge } from "@/components/ui/badge"
@@ -80,6 +86,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiFetch, ApiError } from "@/lib/api"
+import { catalogCountLabel } from "@/lib/catalog-count-label"
 import type {
   LaravelPaginated,
   PurchaseOrderRow,
@@ -136,6 +143,37 @@ const poActionReactivateClass = cn(
   poActionIconBase,
   "border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400",
 )
+
+function purchaseOrderEmptyState(viewTab: ViewTab, hasActiveFilters: boolean) {
+  if (hasActiveFilters) {
+    return {
+      icon: SearchX,
+      title: "Sin resultados",
+      description: "Prueba otro código, proveedor o estado de la orden.",
+    }
+  }
+  if (viewTab === "inactive") {
+    return {
+      icon: Ban,
+      title: "Sin órdenes desactivadas",
+      description: "Las órdenes retiradas del listado operativo aparecerán aquí.",
+    }
+  }
+  if (viewTab === "history") {
+    return {
+      icon: ClipboardList,
+      title: "Sin órdenes con recepción",
+      description:
+        "Cuando se registre la primera recepción de una orden, pasará a esta pestaña.",
+    }
+  }
+  return {
+    icon: ShoppingCart,
+    title: "Sin órdenes pendientes",
+    description:
+      "Crea una orden de compra para solicitar material a proveedores.",
+  }
+}
 
 type PurchaseOrderSheetDetail = {
   id: number
@@ -358,6 +396,22 @@ export default function PurchaseOrdersPage() {
   }, [detailOpen, detailId])
 
   const showInitialSkeleton = loading && rows === null
+  const totalCount = rows?.total ?? 0
+  const hasActiveFilters =
+    supplierId !== "all" ||
+    status !== "all" ||
+    qApi.trim() !== "" ||
+    (isBoss && !isInactiveTab && visibility !== "active")
+  const emptyState = purchaseOrderEmptyState(viewTab, hasActiveFilters)
+
+  const newPurchaseOrderButton = (
+    <Button type="button" asChild className="gap-2 shadow-sm">
+      <Link to="/ordenes-compra/nueva" state={{ from }}>
+        <Plus className="h-4 w-4" aria-hidden />
+        Nueva OC
+      </Link>
+    </Button>
+  )
 
   const submitDeactivate = useCallback(async () => {
     if (!deactivatePo) return
@@ -437,14 +491,15 @@ export default function PurchaseOrdersPage() {
       title="Órdenes de compra"
       subtitle="Pedidos a proveedores: material, cantidades y seguimiento de recepción."
       icon={ShoppingCart}
-      action={
-        <Button type="button" asChild className="shadow-sm">
-          <Link to="/ordenes-compra/nueva" state={{ from }}>
-            <ShoppingCart className="mr-2 size-4" aria-hidden />
-            Nueva OC
-          </Link>
-        </Button>
+      headerVariant="elevated"
+      statBadge={
+        rows && !loading ? (
+          <Badge variant="secondary" className="font-normal tabular-nums">
+            {catalogCountLabel(totalCount, "orden", "órdenes")}
+          </Badge>
+        ) : null
       }
+      action={newPurchaseOrderButton}
     >
       <PurchaseOrderDetailSheet
         open={detailOpen}
@@ -639,13 +694,13 @@ export default function PurchaseOrdersPage() {
             </TabsList>
           </Tabs>
 
-          <div className="po-filter-bar space-y-4 p-4 md:p-5">
+          <div className={cn("po-filter-bar space-y-4 p-4 md:p-5", catalogMasterFilterPanelClass)}>
             <div className="flex flex-wrap items-center gap-2">
               <Filter className="size-4 text-primary" aria-hidden />
               <p className="text-sm font-medium">Filtrar listado</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-12">
-            <CatalogLabeledField label="Proveedor" className="md:col-span-4">
+            <div className={catalogFilterGridClass}>
+            <CatalogLabeledField label="Proveedor" className={catalogFilterCol4Class}>
               <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -656,6 +711,7 @@ export default function PurchaseOrdersPage() {
                     className={cn(
                       "h-11 w-full justify-between font-normal",
                       catalogSelectTriggerClass,
+                      supplierId !== "all" && mesBandejaFilterActiveControlClass,
                     )}
                   >
                     <span
@@ -729,7 +785,7 @@ export default function PurchaseOrdersPage() {
                 </PopoverContent>
               </Popover>
             </CatalogLabeledField>
-            <CatalogLabeledField label="Estado de la orden" className="md:col-span-3">
+            <CatalogLabeledField label="Estado de la orden" className={catalogFilterCol3Class}>
               <Select
                 value={status}
                 onValueChange={(v) => {
@@ -737,7 +793,13 @@ export default function PurchaseOrdersPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                <SelectTrigger
+                  className={cn(
+                    "font-normal",
+                    catalogSelectTriggerClass,
+                    status !== "all" && mesBandejaFilterActiveControlClass,
+                  )}
+                >
                   <SelectValue placeholder="Todos los estados" />
                 </SelectTrigger>
                 <SelectContent>
@@ -756,10 +818,10 @@ export default function PurchaseOrdersPage() {
                 setPage(1)
                 setQInput(ev.target.value)
               }}
-              className="min-w-0 md:col-span-5"
+              className={catalogFilterCol5Class}
             />
             {isBoss && !isInactiveTab ? (
-              <CatalogLabeledField label="Mostrar en listado" className="md:col-span-4">
+              <CatalogLabeledField label="Mostrar en listado" className={catalogFilterCol4Class}>
                 <Select
                   value={visibility}
                   onValueChange={(v) => {
@@ -767,7 +829,13 @@ export default function PurchaseOrdersPage() {
                     setPage(1)
                   }}
                 >
-                  <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                  <SelectTrigger
+                    className={cn(
+                      "font-normal",
+                      catalogSelectTriggerClass,
+                      visibility !== "active" && mesBandejaFilterActiveControlClass,
+                    )}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -816,7 +884,7 @@ export default function PurchaseOrdersPage() {
 
           <div className="po-table-wrap overflow-x-auto">
             <Table className="min-w-[880px]">
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
                 <TableRow className="hover:bg-transparent">
                   <CatalogTableHead icon={ListOrdered} className="w-14">
                     N.º
@@ -856,13 +924,18 @@ export default function PurchaseOrdersPage() {
                 {loading ? (
                   <LoadingTableRow colSpan={tableColSpan} />
                 ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={tableColSpan} className="text-muted-foreground">
-                      {isInactiveTab
-                        ? "No hay órdenes desactivadas con los filtros actuales."
-                        : isHistoryTab
-                          ? "Aún no hay órdenes con recepción registrada."
-                          : "Sin órdenes pendientes de recepción."}
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={tableColSpan} className="p-0">
+                      <CatalogEmptyState
+                        icon={emptyState.icon}
+                        title={emptyState.title}
+                        description={emptyState.description}
+                        action={
+                          hasActiveFilters || viewTab !== "pending"
+                            ? undefined
+                            : newPurchaseOrderButton
+                        }
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -894,7 +967,12 @@ export default function PurchaseOrdersPage() {
                         </span>
                       </TableCell>
                       <TableCell className="p-3 align-middle font-medium">
-                        {r.supplier?.name ?? `#${r.supplier_id}`}
+                        <span className="inline-flex items-center gap-2">
+                          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                            <Truck className="h-3.5 w-3.5" aria-hidden />
+                          </span>
+                          {r.supplier?.name ?? `#${r.supplier_id}`}
+                        </span>
                       </TableCell>
                       <TableCell className="po-col-status p-3 align-middle">
                         <div className="flex flex-col gap-1">
@@ -1016,86 +1094,15 @@ export default function PurchaseOrdersPage() {
             </Table>
           </div>
 
-          {rows ? (
-            <div className="po-pagination-bar">
-              <div className="po-pagination-meta">
-                <p className="text-sm">
-                  {rows.total === 0 ? (
-                    "Sin resultados con los filtros actuales."
-                  ) : (
-                    <>
-                      Mostrando <strong>{rows.from ?? 0}</strong> a <strong>{rows.to ?? 0}</strong> de{" "}
-                      <strong>{rows.total}</strong> registros
-                    </>
-                  )}
-                </p>
-                {rows.last_page > 1 ? (
-                  <p className="text-muted-foreground text-xs">
-                    Página {rows.current_page} de {rows.last_page}
-                  </p>
-                ) : null}
-              </div>
-              <div className="po-pagination-controls">
-                {rows.last_page > 1 ? (
-                  <span className="po-page-indicator">
-                    {rows.current_page} / {rows.last_page}
-                  </span>
-                ) : null}
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground text-sm">Por página</span>
-                  <Select
-                    value={String(perPage)}
-                    onValueChange={(v) => {
-                      setPerPage(Number(v))
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger
-                      id="purchase-orders-per-page"
-                      className={cn(
-                        "h-9 w-[4.75rem] text-sm",
-                        catalogPaginationSelectTriggerClass,
-                      )}
-                      aria-label="Registros por página"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PER_PAGE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt} value={String(opt)}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page <= 1 || loading}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    type="button"
-                  >
-                    <ChevronLeft className="mr-1 size-4" aria-hidden />
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-9 px-3", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page >= rows.last_page || loading}
-                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                    type="button"
-                  >
-                    Siguiente
-                    <ChevronRight className="ml-1 size-4" aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          <CatalogListPagination
+            rows={rows}
+            loading={loading}
+            perPage={perPage}
+            onPerPageChange={setPerPage}
+            onPageChange={setPage}
+            perPageOptions={PER_PAGE_OPTIONS}
+            selectId="purchase-orders-per-page"
+          />
         </>
       )}
     </CatalogPageShell>

@@ -1,5 +1,10 @@
 <?php
 
+/**
+ * Vigilancia — request desactivado (UI: Próximamente). Descomentar al reactivar API.
+ */
+
+/*
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -25,3 +30,4 @@ class StoreGateMovementRequest extends FormRequest
         ];
     }
 }
+*/

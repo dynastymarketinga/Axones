@@ -8,10 +8,25 @@ import { apiFetch, ApiError } from "@/lib/api"
 import type { ClientRecord, LaravelPaginated, VendorRecord } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import { isAxonesFullAccess, normalizeRole } from "@/lib/axones-roles"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormInputClass,
+  catalogMasterFormPanelClass,
+  catalogMasterFormSectionClass,
+} from "@/components/axones/catalog-list-classes"
+import { PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
+import {
+  clampStr,
+  MASTER_FORM_PHONE_MAX_CHARS,
+  masterFormPhoneError,
+  sanitizePhoneInput,
+} from "@/lib/masters-form-phone"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -31,7 +46,6 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  ArrowLeft,
   Building2,
   Check,
   ChevronsUpDown,
@@ -42,6 +56,7 @@ import {
   Phone,
   UserPlus,
   UserRound,
+  Users,
 } from "lucide-react"
 
 /** Secundario con hover similar al pedido cliente (ataljos desde maestros). */
@@ -72,10 +87,7 @@ const fieldLabelClass = "leading-snug"
 const fieldIconClass =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors"
 
-const inputWithIconClass = "h-9 pl-10 leading-none md:text-sm"
-
-/** Máx. dígitos (ITU-T E.164); el campo admite separadores dentro de `LIM.phone` caracteres. */
-const PHONE_MAX_DIGITS = 15
+const inputWithIconClass = catalogMasterFormInputClass
 
 /** Límites alineados con la API (clients). */
 const LIM = {
@@ -84,17 +96,8 @@ const LIM = {
   city: 255,
   address: 2000,
   email: 255,
-  phone: 22,
+  phone: MASTER_FORM_PHONE_MAX_CHARS,
 } as const
-
-function clampStr(s: string, max: number): string {
-  return s.slice(0, max)
-}
-
-/** Teléfono: solo dígitos y separadores habituales; sin letras. */
-function sanitizePhoneInput(raw: string): string {
-  return raw.replace(/[^\d+().\-\s]/g, "").slice(0, LIM.phone)
-}
 
 function onlyDigits(s: string, maxLen: number): string {
   return s.replace(/\D/g, "").slice(0, maxLen)
@@ -270,15 +273,8 @@ export default function ClientFormPage() {
       }
 
       if (p) {
-        if (p.length > LIM.phone) next.phone = `Máximo ${LIM.phone} caracteres.`
-        else if (/[a-zA-Z]/.test(p)) next.phone = "No use letras en el teléfono."
-        else {
-          const compact = p.replace(/[^\d]/g, "")
-          if (compact.length < 7) next.phone = "Teléfono inválido: se requieren al menos 7 dígitos."
-          else if (compact.length > PHONE_MAX_DIGITS)
-            next.phone = `Teléfono inválido: máximo ${PHONE_MAX_DIGITS} dígitos.`
-          else if (!/^[+\d()\-\s.]+$/.test(p)) next.phone = "Teléfono inválido: use dígitos y separadores habituales."
-        }
+        const phoneError = masterFormPhoneError(p)
+        if (phoneError) next.phone = phoneError
       }
 
       if (e) {
@@ -473,32 +469,33 @@ export default function ClientFormPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {isEdit ? "Editar cliente" : "Nuevo cliente"}
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Complete o actualice los datos de contacto y facturación del cliente.
-          </p>
-        </div>
-        <Button type="button" variant="outline" size="icon" asChild>
-          <Link to={returnTo} title="Volver al listado" aria-label="Volver al listado">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-      </div>
-
+    <CatalogPageShell
+      title={isEdit ? "Editar cliente" : "Nuevo cliente"}
+      subtitle={
+        isEdit
+          ? "Actualice los datos de contacto y facturación del cliente."
+          : "Registre los datos de contacto y facturación del cliente."
+      }
+      icon={Users}
+      headerVariant="elevated"
+      action={<CatalogMasterFormBackButton to={returnTo} />}
+    >
       {loading ? (
-        <p className="text-muted-foreground text-sm">Cargando…</p>
+        <PageLoadingBlock />
       ) : (
         <form
           noValidate
           onSubmit={(ev) => void submit(ev)}
-          className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
+          className={catalogMasterFormPanelClass}
         >
-          <div className="grid gap-4 md:grid-cols-2 md:items-start">
+          <div className={catalogMasterFormSectionClass}>
+            <h2 className="text-base font-semibold tracking-tight">Datos del cliente</h2>
+            <p className="text-muted-foreground text-sm">
+              Nombre y RIF son obligatorios. El resto facilita pedidos y facturación.
+            </p>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 md:items-start">
             <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="c-name" className={fieldLabelClass}>
                 Nombre *
@@ -899,13 +896,16 @@ export default function ClientFormPage() {
             ) : null}
           </div>
 
-          <div className="flex justify-center pt-2">
-            <Button type="submit" disabled={saving} className="min-w-[12rem]">
+          <div className={catalogMasterFormActionsClass}>
+            <Button type="button" variant="outline" className="border-primary/25" asChild>
+              <Link to={returnTo}>Cancelar</Link>
+            </Button>
+            <Button type="submit" disabled={saving} className="min-w-[12rem] shadow-sm">
               {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear cliente"}
             </Button>
           </div>
         </form>
       )}
-    </div>
+    </CatalogPageShell>
   )
 }

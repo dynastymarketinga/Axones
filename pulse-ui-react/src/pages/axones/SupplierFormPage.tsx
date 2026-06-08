@@ -8,6 +8,15 @@ import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, SupplierRecord } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import { normalizeRole } from "@/lib/axones-roles"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormInputClass,
+  catalogMasterFormPanelClass,
+  catalogMasterFormSectionClass,
+} from "@/components/axones/catalog-list-classes"
+import { PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -21,8 +30,14 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
+import {
+  clampStr,
+  MASTER_FORM_PHONE_MAX_CHARS,
+  masterFormPhoneError,
+  sanitizePhoneInput,
+} from "@/lib/masters-form-phone"
 import { cn } from "@/lib/utils"
-import { ArrowLeft, Hash, Mail, MapPin, Phone, UserRound } from "lucide-react"
+import { Hash, Mail, MapPin, Phone, Truck, UserRound } from "lucide-react"
 
 const RIF_LETTERS = ["J", "V", "E", "G", "P", "C"] as const
 
@@ -46,25 +61,15 @@ const fieldLabelClass = "leading-snug"
 const fieldIconClass =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors"
 
-const inputWithIconClass = "h-9 pl-10 leading-none md:text-sm"
-
-const PHONE_MAX_DIGITS = 15
+const inputWithIconClass = catalogMasterFormInputClass
 
 /** Límites alineados con ClientFormPage; teléfono en API suppliers hasta 64, UI igual que clientes. */
 const LIM = {
   name: 255,
   address: 2000,
   email: 255,
-  phone: 22,
+  phone: MASTER_FORM_PHONE_MAX_CHARS,
 } as const
-
-function clampStr(s: string, max: number): string {
-  return s.slice(0, max)
-}
-
-function sanitizePhoneInput(raw: string): string {
-  return raw.replace(/[^\d+().\-\s]/g, "").slice(0, LIM.phone)
-}
 
 function onlyDigits(s: string, maxLen: number): string {
   return s.replace(/\D/g, "").slice(0, maxLen)
@@ -223,15 +228,8 @@ export default function SupplierFormPage() {
       }
 
       if (p) {
-        if (p.length > LIM.phone) next.phone = `Máximo ${LIM.phone} caracteres.`
-        else if (/[a-zA-Z]/.test(p)) next.phone = "No use letras en el teléfono."
-        else {
-          const compact = p.replace(/[^\d]/g, "")
-          if (compact.length < 7) next.phone = "Teléfono inválido: se requieren al menos 7 dígitos."
-          else if (compact.length > PHONE_MAX_DIGITS)
-            next.phone = `Teléfono inválido: máximo ${PHONE_MAX_DIGITS} dígitos.`
-          else if (!/^[+\d()\-\s.]+$/.test(p)) next.phone = "Teléfono inválido: use dígitos y separadores habituales."
-        }
+        const phoneError = masterFormPhoneError(p)
+        if (phoneError) next.phone = phoneError
       }
 
       if (e) {
@@ -400,32 +398,33 @@ export default function SupplierFormPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {isEdit ? "Editar proveedor" : "Nuevo proveedor"}
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Complete o actualice los datos del proveedor.
-          </p>
-        </div>
-        <Button type="button" variant="outline" size="icon" asChild>
-          <Link to={returnTo} title="Volver al listado" aria-label="Volver al listado">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-      </div>
-
+    <CatalogPageShell
+      title={isEdit ? "Editar proveedor" : "Nuevo proveedor"}
+      subtitle={
+        isEdit
+          ? "Actualice los datos del proveedor usados en compras y órdenes de compra."
+          : "Registre los datos del proveedor usados en compras y órdenes de compra."
+      }
+      icon={Truck}
+      headerVariant="elevated"
+      action={<CatalogMasterFormBackButton to={returnTo} />}
+    >
       {loading ? (
-        <p className="text-muted-foreground text-sm">Cargando…</p>
+        <PageLoadingBlock />
       ) : (
         <form
           noValidate
           onSubmit={(ev) => void submit(ev)}
-          className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
+          className={catalogMasterFormPanelClass}
         >
-          <div className="grid gap-4 md:grid-cols-2 md:items-start">
+          <div className={catalogMasterFormSectionClass}>
+            <h2 className="text-base font-semibold tracking-tight">Datos del proveedor</h2>
+            <p className="text-muted-foreground text-sm">
+              Nombre y RIF identifican al proveedor. Marque «Sin RIF» si es informal.
+            </p>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 md:items-start">
             <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="s-name" className={fieldLabelClass}>
                 Nombre *
@@ -682,13 +681,16 @@ export default function SupplierFormPage() {
             </div>
           ) : null}
 
-          <div className="flex justify-center pt-2">
-            <Button type="submit" disabled={saving} className="min-w-[12rem]">
+          <div className={catalogMasterFormActionsClass}>
+            <Button type="button" variant="outline" className="border-primary/25" asChild>
+              <Link to={returnTo}>Cancelar</Link>
+            </Button>
+            <Button type="submit" disabled={saving} className="min-w-[12rem] shadow-sm">
               {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear proveedor"}
             </Button>
           </div>
         </form>
       )}
-    </div>
+    </CatalogPageShell>
   )
 }

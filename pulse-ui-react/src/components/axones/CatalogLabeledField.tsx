@@ -22,7 +22,7 @@ export function CatalogLabeledField({
   icon: Icon,
 }: CatalogLabeledFieldProps) {
   return (
-    <div className={cn("grid gap-2.5", className)}>
+    <div className={cn("grid min-w-0 gap-2.5", className)}>
       <Label
         htmlFor={htmlFor}
         className="inline-flex min-h-8 items-center gap-2.5 text-sm font-medium leading-snug text-muted-foreground"

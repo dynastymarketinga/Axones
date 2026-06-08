@@ -84,13 +84,6 @@ class WorkOrderOrdenTrabajoController extends Controller
             $form,
             $request->user(),
         );
-        $saveFingerprint = $doc->updated_at?->toIso8601String() ?? (string) time();
-        $broadcastSummary = $this->productionNotifications->notifyOnWorkOrderSavedBroadcast(
-            $work_order->fresh(),
-            $request->user(),
-            $saveFingerprint,
-        );
-
         $this->ordenTrabajo->syncAreaRequestsAfterProductionFinalize($work_order->fresh(), $form);
 
         $assignmentSummary = null;
@@ -139,7 +132,6 @@ class WorkOrderOrdenTrabajoController extends Controller
             'work_order_id' => $work_order->getKey(),
             'updated_at' => $doc->updated_at,
             'notification_summary' => [
-                'broadcast' => $broadcastSummary,
                 'production' => $productionSummary,
                 'assignment' => $assignmentSummary,
                 'planilla_sustratos_material' => $sustratoMaterialSummary,

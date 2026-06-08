@@ -18,7 +18,7 @@ class TintaMixtureController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = TintaMixture::query()
-            ->with(['outputMaterial', 'creator'])
+            ->with(['outputMaterial', 'creator', 'materialRequest'])
             ->withCount('components')
             ->orderByDesc('created_at');
 
@@ -27,11 +27,13 @@ class TintaMixtureController extends Controller
             $escaped = addcslashes($q, '%_\\');
             $like = '%'.$escaped.'%';
             $query->where(function ($w) use ($like): void {
-                $w->whereHas('outputMaterial', function ($m) use ($like): void {
-                    $m->where('name', 'like', $like)->orWhere('sku', 'like', $like);
-                })->orWhereHas('creator', function ($u) use ($like): void {
-                    $u->where('name', 'like', $like);
-                });
+                $w->where('output_sku', 'like', $like)
+                    ->orWhere('output_name', 'like', $like)
+                    ->orWhereHas('outputMaterial', function ($m) use ($like): void {
+                        $m->where('name', 'like', $like)->orWhere('sku', 'like', $like);
+                    })->orWhereHas('creator', function ($u) use ($like): void {
+                        $u->where('name', 'like', $like);
+                    });
             });
         }
 

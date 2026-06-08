@@ -7,6 +7,8 @@
 }
 
 .po-filter-bar {
+  min-width: 0;
+  overflow-x: clip;
   border-radius: 1rem;
   border: 1px solid rgb(var(--po-accent) / 0.18);
   background: linear-gradient(

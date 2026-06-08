@@ -20,7 +20,6 @@ use App\Models\WorkOrderLine;
 use App\Models\WorkOrderProductionItem;
 use App\Services\MaterialRequestService;
 use App\Services\OperationalAlertService;
-use App\Services\ProductionNotificationService;
 use App\Services\WorkOrderPlanillaReportService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -36,7 +35,6 @@ class WorkOrderController extends Controller
     public function __construct(
         private readonly MaterialRequestService $materialRequests,
         private readonly OperationalAlertService $alerts,
-        private readonly ProductionNotificationService $productionNotifications,
         private readonly WorkOrderPlanillaReportService $planillaReport,
     ) {}
 
@@ -485,8 +483,6 @@ class WorkOrderController extends Controller
                 'materialRequests.lines.material',
             ]);
         });
-
-        $this->productionNotifications->notifyOnWorkOrderCreated($order, $request->user());
 
         if ($linesInput !== []) {
             $linesForAlerts = array_map(static fn (array $l) => [

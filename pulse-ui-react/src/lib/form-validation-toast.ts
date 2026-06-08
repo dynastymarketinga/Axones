@@ -45,14 +45,3 @@ export function toastFieldValidationErrors(
     toast.error(line)
   }
 }
-
-/**
- * Arma un único texto multilínea (p. ej. logs o mensajes legacy).
- */
-export function formatValidationErrorsToast(
-  errors: Record<string, string | undefined>,
-  order: FieldErrorOrder,
-): string {
-  const lines = collectFieldValidationLines(errors, order)
-  return lines.length ? lines.join("\n") : FALLBACK
-}

@@ -2,21 +2,33 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import {
+  ArrowLeftRight,
+  CalendarDays,
+  ClipboardList,
+  Filter,
+  Layers,
+  ShieldAlert,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { apiDownloadFile, apiFetch, ApiError } from "@/lib/api"
 import { formatQuantityDisplay } from "@/lib/numeric-display"
 import type { InventoryMovementRow, LaravelPaginated } from "@/types/api"
+import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import {
-  AXONES_INVENTORY_FILTER_INPUT_CLASS,
-  AxonesInventoryModuleNav,
-  AxonesTableCard,
-} from "@/components/axones/inventory-page-layout"
+  catalogFilterActionsClass,
+  catalogFilterCol2Class,
+  catalogFilterDateInputClass,
+  catalogFilterGridClass,
+  catalogSelectTriggerClass,
+} from "@/components/axones/catalog-list-classes"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
 import {
   Select,
   SelectContent,
@@ -32,6 +44,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+
+import "./materials-list.css"
 
 const MOVEMENT_TYPES = ["in", "out", "adjustment_add", "adjustment_sub"]
 const REFERENCE_TYPES = [
@@ -196,7 +210,7 @@ export default function InventoryMovementsPage() {
   }, [load])
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
+    <div className="mat-list-shell space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           Movimientos generales
@@ -206,136 +220,136 @@ export default function InventoryMovementsPage() {
         </p>
       </div>
 
-      <AxonesInventoryModuleNav active="movimientos-inventario" />
+      <AxonesInventoryModuleNav active="movimientos-inventario" variant="catalog" />
 
-      <AxonesTableCard>
-        <div className="border-b bg-muted/30 p-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <div className="grid gap-2">
-              <Label>Desde</Label>
-              <Input
-                type="date"
-                value={from}
-                className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
-                onChange={(ev) => {
-                  setFrom(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Hasta</Label>
-              <Input
-                type="date"
-                value={to}
-                className={AXONES_INVENTORY_FILTER_INPUT_CLASS}
-                onChange={(ev) => {
-                  setTo(ev.target.value)
-                  setPage(1)
-                }}
-              />
-            </div>
-        <div className="grid gap-2">
-          <Label>Tipo</Label>
-          <Select
-            value={movementType}
-            onValueChange={(v) => {
-              setMovementType(v)
-              setPage(1)
-            }}
-          >
-                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  {MOVEMENT_TYPES.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="mat-filter-bar space-y-4 p-4 md:p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Filter className="size-4 text-primary" aria-hidden />
+          <p className="text-sm font-medium">Filtrar listado</p>
         </div>
-        <div className="grid gap-2">
-          <Label>Área inventario</Label>
-          <Select
-            value={inventoryArea}
-            onValueChange={(v) => {
-              setInventoryArea(v)
-              setPage(1)
-            }}
-          >
-                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {AREAS.map((a) => (
-                <SelectItem key={a} value={a}>
-                  {a}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className={catalogFilterGridClass}>
+          <CatalogLabeledField label="Desde" icon={CalendarDays} className={catalogFilterCol2Class}>
+            <Input
+              type="date"
+              value={from}
+              className={catalogFilterDateInputClass}
+              onChange={(ev) => {
+                setFrom(ev.target.value)
+                setPage(1)
+              }}
+            />
+          </CatalogLabeledField>
+          <CatalogLabeledField label="Hasta" icon={CalendarDays} className={catalogFilterCol2Class}>
+            <Input
+              type="date"
+              value={to}
+              className={catalogFilterDateInputClass}
+              onChange={(ev) => {
+                setTo(ev.target.value)
+                setPage(1)
+              }}
+            />
+          </CatalogLabeledField>
+          <CatalogLabeledField label="Tipo" icon={ArrowLeftRight} className={catalogFilterCol2Class}>
+            <Select
+              value={movementType}
+              onValueChange={(v) => {
+                setMovementType(v)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {MOVEMENT_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {movementTypeLabel[t] ?? t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CatalogLabeledField>
+          <CatalogLabeledField label="Área inventario" icon={Layers} className={catalogFilterCol2Class}>
+            <Select
+              value={inventoryArea}
+              onValueChange={(v) => {
+                setInventoryArea(v)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                {AREAS.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CatalogLabeledField>
+          <CatalogLabeledField label="Origen" icon={ClipboardList} className={catalogFilterCol2Class}>
+            <Select
+              value={referenceType}
+              onValueChange={(v) => {
+                setReferenceType(v)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {REFERENCE_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {referenceTypeLabel[t] ?? t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CatalogLabeledField>
+          <CatalogLabeledField label="Auditoría" icon={ShieldAlert} className={catalogFilterCol2Class}>
+            <Select
+              value={invalidOnly}
+              onValueChange={(v) => {
+                setInvalidOnly(v)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="invalid">Solo inválidos</SelectItem>
+              </SelectContent>
+            </Select>
+          </CatalogLabeledField>
         </div>
-        <div className="grid gap-2">
-          <Label>Origen</Label>
-          <Select
-            value={referenceType}
-            onValueChange={(v) => {
-              setReferenceType(v)
-              setPage(1)
-            }}
-          >
-                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  {REFERENCE_TYPES.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {referenceTypeLabel[t] ?? t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-            <div className="grid gap-2">
-              <Label>Auditoría</Label>
-              <Select
-                value={invalidOnly}
-                onValueChange={(v) => {
-                  setInvalidOnly(v)
-                  setPage(1)
-                }}
-              >
-                <SelectTrigger className={AXONES_INVENTORY_FILTER_INPUT_CLASS}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="invalid">Solo inválidos</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2 border-b p-4">
-          <Button type="button" variant="outline" onClick={openPreview} disabled={loading}>
+        <div className={catalogFilterActionsClass}>
+          <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={openPreview} disabled={loading}>
             Vista previa
           </Button>
           <Button
             type="button"
             variant="outline"
+            className="w-full sm:w-auto"
             onClick={() => void downloadMovementsPdf()}
             disabled={loading || reportLoading}
           >
             {reportLoading ? "Generando PDF..." : "Generar PDF"}
           </Button>
         </div>
-      </AxonesTableCard>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          Historial de recepciones, despachos y movimientos internos. Use los filtros para acotar por
+          fecha, tipo, área u origen; exporte el rango con vista previa o PDF.
+        </p>
+      </div>
 
       <Card>
         <CardHeader className="pb-2">

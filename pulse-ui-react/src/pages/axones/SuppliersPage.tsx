@@ -11,13 +11,18 @@ import {
   MapPin,
   Pencil,
   Phone,
+  Plus,
+  SearchX,
   Settings2,
   Truck,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
+import { CatalogEmptyState } from "@/components/axones/CatalogEmptyState"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
+import { CatalogFilterPanel } from "@/components/axones/CatalogFilterPanel"
+import { CatalogListPagination } from "@/components/axones/CatalogListPagination"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
@@ -26,21 +31,15 @@ import {
 } from "@/components/axones/CatalogTableHead"
 import {
   catalogActionButtonClass,
-  catalogPaginationOutlineButtonClass,
-  catalogPaginationSelectTriggerClass,
+  catalogMasterTablePanelClass,
+  catalogRowActionsClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -50,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { apiFetch, ApiError } from "@/lib/api"
+import { catalogCountLabel } from "@/lib/catalog-count-label"
 import type { LaravelPaginated, SupplierRecord } from "@/types/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import { normalizeRole } from "@/lib/axones-roles"
@@ -178,8 +178,18 @@ export default function SuppliersPage() {
   }, [detailOpen, detailId])
 
   const showInitialSkeleton = loading && rows === null
-
+  const hasActiveFilters = search.trim() !== ""
+  const totalCount = rows?.total ?? 0
   const colCount = isInventory ? 5 : 8
+
+  const newSupplierButton = (
+    <Button type="button" asChild className="gap-2 shadow-sm">
+      <Link to="/proveedores/form" state={{ from }}>
+        <Plus className="h-4 w-4" aria-hidden />
+        Nuevo proveedor
+      </Link>
+    </Button>
+  )
 
   const detailFields =
     detail && !detailLoading
@@ -214,13 +224,15 @@ export default function SuppliersPage() {
       title="Proveedores"
       subtitle="Proveedores usados en compras y órdenes de compra."
       icon={Truck}
-      action={
-        <Button type="button" asChild>
-          <Link to="/proveedores/form" state={{ from }}>
-            Nuevo proveedor
-          </Link>
-        </Button>
+      headerVariant="elevated"
+      statBadge={
+        rows && !loading ? (
+          <Badge variant="secondary" className="font-normal tabular-nums">
+            {catalogCountLabel(totalCount, "proveedor", "proveedores")}
+          </Badge>
+        ) : null
       }
+      action={newSupplierButton}
     >
       {showInitialSkeleton ? (
         <div className="space-y-4">
@@ -254,30 +266,35 @@ export default function SuppliersPage() {
             }
           />
 
-          <CatalogFilterGrid>
-            <CatalogSearchField
-              id="sup-q"
-              label="Buscar por nombre o RIF"
-              placeholder="Ej. razón social, RIF…"
-              value={query}
-              onChange={(ev) => setQuery(ev.target.value)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter") {
-                  const next = ev.currentTarget.value.trim()
-                  setSearch((prev) => (prev === next ? prev : next))
-                  setPage(1)
-                }
-              }}
-              className="min-w-0 md:col-span-6"
-            />
-            <p className="text-muted-foreground text-xs md:col-span-12">
-              El filtro se aplica automáticamente al escribir.
-            </p>
-          </CatalogFilterGrid>
+          <CatalogFilterPanel
+            hint={
+              <p className="text-muted-foreground text-xs">
+                Búsqueda automática al escribir · Enter fuerza la búsqueda inmediata
+              </p>
+            }
+          >
+            <CatalogFilterGrid>
+              <CatalogSearchField
+                id="sup-q"
+                label="Buscar por nombre o RIF"
+                placeholder="Ej. razón social, RIF…"
+                value={query}
+                onChange={(ev) => setQuery(ev.target.value)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") {
+                    const next = ev.currentTarget.value.trim()
+                    setSearch((prev) => (prev === next ? prev : next))
+                    setPage(1)
+                  }
+                }}
+                className="min-w-0 md:col-span-12"
+              />
+            </CatalogFilterGrid>
+          </CatalogFilterPanel>
 
-          <div className="bg-card w-full min-w-0 overflow-x-auto rounded-2xl border shadow-sm">
+          <div className={cn(catalogMasterTablePanelClass, "w-full min-w-0")}>
             <Table className={cn(!isInventory && "min-w-[720px]")}>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
                 <TableRow className={catalogTableHeaderRowClass}>
                   <CatalogTableHead icon={ListOrdered} className="w-16">
                     N.º
@@ -299,9 +316,18 @@ export default function SuppliersPage() {
                 {loading ? (
                   <LoadingTableRow colSpan={colCount} />
                 ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={colCount} className="text-muted-foreground">
-                      Sin proveedores.
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={colCount} className="p-0">
+                      <CatalogEmptyState
+                        icon={hasActiveFilters ? SearchX : Truck}
+                        title={hasActiveFilters ? "Sin resultados" : "Sin proveedores"}
+                        description={
+                          hasActiveFilters
+                            ? "Prueba otro término de búsqueda."
+                            : "Registra proveedores para usar en compras y órdenes de compra."
+                        }
+                        action={hasActiveFilters ? undefined : newSupplierButton}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -318,25 +344,51 @@ export default function SuppliersPage() {
                           {n}
                         </TableCell>
                         <TableCell className={cn("font-medium", catalogTableBodyCellClass)}>
-                          {s.name}
+                          <span className="inline-flex items-center gap-2">
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                              <Truck className="h-3.5 w-3.5" aria-hidden />
+                            </span>
+                            {s.name}
+                          </span>
                         </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>{s.rif ?? "—"}</TableCell>
+                        <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
+                          {s.rif ?? "—"}
+                        </TableCell>
                         {!isInventory ? (
                           <>
-                            <TableCell className={catalogTableBodyCellClass}>{s.email ?? "—"}</TableCell>
-                            <TableCell className={catalogTableBodyCellClass}>{s.phone ?? "—"}</TableCell>
+                            <TableCell className={catalogTableBodyCellClass}>
+                              {s.email ? (
+                                <span className="inline-flex items-center gap-1.5 text-sm">
+                                  <Mail className="text-muted-foreground h-3.5 w-3.5 shrink-0" aria-hidden />
+                                  <span className="truncate">{s.email}</span>
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
+                            <TableCell className={catalogTableBodyCellClass}>
+                              {s.phone ? (
+                                <span className="inline-flex items-center gap-1.5 tabular-nums text-sm">
+                                  <Phone className="text-muted-foreground h-3.5 w-3.5 shrink-0" aria-hidden />
+                                  {s.phone}
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
                             <TableCell
                               className={cn("max-w-[200px] truncate", catalogTableBodyCellClass)}
+                              title={s.address ?? undefined}
                             >
                               {s.address ?? "—"}
                             </TableCell>
                           </>
                         ) : null}
-                        <TableCell className={cn("whitespace-nowrap", catalogTableBodyCellClass)}>
+                        <TableCell className={cn("whitespace-nowrap tabular-nums", catalogTableBodyCellClass)}>
                           {formatDateDMY(s.created_at)}
                         </TableCell>
                         <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
-                          <div className="inline-flex justify-end gap-1">
+                          <div className={catalogRowActionsClass}>
                             <Button
                               type="button"
                               variant="outline"
@@ -376,69 +428,15 @@ export default function SuppliersPage() {
             </Table>
           </div>
 
-          {rows ? (
-            <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <p className="text-muted-foreground min-w-0">
-                {rows.total === 0
-                  ? "Sin resultados con los filtros actuales."
-                  : rows.last_page > 1
-                    ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
-                    : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Por página</span>
-                  <Select
-                    value={String(perPage)}
-                    onValueChange={(v) => {
-                      setPerPage(Number(v))
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger
-                      id="suppliers-per-page"
-                      className={cn(
-                        "h-8 w-[4.5rem] text-sm",
-                        catalogPaginationSelectTriggerClass,
-                      )}
-                      aria-label="Registros por página"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PER_PAGE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt} value={String(opt)}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page <= 1 || loading}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    type="button"
-                  >
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page >= rows.last_page || loading}
-                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                    type="button"
-                  >
-                    Siguiente
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          <CatalogListPagination
+            rows={rows}
+            loading={loading}
+            perPage={perPage}
+            onPerPageChange={setPerPage}
+            onPageChange={setPage}
+            perPageOptions={PER_PAGE_OPTIONS}
+            selectId="suppliers-per-page"
+          />
         </>
       )}
     </CatalogPageShell>

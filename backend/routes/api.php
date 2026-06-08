@@ -8,7 +8,7 @@ use App\Http\Controllers\Api\ClientOrderController;
 use App\Http\Controllers\Api\CorteDispatchController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DeliveryNoteController;
-use App\Http\Controllers\Api\GateMovementController;
+// use App\Http\Controllers\Api\GateMovementController;
 use App\Http\Controllers\Api\InventoryChangeApprovalController;
 use App\Http\Controllers\Api\InventoryMovementController;
 use App\Http\Controllers\Api\InventoryMovementsController;
@@ -25,6 +25,8 @@ use App\Http\Controllers\Api\PurchaseReceiptController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\TintaMixtureController;
+use App\Http\Controllers\Api\UserAdminEventController;
+use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserPasswordController;
 use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\WorkOrderController;
@@ -35,7 +37,7 @@ use App\Http\Controllers\Api\WorkOrderNotaEntregaController;
 use App\Http\Controllers\Api\WorkOrderOrdenTrabajoController;
 use App\Http\Controllers\Api\WorkOrderPrintingController;
 use App\Http\Controllers\Api\WorkOrderProductionSummaryController;
-use App\Http\Controllers\Api\WorkOrderQualityController;
+// use App\Http\Controllers\Api\WorkOrderQualityController;
 use App\Http\Controllers\Api\WorkOrderTintasController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -63,10 +65,16 @@ Route::middleware('auth:sanctum')->group(function () {
         ];
     });
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::patch('/user/password', [UserPasswordController::class, 'updateSelf']);
 
     Route::get('/password-reset-requests', [PasswordResetRequestController::class, 'index']);
     Route::patch('/password-reset-requests/{password_reset_request}/resolve', [PasswordResetRequestController::class, 'resolve']);
+    Route::get('/users', [UserController::class, 'index']);
+    Route::post('/users', [UserController::class, 'store']);
+    Route::get('/users/{user}', [UserController::class, 'show']);
+    Route::patch('/users/{user}', [UserController::class, 'update']);
     Route::patch('/users/{user}/password', [UserPasswordController::class, 'update']);
+    Route::get('/user-admin-events', [UserAdminEventController::class, 'index']);
 
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
 
@@ -181,11 +189,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/work-orders/{work_order}/production-summary', [WorkOrderProductionSummaryController::class, 'show'])
         ->middleware('area.role:planilla_read');
 
-    Route::get('/work-orders/{work_order}/quality', [WorkOrderQualityController::class, 'show']);
-    Route::put('/work-orders/{work_order}/quality', [WorkOrderQualityController::class, 'update']);
-    Route::get('/work-orders/{work_order}/quality/certificate/preview', [WorkOrderQualityController::class, 'previewCertificate']);
-    Route::get('/work-orders/{work_order}/quality/certificate', [WorkOrderQualityController::class, 'downloadCertificate']);
-    Route::get('/work-orders/{work_order}/quality/certificate.pdf', [WorkOrderQualityController::class, 'downloadCertificatePdf']);
+    // Calidad — API desactivada (UI: Próximamente). Tablas/modelos conservados.
+    // Route::get('/work-orders/{work_order}/quality', [WorkOrderQualityController::class, 'show']);
+    // Route::put('/work-orders/{work_order}/quality', [WorkOrderQualityController::class, 'update']);
+    // Route::get('/work-orders/{work_order}/quality/certificate/preview', [WorkOrderQualityController::class, 'previewCertificate']);
+    // Route::get('/work-orders/{work_order}/quality/certificate', [WorkOrderQualityController::class, 'downloadCertificate']);
+    // Route::get('/work-orders/{work_order}/quality/certificate.pdf', [WorkOrderQualityController::class, 'downloadCertificatePdf']);
 
     Route::get('/work-orders/{work_order}/printing', [WorkOrderPrintingController::class, 'show'])
         ->middleware('area.role:printing');
@@ -257,12 +266,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/area-requests', [AreaRequestController::class, 'index']);
     Route::get('/area-requests/counts', [AreaRequestController::class, 'counts']);
     Route::get('/area-requests/warehouse-pending-count', [AreaRequestController::class, 'warehousePendingCount']);
+    Route::get('/warehouse/tintas-pending-counts', [AreaRequestController::class, 'tintasPendingCounts']);
     Route::post('/area-requests', [AreaRequestController::class, 'store']);
     Route::patch('/area-requests/{area_request}', [AreaRequestController::class, 'update']);
     Route::delete('/area-requests/{area_request}', [AreaRequestController::class, 'destroy']);
 
-    Route::get('/gate-movements', [GateMovementController::class, 'index']);
-    Route::post('/gate-movements', [GateMovementController::class, 'store']);
+    // Vigilancia — API desactivada (UI: Próximamente). Tablas/modelos conservados.
+    // Route::get('/gate-movements', [GateMovementController::class, 'index']);
+    // Route::post('/gate-movements', [GateMovementController::class, 'store']);
 
     Route::get('/material-requests', [MaterialRequestController::class, 'index']);
     Route::post('/material-requests', [MaterialRequestController::class, 'store']);

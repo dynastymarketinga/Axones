@@ -18,10 +18,9 @@ import { getStoredUser } from "@/lib/auth-storage"
 import { useAreaBandejaCounts } from "@/hooks/useAreaBandejaCounts"
 import { usePendingPurchaseOrdersCount } from "@/hooks/usePendingPurchaseOrdersCount"
 import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
+import { useWarehouseTintasPendingCounts } from "@/hooks/useWarehouseTintasPendingCounts"
 import { AXONES_MENU_TREE, getAccountLeaves } from "@/lib/axones-menu"
-import { filterAxonesMenuTree } from "@/lib/axones-roles"
-
-const AREA_COUNT_AREAS = ["impresion", "laminacion", "corte", "tintas", "montaje"] as const
+import { filterAxonesMenuTree, canSeeWarehouseInventoryCounts } from "@/lib/axones-roles"
 
 const data = {
   user: {
@@ -39,14 +38,16 @@ const data = {
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   useLocation()
   const session = getStoredUser()
+  const showWarehouseCounts = canSeeWarehouseInventoryCounts(session?.role)
   const navUser = session
     ? { name: session.name, email: session.email, avatar: "" }
     : data.user
 
-  const { data: areaCounts } = useAreaBandejaCounts({
-    areas: [...AREA_COUNT_AREAS],
-  })
+  const { data: areaCounts } = useAreaBandejaCounts()
   const { count: warehouseInsumosPending } = useWarehouseInsumosPendingCount()
+  const { counts: tintasWarehouseCounts } = useWarehouseTintasPendingCounts({
+    enabled: showWarehouseCounts,
+  })
   const { count: pendingPurchaseOrders } = usePendingPurchaseOrdersCount()
 
   const axonesFiltered = React.useMemo(
@@ -62,7 +63,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       corte: counts.corte ?? 0,
       tintas: counts.tintas ?? 0,
       montaje: counts.montaje ?? 0,
-      "solicitudes-area": warehouseInsumosPending,
+      materiales: tintasWarehouseCounts.materiales,
+      devoluciones: tintasWarehouseCounts.devoluciones,
+      "solicitudes-area": Math.max(warehouseInsumosPending, tintasWarehouseCounts.solicitudes_area),
       "recepciones-oc": pendingPurchaseOrders,
     }
 
@@ -77,7 +80,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       })
 
     return add(axonesFiltered as any)
-  }, [areaCounts.counts, axonesFiltered, pendingPurchaseOrders, warehouseInsumosPending])
+  }, [areaCounts.counts, axonesFiltered, pendingPurchaseOrders, tintasWarehouseCounts, warehouseInsumosPending])
 
   const accountLeaves = React.useMemo(
     () => getAccountLeaves(session?.role, session?.id),

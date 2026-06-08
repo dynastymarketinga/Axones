@@ -2,6 +2,11 @@
 
 namespace App\Models;
 
+/**
+ * Calidad — modelo activo; tabla `work_order_quality_records` conservada.
+ * API/UI desactivados (Próximamente). Usado por seeders demo.
+ */
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 

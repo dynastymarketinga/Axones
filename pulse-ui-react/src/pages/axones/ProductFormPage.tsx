@@ -1,14 +1,21 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Barcode, Building2, Boxes, CircleHelp, Hash, Layers, Package2, Printer } from "lucide-react"
+import { Barcode, Building2, Boxes, CircleHelp, Hash, Layers, Package, Package2, Printer } from "lucide-react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { AXONES_INVENTORY_FILTER_INPUT_CLASS } from "@/components/axones/inventory-page-layout"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormPanelClass,
+  catalogMasterFormSectionClass,
+} from "@/components/axones/catalog-list-classes"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
-import { InlineSpinner } from "@/components/axones/LoadingStates"
+import { InlineSpinner, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -284,34 +291,47 @@ export default function ProductFormPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <h1 className="sr-only">{isEdit ? "Editar especificación" : "Nueva especificación"}</h1>
-      <div className="flex justify-end gap-2">
+    <CatalogPageShell
+      title={isEdit ? "Editar especificación" : "Nueva especificación"}
+      subtitle={
+        isEdit
+          ? "Actualice la plantilla técnico-comercial asociada al cliente."
+          : "Registre la plantilla técnico-comercial para usarla en órdenes de trabajo."
+      }
+      icon={Package}
+      headerVariant="elevated"
+      action={
+        <div className="flex shrink-0 gap-2">
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
             size="icon"
+            className="border-primary/25 shadow-sm"
             onClick={() => setHelpOpen(true)}
             aria-label="Ayuda"
           >
             <CircleHelp className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="outline" size="icon" asChild>
-            <Link to={returnLinkTarget} aria-label="Volver al listado">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-      </div>
-
+          <CatalogMasterFormBackButton to={returnLinkTarget} />
+        </div>
+      }
+    >
       {loading ? (
-        <p className="text-muted-foreground text-sm">Cargando…</p>
+        <PageLoadingBlock />
       ) : (
         <form
           noValidate
           onSubmit={(ev) => void submit(ev)}
-          className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm"
+          className={catalogMasterFormPanelClass}
         >
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className={catalogMasterFormSectionClass}>
+            <h2 className="text-base font-semibold tracking-tight">Datos de la especificación</h2>
+            <p className="text-muted-foreground text-sm">
+              Cliente y nombre son obligatorios. El resto describe la estructura comercial del producto.
+            </p>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2">
             <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="p-client">Cliente *</Label>
               <div className="group/field relative">
@@ -509,8 +529,11 @@ export default function ProductFormPage() {
             </div>
           </div>
 
-          <div className="flex justify-center pt-1">
-            <Button type="submit" disabled={saving}>
+          <div className={catalogMasterFormActionsClass}>
+            <Button type="button" variant="outline" className="border-primary/25" asChild>
+              <Link to={returnLinkTarget}>Cancelar</Link>
+            </Button>
+            <Button type="submit" disabled={saving} className="min-w-[12rem] shadow-sm">
               {saving ? (
                 <span className="inline-flex items-center gap-2">
                   {isEdit || logoLoadFailed ? (
@@ -557,6 +580,6 @@ export default function ProductFormPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </CatalogPageShell>
   )
 }

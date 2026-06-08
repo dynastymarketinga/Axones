@@ -145,4 +145,75 @@ class AreaRequestService
             'ot_planilla' => $otPlanilla,
         ];
     }
+
+    /**
+     * Depura solicitudes `done` antiguas para producción.
+     *
+     * Conserva siempre:
+     * - Todas las filas `pending` (y `cancelled`)
+     * - La fila más reciente por OT+área de coordinación (historial / listado)
+     *
+     * Elimina cuando superan la retención:
+     * - Coordinación OT `done` duplicada u obsoleta
+     * - Espejos de insumos al almacén ya completados
+     * - Solicitudes manuales sin OT completadas
+     *
+     * @return array{deleted: int, candidates: int, retention_days: int, dry_run: bool}
+     */
+    public function purgeDoneAreaRequests(int $retentionDays, bool $dryRun = false): array
+    {
+        $retentionDays = max(1, $retentionDays);
+        $cutoff = now()->subDays($retentionDays);
+
+        $latestCoordinationIds = AreaRequest::query()
+            ->selectRaw('MAX(id) as id')
+            ->whereNotNull('work_order_id')
+            ->whereNull('material_request_id')
+            ->groupBy('work_order_id', 'area')
+            ->pluck('id')
+            ->map(static fn ($id) => (int) $id)
+            ->all();
+
+        $query = AreaRequest::query()
+            ->where('status', AreaRequestStatus::Done->value)
+            ->where('updated_at', '<', $cutoff)
+            ->where(function (Builder $q) use ($latestCoordinationIds): void {
+                $q->whereNotNull('material_request_id')
+                    ->orWhereNull('work_order_id');
+
+                if ($latestCoordinationIds !== []) {
+                    $q->orWhereNotIn('id', $latestCoordinationIds);
+                }
+            });
+
+        $candidates = (clone $query)->count();
+
+        if ($dryRun || $candidates === 0) {
+            return [
+                'deleted' => $candidates,
+                'candidates' => $candidates,
+                'retention_days' => $retentionDays,
+                'dry_run' => $dryRun,
+            ];
+        }
+
+        $deleted = 0;
+        (clone $query)
+            ->orderBy('id')
+            ->select('id')
+            ->chunkById(500, function ($rows) use (&$deleted): void {
+                $ids = $rows->pluck('id')->all();
+                if ($ids === []) {
+                    return;
+                }
+                $deleted += AreaRequest::query()->whereIn('id', $ids)->delete();
+            });
+
+        return [
+            'deleted' => $deleted,
+            'candidates' => $candidates,
+            'retention_days' => $retentionDays,
+            'dry_run' => false,
+        ];
+    }
 }

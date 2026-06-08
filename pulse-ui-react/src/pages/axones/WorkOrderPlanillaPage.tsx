@@ -251,7 +251,6 @@ type SaveOrdenTrabajoResponse = {
   work_order_id: number
   updated_at: string
   notification_summary?: {
-    broadcast: NotificationSummary | null
     production: NotificationSummary | null
     assignment: AssignmentNotificationSummary | null
     planilla_sustratos_material?: PlanillaSustratosMaterialSummary | null
@@ -2592,20 +2591,13 @@ export default function WorkOrderPlanillaPage() {
           assignment_reason: programacionMotivo,
         }),
       })
-      const summary = saveRes.notification_summary?.broadcast
-      const sentTo = summary?.sent_to ?? []
-      const skipped = summary?.skipped ?? []
       const assignSummary = saveRes.notification_summary?.assignment
       const assignSent = assignSummary?.sent_to ?? []
-      const sentLabel = sentTo.length
-        ? sentTo.map((a) => toTitleArea(a)).join(", ")
-        : "ninguna"
       const assignLabel =
         assignSent.length > 0 ? assignSent.map((a) => toTitleArea(a)).join(", ") : null
-      let toastMsg = `Orden guardada. Notificación broadcast a ${sentTo.length} área(s): ${sentLabel}.`
-      if (assignLabel) {
-        toastMsg += ` Asignación dirigida a ${assignSent.length} área(s): ${assignLabel}.`
-      }
+      const toastMsg = assignLabel
+        ? `Orden guardada. Asignada a ${assignSent.length} área(s): ${assignLabel}.`
+        : "Orden guardada."
       toast.success(toastMsg)
 
       const sustratoMr = saveRes.notification_summary?.planilla_sustratos_material
@@ -2629,11 +2621,9 @@ export default function WorkOrderPlanillaPage() {
       console.groupCollapsed("[OT] Resumen de notificaciones")
       console.info("work_order_id:", saveRes.work_order_id)
       console.info("updated_at:", saveRes.updated_at)
-      console.info("broadcast_event:", summary?.event ?? "N/A")
-      console.info("sent_to:", sentTo)
-      console.info("skipped:", skipped)
+      console.info("assignment_event:", assignSummary?.event ?? "N/A")
       console.info("assignment_sent_to:", assignSent)
-      console.table(summary?.areas ?? [])
+      console.table(assignSummary?.areas ?? [])
       console.groupEnd()
       window.dispatchEvent(
         new CustomEvent("alerts:refresh", {

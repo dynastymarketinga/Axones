@@ -48,6 +48,28 @@ export type SupplierRecord = {
   updated_at?: string
 }
 
+export type UserRecord = {
+  id: number
+  name: string
+  email: string
+  username: string | null
+  role: string
+  active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export type UserAdminEventRecord = {
+  id: number
+  actor_user_id: number | null
+  target_user_id: number
+  event_type: string
+  metadata: Record<string, unknown> | null
+  created_at: string
+  actor?: { id: number; name: string; username?: string | null } | null
+  target?: { id: number; name: string; username?: string | null } | null
+}
+
 export type VendorRecord = {
   id: number
   name: string

@@ -7,19 +7,25 @@ import {
   Boxes,
   CalendarDays,
   Eye,
+  Filter,
   ListOrdered,
   Package,
   Pencil,
+  Plus,
   Printer,
   Rows3,
+  SearchX,
   Settings2,
   Users,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { EntityDetailDialog } from "@/components/axones/EntityDetailDialog"
+import { CatalogEmptyState } from "@/components/axones/CatalogEmptyState"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
+import { CatalogFilterPanel } from "@/components/axones/CatalogFilterPanel"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogListPagination } from "@/components/axones/CatalogListPagination"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
@@ -30,14 +36,16 @@ import {
 } from "@/components/axones/CatalogTableHead"
 import {
   catalogActionButtonClass,
-  catalogPaginationOutlineButtonClass,
-  catalogPaginationSelectTriggerClass,
+  catalogMasterTablePanelClass,
+  catalogRowActionsClass,
   catalogSelectTriggerClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
+  mesBandejaFilterActiveControlClass,
 } from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -55,6 +63,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { apiFetch, ApiError } from "@/lib/api"
+import { catalogCountLabel } from "@/lib/catalog-count-label"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
 import { cn } from "@/lib/utils"
 
@@ -211,8 +220,18 @@ export default function ProductsPage() {
   }, [detailOpen, detailId])
 
   const showInitialSkeleton = loading && rows === null
-
+  const hasActiveFilters = search.trim() !== "" || clientFilter !== "all"
+  const totalCount = rows?.total ?? 0
   const colSpan = 9
+
+  const newProductButton = (
+    <Button type="button" asChild className="gap-2 shadow-sm">
+      <Link to="/productos/form" state={{ from }}>
+        <Plus className="h-4 w-4" aria-hidden />
+        Nueva especificación
+      </Link>
+    </Button>
+  )
 
   const detailFields =
     detail && !detailLoading
@@ -254,13 +273,15 @@ export default function ProductsPage() {
       title="Especificaciones de producto"
       subtitle="Plantilla técnico-comercial por cliente (CPE, MPS, tipo de impresión, estructura). Se elige al crear una orden de trabajo. No es inventario ni producto terminado."
       icon={Package}
-      action={
-        <Button type="button" asChild>
-          <Link to="/productos/form" state={{ from }}>
-            Nueva especificación
-          </Link>
-        </Button>
+      headerVariant="elevated"
+      statBadge={
+        rows && !loading ? (
+          <Badge variant="secondary" className="font-normal tabular-nums">
+            {catalogCountLabel(totalCount, "especificación", "especificaciones")}
+          </Badge>
+        ) : null
       }
+      action={newProductButton}
     >
       {showInitialSkeleton ? (
         <div className="space-y-4">
@@ -294,53 +315,62 @@ export default function ProductsPage() {
             }
           />
 
-          <CatalogFilterGrid>
-            <CatalogSearchField
-              id="product-q"
-              placeholder="Ej. nombre, CPE, MPS…"
-              value={query}
-              onChange={(ev) => setQuery(ev.target.value)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter") {
-                  const next = ev.currentTarget.value.trim()
-                  setSearch((prev) => (prev === next ? prev : next))
-                  setPage(1)
-                }
-              }}
-              className="min-w-0 md:col-span-6"
-            />
-            <CatalogLabeledField label="Cliente" htmlFor="product-client" className="md:col-span-6">
-              <Select
-                value={clientFilter}
-                onValueChange={(v) => {
-                  setClientFilter(v)
-                  setPage(1)
+          <CatalogFilterPanel
+            hint={
+              <p className="text-muted-foreground text-xs">
+                Búsqueda automática al escribir · Enter fuerza la búsqueda inmediata
+              </p>
+            }
+          >
+            <CatalogFilterGrid>
+              <CatalogSearchField
+                id="product-q"
+                placeholder="Ej. nombre, CPE, MPS…"
+                value={query}
+                onChange={(ev) => setQuery(ev.target.value)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") {
+                    const next = ev.currentTarget.value.trim()
+                    setSearch((prev) => (prev === next ? prev : next))
+                    setPage(1)
+                  }
                 }}
-              >
-                <SelectTrigger
-                  id="product-client"
-                  className={cn("w-full font-normal", catalogSelectTriggerClass)}
+                className="min-w-0 md:col-span-8"
+              />
+              <CatalogLabeledField label="Cliente" icon={Filter} htmlFor="product-client" className="md:col-span-4">
+                <Select
+                  value={clientFilter}
+                  onValueChange={(v) => {
+                    setClientFilter(v)
+                    setPage(1)
+                  }}
                 >
-                  <SelectValue placeholder="Todos los clientes" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los clientes</SelectItem>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CatalogLabeledField>
-            <p className="text-muted-foreground text-xs md:col-span-12">
-              El texto de búsqueda se aplica automáticamente al escribir.
-            </p>
-          </CatalogFilterGrid>
+                  <SelectTrigger
+                    id="product-client"
+                    className={cn(
+                      "w-full font-normal",
+                      catalogSelectTriggerClass,
+                      clientFilter !== "all" && mesBandejaFilterActiveControlClass,
+                    )}
+                  >
+                    <SelectValue placeholder="Todos los clientes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los clientes</SelectItem>
+                    {clients.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CatalogLabeledField>
+            </CatalogFilterGrid>
+          </CatalogFilterPanel>
 
-          <div className="bg-card w-full min-w-0 overflow-x-auto rounded-2xl border shadow-sm">
+          <div className={cn(catalogMasterTablePanelClass, "w-full min-w-0")}>
             <Table className="w-full min-w-[720px]">
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
                 <TableRow className={catalogTableHeaderRowClass}>
                   <CatalogTableHead icon={ListOrdered} className="w-16">
                     N.º
@@ -361,9 +391,18 @@ export default function ProductsPage() {
                 {loading ? (
                   <LoadingTableRow colSpan={colSpan} />
                 ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={colSpan} className="text-muted-foreground">
-                      Sin especificaciones.
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={colSpan} className="p-0">
+                      <CatalogEmptyState
+                        icon={hasActiveFilters ? SearchX : Package}
+                        title={hasActiveFilters ? "Sin resultados" : "Sin especificaciones"}
+                        description={
+                          hasActiveFilters
+                            ? "Prueba otro término de búsqueda o cambia el filtro de cliente."
+                            : "Crea la primera plantilla técnico-comercial para usarla en órdenes de trabajo."
+                        }
+                        action={hasActiveFilters ? undefined : newProductButton}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -380,14 +419,28 @@ export default function ProductsPage() {
                           <CatalogTableBodyCellContent>{n}</CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={cn("font-medium", catalogTableBodyCellClass)}>
-                          <CatalogTableBodyCellContent>{p.name}</CatalogTableBodyCellContent>
-                        </TableCell>
-                        <TableCell className={catalogTableBodyCellClass}>
                           <CatalogTableBodyCellContent>
-                            {p.client?.name ?? "—"}
+                            <span className="inline-flex items-center gap-2">
+                              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                                <Package className="h-3.5 w-3.5" aria-hidden />
+                              </span>
+                              {p.name}
+                            </span>
                           </CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
+                          <CatalogTableBodyCellContent>
+                            {p.client?.name ? (
+                              <span className="inline-flex items-center gap-1.5 text-sm">
+                                <Users className="text-muted-foreground h-3.5 w-3.5 shrink-0" aria-hidden />
+                                {p.client.name}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </CatalogTableBodyCellContent>
+                        </TableCell>
+                        <TableCell className={cn("font-mono text-sm", catalogTableBodyCellClass)}>
                           <CatalogTableBodyCellContent>{p.cpe ?? "—"}</CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
@@ -407,14 +460,14 @@ export default function ProductsPage() {
                             {truncate(p.structure, 80)}
                           </CatalogTableBodyCellContent>
                         </TableCell>
-                        <TableCell className={cn("whitespace-nowrap", catalogTableBodyCellClass)}>
+                        <TableCell className={cn("whitespace-nowrap tabular-nums", catalogTableBodyCellClass)}>
                           <CatalogTableBodyCellContent>
                             {formatDateDMY(p.created_at)}
                           </CatalogTableBodyCellContent>
                         </TableCell>
                         <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
                           <CatalogTableBodyCellContentRight>
-                            <div className="inline-flex gap-1">
+                            <div className={catalogRowActionsClass}>
                               <Button
                                 type="button"
                                 variant="outline"
@@ -455,69 +508,15 @@ export default function ProductsPage() {
             </Table>
           </div>
 
-          {rows ? (
-            <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <p className="text-muted-foreground min-w-0">
-                {rows.total === 0
-                  ? "Sin resultados con los filtros actuales."
-                  : rows.last_page > 1
-                    ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
-                    : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Por página</span>
-                  <Select
-                    value={String(perPage)}
-                    onValueChange={(v) => {
-                      setPerPage(Number(v))
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger
-                      id="products-per-page"
-                      className={cn(
-                        "h-8 w-[4.5rem] text-sm",
-                        catalogPaginationSelectTriggerClass,
-                      )}
-                      aria-label="Registros por página"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PER_PAGE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt} value={String(opt)}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page <= 1 || loading}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    type="button"
-                  >
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page >= rows.last_page || loading}
-                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                    type="button"
-                  >
-                    Siguiente
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          <CatalogListPagination
+            rows={rows}
+            loading={loading}
+            perPage={perPage}
+            onPerPageChange={setPerPage}
+            onPageChange={setPage}
+            perPageOptions={PER_PAGE_OPTIONS}
+            selectId="products-per-page"
+          />
         </>
       )}
     </CatalogPageShell>

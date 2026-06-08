@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { ClipboardList, Package } from "lucide-react"
+import { CircleDot, ClipboardList, Filter, Layers, Package } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated } from "@/types/api"
+import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { catalogFilterGridCompactClass, catalogSelectTriggerClass } from "@/components/axones/catalog-list-classes"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -28,6 +31,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
 import { cn } from "@/lib/utils"
+
+import "./materials-list.css"
 
 function TabCountBadge({ count }: { count: number }) {
   if (count <= 0) return null
@@ -142,33 +147,34 @@ export default function AreaRequestsPage() {
     }
   }
 
-  const filterTriggerClass =
-    "h-10 min-w-[10.5rem] border-zinc-200/90 bg-white font-medium text-foreground shadow-sm transition-colors hover:bg-zinc-50/90 focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800/80"
-
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Solicitudes entre áreas</h1>
-        <p className="text-muted-foreground max-w-3xl text-sm">
-          Bandeja del almacén para autorizar salidas de inventario. Use la pestaña{" "}
-          <strong>Solicitudes de insumos</strong> para pedidos del formulario{" "}
-          <Link
-            className="text-primary font-medium underline-offset-4 hover:underline"
-            to="/solicitudes-material/nueva"
-          >
-            Nueva solicitud
-          </Link>
-          ; la pestaña <strong>Desde orden de trabajo</strong> agrupa los sustratos virgen guardados en la{" "}
-          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/ordenes-trabajo">
-            planilla OT
-          </Link>
-          . Desde <strong>Ver insumos</strong> puede autorizar y despachar; el historial queda en{" "}
-          <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/movimientos-inventario">
-            Movimientos
-          </Link>
-          .
-        </p>
-      </div>
+    <div className="mat-list-shell">
+      <CatalogPageShell
+        title="Solicitudes entre áreas"
+        subtitle={
+          <>
+            Bandeja del almacén para autorizar salidas de inventario. Use la pestaña{" "}
+            <strong>Solicitudes de insumos</strong> para pedidos del formulario{" "}
+            <Link
+              className="text-primary font-medium underline-offset-4 hover:underline"
+              to="/solicitudes-material/nueva"
+            >
+              Nueva solicitud
+            </Link>
+            ; la pestaña <strong>Desde orden de trabajo</strong> agrupa los sustratos virgen guardados en la{" "}
+            <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/ordenes-trabajo">
+              planilla OT
+            </Link>
+            . Desde <strong>Ver insumos</strong> puede autorizar y despachar; el historial queda en{" "}
+            <Link className="text-primary font-medium underline-offset-4 hover:underline" to="/movimientos-inventario">
+              Movimientos
+            </Link>
+            .
+          </>
+        }
+        icon={ClipboardList}
+      >
+        <AxonesInventoryModuleNav active="solicitudes-area" variant="catalog" />
 
       <Tabs
         value={trayTab}
@@ -176,14 +182,15 @@ export default function AreaRequestsPage() {
           setTrayTab(v as InsumosTrayTab)
           setPage(1)
         }}
+        className="w-full"
       >
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/40 p-1">
-          <TabsTrigger value="manual" className="inline-flex items-center gap-2">
+        <TabsList className="mat-view-tab-list">
+          <TabsTrigger value="manual" className="mat-view-tab-trigger inline-flex items-center gap-2">
             <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
             Solicitudes de insumos
             <TabCountBadge count={pendingBreakdown.manual} />
           </TabsTrigger>
-          <TabsTrigger value="ot_planilla" className="inline-flex items-center gap-2">
+          <TabsTrigger value="ot_planilla" className="mat-view-tab-trigger inline-flex items-center gap-2">
             <Package className="h-4 w-4 shrink-0" aria-hidden />
             Desde orden de trabajo
             <TabCountBadge count={pendingBreakdown.otPlanilla} />
@@ -193,10 +200,13 @@ export default function AreaRequestsPage() {
         <p className="text-muted-foreground mt-3 text-sm">{activeTray.hint}</p>
 
         <TabsContent value={trayTab} className="mt-4 space-y-4">
-          <div className="rounded-xl border border-zinc-200/90 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="flex flex-wrap items-end gap-4">
-              <div className="grid min-w-[10.5rem] gap-2">
-                <Label className="text-foreground/90 text-sm font-semibold">Área</Label>
+          <div className="mat-filter-bar space-y-4 p-4 md:p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Filter className="size-4 text-primary" aria-hidden />
+              <p className="text-sm font-medium">Filtrar listado</p>
+            </div>
+            <div className={catalogFilterGridCompactClass}>
+              <CatalogLabeledField label="Área" icon={Layers}>
                 <Select
                   value={area}
                   onValueChange={(v) => {
@@ -204,10 +214,10 @@ export default function AreaRequestsPage() {
                     setPage(1)
                   }}
                 >
-                  <SelectTrigger className={filterTriggerClass}>
+                  <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+                  <SelectContent>
                     <SelectItem value="all">Todas</SelectItem>
                     {AREA_OPTIONS.map((o) => (
                       <SelectItem key={o.value} value={o.value}>
@@ -216,9 +226,8 @@ export default function AreaRequestsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="grid min-w-[10.5rem] gap-2">
-                <Label className="text-foreground/90 text-sm font-semibold">Estado</Label>
+              </CatalogLabeledField>
+              <CatalogLabeledField label="Estado" icon={CircleDot}>
                 <Select
                   value={status}
                   onValueChange={(v) => {
@@ -226,10 +235,10 @@ export default function AreaRequestsPage() {
                     setPage(1)
                   }}
                 >
-                  <SelectTrigger className={filterTriggerClass}>
+                  <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
+                  <SelectContent>
                     {STATUS_OPTIONS.map((o) => (
                       <SelectItem key={o.value} value={o.value}>
                         {o.label}
@@ -237,8 +246,12 @@ export default function AreaRequestsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </CatalogLabeledField>
             </div>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Solicitudes de insumos y sustratos entre áreas. Use los filtros para acotar por área o
+              estado; desde <strong>Ver insumos</strong> puede autorizar y despachar.
+            </p>
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-card to-violet-500/[0.07] shadow-md shadow-primary/5">
@@ -356,6 +369,7 @@ export default function AreaRequestsPage() {
           ) : null}
         </TabsContent>
       </Tabs>
+      </CatalogPageShell>
     </div>
   )
 }

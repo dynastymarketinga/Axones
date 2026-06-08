@@ -29,6 +29,10 @@ import {
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
 import {
+  catalogFilterCol3Class,
+  catalogFilterCol4Class,
+  catalogFilterCol5Class,
+  catalogFilterGridClass,
   catalogPaginationOutlineButtonClass,
   catalogPaginationSelectTriggerClass,
   catalogSelectTriggerClass,
@@ -46,12 +50,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { apiFetch, ApiError } from "@/lib/api"
+import { apiFetch, ApiError, isApiAbortError } from "@/lib/api"
+import { getStoredUser } from "@/lib/auth-storage"
+import { canSeeWarehouseInventoryCounts } from "@/lib/axones-roles"
 import {
   getMaterialAreaPillClass,
   getMaterialsListTabTheme,
 } from "@/lib/material-area-theme"
 import { cn } from "@/lib/utils"
+import { useWarehouseTintasPendingCounts } from "@/hooks/useWarehouseTintasPendingCounts"
 import type { LaravelPaginated, MaterialRow } from "@/types/api"
 import {
   Table,
@@ -135,12 +142,12 @@ function parseStock(value: string | number | null | undefined): number {
 
 const SEARCH_DEBOUNCE_MS = 320
 
-function isAbortError(e: unknown): boolean {
-  if (e instanceof DOMException && e.name === "AbortError") return true
-  return e instanceof Error && e.name === "AbortError"
-}
-
 export default function MaterialsPage() {
+  const session = getStoredUser()
+  const showWarehouseTintasBanner = canSeeWarehouseInventoryCounts(session?.role)
+  const { counts: tintasPending } = useWarehouseTintasPendingCounts({
+    enabled: showWarehouseTintasBanner,
+  })
   const [qInput, setQInput] = useState("")
   const [qApi, setQApi] = useState("")
   const qDebounceRef = useRef<number | null>(null)
@@ -205,9 +212,11 @@ export default function MaterialsPage() {
       if (ac.signal.aborted) return
       setRows(data)
     } catch (e) {
-      if (isAbortError(e)) return
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudieron cargar los materiales.")
+      if (isApiAbortError(e)) return
+      if (e instanceof ApiError) {
+        if (e.status === 0) return
+        toast.error(e.message)
+      } else toast.error("No se pudieron cargar los materiales.")
       if (!ac.signal.aborted) setRows(null)
     } finally {
       if (!ac.signal.aborted) setLoading(false)
@@ -244,6 +253,21 @@ export default function MaterialsPage() {
         }
       >
         <AxonesInventoryModuleNav active="materiales" variant="catalog" />
+
+        {showWarehouseTintasBanner && tintasPending.materiales > 0 ? (
+          <div className="mb-4 rounded-lg border border-violet-200/80 bg-violet-50/80 px-4 py-3 text-sm text-violet-950">
+            <strong>{tintasPending.materiales}</strong> acción(es) pendiente(s) de tintas (consumo, mezcla o
+            devolución). Revise{" "}
+            <Link className="font-medium underline underline-offset-2" to="/solicitudes-area">
+              Solicitudes entre áreas
+            </Link>{" "}
+            y{" "}
+            <Link className="font-medium underline underline-offset-2" to="/devoluciones">
+              Devoluciones
+            </Link>
+            .
+          </div>
+        ) : null}
 
         {showInitialSkeleton ? (
           <div className="space-y-4">
@@ -285,7 +309,7 @@ export default function MaterialsPage() {
                 <p className="text-sm font-medium">Filtrar listado</p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-12">
+              <div className={catalogFilterGridClass}>
                 <CatalogSearchField
                   id="mat-q"
                   placeholder="Código o nombre…"
@@ -294,9 +318,9 @@ export default function MaterialsPage() {
                     setPage(1)
                     setQInput(ev.target.value)
                   }}
-                  className="min-w-0 md:col-span-5"
+                  className={catalogFilterCol5Class}
                 />
-                <CatalogLabeledField label="Estado de stock" className="md:col-span-3">
+                <CatalogLabeledField label="Estado de stock" className={catalogFilterCol3Class}>
                   <Select
                     value={stockState}
                     onValueChange={(value) => {
@@ -315,7 +339,7 @@ export default function MaterialsPage() {
                     </SelectContent>
                   </Select>
                 </CatalogLabeledField>
-                <CatalogLabeledField label="Ordenar lista" className="md:col-span-4">
+                <CatalogLabeledField label="Ordenar lista" className={catalogFilterCol4Class}>
                   <Select
                     value={sortPreset}
                     onValueChange={(value) => {

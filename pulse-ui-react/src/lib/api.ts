@@ -113,6 +113,37 @@ export function buildApiUrl(path: string, query?: ApiFetchQuery): string {
   return url
 }
 
+async function fetchApiResponse(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const maxAttempts = 2
+  let lastError: unknown
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fetch(url, init)
+    } catch (e) {
+      lastError = e
+      if (isApiAbortError(e)) throw e
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 350))
+      }
+    }
+  }
+  throw lastError
+}
+
+/** Petición cancelada (AbortController) — no es error de red. */
+export function isApiAbortError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === "AbortError") return true
+  return e instanceof Error && e.name === "AbortError"
+}
+
+function isNetworkFetchError(e: unknown): boolean {
+  if (isApiAbortError(e)) return false
+  return e instanceof TypeError
+}
+
 /** Peticiones autenticadas al API Laravel (Sanctum Bearer). */
 export async function apiFetch<T>(
   path: string,
@@ -126,10 +157,22 @@ export async function apiFetch<T>(
     ...(extraHeaders as Record<string, string> | undefined),
   }
 
-  const res = await fetch(url, {
-    ...rest,
-    headers: mergedHeaders,
-  })
+  let res: Response
+  try {
+    res = await fetchApiResponse(url, {
+      ...rest,
+      headers: mergedHeaders,
+    })
+  } catch (e) {
+    if (isApiAbortError(e)) throw e
+    throw new ApiError(
+      isNetworkFetchError(e)
+        ? "No se pudo contactar al servidor. Compruebe que Laravel esté en marcha (php artisan serve) y recargue la página."
+        : "Error de red al contactar al servidor.",
+      0,
+      {},
+    )
+  }
 
   const data = (await res.json().catch(() => ({}))) as T & ApiErrorBody
 
@@ -237,4 +280,19 @@ export async function apiDownloadFile(
   a.download = name
   a.click()
   URL.revokeObjectURL(a.href)
+}
+
+export type UpdateCurrentUserPasswordPayload = {
+  current_password: string
+  password: string
+  password_confirmation: string
+}
+
+export async function updateCurrentUserPassword(
+  payload: UpdateCurrentUserPasswordPayload,
+): Promise<{ message: string; requires_relogin?: boolean }> {
+  return apiFetch("user/password", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  })
 }

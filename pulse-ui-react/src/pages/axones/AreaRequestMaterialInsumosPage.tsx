@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import { tintasMaterialRequestOriginLabel } from "@/lib/tintas-warehouse-labels"
 
 type LineRow = MaterialRequestDispatchLine
 
@@ -28,6 +29,7 @@ type Detail = {
   work_order_id?: number | null
   status: string
   authorized_by?: number | null
+  originating_area?: string | null
   notes?: string | null
   work_order?: {
     code: string
@@ -179,6 +181,14 @@ export default function AreaRequestMaterialInsumosPage() {
           <p className="text-muted-foreground py-8 text-center text-sm">Cargando…</p>
         ) : !detail ? null : (
           <>
+            {(() => {
+              const tintasOrigin = tintasMaterialRequestOriginLabel(detail.notes, detail.originating_area)
+              return tintasOrigin ? (
+                <Badge variant="outline" className="border-violet-300 bg-violet-50 text-violet-900">
+                  Origen: {tintasOrigin}
+                </Badge>
+              ) : null
+            })()}
             <div className="rounded-xl border border-border/80 bg-card/90 p-4 text-sm shadow-sm">
               {detail.work_order_id ? (
                 <div className="space-y-2">

@@ -347,6 +347,10 @@ class MaterialRequestService
             ]);
             $this->syncShadowAreaRequestForMaterialRequest($out);
 
+            if ($allComplete) {
+                app(TintasWarehouseRequestService::class)->fulfillMixtureOnDispatch($out, $user);
+            }
+
             return $out;
         });
     }
@@ -416,6 +420,16 @@ class MaterialRequestService
         return str_starts_with(trim((string) $mr->notes), PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER);
     }
 
+    private function isTintasConsumptionMaterialRequest(MaterialRequest $mr): bool
+    {
+        return str_starts_with(trim((string) $mr->notes), TintasWarehouseRequestService::CONSUMPTION_NOTES_MARKER);
+    }
+
+    private function isTintasMixtureMaterialRequest(MaterialRequest $mr): bool
+    {
+        return str_starts_with(trim((string) $mr->notes), TintasWarehouseRequestService::MIXTURE_NOTES_MARKER);
+    }
+
     private function shadowAreaRequestTitle(MaterialRequest $mr): string
     {
         if ($this->isPlanillaSustratoMaterialRequest($mr)) {
@@ -428,6 +442,18 @@ class MaterialRequestService
             };
 
             return sprintf('OT %s — %s (sustratos)', $code, $areaLabel);
+        }
+
+        if ($this->isTintasConsumptionMaterialRequest($mr)) {
+            $code = $mr->workOrder?->code ?? ($mr->work_order_id ? '#'.$mr->work_order_id : '—');
+
+            return sprintf('OT %s — Consumo tintas', $code);
+        }
+
+        if ($this->isTintasMixtureMaterialRequest($mr)) {
+            $code = $mr->workOrder?->code ?? ($mr->work_order_id ? '#'.$mr->work_order_id : '—');
+
+            return sprintf('OT %s — Mezcla tintas', $code);
         }
 
         return 'Solicitud de insumos #'.$mr->getKey();
@@ -456,7 +482,11 @@ class MaterialRequestService
 
         $originLine = $this->isPlanillaSustratoMaterialRequest($mr)
             ? '[Origen: sustratos virgen en planilla OT — solicitud al almacén]'
-            : '[Origen: solicitud de insumos al almacén]';
+            : ($this->isTintasConsumptionMaterialRequest($mr)
+                ? '[Origen: consumo tintas — solicitud al almacén]'
+                : ($this->isTintasMixtureMaterialRequest($mr)
+                    ? '[Origen: mezcla tintas — solicitud al almacén]'
+                    : '[Origen: solicitud de insumos al almacén]'));
 
         $parts = [
             $originLine,

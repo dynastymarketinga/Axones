@@ -20,14 +20,14 @@ import { getStoredUser } from "@/lib/auth-storage"
 import { useOperationalAlertStreamSubscription } from "@/providers/use-operational-alert-stream-subscription"
 import { usePendingPurchaseOrdersCount } from "@/hooks/usePendingPurchaseOrdersCount"
 import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
-import { isAxonesFullAccess, normalizeRole } from "@/lib/axones-roles"
+import { useWarehouseTintasPendingCounts } from "@/hooks/useWarehouseTintasPendingCounts"
+import { canSeeWarehouseInventoryCounts } from "@/lib/axones-roles"
+import { useDebouncedWindowEvent } from "@/lib/debounced-event-listener"
 import { operationalAlertTypeLabel } from "@/lib/operational-alert-labels"
 import { cn } from "@/lib/utils"
 
 function canSeeWarehouseBellBadge(role?: string | null): boolean {
-  const r = normalizeRole(role)
-  if (isAxonesFullAccess(role)) return true
-  return ["inventory", "inventario", "inventory_chief", "jefe_inventario", "jefe_almacen"].includes(r)
+  return canSeeWarehouseInventoryCounts(role)
 }
 
 type Notification = {
@@ -147,30 +147,38 @@ export function NotificationDropdown() {
   const showWarehouseBadge = canSeeWarehouseBellBadge(session?.role)
   const { count: warehousePending, reload: reloadWarehousePending } =
     useWarehouseInsumosPendingCount()
+  const { counts: tintasWarehouseCounts, reload: reloadTintasWarehouseCounts } =
+    useWarehouseTintasPendingCounts({ enabled: showWarehouseBadge })
   const { count: pendingPurchaseOrders, reload: reloadPendingPurchaseOrders } =
     usePendingPurchaseOrdersCount()
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       await reloadPendingPurchaseOrders()
       if (showWarehouseBadge) {
         await reloadWarehousePending()
+        await reloadTintasWarehouseCounts()
       }
       const res = await apiFetch<AlertPage>("alerts", {
         query: { page: 1, per_page: 8, unread: "1" },
       })
       setRows(res.data ?? [])
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
+      if (e instanceof ApiError && e.status !== 0) toast.error(e.message)
     }
-  }
+  }, [
+    reloadPendingPurchaseOrders,
+    reloadTintasWarehouseCounts,
+    reloadWarehousePending,
+    showWarehouseBadge,
+  ])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void load()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [])
+  }, [load])
 
   useEffect(() => {
     if (!open) return
@@ -178,15 +186,11 @@ export function NotificationDropdown() {
       void load()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [open])
+  }, [load, open])
 
-  useEffect(() => {
-    const onRefresh = () => {
-      void load()
-    }
-    window.addEventListener("alerts:refresh", onRefresh)
-    return () => window.removeEventListener("alerts:refresh", onRefresh)
-  }, [load])
+  useDebouncedWindowEvent("alerts:refresh", () => {
+    void load()
+  })
 
   const onStreamRow = useCallback((row: StreamAlertPayload) => {
     setRows((prev) => {
@@ -333,7 +337,7 @@ export function NotificationDropdown() {
   )
   const unreadCount = unreadNotifications.length
   const bellBadgeCount = showWarehouseBadge
-    ? Math.max(unreadCount, warehousePending, pendingPurchaseOrders)
+    ? Math.max(unreadCount, warehousePending, pendingPurchaseOrders, tintasWarehouseCounts.bell)
     : Math.max(unreadCount, pendingPurchaseOrders)
 
   return (

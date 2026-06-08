@@ -67,18 +67,22 @@ type ReturnRow = {
   work_order?: { code: string }
 }
 
-function viewHint(kind: "all" | "good" | "rejected"): string {
+type ReturnKindTab = "all" | "good" | "rejected" | "tintas"
+
+function viewHint(kind: ReturnKindTab): string {
   const kindText =
     kind === "good"
       ? "Las devoluciones buenas incrementan el stock de sustrato en Materiales al registrarse desde producción."
       : kind === "rejected"
         ? "Las devoluciones malas quedan pendientes hasta verificar el ingreso en bobinas rechazadas."
-        : "Las buenas alimentan sustrato de inmediato; las malas quedan pendientes hasta verificar."
-  return `Las devoluciones registradas desde Impresión, Laminación u otros flujos aparecen aquí. ${kindText}`
+        : kind === "tintas"
+          ? "Devoluciones de sobrantes desde el encargado de tintas (tintas o cementerio). Leonardo acepta para subir stock."
+          : "Las buenas alimentan sustrato de inmediato; las malas quedan pendientes hasta verificar."
+  return `Las devoluciones registradas desde Impresión, Laminación, Tintas u otros flujos aparecen aquí. ${kindText}`
 }
 
 export default function InventoryReturnsPage() {
-  const [kindTab, setKindTab] = useState<"all" | "good" | "rejected">("all")
+  const [kindTab, setKindTab] = useState<ReturnKindTab>("all")
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [loading, setLoading] = useState(true)
@@ -94,6 +98,8 @@ export default function InventoryReturnsPage() {
           : kindTab === "rejected"
             ? "bobinas_rechazadas"
             : undefined
+      const destinationAreasFilter =
+        kindTab === "tintas" ? "tintas,cementerio_tintas" : undefined
       const data = await apiFetch<LaravelPaginated<ReturnRow>>(
         "inventory-returns",
         {
@@ -101,6 +107,7 @@ export default function InventoryReturnsPage() {
             page,
             per_page: perPage,
             destination_area: destinationAreaFilter,
+            destination_areas: destinationAreasFilter,
           },
         },
       )
@@ -125,6 +132,7 @@ export default function InventoryReturnsPage() {
         body: JSON.stringify({ reason }),
       })
       toast.success("Devolución verificada; ingreso aplicado al inventario.")
+      window.dispatchEvent(new Event("alerts:refresh"))
       void load()
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
@@ -153,7 +161,7 @@ export default function InventoryReturnsPage() {
             <Tabs
               value={kindTab}
               onValueChange={(v) => {
-                setKindTab(v as "all" | "good" | "rejected")
+                setKindTab(v as ReturnKindTab)
                 setPage(1)
               }}
               className="w-full"
@@ -167,6 +175,9 @@ export default function InventoryReturnsPage() {
                 </TabsTrigger>
                 <TabsTrigger value="rejected" className="mat-view-tab-trigger">
                   Malas
+                </TabsTrigger>
+                <TabsTrigger value="tintas" className="mat-view-tab-trigger">
+                  Tintas
                 </TabsTrigger>
               </TabsList>
             </Tabs>

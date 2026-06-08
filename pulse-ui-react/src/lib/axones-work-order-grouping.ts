@@ -1,3 +1,4 @@
+import { formatQuantityDisplay } from "@/lib/numeric-display"
 import type { WorkOrderListRow } from "@/types/api"
 
 function readString(v: unknown): string {
@@ -75,6 +76,13 @@ export function groupWorkOrdersForHub(rows: WorkOrderListRow[]): WorkOrderHubGro
   return keys.map((key) => ({ key, rows: map.get(key) ?? [] }))
 }
 
+/** Kg pedido para una fila: enteros sin ".000" ni separador de miles; decimales solo si aportan. */
+export function pedidoKgDisplay(row: WorkOrderListRow): string {
+  const raw = pedidoKgRaw(row)
+  if (raw === null) return "—"
+  return formatQuantityDisplay(raw) || "—"
+}
+
 /** Suma de Kg pedido para fila de grupo; "—" si no hay ningún valor numérico. */
 export function sumPedidoKgDisplay(rows: WorkOrderListRow[]): string {
   let sum = 0
@@ -87,10 +95,7 @@ export function sumPedidoKgDisplay(rows: WorkOrderListRow[]): string {
     }
   }
   if (!any) return "—"
-  return new Intl.NumberFormat("es-VE", {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(sum)
+  return formatQuantityDisplay(sum)
 }
 
 /** OT más reciente del grupo (primera fila tras ordenar por fecha/id). */

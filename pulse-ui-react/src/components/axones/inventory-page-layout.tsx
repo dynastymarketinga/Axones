@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 /** Pestañas de módulo alineadas con el grupo «Inventario» del sidebar. */
 export type AxonesInventoryModuleNavKey =
   | "materiales"
+  | "solicitudes-area"
   | "recepciones-oc"
   | "movimientos-inventario"
   | "devoluciones"
@@ -18,6 +19,7 @@ const INVENTORY_MODULE_NAV: {
   routeKey: string
 }[] = [
   { key: "materiales", title: "Materiales", routeKey: "materiales" },
+  { key: "solicitudes-area", title: "Solicitudes entre áreas", routeKey: "solicitudes-area" },
   { key: "recepciones-oc", title: "Recepción", routeKey: "recepciones-oc" },
   { key: "movimientos-inventario", title: "Movimientos", routeKey: "movimientos-inventario" },
   { key: "devoluciones", title: "Devoluciones", routeKey: "devoluciones" },

@@ -3,14 +3,8 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { NotificationDropdown } from "@/components/notification-dropdown"
 import { OperationalAlertsStreamProvider } from "@/providers/operational-alerts-stream-provider"
 
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+import { AxonesAppBreadcrumb } from "@/components/axones/AxonesAppBreadcrumb"
+import { AxonesDocumentTitle } from "@/components/axones/AxonesDocumentTitle"
 import { Separator } from "@/components/ui/separator"
 import {
   SidebarInset,
@@ -51,6 +45,7 @@ export default function AppLayout() {
 
   return (
     <OperationalAlertsStreamProvider>
+    <AxonesDocumentTitle />
     <SidebarProvider open={open} onOpenChange={setOpen}>
       <AppSidebar />
 
@@ -72,17 +67,7 @@ export default function AppLayout() {
 
             <Separator orientation="vertical" className="h-4" />
 
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">Panel</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Resumen</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
+            <AxonesAppBreadcrumb />
           </div>
 
           <div className="ml-auto px-6">

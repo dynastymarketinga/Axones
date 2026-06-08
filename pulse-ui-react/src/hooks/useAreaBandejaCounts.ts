@@ -4,12 +4,13 @@ import {
   fetchBandejaTotal,
   type MiAreaApi,
 } from "@/lib/axones-area-bandeja"
+import { useDebouncedWindowEvent } from "@/lib/debounced-event-listener"
 
 export type AreaBandejaCounts = {
   counts: Record<MiAreaApi, number>
 }
 
-const DEFAULT_AREAS: MiAreaApi[] = [
+export const DEFAULT_BANDEJA_AREAS: MiAreaApi[] = [
   "impresion",
   "laminacion",
   "corte",
@@ -24,6 +25,11 @@ function cacheKey(areasKey: string): string {
   return `${CACHE_PREFIX}${areasKey}`
 }
 
+function parseAreasKey(areasKey: string): MiAreaApi[] {
+  const parsed = areasKey.split(",").filter(Boolean) as MiAreaApi[]
+  return parsed.length ? parsed : DEFAULT_BANDEJA_AREAS
+}
+
 function emptyCounts(areas: MiAreaApi[]): AreaBandejaCounts {
   const counts = {} as Record<MiAreaApi, number>
   for (const a of areas) counts[a] = 0
@@ -31,12 +37,10 @@ function emptyCounts(areas: MiAreaApi[]): AreaBandejaCounts {
 }
 
 export function useAreaBandejaCounts(options?: { areas?: MiAreaApi[] }) {
-  const areas = options?.areas ?? DEFAULT_AREAS
-  const areasKey = React.useMemo(
-    () => [...areas].sort().join(","),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [areas.join(",")],
-  )
+  const areasKey = React.useMemo(() => {
+    const list = options?.areas ?? DEFAULT_BANDEJA_AREAS
+    return [...list].sort().join(",")
+  }, [options?.areas?.join(",") ?? "__default__"])
   const key = cacheKey(areasKey)
 
   const [loading, setLoading] = React.useState(false)
@@ -53,18 +57,18 @@ export function useAreaBandejaCounts(options?: { areas?: MiAreaApi[] }) {
     }
   })
 
+  const loadInFlight = React.useRef(false)
+
   const load = React.useCallback(async () => {
+    if (loadInFlight.current) return
+    loadInFlight.current = true
+    const areas = parseAreasKey(areasKey)
     setLoading(true)
     try {
-      const totals = await Promise.all(
-        areas.map(async (miArea) => {
-          const total = await fetchBandejaTotal(miArea, "active", {})
-          return [miArea, total] as const
-        }),
-      )
+      // Secuencial: php artisan serve es mono-hilo; paralelo satura y falla fetch.
       const counts = {} as Record<MiAreaApi, number>
-      for (const [miArea, total] of totals) {
-        counts[miArea] = total
+      for (const miArea of areas) {
+        counts[miArea] = await fetchBandejaTotal(miArea, "active", {})
       }
       const next: AreaBandejaCounts = { counts }
       setData(next)
@@ -77,8 +81,9 @@ export function useAreaBandejaCounts(options?: { areas?: MiAreaApi[] }) {
       // Mantener cache anterior si existía
     } finally {
       setLoading(false)
+      loadInFlight.current = false
     }
-  }, [areas, key])
+  }, [areasKey, key])
 
   React.useEffect(() => {
     let hasFresh = false
@@ -96,14 +101,11 @@ export function useAreaBandejaCounts(options?: { areas?: MiAreaApi[] }) {
     if (!hasFresh) void load()
   }, [key, load])
 
-  React.useEffect(() => {
-    const onRefresh = () => {
-      void load()
-    }
-    window.addEventListener("alerts:refresh", onRefresh)
-    return () => window.removeEventListener("alerts:refresh", onRefresh)
-  }, [load])
+  useDebouncedWindowEvent("alerts:refresh", () => {
+    void load()
+  })
 
+  const areas = parseAreasKey(areasKey)
   return {
     loading,
     data: data ?? emptyCounts(areas),

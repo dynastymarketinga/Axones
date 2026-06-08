@@ -10,6 +10,7 @@ use App\Models\TintasTimeSegment;
 use App\Models\WorkOrder;
 use App\Services\PrintingProductionService;
 use App\Services\TintasProductionService;
+use App\Services\TintasWarehouseRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 
@@ -18,6 +19,7 @@ class WorkOrderTintasController extends Controller
     public function __construct(
         private readonly TintasProductionService $tintas,
         private readonly PrintingProductionService $printing,
+        private readonly TintasWarehouseRequestService $tintasWarehouse,
     ) {}
 
     /**
@@ -86,6 +88,17 @@ class WorkOrderTintasController extends Controller
         $chemicalUsages = $request->has('chemical_usages') ? ($validated['chemical_usages'] ?? []) : null;
 
         $payload = $this->printing->syncConsumables($work_order, $inkLines, $chemicalUsages);
+
+        $materialRequest = $this->tintasWarehouse->syncConsumptionRequest(
+            $work_order,
+            $request->user(),
+            $inkLines,
+            $chemicalUsages,
+        );
+
+        if ($materialRequest !== null) {
+            $payload['material_request_id'] = $materialRequest->getKey();
+        }
 
         return response()->json($payload);
     }

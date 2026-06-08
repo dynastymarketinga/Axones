@@ -47,6 +47,13 @@ class InventoryReturnController extends Controller
             $query->where('destination_area', $destinationArea);
         }
 
+        if ($destinationAreas = $request->query('destination_areas')) {
+            $areas = array_values(array_filter(array_map('trim', explode(',', (string) $destinationAreas))));
+            if ($areas !== []) {
+                $query->whereIn('destination_area', $areas);
+            }
+        }
+
         return response()->json($query->paginate(min((int) $request->query('per_page', 20), 100)));
     }
 

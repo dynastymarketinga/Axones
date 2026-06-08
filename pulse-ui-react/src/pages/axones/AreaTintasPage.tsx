@@ -1,9 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
+  ArrowUp,
+  Calendar,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -13,23 +15,34 @@ import {
   Droplets,
   ExternalLink,
   History,
-  Package,
   Inbox,
+  List,
+  ListFilter,
   ListOrdered,
+  Minus,
+  Package,
   Rows3,
   Search,
   SlidersHorizontal,
   Warehouse,
   XCircle,
+  Zap,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
-import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
+import { MesBandejaCriteriaDateInput } from "@/components/axones/MesBandejaCriteriaDateInput"
+import {
+  MesBandejaCriteriaField,
+  mesBandejaCriteriaSelectClass,
+} from "@/components/axones/MesBandejaCriteriaField"
+import { MesBandejaFiltersPanel } from "@/components/axones/MesBandejaFiltersPanel"
 import { TintasMaterialInventoryTable } from "@/components/axones/TintasMaterialInventoryTable"
-import { TintasOtWorkspace } from "@/components/axones/TintasOtWorkspace"
+import { TintasMixSection } from "@/components/axones/TintasMixSection"
+import { useTintasMaterials } from "@/hooks/useTintasMaterials"
 import { mesBandejaFilterPanelClass } from "@/components/axones/catalog-list-classes"
 import {
   INSUMOS_BANDEJA_TABLE_COLSPAN,
@@ -47,7 +60,6 @@ import {
   mesBandejaStickyOtCellClass,
   mesBandejaStickyOtHeadClass,
 } from "@/components/axones/InsumosBandejaTable"
-import { catalogSelectTriggerClass } from "@/components/axones/catalog-list-classes"
 import { apiFetch, ApiError } from "@/lib/api"
 import {
   BANDEJA_COLLECT_MAX_PAGES,
@@ -89,13 +101,12 @@ import {
   parseMesBandejaSubTabParam,
 } from "@/lib/mes-bandeja-navigation"
 import { tintasActivasBucketFromRow, tintasMesBandFromWorkOrderRow } from "@/lib/tintas-mes-band-status"
+import { tintasWorkOrderProduccionUrl } from "@/lib/tintas-navigation"
 import { cn } from "@/lib/utils"
-import type { LaravelPaginated, MaterialRow, WorkOrderListRow } from "@/types/api"
+import type { LaravelPaginated, WorkOrderListRow } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -114,7 +125,7 @@ import {
 } from "@/components/ui/table"
 
 type TintasBandejaTab = "activas" | "historial"
-type TintasConsumoVista = "produccion" | "inventario" | "cementerio"
+type TintasAreaToolsVista = "inventario" | "cementerio" | "mezcla"
 
 function tintasOtStatusLabel(status?: string | null): string {
   if (status === "open") return "Abierta"
@@ -125,6 +136,35 @@ function tintasOtStatusLabel(status?: string | null): string {
 
 const MI_AREA_TINTAS: MiAreaApi = "tintas"
 const TINTAS_BANDEJA_MES_COLSPAN = 5
+const SEARCH_DEBOUNCE_MS = 320
+
+function bandejaPriorityIcon(value: string): LucideIcon {
+  if (value === "urgente") return Zap
+  if (value === "alta") return ArrowUp
+  if (value === "normal") return Minus
+  return List
+}
+
+function bandejaPriorityIconClass(value: string): string {
+  if (value === "urgente") return "text-amber-600 dark:text-amber-400"
+  if (value === "alta") return "text-orange-600 dark:text-orange-400"
+  if (value === "normal") return "text-sky-600 dark:text-sky-400"
+  return "text-violet-600/75 dark:text-violet-300"
+}
+
+function bandejaStatusIcon(value: string): LucideIcon {
+  if (value === "open") return Circle
+  if (value === "completed") return CheckCircle2
+  if (value === "cancelled") return XCircle
+  return List
+}
+
+function bandejaStatusIconClass(value: string): string {
+  if (value === "open") return "text-sky-600 dark:text-sky-400"
+  if (value === "completed") return "text-emerald-600 dark:text-emerald-400"
+  if (value === "cancelled") return "text-rose-600 dark:text-rose-400"
+  return "text-muted-foreground"
+}
 
 function tintasBandejaColSpan(programacion: boolean): number {
   if (!programacion) return TINTAS_BANDEJA_MES_COLSPAN
@@ -137,26 +177,34 @@ function tintasBandejaColSpan(programacion: boolean): number {
   )
 }
 
-function tintasWorkOrderProduccionUrl(woId: number): string {
-  return `/ordenes-trabajo/${woId}/produccion?tab=tintas`
+function parseTintasAreaToolsVista(value: string | null): TintasAreaToolsVista {
+  if (value === "inventario" || value === "cementerio" || value === "mezcla") return value
+  return "inventario"
 }
 
 export default function AreaTintasPage() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const otRedirectParam = searchParams.get("ot")
+  const otRedirectNum = otRedirectParam ? Number(otRedirectParam) : NaN
   const initialBandejaSubTab = parseMesBandejaSubTabParam(searchParams.get(MES_BANDEJA_QUERY_KEY))
   const session = getStoredUser()
-  const [mode, setMode] = useState<"list" | "consumo">(() =>
-    searchParams.get("ot") || searchParams.get("vista") ? "consumo" : "list",
-  )
-  const [consumoVista, setConsumoVista] = useState<TintasConsumoVista>(() => {
+  const [mode, setMode] = useState<"list" | "tools">(() => {
     const v = searchParams.get("vista")
-    if (v === "inventario" || v === "cementerio") return v
-    return "produccion"
+    if (v === "inventario" || v === "cementerio" || v === "mezcla") return "tools"
+    return "list"
   })
+  const [toolsVista, setToolsVista] = useState<TintasAreaToolsVista>(() =>
+    parseTintasAreaToolsVista(searchParams.get("vista")),
+  )
   const [activeTab, setActiveTab] = useState<TintasBandejaTab>("activas")
-  const [q, setQ] = useState("")
+  const [qInput, setQInput] = useState("")
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<string>("all")
+  const [priority, setPriority] = useState<string>("all")
+  const [createdFrom, setCreatedFrom] = useState("")
+  const [createdTo, setCreatedTo] = useState("")
+  const skipSearchPageReset = useRef(true)
   const [page, setPage] = useState(1)
   const [onlyPendingArea, setOnlyPendingArea] = useState(false)
   const [historialIncludePending, setHistorialIncludePending] = useState(false)
@@ -195,46 +243,36 @@ export default function AreaTintasPage() {
     return mesActivasBucketCounts.pendientes + mesActivasBucketCounts.produccion
   }, [mesActivasBucketCounts, totalActivas])
 
-  const [workOrders, setWorkOrders] = useState<WorkOrderListRow[]>([])
-  const [woId, setWoId] = useState<string>(() => searchParams.get("ot") ?? "")
-  const woNum = Number(woId)
-
-  const [tintaMaterials, setTintaMaterials] = useState<MaterialRow[]>([])
-  const [invTintas, setInvTintas] = useState<MaterialRow[]>([])
-  const [invCementerio, setInvCementerio] = useState<MaterialRow[]>([])
   const [loading, setLoading] = useState(false)
 
-  const selectedWo = useMemo(
-    () => workOrders.find((w) => w.id === woNum) ?? null,
-    [workOrders, woNum],
-  )
+  const {
+    tintaMaterials,
+    invTintas,
+    invCementerio,
+    loading: materialsLoading,
+    reload: reloadMaterials,
+  } = useTintasMaterials({ enabled: mode === "tools" })
 
-  const syncConsumoUrl = useCallback(
-    (nextOt: string, nextVista: TintasConsumoVista) => {
+  const syncToolsUrl = useCallback(
+    (nextVista: TintasAreaToolsVista) => {
       setSearchParams((prev) => {
         const p = new URLSearchParams(prev)
-        if (nextOt) p.set("ot", nextOt)
-        else p.delete("ot")
-        if (nextVista === "produccion") p.delete("vista")
-        else p.set("vista", nextVista)
+        p.delete("ot")
+        p.set("vista", nextVista)
         return p
       })
     },
     [setSearchParams],
   )
 
-  const openConsumo = useCallback(
-    (orderId: number, vista: TintasConsumoVista = "produccion") => {
-      const id = String(orderId)
-      setWoId(id)
-      setMode("consumo")
-      setConsumoVista(vista)
-      syncConsumoUrl(id, vista)
+  const openTintasProduction = useCallback(
+    (orderId: number) => {
+      navigate(tintasWorkOrderProduccionUrl(orderId))
     },
-    [syncConsumoUrl],
+    [navigate],
   )
 
-  const closeConsumo = useCallback(() => {
+  const closeAreaTools = useCallback(() => {
     setMode("list")
     setSearchParams({})
   }, [setSearchParams])
@@ -247,19 +285,22 @@ export default function AreaTintasPage() {
   }, [searchParams, mode])
 
   useEffect(() => {
-    if (searchParams.get("vista") !== "mezcla") return
+    if (searchParams.get("vista") !== "mezcla" || mode !== "tools") return
     const el = document.getElementById("tintas-mezcla")
     if (!el) return
     const t = window.setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 300)
     return () => window.clearTimeout(t)
-  }, [searchParams, mode, consumoVista])
+  }, [searchParams, mode, toolsVista])
 
   const bandejaListFilters = useMemo((): BandejaListFilters => {
     return {
       status: status !== "all" ? status : undefined,
-      client_order_reference: search || undefined,
+      priority: priority !== "all" ? priority : undefined,
+      q: search || undefined,
+      created_from: createdFrom || undefined,
+      created_to: createdTo || undefined,
     }
-  }, [status, search])
+  }, [status, priority, search, createdFrom, createdTo])
 
   const refreshBandejaMeta = useCallback(async () => {
     if (mode !== "list") return
@@ -327,7 +368,10 @@ export default function AreaTintasPage() {
         page,
         per_page: 20,
         status: status !== "all" ? status : undefined,
-        client_order_reference: search || undefined,
+        priority: priority !== "all" ? priority : undefined,
+        q: search || undefined,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
       }
       if (activeTab === "activas") {
         query.mi_area = "tintas"
@@ -343,16 +387,43 @@ export default function AreaTintasPage() {
 
       const data = await apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", { query })
       setRows(data)
-      setWorkOrders(data.data ?? [])
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudieron cargar las órdenes.")
       setRows(null)
-      setWorkOrders([])
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [activeTab, page, search, status, onlyPendingArea, historialIncludePending])
+  }, [
+    activeTab,
+    page,
+    search,
+    status,
+    priority,
+    createdFrom,
+    createdTo,
+    onlyPendingArea,
+    historialIncludePending,
+  ])
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setSearch(qInput.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(id)
+  }, [qInput])
+
+  useEffect(() => {
+    if (skipSearchPageReset.current) {
+      skipSearchPageReset.current = false
+      return
+    }
+    setPage(1)
+  }, [search])
+
+  useEffect(() => {
+    setPage(1)
+  }, [activeTab, status, priority, createdFrom, createdTo, onlyPendingArea, historialIncludePending])
 
   useEffect(() => {
     if (mode !== "list" || activeTab !== "activas") return
@@ -368,65 +439,10 @@ export default function AreaTintasPage() {
     return () => window.clearInterval(id)
   }, [mode, activeTab, loadAreaRows])
 
-  const loadLists = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [mats, invT, invC, woList] = await Promise.all([
-        apiFetch<LaravelPaginated<MaterialRow>>("materials", {
-          query: { per_page: 400, page: 1 },
-        }),
-        apiFetch<LaravelPaginated<MaterialRow>>("materials", {
-          query: { inventory_area: "tintas", per_page: 200, page: 1 },
-        }),
-        apiFetch<LaravelPaginated<MaterialRow>>("materials", {
-          query: { inventory_area: "cementerio_tintas", per_page: 200, page: 1 },
-        }),
-        apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", {
-          query: { mi_area: "tintas", area_process_tag: "active", per_page: 100, page: 1 },
-        }),
-      ])
-      setWorkOrders(woList.data ?? [])
-      setTintaMaterials(
-        (mats.data ?? []).filter(
-          (m) =>
-            m.inventory_area === "tintas" ||
-            m.inventory_area === "cementerio_tintas",
-        ),
-      )
-      setInvTintas(invT.data ?? [])
-      setInvCementerio(invC.data ?? [])
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudieron cargar OTs o materiales.")
-      setWorkOrders([])
-      setTintaMaterials([])
-      setInvTintas([])
-      setInvCementerio([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
     if (mode !== "list") return
     void loadAreaRows()
   }, [loadAreaRows, mode])
-
-  useEffect(() => {
-    if (mode === "list") return
-    void loadLists()
-  }, [loadLists, mode])
-
-  function stageLabel(boardStage?: string | null): string {
-    if (boardStage === "nueva") return "Pendiente por OT"
-    if (boardStage === "pendiente") return "Programación"
-    if (boardStage === "montaje") return "Montaje"
-    if (boardStage === "impresion") return "Impresión"
-    if (boardStage === "laminacion") return "Laminación"
-    if (boardStage === "corte") return "Corte"
-    if (boardStage === "completada") return "Completada"
-    return boardStage ?? "—"
-  }
 
   const tintasPagination =
     rows && rows.last_page > 1 ? (
@@ -459,29 +475,177 @@ export default function AreaTintasPage() {
       </div>
     ) : null
 
-  const tintasFilterHint = (
-    <p className="text-muted-foreground flex items-start gap-2 text-xs md:col-span-12">
-      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-      <span>
-        Pulse <strong className="font-medium text-foreground">Buscar</strong> o Enter para filtrar por código de OT,
-        referencia de pedido o nombre de cliente. El estado se aplica al cambiar el valor.
-      </span>
-    </p>
-  )
+  const activeServerFilterCount = useMemo(() => {
+    let n = 0
+    if (search.trim()) n++
+    if (status !== "all") n++
+    if (priority !== "all") n++
+    if (createdFrom) n++
+    if (createdTo) n++
+    return n
+  }, [search, status, priority, createdFrom, createdTo])
 
-  const tintasHistorialFilterHint = (
-    <p className="text-muted-foreground flex items-start gap-2 text-xs md:col-span-12">
-      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-      <span>
-        Pulse <strong className="font-medium text-foreground">Buscar</strong> o Enter para aplicar el texto. Use las
-        casillas de arriba para acotar el historial.
-      </span>
-    </p>
-  )
-
-  const applyTintasSearch = () => {
+  const clearBandejaFilters = useCallback(() => {
+    setQInput("")
+    setSearch("")
+    setStatus("all")
+    setPriority("all")
+    setCreatedFrom("")
+    setCreatedTo("")
     setPage(1)
-    setSearch(q.trim())
+  }, [])
+
+  const filterHint = (
+    <p className="text-muted-foreground max-sm:hidden flex items-start gap-2 text-xs leading-relaxed sm:text-sm">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <span>
+        La búsqueda filtra por código OT, referencia, cliente o producto al escribir.{" "}
+        <span className="font-medium text-foreground/85">Estado OT</span> es abierta / completada / cancelada de la
+        orden (no el icono de solicitud al área en la tabla). Los botones Pendientes, En producción y Finalizadas
+        filtran solo las filas de la página actual en «En curso».
+      </span>
+    </p>
+  )
+
+  const bandejaCriteriaRow = (
+    <CatalogFilterGrid className="gap-3 md:gap-2.5">
+      <MesBandejaCriteriaField
+        label="Prioridad"
+        icon={ListFilter}
+        accent="violet"
+        active={priority !== "all"}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <Select
+          value={priority}
+          onValueChange={(v) => {
+            setPriority(v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className={mesBandejaCriteriaSelectClass("violet", priority !== "all")}>
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              {(() => {
+                const Icon = bandejaPriorityIcon(priority)
+                return <Icon className={cn("h-4 w-4 shrink-0", bandejaPriorityIconClass(priority))} aria-hidden />
+              })()}
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent className="border-violet-500/20">
+            <SelectItem value="all" className="gap-2.5 font-medium">
+              <List className="h-4 w-4 shrink-0 text-violet-600/70" aria-hidden />
+              Todas
+            </SelectItem>
+            <SelectItem value="normal" className="gap-2.5 font-medium">
+              <Minus className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              Normal
+            </SelectItem>
+            <SelectItem value="alta" className="gap-2.5 font-medium">
+              <ArrowUp className="h-4 w-4 shrink-0 text-orange-600" aria-hidden />
+              Alta
+            </SelectItem>
+            <SelectItem value="urgente" className="gap-2.5 font-medium">
+              <Zap className="h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+              Urgente
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </MesBandejaCriteriaField>
+
+      <MesBandejaCriteriaField
+        label="Estado OT"
+        icon={SlidersHorizontal}
+        accent="sky"
+        active={status !== "all"}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <Select
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className={mesBandejaCriteriaSelectClass("sky", status !== "all")}>
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              {(() => {
+                const Icon = bandejaStatusIcon(status)
+                return <Icon className={cn("h-4 w-4 shrink-0", bandejaStatusIconClass(status))} aria-hidden />
+              })()}
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent className="border-sky-500/20">
+            <SelectItem value="all" className="gap-2.5 font-medium">
+              <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              Todos
+            </SelectItem>
+            <SelectItem value="open" className="gap-2.5 font-medium">
+              <Circle className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              Abierta
+            </SelectItem>
+            <SelectItem value="completed" className="gap-2.5 font-medium">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+              Completada
+            </SelectItem>
+            <SelectItem value="cancelled" className="gap-2.5 font-medium">
+              <XCircle className="h-4 w-4 shrink-0 text-rose-600" aria-hidden />
+              Cancelada
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </MesBandejaCriteriaField>
+
+      <MesBandejaCriteriaField
+        label="Fecha OT (desde)"
+        icon={Calendar}
+        accent="amber"
+        active={Boolean(createdFrom)}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <MesBandejaCriteriaDateInput
+          accent="amber"
+          value={createdFrom}
+          onChange={(v) => {
+            setCreatedFrom(v)
+            setPage(1)
+          }}
+        />
+      </MesBandejaCriteriaField>
+
+      <MesBandejaCriteriaField
+        label="Fecha OT (hasta)"
+        icon={Calendar}
+        accent="orange"
+        active={Boolean(createdTo)}
+        className="min-w-0 sm:col-span-6 md:col-span-3"
+      >
+        <MesBandejaCriteriaDateInput
+          accent="orange"
+          value={createdTo}
+          onChange={(v) => {
+            setCreatedTo(v)
+            setPage(1)
+          }}
+        />
+      </MesBandejaCriteriaField>
+    </CatalogFilterGrid>
+  )
+
+  const bandejaSearchFields = (
+    <CatalogSearchField
+      id="tintas-q"
+      label="Ref. pedido cliente"
+      placeholder="Código OT, referencia, cliente…"
+      value={qInput}
+      onChange={(ev) => setQInput(ev.target.value)}
+      className="min-w-0"
+    />
+  )
+
+  if (Number.isFinite(otRedirectNum) && otRedirectNum > 0) {
+    return <Navigate to={tintasWorkOrderProduccionUrl(otRedirectNum)} replace />
   }
 
   return (
@@ -495,28 +659,13 @@ export default function AreaTintasPage() {
           </>
         ) : (
           <>
-            Consumo, mezcla de color e inventario en un solo panel para la OT seleccionada.
+            Inventario, cementerio y recetario de mezclas del área. Para operar una OT use{" "}
+            <strong className="font-medium text-foreground">Registrar consumo</strong> en la bandeja.
           </>
         )
       }
       icon={Droplets}
-      action={
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            if (mode === "list") {
-              void loadAreaRows()
-              void refreshBandejaMeta()
-              return
-            }
-            void loadLists()
-          }}
-          disabled={loading}
-        >
-          Actualizar
-        </Button>
-      }
+      className={mode === "list" ? "!p-0 md:!p-0 space-y-5" : undefined}
     >
       {mode === "list" ? (
         <Tabs
@@ -553,6 +702,15 @@ export default function AreaTintasPage() {
             </TabsTrigger>
           </TabsList>
 
+          <MesBandejaFiltersPanel
+            className="mt-4"
+            activeFilterCount={activeServerFilterCount}
+            onClear={clearBandejaFilters}
+            criteriaRow={bandejaCriteriaRow}
+            searchFields={bandejaSearchFields}
+            hint={filterHint}
+          />
+
           <TabsContent value="activas" className="mt-4 space-y-4">
             <MesActivasSubTabsBar
               value={mesActivasSubTab}
@@ -579,57 +737,6 @@ export default function AreaTintasPage() {
                 {`En curso: ${displayTotalActivas}`}
               </Badge>
             </div>
-
-            <CatalogFilterGrid>
-              <CatalogSearchField
-                id="tintas-q-act"
-                label="Ref. pedido cliente"
-                placeholder="Código OT, referencia, cliente…"
-                value={q}
-                onChange={(ev) => setQ(ev.target.value)}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter") applyTintasSearch()
-                }}
-                className="min-w-0 md:col-span-6"
-              />
-              <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="md:col-span-3">
-                <Select
-                  value={status}
-                  onValueChange={(v) => {
-                    setStatus(v)
-                    setPage(1)
-                  }}
-                >
-                  <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="gap-2">
-                      <Rows3 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Todos
-                    </SelectItem>
-                    <SelectItem value="open" className="gap-2">
-                      <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Abierta
-                    </SelectItem>
-                    <SelectItem value="completed" className="gap-2">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Completada
-                    </SelectItem>
-                    <SelectItem value="cancelled" className="gap-2">
-                      <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Cancelada
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </CatalogLabeledField>
-              <CatalogLabeledField label="Aplicar" className="md:col-span-3">
-                <Button type="button" className="h-11 w-full" onClick={applyTintasSearch}>
-                  Buscar
-                </Button>
-              </CatalogLabeledField>
-              {tintasFilterHint}
-            </CatalogFilterGrid>
 
             <InsumosBandejaTableCard wideTable>
               <Table
@@ -772,7 +879,7 @@ export default function AreaTintasPage() {
                                 type="button"
                                 variant="link"
                                 className="h-auto p-0 text-sm text-primary"
-                                onClick={() => openConsumo(o.id)}
+                                onClick={() => openTintasProduction(o.id)}
                               >
                                 Registrar consumo
                               </Button>
@@ -835,57 +942,6 @@ export default function AreaTintasPage() {
                 Ver también solicitudes abiertas
               </label>
             </div>
-
-            <CatalogFilterGrid>
-              <CatalogSearchField
-                id="tintas-q-historial"
-                label="Ref. pedido cliente"
-                placeholder="Código OT, referencia, cliente…"
-                value={q}
-                onChange={(ev) => setQ(ev.target.value)}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter") applyTintasSearch()
-                }}
-                className="min-w-0 md:col-span-6"
-              />
-              <CatalogLabeledField label="Estado" icon={SlidersHorizontal} className="md:col-span-3">
-                <Select
-                  value={status}
-                  onValueChange={(v) => {
-                    setStatus(v)
-                    setPage(1)
-                  }}
-                >
-                  <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="gap-2">
-                      <Rows3 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Todos
-                    </SelectItem>
-                    <SelectItem value="open" className="gap-2">
-                      <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Abierta
-                    </SelectItem>
-                    <SelectItem value="completed" className="gap-2">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Completada
-                    </SelectItem>
-                    <SelectItem value="cancelled" className="gap-2">
-                      <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                      Cancelada
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </CatalogLabeledField>
-              <CatalogLabeledField label="Aplicar" className="md:col-span-3">
-                <Button type="button" className="h-11 w-full" onClick={applyTintasSearch}>
-                  Buscar
-                </Button>
-              </CatalogLabeledField>
-              {tintasHistorialFilterHint}
-            </CatalogFilterGrid>
 
             <InsumosBandejaTableCard>
               <Table>
@@ -964,7 +1020,7 @@ export default function AreaTintasPage() {
                               type="button"
                               variant="link"
                               className="h-auto p-0 text-sm text-primary"
-                              onClick={() => openConsumo(o.id)}
+                              onClick={() => openTintasProduction(o.id)}
                             >
                               Registrar consumo
                             </Button>
@@ -988,136 +1044,44 @@ export default function AreaTintasPage() {
             )}
           >
             <div className="min-w-0">
-              <p className="text-sm font-semibold tracking-tight">
-                {selectedWo ? selectedWo.code : "OT no seleccionada"}
-              </p>
-              <p className="text-muted-foreground truncate text-xs">
-                {selectedWo
-                  ? [selectedWo.client?.name, selectedWo.product?.name].filter(Boolean).join(" · ")
-                  : "Elija una orden en impresión para registrar consumos y mezclas."}
+              <p className="text-sm font-semibold tracking-tight">Consultas del área tintas</p>
+              <p className="text-muted-foreground text-xs">
+                Inventario, cementerio y recetario. Para registrar consumo de una OT use la bandeja →{" "}
+                <strong className="font-medium text-foreground">Registrar consumo</strong>.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {selectedWo ? (
-                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" asChild>
-                  <Link to={tintasWorkOrderProduccionUrl(selectedWo.id)}>Abrir en producción</Link>
-                </Button>
-              ) : null}
-              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={closeConsumo}>
-                <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-                Volver al listado
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={closeAreaTools}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+              Volver al listado
+            </Button>
           </div>
 
           <Tabs
-            value={consumoVista}
+            value={toolsVista}
             onValueChange={(v) => {
-              const next = v as TintasConsumoVista
-              setConsumoVista(next)
-              if (woId) syncConsumoUrl(woId, next)
+              const next = v as TintasAreaToolsVista
+              setToolsVista(next)
+              syncToolsUrl(next)
             }}
             className="w-full"
           >
             <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 rounded-xl border bg-muted/30 p-1">
-              <TabsTrigger value="produccion" className="text-xs sm:text-sm">
-                Producción y consumo
-              </TabsTrigger>
               <TabsTrigger value="inventario" className="text-xs sm:text-sm">
                 Inventario
               </TabsTrigger>
               <TabsTrigger value="cementerio" className="text-xs sm:text-sm">
                 Cementerio
               </TabsTrigger>
+              <TabsTrigger value="mezcla" className="text-xs sm:text-sm">
+                Mezcla / recetario
+              </TabsTrigger>
             </TabsList>
-
-            <TabsContent value="produccion" className="mt-4 space-y-4">
-              <div className="overflow-hidden rounded-2xl border border-violet-200/60 shadow-sm">
-              <Card className="rounded-none border-0 border-b border-violet-100/90 bg-violet-50/40 shadow-none">
-                <CardHeader className="border-b border-violet-100/80 bg-violet-50/60 pb-3">
-                  <CardTitle className="text-sm font-semibold text-violet-950/90">
-                    Orden de trabajo en impresión
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 bg-white/50 pt-4">
-                  <div className="grid gap-3 md:grid-cols-12">
-                    <div className="grid gap-2 md:col-span-6">
-                      <Label className="text-xs font-medium">OT</Label>
-                      <Select
-                        value={woId}
-                        onValueChange={(v) => {
-                          setWoId(v)
-                          syncConsumoUrl(v, consumoVista)
-                        }}
-                      >
-                        <SelectTrigger className={cn(catalogSelectTriggerClass, "h-10 text-sm")}>
-                          <SelectValue placeholder="Seleccione una OT…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {workOrders.map((w) => (
-                            <SelectItem key={w.id} value={String(w.id)}>
-                              {w.code} — {w.client?.name ?? "—"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2 md:col-span-3">
-                      <Label className="text-xs font-medium">Estado OT</Label>
-                      <Input
-                        value={selectedWo ? tintasOtStatusLabel(selectedWo.status) : "—"}
-                        disabled
-                        className="h-10 text-sm"
-                      />
-                    </div>
-                    <div className="grid gap-2 md:col-span-3">
-                      <Label className="text-xs font-medium">Etapa en planta</Label>
-                      <Input
-                        value={selectedWo ? stageLabel(selectedWo.board_stage) : "—"}
-                        disabled
-                        className="h-10 text-sm"
-                      />
-                    </div>
-                  </div>
-                  {selectedWo ? (
-                    <div className="grid gap-2 rounded-xl border border-primary/15 bg-primary/[0.04] p-3 text-sm sm:grid-cols-3">
-                      <p>
-                        <span className="text-muted-foreground">Cliente:</span>{" "}
-                        <span className="font-medium">{selectedWo.client?.name ?? "—"}</span>
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Producto:</span>{" "}
-                        <span className="font-medium">{selectedWo.product?.name ?? "—"}</span>
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Código:</span>{" "}
-                        <span className="font-mono font-medium">{selectedWo.code}</span>
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">
-                      Seleccione una OT para registrar consumos y mezcla de tinta.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {Number.isFinite(woNum) && woNum > 0 ? (
-                <TintasOtWorkspace
-                  workOrderId={woNum}
-                  workOrderCode={selectedWo?.code}
-                  tintaMaterials={tintaMaterials}
-                  onMixCreated={() => void loadLists()}
-                  onRefresh={() => void loadLists()}
-                  refreshing={loading}
-                />
-              ) : (
-                <p className="text-muted-foreground border-t border-violet-100/80 bg-violet-50/30 px-5 py-8 text-center text-sm">
-                  Seleccione una OT para abrir el panel de consumo y mezcla.
-                </p>
-              )}
-              </div>
-            </TabsContent>
 
             <TabsContent value="inventario" className="mt-4 space-y-3">
               <Card className="border-border/80 shadow-sm">
@@ -1146,6 +1110,14 @@ export default function AreaTintasPage() {
                   />
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="mezcla" className="mt-4 space-y-3">
+              <TintasMixSection
+                tintaMaterials={tintaMaterials}
+                layout="all"
+                onMixCreated={() => void reloadMaterials()}
+              />
             </TabsContent>
           </Tabs>
         </div>

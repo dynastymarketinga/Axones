@@ -492,6 +492,14 @@ class OperationalAlertService
             trim((string) $mr->notes),
             PlanillaSustratoMaterialRequestSyncService::NOTES_MARKER,
         );
+        $fromTintasConsumption = str_starts_with(
+            trim((string) $mr->notes),
+            TintasWarehouseRequestService::CONSUMPTION_NOTES_MARKER,
+        );
+        $fromTintasMixture = str_starts_with(
+            trim((string) $mr->notes),
+            TintasWarehouseRequestService::MIXTURE_NOTES_MARKER,
+        );
 
         $woCode = $mr->workOrder?->code;
         $otRef = $woCode !== null && $woCode !== ''
@@ -500,7 +508,11 @@ class OperationalAlertService
 
         $origin = $fromPlanilla
             ? 'sustratos virgen (planilla OT)'
-            : 'solicitud de insumos';
+            : ($fromTintasConsumption
+                ? 'consumo tintas OT'
+                : ($fromTintasMixture
+                    ? 'mezcla tintas OT'
+                    : 'solicitud de insumos'));
 
         $lineSummary = $mr->lines
             ->map(function ($ln) {
@@ -533,6 +545,9 @@ class OperationalAlertService
                 'channel' => 'bell',
                 'material_request_id' => $mr->getKey(),
                 'from_planilla' => $fromPlanilla,
+                'source' => $fromTintasConsumption
+                    ? 'tintas_consumo'
+                    : ($fromTintasMixture ? 'tintas_mixture' : ($fromPlanilla ? 'ot_planilla' : 'manual')),
             ],
             'created_by' => $user?->getKey(),
         ]);

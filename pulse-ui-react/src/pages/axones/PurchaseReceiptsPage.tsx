@@ -33,12 +33,18 @@ import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-
 import type { LaravelPaginated, PurchaseOrderRow, SupplierRecord } from "@/types/api"
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
   CatalogTableHead,
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
 import {
+  catalogFilterCol2Class,
+  catalogFilterCol3Class,
+  catalogFilterCol4Class,
+  catalogFilterCol8Class,
+  catalogFilterGridClass,
   catalogPaginationOutlineButtonClass,
   catalogPaginationSelectTriggerClass,
   catalogSelectTriggerClass,
@@ -86,6 +92,7 @@ import {
   PurchaseOrderStatusBadge,
 } from "@/pages/axones/purchase-order-shared"
 import "./purchase-order-list.css"
+import "./materials-list.css"
 
 type ViewTab = "history" | "pending"
 
@@ -469,7 +476,7 @@ export default function PurchaseReceiptsPage() {
   }
 
   return (
-    <div className="po-list-shell">
+    <div className="po-list-shell mat-list-shell">
       <CatalogPageShell
         title="Recepción de material"
         subtitle="Historial de ingresos registrados en inventario: factura, proveedor y cruce con órdenes de compra."
@@ -483,6 +490,8 @@ export default function PurchaseReceiptsPage() {
           </Button>
         }
       >
+        <AxonesInventoryModuleNav active="recepciones-oc" variant="catalog" />
+
         {showInitialSkeleton ? (
           <div className="space-y-4">
             <PageLoadingBlock />
@@ -524,8 +533,8 @@ export default function PurchaseReceiptsPage() {
                     <Filter className="size-4 text-primary" aria-hidden />
                     <p className="text-sm font-medium">Filtrar órdenes pendientes</p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-12">
-                    <CatalogLabeledField label="Proveedor" className="md:col-span-4">
+                  <div className={catalogFilterGridClass}>
+                    <CatalogLabeledField label="Proveedor" className={catalogFilterCol4Class}>
                       <Popover open={poSupplierOpen} onOpenChange={setPoSupplierOpen}>
                         <PopoverTrigger asChild>
                           <Button
@@ -609,7 +618,7 @@ export default function PurchaseReceiptsPage() {
                       placeholder="Buscar por código OC…"
                       value={poQInput}
                       onChange={(ev) => setPoQInput(ev.target.value)}
-                      className="min-w-0 md:col-span-8"
+                      className={catalogFilterCol8Class}
                     />
                   </div>
                   <p className="text-muted-foreground text-xs leading-relaxed">
@@ -729,8 +738,8 @@ export default function PurchaseReceiptsPage() {
                 <Filter className="size-4 text-primary" aria-hidden />
                 <p className="text-sm font-medium">Filtrar listado</p>
               </div>
-              <div className="grid gap-3 md:grid-cols-12">
-                <CatalogLabeledField label="Fecha desde" className="md:col-span-2">
+              <div className={catalogFilterGridClass}>
+                <CatalogLabeledField label="Fecha desde" className={catalogFilterCol2Class}>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -757,7 +766,7 @@ export default function PurchaseReceiptsPage() {
                     </PopoverContent>
                   </Popover>
                 </CatalogLabeledField>
-                <CatalogLabeledField label="Fecha hasta" className="md:col-span-2">
+                <CatalogLabeledField label="Fecha hasta" className={catalogFilterCol2Class}>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -784,7 +793,7 @@ export default function PurchaseReceiptsPage() {
                     </PopoverContent>
                   </Popover>
                 </CatalogLabeledField>
-                <CatalogLabeledField label="Proveedor" icon={Truck} className="md:col-span-3">
+                <CatalogLabeledField label="Proveedor" icon={Truck} className={catalogFilterCol3Class}>
                   <Input
                     id="rc-filter-supplier"
                     placeholder="Nombre de proveedor…"
@@ -793,7 +802,7 @@ export default function PurchaseReceiptsPage() {
                     onChange={(ev) => setSupplierInput(ev.target.value)}
                   />
                 </CatalogLabeledField>
-                <CatalogLabeledField label="N° Factura" icon={Hash} className="md:col-span-2">
+                <CatalogLabeledField label="N° Factura" icon={Hash} className={catalogFilterCol2Class}>
                   <Input
                     id="rc-filter-invoice"
                     placeholder="Número de factura…"
@@ -809,7 +818,7 @@ export default function PurchaseReceiptsPage() {
                   placeholder="Buscar por nombre o SKU…"
                   value={materialInput}
                   onChange={(ev) => setMaterialInput(ev.target.value)}
-                  className="md:col-span-3"
+                  className={catalogFilterCol3Class}
                 />
               </div>
               <p className="text-muted-foreground text-xs leading-relaxed">

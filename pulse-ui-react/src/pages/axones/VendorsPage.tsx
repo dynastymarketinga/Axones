@@ -1,14 +1,17 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useSearchParams } from "react-router-dom"
 import {
+  Ban,
   CalendarDays,
   CheckCircle2,
   CircleDot,
   ListOrdered,
   Pencil,
   Phone,
+  Plus,
+  SearchX,
   Settings2,
   User,
   Users,
@@ -16,8 +19,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
-import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogActiveStatusBadge } from "@/components/axones/CatalogActiveStatusBadge"
+import { CatalogEmptyState } from "@/components/axones/CatalogEmptyState"
+import { CatalogFilterPanel } from "@/components/axones/CatalogFilterPanel"
+import { CatalogListPagination } from "@/components/axones/CatalogListPagination"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
@@ -26,22 +31,16 @@ import {
 } from "@/components/axones/CatalogTableHead"
 import {
   catalogActionButtonClass,
-  catalogPaginationOutlineButtonClass,
-  catalogPaginationSelectTriggerClass,
-  catalogSelectTriggerClass,
+  catalogMasterTablePanelClass,
+  catalogRowActionsClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -50,13 +49,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { catalogCountLabel } from "@/lib/catalog-count-label"
 import { apiFetch, ApiError } from "@/lib/api"
-import type { LaravelPaginated, VendorRecord } from "@/types/api"
 import { cn } from "@/lib/utils"
+import type { LaravelPaginated, VendorRecord } from "@/types/api"
 
 const SEARCH_DEBOUNCE_MS = 320
 
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
+
+type ViewTab = "active" | "inactive"
+
+function parseViewTab(raw: string | null): ViewTab {
+  if (raw === "inactive") return "inactive"
+  return "active"
+}
 
 function formatDateDMY(value: string | null | undefined): string {
   if (!value) return "—"
@@ -69,12 +76,43 @@ function formatDateDMY(value: string | null | undefined): string {
   }).format(d)
 }
 
+function vendorCountLabel(total: number): string {
+  return catalogCountLabel(total, "vendedor", "vendedores")
+}
+
+function vendorEmptyState(viewTab: ViewTab, hasSearch: boolean) {
+  if (hasSearch) {
+    return {
+      icon: SearchX,
+      title: "Sin resultados",
+      description: "Prueba otro término de búsqueda.",
+    }
+  }
+  if (viewTab === "inactive") {
+    return {
+      icon: Ban,
+      title: "Sin vendedores desactivados",
+      description: "Los vendedores retirados del listado operativo aparecerán aquí.",
+    }
+  }
+  return {
+    icon: Users,
+    title: "Sin vendedores",
+    description: "Crea el primero para asignarlo a tus clientes comerciales.",
+  }
+}
+
 export default function VendorsPage() {
   const location = useLocation()
-  const [query, setQuery] = useState("")
-  const [search, setSearch] = useState("")
-  const [activeFilter, setActiveFilter] = useState<string>("all")
-  const [page, setPage] = useState(1)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "")
+  const [search, setSearch] = useState(() => searchParams.get("q")?.trim() ?? "")
+  const [viewTab, setViewTab] = useState<ViewTab>(() => parseViewTab(searchParams.get("tab")))
+  const [page, setPage] = useState(() => {
+    const raw = searchParams.get("page")
+    const n = raw ? Number(raw) : 1
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1
+  })
   const [perPage, setPerPage] = useState<number>(20)
   const [loading, setLoading] = useState(true)
   const [togglingId, setTogglingId] = useState<number | null>(null)
@@ -82,15 +120,26 @@ export default function VendorsPage() {
   const debounceRef = useRef<number | null>(null)
   const skipSearchPageReset = useRef(true)
 
+  const isInactiveTab = viewTab === "inactive"
+
   const from = useMemo(() => {
     const params = new URLSearchParams()
     if (search.trim()) params.set("q", search.trim())
-    if (activeFilter !== "all") params.set("active", activeFilter)
+    if (isInactiveTab) params.set("tab", "inactive")
     if (page > 1) params.set("page", String(page))
     if (perPage !== 20) params.set("per_page", String(perPage))
     const qs = params.toString()
     return `${location.pathname}${qs ? `?${qs}` : ""}`
-  }, [location.pathname, page, perPage, search, activeFilter])
+  }, [location.pathname, page, perPage, search, isInactiveTab])
+
+  useEffect(() => {
+    const next = new URLSearchParams()
+    if (search.trim()) next.set("q", search.trim())
+    if (isInactiveTab) next.set("tab", "inactive")
+    if (page > 1) next.set("page", String(page))
+    if (perPage !== 20) next.set("per_page", String(perPage))
+    setSearchParams(next, { replace: true })
+  }, [page, perPage, search, isInactiveTab, setSearchParams])
 
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
@@ -118,9 +167,7 @@ export default function VendorsPage() {
           q: search || undefined,
           page,
           per_page: perPage,
-          ...(activeFilter !== "all"
-            ? { active: activeFilter === "true" ? 1 : 0 }
-            : {}),
+          active: isInactiveTab ? 0 : 1,
         },
       })
       setRows(data)
@@ -131,7 +178,7 @@ export default function VendorsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, search, activeFilter])
+  }, [page, perPage, search, isInactiveTab])
 
   useEffect(() => {
     void load()
@@ -141,18 +188,19 @@ export default function VendorsPage() {
     setTogglingId(vendor.id)
     try {
       const nextActive = !vendor.active
-      const updated = await apiFetch<VendorRecord>(`vendors/${vendor.id}`, {
+      await apiFetch<VendorRecord>(`vendors/${vendor.id}`, {
         method: "PATCH",
         body: JSON.stringify({ active: nextActive }),
       })
-      setRows((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          data: prev.data.map((v) => (v.id === vendor.id ? { ...v, ...updated } : v)),
-        }
-      })
-      toast.success(nextActive ? "Vendedor activado." : "Vendedor desactivado.")
+      if (nextActive) {
+        setViewTab("active")
+        setPage(1)
+        toast.success("Vendedor activado.")
+      } else {
+        setViewTab("inactive")
+        setPage(1)
+        toast.success("Vendedor desactivado. Consulte la pestaña Desactivados.")
+      }
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo actualizar el estado.")
@@ -162,19 +210,32 @@ export default function VendorsPage() {
   }, [])
 
   const showInitialSkeleton = loading && rows === null
+  const hasSearch = search.trim() !== ""
+  const totalCount = rows?.total ?? 0
+  const emptyState = vendorEmptyState(viewTab, hasSearch)
+  const newVendorButton = (
+    <Button type="button" asChild className="gap-2 shadow-sm">
+      <Link to="/vendedores/form" state={{ from }}>
+        <Plus className="h-4 w-4" aria-hidden />
+        Nuevo vendedor
+      </Link>
+    </Button>
+  )
 
   return (
     <CatalogPageShell
       title="Vendedores"
       subtitle="Asignación comercial por cliente."
       icon={Users}
-      action={
-        <Button type="button" asChild>
-          <Link to="/vendedores/form" state={{ from }}>
-            Nuevo vendedor
-          </Link>
-        </Button>
+      headerVariant="elevated"
+      statBadge={
+        rows && !loading ? (
+          <Badge variant="secondary" className="font-normal tabular-nums">
+            {vendorCountLabel(totalCount)}
+          </Badge>
+        ) : null
       }
+      action={newVendorButton}
     >
       {showInitialSkeleton ? (
         <div className="space-y-4">
@@ -183,25 +244,37 @@ export default function VendorsPage() {
         </div>
       ) : (
         <>
-          <CatalogFilterGrid>
-            <CatalogLabeledField label="Estado" className="md:col-span-3">
-              <Select
-                value={activeFilter}
-                onValueChange={(v) => {
-                  setActiveFilter(v)
-                  setPage(1)
-                }}
+          <Tabs
+            value={viewTab}
+            onValueChange={(value) => {
+              setViewTab(parseViewTab(value))
+              setPage(1)
+            }}
+            className="w-full"
+          >
+            <TabsList className="inline-flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg border border-primary/15 bg-primary/5 p-1 sm:w-auto">
+              <TabsTrigger
+                value="active"
+                className="text-xs data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm sm:text-sm"
               >
-                <SelectTrigger className={cn("w-full font-normal", catalogSelectTriggerClass)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="true">Activos</SelectItem>
-                  <SelectItem value="false">Inactivos</SelectItem>
-                </SelectContent>
-              </Select>
-            </CatalogLabeledField>
+                Activos
+              </TabsTrigger>
+              <TabsTrigger
+                value="inactive"
+                className="text-xs data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm sm:text-sm"
+              >
+                Desactivados
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <CatalogFilterPanel
+            hint={
+              <p className="text-muted-foreground text-xs">
+                Búsqueda automática al escribir · Enter fuerza la búsqueda inmediata
+              </p>
+            }
+          >
             <CatalogSearchField
               id="vendor-q"
               placeholder="Ej. nombre, teléfono…"
@@ -214,16 +287,13 @@ export default function VendorsPage() {
                   setPage(1)
                 }
               }}
-              className="min-w-0 md:col-span-6"
+              className="min-w-0"
             />
-            <p className="text-muted-foreground text-xs md:col-span-12">
-              El texto de búsqueda se aplica automáticamente al escribir.
-            </p>
-          </CatalogFilterGrid>
+          </CatalogFilterPanel>
 
-          <div className="bg-card overflow-x-auto rounded-2xl border shadow-sm">
+          <div className={catalogMasterTablePanelClass}>
             <Table className="w-full min-w-[560px]">
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
                 <TableRow className={catalogTableHeaderRowClass}>
                   <CatalogTableHead icon={ListOrdered} className="w-16">
                     N.º
@@ -239,14 +309,23 @@ export default function VendorsPage() {
                 {loading ? (
                   <LoadingTableRow colSpan={6} />
                 ) : !rows?.data.length ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
-                      Sin vendedores.
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={6} className="p-0">
+                      <CatalogEmptyState
+                        icon={emptyState.icon}
+                        title={emptyState.title}
+                        description={emptyState.description}
+                        action={
+                          hasSearch || isInactiveTab ? undefined : newVendorButton
+                        }
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
                   rows.data.map((v, index) => {
                     const n = (rows.current_page - 1) * rows.per_page + index + 1
+                    const phone = v.phone_primary || v.phone_secondary
+
                     return (
                       <TableRow key={v.id} className={catalogTableBodyRowClass}>
                         <TableCell
@@ -258,19 +337,31 @@ export default function VendorsPage() {
                           {n}
                         </TableCell>
                         <TableCell className={cn("font-medium", catalogTableBodyCellClass)}>
-                          {v.name}
+                          <span className="inline-flex items-center gap-2">
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                              <User className="h-3.5 w-3.5" aria-hidden />
+                            </span>
+                            {v.name}
+                          </span>
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
-                          {v.phone_primary || v.phone_secondary || "—"}
+                          {phone ? (
+                            <span className="inline-flex items-center gap-1.5 tabular-nums text-sm">
+                              <Phone className="text-muted-foreground h-3.5 w-3.5 shrink-0" aria-hidden />
+                              {phone}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </TableCell>
                         <TableCell className={catalogTableBodyCellClass}>
-                          {v.active ? "Sí" : "No"}
+                          <CatalogActiveStatusBadge active={v.active} />
                         </TableCell>
-                        <TableCell className={cn("whitespace-nowrap", catalogTableBodyCellClass)}>
+                        <TableCell className={cn("whitespace-nowrap tabular-nums", catalogTableBodyCellClass)}>
                           {formatDateDMY(v.created_at)}
                         </TableCell>
                         <TableCell className={cn("p-2 text-right", catalogTableBodyCellClass)}>
-                          <div className="inline-flex flex-wrap justify-end gap-1">
+                          <div className={catalogRowActionsClass}>
                             <Button
                               variant="outline"
                               size="icon"
@@ -322,69 +413,15 @@ export default function VendorsPage() {
             </Table>
           </div>
 
-          {rows ? (
-            <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <p className="text-muted-foreground min-w-0">
-                {rows.total === 0
-                  ? "Sin resultados con los filtros actuales."
-                  : rows.last_page > 1
-                    ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
-                    : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Por página</span>
-                  <Select
-                    value={String(perPage)}
-                    onValueChange={(v) => {
-                      setPerPage(Number(v))
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger
-                      id="vendor-per-page"
-                      className={cn(
-                        "h-8 w-[4.5rem] text-sm",
-                        catalogPaginationSelectTriggerClass,
-                      )}
-                      aria-label="Registros por página"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PER_PAGE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt} value={String(opt)}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page <= 1 || loading}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    type="button"
-                  >
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                    disabled={rows.current_page >= rows.last_page || loading}
-                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                    type="button"
-                  >
-                    Siguiente
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          <CatalogListPagination
+            rows={rows}
+            loading={loading}
+            perPage={perPage}
+            onPerPageChange={setPerPage}
+            onPageChange={setPage}
+            perPageOptions={PER_PAGE_OPTIONS}
+            selectId="vendor-per-page"
+          />
         </>
       )}
     </CatalogPageShell>

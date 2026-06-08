@@ -14,6 +14,8 @@ import Error500 from "@/pages/error/Error500"
 import ComingSoon from "@/pages/error/ComingSoon"
 import UserProfile from "@/pages/account/UserProfile"
 import PasswordResetRequestsPage from "@/pages/account/PasswordResetRequestsPage"
+import UsersPage from "@/pages/account/UsersPage"
+import UserFormPage from "@/pages/account/UserFormPage"
 import ClientsPage from "@/pages/axones/ClientsPage"
 import ProductsPage from "@/pages/axones/ProductsPage"
 import SuppliersPage from "@/pages/axones/SuppliersPage"
@@ -88,6 +90,20 @@ import AreaTintasPage from "@/pages/axones/AreaTintasPage"
 import { getStoredUser } from "@/lib/auth-storage"
 import { isAxonesUrlAllowed } from "@/lib/axones-roles"
 
+function AxonesRouteGuard({
+  routeKey,
+  children,
+}: {
+  routeKey: string
+  children: ReactElement
+}): ReactElement {
+  const user = getStoredUser()
+  const allowed = isAxonesUrlAllowed(routeKey, user?.role, user?.id)
+  if (!allowed) return <Navigate to="/resumen" replace />
+  return children
+}
+
+/** Envuelve la ruta para re-evaluar permisos en cada navegación (no al importar el módulo). */
 function guardAxonesRoute({
   routeKey,
   element,
@@ -95,10 +111,7 @@ function guardAxonesRoute({
   routeKey: string
   element: ReactElement
 }): ReactElement {
-  const user = getStoredUser()
-  const allowed = isAxonesUrlAllowed(routeKey, user?.role, user?.id)
-  if (!allowed) return <Navigate to="/resumen" replace />
-  return element
+  return <AxonesRouteGuard routeKey={routeKey}>{element}</AxonesRouteGuard>
 }
 
 function LegacyInventoryAreasRedirect(): ReactElement {
@@ -315,6 +328,7 @@ export const router = createBrowserRouter(
           path: "notas-entrega/:noteId/vista-previa",
           element: guardAxonesRoute({ routeKey: "notas-entrega", element: <DeliveryNotePreviewPage /> }),
         },
+        // Calidad / Vigilancia — UI Próximamente (sin API; ver backend routes/api.php comentadas)
         { path: "calidad", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityWorkOrderPage /> }) },
         { path: "calidad/vista-previa", element: guardAxonesRoute({ routeKey: "calidad", element: <QualityCertificatePreviewPage /> }) },
         {
@@ -350,6 +364,20 @@ export const router = createBrowserRouter(
 
         // account
         { path: "account/profile", element: <UserProfile /> },
+        {
+          path: "account/users",
+          element: guardAxonesRoute({
+            routeKey: "account/users",
+            element: <UsersPage />,
+          }),
+        },
+        {
+          path: "account/users/form",
+          element: guardAxonesRoute({
+            routeKey: "account/users/form",
+            element: <UserFormPage />,
+          }),
+        },
         {
           path: "account/password-reset-requests",
           element: guardAxonesRoute({

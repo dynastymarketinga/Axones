@@ -9,6 +9,7 @@ import UIThemeProvider from "@/providers/ui-theme-provider"
 import { registerSW } from "virtual:pwa-register"
 
 import { router } from "@/routes"
+import { ensureAxonesFavicon } from "@/lib/axones-favicon"
 import "@/index.css"
 
 const updateSW = registerSW({
@@ -18,9 +19,7 @@ const updateSW = registerSW({
   },
 })
 
-if (typeof document !== "undefined") {
-  document.title = "Axones"
-}
+ensureAxonesFavicon()
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -24,6 +24,8 @@ type Props = {
   /** Solo lectura: sin catálogo ni edición (datos ya guardados en la OT). */
   readOnly?: boolean
   onSetField?: (key: string, value: unknown) => void
+  /** Sin cabecera de sección (p. ej. dentro de un acordeón). */
+  embedded?: boolean
 }
 
 function readString(v: unknown): string {
@@ -252,6 +254,7 @@ export default function WorkOrderPrintingInkTable({
   tintaMaterialesLoading = false,
   readOnly = false,
   onSetField = () => {},
+  embedded = false,
 }: Props) {
   const [tintaColorPickerRow, setTintaColorPickerRow] = useState<number | null>(null)
   const tintaIdBase = useId().replace(/:/g, "")
@@ -280,15 +283,8 @@ export default function WorkOrderPrintingInkTable({
     tintaFieldId: tintaTableFieldId,
   }
 
-  return (
-    <div className="ot-section ot-section--tintas">
-      <div className="section-header section-hdr-tintas">
-        <span className="inline-flex items-center gap-2">
-          <Palette className="h-4 w-4" />
-          DESCRIPCION DE TINTAS
-        </span>
-      </div>
-      <div className="section-body">
+  const body = (
+    <>
         <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
           {readOnly ? (
             <>
@@ -382,7 +378,22 @@ export default function WorkOrderPrintingInkTable({
             </tbody>
           </table>
         </div>
+    </>
+  )
+
+  if (embedded) {
+    return <div className="section-body">{body}</div>
+  }
+
+  return (
+    <div className="ot-section ot-section--tintas">
+      <div className="section-header section-hdr-tintas">
+        <span className="inline-flex items-center gap-2">
+          <Palette className="h-4 w-4" />
+          DESCRIPCION DE TINTAS
+        </span>
       </div>
+      <div className="section-body">{body}</div>
     </div>
   )
 }

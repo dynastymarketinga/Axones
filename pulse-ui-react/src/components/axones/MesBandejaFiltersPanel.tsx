@@ -15,9 +15,14 @@ type MesBandejaFiltersPanelProps = {
   criteriaRow: ReactNode
   /** Búsqueda por texto debajo de los filtros. */
   searchFields: ReactNode
-  hint: ReactNode
+  hint?: ReactNode | null
+  /** Si es null, no se muestra la línea bajo el título. */
+  headerSubtitle?: ReactNode | null
   className?: string
 }
+
+const DEFAULT_HEADER_SUBTITLE =
+  "Criterios y fechas al servidor; búsqueda al escribir; cronómetro se filtra debajo."
 
 export function MesBandejaFiltersPanel({
   activeFilterCount,
@@ -25,9 +30,12 @@ export function MesBandejaFiltersPanel({
   criteriaRow,
   searchFields,
   hint,
+  headerSubtitle = DEFAULT_HEADER_SUBTITLE,
   className,
 }: MesBandejaFiltersPanelProps) {
   const hasActive = activeFilterCount > 0
+  const showHeaderSubtitle = headerSubtitle !== null
+  const showHint = hint !== null && hint !== undefined
 
   return (
     <div className={cn(mesBandejaFilterPanelClass, className)}>
@@ -41,9 +49,9 @@ export function MesBandejaFiltersPanel({
           </span>
           <div className="min-w-0">
             <p className="text-sm font-semibold tracking-tight text-foreground">Filtros de la bandeja</p>
-            <p className="text-muted-foreground hidden text-xs leading-snug sm:block">
-              Criterios y fechas al servidor; búsqueda al escribir; cronómetro se filtra debajo.
-            </p>
+            {showHeaderSubtitle && headerSubtitle ? (
+              <p className="text-muted-foreground hidden text-xs leading-snug sm:block">{headerSubtitle}</p>
+            ) : null}
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -79,7 +87,9 @@ export function MesBandejaFiltersPanel({
         {searchFields}
       </div>
 
-      <div className="border-t border-primary/12 bg-muted/25 px-4 py-3 dark:bg-muted/15 sm:px-5">{hint}</div>
+      {showHint ? (
+        <div className="border-t border-primary/12 bg-muted/25 px-4 py-3 dark:bg-muted/15 sm:px-5">{hint}</div>
+      ) : null}
     </div>
   )
 }

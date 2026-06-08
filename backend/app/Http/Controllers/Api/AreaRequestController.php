@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateFacilityAreaRequest;
 use App\Models\AreaRequest;
 use App\Services\AreaRequestService;
 use App\Services\OperationalAlertService;
+use App\Services\TintasWarehouseRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -101,6 +102,15 @@ class AreaRequestController extends Controller
             'manual_pending' => $breakdown['manual'],
             'ot_planilla_pending' => $breakdown['ot_planilla'],
         ]);
+    }
+
+    public function tintasPendingCounts(): JsonResponse
+    {
+        $this->operationalAlerts->syncWarehouseAlertsForPendingMaterialRequests();
+
+        return response()->json(
+            app(TintasWarehouseRequestService::class)->pendingWarehouseCounts()
+        );
     }
 
     public function store(StoreFacilityAreaRequest $request): JsonResponse

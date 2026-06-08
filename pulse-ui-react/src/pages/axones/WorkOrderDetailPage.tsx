@@ -5,7 +5,6 @@ import { Link, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { ArrowLeft, ClipboardList, Info } from "lucide-react"
 
-import { ProductionAreaPanel } from "@/components/axones/ProductionAreaPanel"
 import { WorkOrderDocumentSheet } from "@/components/axones/WorkOrderDocumentSheet"
 import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
@@ -14,8 +13,9 @@ import WorkOrderPrintingControlPanel from "@/pages/axones/WorkOrderPrintingContr
 import WorkOrderMontajeControlPanel from "@/pages/axones/WorkOrderMontajeControlPanel"
 import WorkOrderLaminacionControlPanel from "@/pages/axones/WorkOrderLaminacionControlPanel"
 import WorkOrderCorteControlPanel from "@/pages/axones/WorkOrderCorteControlPanel"
-import { WorkOrderPrintingPlanillaSnapshot } from "@/pages/axones/WorkOrderPrintingPlanillaSnapshot"
+import WorkOrderTintasControlPanel from "@/pages/axones/WorkOrderTintasControlPanel"
 import { WorkOrderMontajePlanillaSnapshot } from "@/pages/axones/WorkOrderMontajePlanillaSnapshot"
+import { WorkOrderTintasPlanillaSnapshot } from "@/pages/axones/WorkOrderTintasPlanillaSnapshot"
 import type { WorkOrderDetailRecord } from "@/types/api"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -61,7 +61,13 @@ function canAccessProductionTab(
 }
 
 function isFocusedProductionTab(tab: ProductionTab): boolean {
-  return tab === "printing" || tab === "laminacion" || tab === "montaje" || tab === "corte"
+  return (
+    tab === "printing" ||
+    tab === "laminacion" ||
+    tab === "montaje" ||
+    tab === "corte" ||
+    tab === "tintas"
+  )
 }
 
 function tabLabel(tab: ProductionTab): string {
@@ -171,6 +177,7 @@ export default function WorkOrderDetailPage() {
   const isLaminacionFocusedView = isFocusedView && activeTab === "laminacion"
   const isMontajeFocusedView = isFocusedView && activeTab === "montaje"
   const isCorteFocusedView = isFocusedView && activeTab === "corte"
+  const isTintasFocusedView = isFocusedView && activeTab === "tintas"
 
   const [loading, setLoading] = useState(true)
   const [order, setOrder] = useState<WorkOrderDetailRecord | null>(null)
@@ -209,8 +216,8 @@ export default function WorkOrderDetailPage() {
   const product = order?.product
   const code = order?.code ?? `OT #${id}`
   const form = (order?.technical_document?.form ?? {}) as Record<string, unknown>
-  const showPrintingPrefill = isPrintingFocusedView && isBoss
   const showMontajePrefill = isMontajeFocusedView && isBoss
+  const showTintasPrefill = isTintasFocusedView && canUseTintasOps
   const showMasterDataOnProduction = !isFocusedView
 
   return (
@@ -263,6 +270,11 @@ export default function WorkOrderDetailPage() {
                     Registre turno de planta, cronómetro y producción. Pulse <strong>Guardar</strong> para enviar al
                     sistema.
                   </>
+                ) : isTintasFocusedView ? (
+                  <>
+                    Elija un paso: tintas usadas, químicos, devolución o mezcla. Las solicitudes las aprueba
+                    Leonardo (almacén); no hay turnos ni temporizador.
+                  </>
                 ) : !tabHasAccess ? (
                   <>
                     La pestaña <strong>{tabLabel(activeTab)}</strong> está seleccionada, pero su rol no puede operar
@@ -287,8 +299,8 @@ export default function WorkOrderDetailPage() {
             />
           ) : null}
 
-          {showPrintingPrefill ? <WorkOrderPrintingPlanillaSnapshot form={form} /> : null}
           {showMontajePrefill ? <WorkOrderMontajePlanillaSnapshot form={form} /> : null}
+          {showTintasPrefill ? <WorkOrderTintasPlanillaSnapshot form={form} /> : null}
 
           {isFocusedView ? (
             <>
@@ -303,6 +315,9 @@ export default function WorkOrderDetailPage() {
               ) : null}
               {isCorteFocusedView ? (
                 <WorkOrderCorteControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
+              ) : null}
+              {isTintasFocusedView ? (
+                <WorkOrderTintasControlPanel workOrderId={id} workOrderCode={code} />
               ) : null}
             </>
           ) : (
@@ -323,10 +338,7 @@ export default function WorkOrderDetailPage() {
               </TabsContent>
               <TabsContent value="printing" className="mt-4">
                 {canUsePrintingOps ? (
-                  <>
-                    {isBoss ? <WorkOrderPrintingPlanillaSnapshot form={form} /> : null}
-                    <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
-                  </>
+                  <WorkOrderPrintingControlPanel workOrderId={id} canFinalizeOrder={isBoss} />
                 ) : (
                   <ProductionTabAccessNotice tab="printing" />
                 )}
@@ -340,13 +352,10 @@ export default function WorkOrderDetailPage() {
               </TabsContent>
               <TabsContent value="tintas" className="mt-4">
                 {canUseTintasOps ? (
-                  <ProductionAreaPanel
-                    workOrderId={id}
-                    title="Tintas"
-                    areaPath="tintas"
-                    usageMode="none"
-                    canFinalizeOrder={isBoss}
-                  />
+                  <>
+                    <WorkOrderTintasPlanillaSnapshot form={form} />
+                    <WorkOrderTintasControlPanel workOrderId={id} workOrderCode={code} />
+                  </>
                 ) : (
                   <ProductionTabAccessNotice tab="tintas" />
                 )}

@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Módulo Calidad — API desactivada (UI: Próximamente).
+ * Descomentar esta clase y las rutas en routes/api.php para reactivar.
+ * Tabla `work_order_quality_records` y modelo WorkOrderQualityRecord se conservan.
+ */
+
+/*
 namespace App\Http\Controllers\Api;
 
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -112,3 +119,4 @@ class WorkOrderQualityController extends Controller
         };
     }
 }
+*/

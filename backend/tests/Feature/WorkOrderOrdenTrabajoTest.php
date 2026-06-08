@@ -1136,7 +1136,7 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             ->assertJsonValidationErrors(['form.kgSalidaCorte']);
     }
 
-    public function test_put_orden_trabajo_broadcasts_saved_to_all_areas(): void
+    public function test_put_orden_trabajo_without_assignment_creates_no_area_requests(): void
     {
         $user = User::factory()->create(['role' => 'calidad']);
         $h = $this->auth($user);
@@ -1159,7 +1159,36 @@ class WorkOrderOrdenTrabajoTest extends TestCase
             ->where('work_order_id', $wo->id)
             ->where('alert_type', 'work_order_saved_broadcast')
             ->count());
-        $this->assertDatabaseHas('area_requests', ['work_order_id' => $wo->id, 'area' => 'tintas']);
+        $this->assertSame(0, AreaRequest::query()->where('work_order_id', $wo->id)->count());
+    }
+
+    public function test_put_orden_trabajo_assignment_creates_only_assigned_areas(): void
+    {
+        $user = User::factory()->create(['role' => 'calidad']);
+        $h = $this->auth($user);
+        $wo = WorkOrder::query()->create([
+            'code' => 'OT-ASSIGN-ONLY',
+            'status' => 'open',
+            'created_by' => $user->id,
+        ]);
+
+        $payload = [
+            'form' => [
+                'cliente' => 'X',
+                'pedidoKg' => '100',
+                'maquina' => 'COMEXI 1',
+                'tipoImpresionEstructura' => 'reverso',
+            ],
+            'assigned_areas' => ['impresion', 'tintas'],
+            'assignment_reason' => 'Solo impresión y tintas',
+        ];
+
+        $this->putJson("/api/work-orders/{$wo->id}/orden-trabajo", $payload, $h)->assertOk();
+
+        $this->assertSame(2, AreaRequest::query()->where('work_order_id', $wo->id)->count());
+        $this->assertDatabaseHas('area_requests', ['work_order_id' => $wo->id, 'area' => 'impresion', 'status' => 'pending']);
+        $this->assertDatabaseHas('area_requests', ['work_order_id' => $wo->id, 'area' => 'tintas', 'status' => 'pending']);
+        $this->assertDatabaseMissing('area_requests', ['work_order_id' => $wo->id, 'area' => 'montaje']);
     }
 
     public function test_work_orders_mi_area_filters_by_pending_area_request(): void

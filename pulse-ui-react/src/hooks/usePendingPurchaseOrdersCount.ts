@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { apiFetch } from "@/lib/api"
+import { useDebouncedWindowEvent } from "@/lib/debounced-event-listener"
 
 const CACHE_TTL_MS = 30_000
 const CACHE_KEY = "pending-purchase-orders-count"
@@ -49,13 +50,9 @@ export function usePendingPurchaseOrdersCount() {
     if (!useCache) void load()
   }, [load])
 
-  React.useEffect(() => {
-    const onRefresh = () => {
-      void load()
-    }
-    window.addEventListener("alerts:refresh", onRefresh)
-    return () => window.removeEventListener("alerts:refresh", onRefresh)
-  }, [load])
+  useDebouncedWindowEvent("alerts:refresh", () => {
+    void load()
+  })
 
   return { count, loading, reload: load }
 }

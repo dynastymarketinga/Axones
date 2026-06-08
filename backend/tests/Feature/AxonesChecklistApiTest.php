@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\DeliveryNoteStatus;
-use App\Enums\QualityOutcome;
 use App\Enums\WorkOrderStatus;
 use App\Models\Client;
 use App\Models\DeliveryNote;
@@ -24,7 +23,7 @@ class AxonesChecklistApiTest extends TestCase
 
     public function test_production_summary_delivery_quality_area_request_reports(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'boss', 'username' => 'boss_checklist']);
         $h = $this->auth($user);
 
         $client = Client::query()->create(['name' => 'Cli X', 'rif' => 'J-900']);
@@ -60,12 +59,12 @@ class AxonesChecklistApiTest extends TestCase
         ], $h)->assertOk();
         $this->assertEquals(DeliveryNoteStatus::Dispatched->value, $dn->fresh()->status);
 
-        $this->putJson("/api/work-orders/{$wo->id}/quality", [
-            'outcome' => QualityOutcome::Pass->value,
-            'notes' => 'Conforme',
-        ], $h)->assertOk();
-
-        $this->getJson("/api/work-orders/{$wo->id}/quality/certificate", $h)->assertOk();
+        // Calidad — API desactivada (UI: Próximamente)
+        // $this->putJson("/api/work-orders/{$wo->id}/quality", [
+        //     'outcome' => QualityOutcome::Pass->value,
+        //     'notes' => 'Conforme',
+        // ], $h)->assertOk();
+        // $this->getJson("/api/work-orders/{$wo->id}/quality/certificate", $h)->assertOk();
 
         $this->getJson('/api/reports/production-time-by-area?from=2026-01-01&to=2026-12-31', $h)->assertOk()
             ->assertJsonStructure(['from', 'to', 'rows']);
@@ -87,9 +86,10 @@ class AxonesChecklistApiTest extends TestCase
         ], [], [], $this->transformHeadersToServerVars($h));
         $this->assertSame(200, $pdfRes->getStatusCode());
 
-        $this->postJson('/api/gate-movements', [
-            'direction' => 'in',
-            'notes' => 'Camión proveedor',
-        ], $h)->assertCreated();
+        // Vigilancia — API desactivada (UI: Próximamente)
+        // $this->postJson('/api/gate-movements', [
+        //     'direction' => 'in',
+        //     'notes' => 'Camión proveedor',
+        // ], $h)->assertCreated();
     }
 }

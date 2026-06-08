@@ -1,10 +1,5 @@
 <?php
 
-/**
- * Calidad — request desactivado (UI: Próximamente). Descomentar al reactivar API.
- */
-
-/*
 namespace App\Http\Requests;
 
 use App\Enums\QualityOutcome;
@@ -30,4 +25,3 @@ class StoreWorkOrderQualityRequest extends FormRequest
         ];
     }
 }
-*/

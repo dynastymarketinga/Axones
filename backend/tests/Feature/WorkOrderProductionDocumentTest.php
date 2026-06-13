@@ -54,7 +54,7 @@ class WorkOrderProductionDocumentTest extends TestCase
 
     public function test_patch_replaces_production_items(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'planificador']);
         $token = $user->createToken('t')->plainTextToken;
 
         $created = $this->postJson('/api/work-orders', [

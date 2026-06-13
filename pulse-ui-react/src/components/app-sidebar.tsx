@@ -20,7 +20,7 @@ import { usePendingPurchaseOrdersCount } from "@/hooks/usePendingPurchaseOrdersC
 import { useWarehouseInsumosPendingCount } from "@/hooks/useWarehouseInsumosPendingCount"
 import { useWarehouseTintasPendingCounts } from "@/hooks/useWarehouseTintasPendingCounts"
 import { AXONES_MENU_TREE, getAccountLeaves } from "@/lib/axones-menu"
-import { filterAxonesMenuTree, canSeeWarehouseInventoryCounts } from "@/lib/axones-roles"
+import { filterAxonesMenuTree, canSeeWarehouseInventoryCounts, type AxonesMenuNode } from "@/lib/axones-roles"
 
 const data = {
   user: {
@@ -69,17 +69,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       "recepciones-oc": pendingPurchaseOrders,
     }
 
-    const add = (nodes: any[]): any[] =>
+    const add = (nodes: AxonesMenuNode[]): MenuItem[] =>
       nodes.map((n) => {
-        if (n && Array.isArray(n.items)) {
+        if ("items" in n && Array.isArray(n.items)) {
           return { ...n, items: add(n.items) }
         }
-        const url = typeof n?.url === "string" ? n.url : ""
+        const url = typeof n.url === "string" ? n.url : ""
         const badgeCount = byUrl[url] ?? 0
         return badgeCount > 0 ? { ...n, badgeCount } : n
       })
 
-    return add(axonesFiltered as any)
+    return add(axonesFiltered)
   }, [areaCounts.counts, axonesFiltered, pendingPurchaseOrders, tintasWarehouseCounts, warehouseInsumosPending])
 
   const accountLeaves = React.useMemo(

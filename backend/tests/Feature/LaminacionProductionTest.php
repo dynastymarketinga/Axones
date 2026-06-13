@@ -34,7 +34,7 @@ class LaminacionProductionTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse('2026-04-22 10:00:00'));
 
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'laminacion']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-L-2',
             'status' => WorkOrderStatus::Open->value,
@@ -58,7 +58,7 @@ class LaminacionProductionTest extends TestCase
 
     public function test_rejects_segment_on_cancelled_work_order(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'laminacion']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-L-3',
             'status' => WorkOrderStatus::Cancelled->value,
@@ -72,7 +72,7 @@ class LaminacionProductionTest extends TestCase
 
     public function test_bobina_usage_summary_scrap_and_solvent(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'laminacion']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-L-4',
             'status' => WorkOrderStatus::Open->value,
@@ -120,7 +120,7 @@ class LaminacionProductionTest extends TestCase
 
     public function test_bobina_material_mismatch_is_rejected(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'laminacion']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-L-5',
             'status' => WorkOrderStatus::Open->value,

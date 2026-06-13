@@ -125,6 +125,12 @@ class PurchaseReceiptService
                             "lines.$index.material_id" => ['El material debe coincidir con el definido en la línea de OC.'],
                         ]);
                     }
+                    $pending = bcsub((string) $pol->quantity_ordered, (string) $pol->quantity_received, 3);
+                    if (bccomp($qty, $pending, 3) === 1) {
+                        throw ValidationException::withMessages([
+                            "lines.$index.quantity" => ['La cantidad supera el pendiente de la línea de OC ('.$pending.').'],
+                        ]);
+                    }
                     $pol->quantity_received = bcadd((string) $pol->quantity_received, $qty, 3);
                     $pol->save();
                 }

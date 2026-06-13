@@ -105,7 +105,7 @@ import {
   type LaminacionTurnTimer,
 } from "./laminacion-turnos"
 import "./work-order-planilla.css"
-import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
+import { AlertCircle, CheckCircle2, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
 import { navigateToMesBandeja } from "@/lib/mes-bandeja-navigation"
@@ -998,7 +998,7 @@ export default function WorkOrderLaminacionControlPanel({
         mesLaminacionToastWarning(`Se detectaron ${outlierWarnings.length} valores atípicos. Se guardará de todas formas.`)
       }
 
-      let closedP = parseLaminacionTurnos(src[LAM_TURNOS_KEY])
+      const closedP = parseLaminacionTurnos(src[LAM_TURNOS_KEY])
       let actualP = parseLaminacionTurnoActual(src[LAM_ACTUAL_KEY])
       if (actualP) {
         actualP = syncLaminacionTurnoFromFormMirror(src, actualP)

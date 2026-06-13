@@ -13,30 +13,24 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronsUpDown,
-  CirclePause,
   CirclePlay,
   ClipboardList,
   Clock,
   Droplets,
   Factory,
   FileSearch,
-  Flag,
   Hash,
   History,
   Hourglass,
   IdCard,
   Layers,
   Link2,
-  LogOut,
   Moon,
   Package,
-  PackageCheck,
   PackageSearch,
-  PackageX,
   PieChart,
   Printer,
   Recycle,
-  ListChecks,
   Ruler,
   Sun,
   Timer,
@@ -65,14 +59,12 @@ import {
 import {
   allRejectedEntriesHaveMotivo,
   hasSalidaBobinaMeta,
-  normalizeSalidaBobinaLabelMeta,
   salidaBobinaLabelTooltipText,
   sumRejectedEntryKg,
 } from "./printing-turnos"
 import { sanitizePositiveDecimalInput } from "./purchase-document-form-ui"
 import { computeLamMaterialConsumo } from "./laminacion-turnos"
 import {
-  materialSpecificationsLabel,
   rejectReasonLabel,
   todayIsoDate,
 } from "./warehouse-return-helpers"
@@ -85,7 +77,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -125,7 +116,6 @@ import {
 } from "@/components/ui/select"
 
 import {
-  LAM_PAUSE_REASONS,
   type BobinaLabelMeta,
   type LamLabelEditorMode,
   sumSalidaKgTurno,

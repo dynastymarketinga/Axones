@@ -34,7 +34,7 @@ class CorteProductionTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse('2026-04-21 08:00:00'));
 
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-C-2',
             'status' => WorkOrderStatus::Open->value,
@@ -68,7 +68,7 @@ class CorteProductionTest extends TestCase
 
     public function test_rejects_segment_on_cancelled_work_order(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-C-3',
             'status' => WorkOrderStatus::Cancelled->value,
@@ -82,7 +82,7 @@ class CorteProductionTest extends TestCase
 
     public function test_bobina_usage_and_summary(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'corte']);
         $wo = WorkOrder::query()->create([
             'code' => 'OT-C-4',
             'status' => WorkOrderStatus::Open->value,

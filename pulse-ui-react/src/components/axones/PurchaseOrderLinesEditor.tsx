@@ -13,7 +13,6 @@ import {
   Package,
   PackagePlus,
   Plus,
-  Ruler,
   Scale,
   X,
 } from "lucide-react"

@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\MaterialRequestController;
 use App\Http\Controllers\Api\MiscellaneousReceiptController;
 use App\Http\Controllers\Api\OperationalAlertController;
+use App\Http\Controllers\Api\OperationalAlertStreamController;
 use App\Http\Controllers\Api\PlanillaSustratoShortageAlertController;
 use App\Http\Controllers\Api\PasswordResetRequestController;
 use App\Http\Controllers\Api\ProductController;

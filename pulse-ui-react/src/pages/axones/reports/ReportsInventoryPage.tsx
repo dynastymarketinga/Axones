@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, BarChart3, PackageX, ArrowRightLeft, Boxes } from "lucide-react"
+import { ArrowDown, ArrowUp, PackageX, ArrowRightLeft, Boxes } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -9,7 +9,6 @@ import {
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
-import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
 import { ReportFilterSection } from "@/components/axones/reports/ReportFilterSection"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,7 +29,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { ApiError, apiFetch } from "@/lib/api"
-import type { LaravelPaginated } from "@/types/api"
 import { cn } from "@/lib/utils"
 
 import { InventoryReportFilters } from "./inventory-report-filters"

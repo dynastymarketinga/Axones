@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 
 import {
   formatMaterialCatalogLabel,
-  formatMaterialDimensionDisplay,
   formatMaterialDimensionHint,
   formatMaterialIdentity,
   formatOcLineReceiptProgress,

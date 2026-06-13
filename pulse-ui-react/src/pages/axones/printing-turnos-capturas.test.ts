@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 
 import {
   accumulatePrintingFromJson,
-  clearPrintingTurnoOperativo,
   flushPrintingTurnoOperativoToCapturas,
   IMP_BOBINAS_SLOTS,
   normalizePrintingTurno,

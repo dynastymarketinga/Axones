@@ -25,7 +25,7 @@ class MasterDataCrudApiTest extends TestCase
 
         $create = $this->postJson('/api/clients', [
             'name' => 'Cliente API',
-            'rif' => 'J-123456789',
+            'rif' => 'J-12345678-9',
             'city' => 'Caracas',
         ], $headers);
 
@@ -33,11 +33,11 @@ class MasterDataCrudApiTest extends TestCase
         $id = (int) $create->json('id');
         $this->assertSame('Cliente API', $create->json('name'));
 
-        $this->getJson("/api/clients/{$id}", $headers)->assertOk()->assertJsonPath('rif', 'J-123456789');
+        $this->getJson("/api/clients/{$id}", $headers)->assertOk()->assertJsonPath('rif', 'J-12345678-9');
 
         $patch = $this->patchJson("/api/clients/{$id}", [
             'name' => 'Cliente API editado',
-            'rif' => 'J-123456789',
+            'rif' => 'J-12345678-9',
         ], $headers);
 
         $patch->assertOk()->assertJsonPath('name', 'Cliente API editado');

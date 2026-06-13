@@ -155,7 +155,7 @@ final class ScrapSubstrateCatalog
                 continue;
             }
             foreach ($group['structure_patterns'] as $pat) {
-                if (str_contains($s, $pat)) {
+                if (preg_match('/\b'.preg_quote($pat, '/').'\b/u', $s) === 1) {
                     return true;
                 }
             }

@@ -1,4 +1,3 @@
-import { parseDecimalTwoInput, sanitizeDecimalTwoInput } from "@/lib/decimal-two-input"
 import { parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 import { sanitizeBobinaKgSlotInput } from "@/lib/bobina-kg-slot"
 
@@ -742,7 +741,7 @@ export function clearPrintingMirrorKeys(): Record<string, unknown> {
 
 export function bootstrapPrintingFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
   let turnos = parsePrintingTurnos(mergedForm[IMP_TURNOS_KEY])
-  let actual = parsePrintingTurnoActual(mergedForm[IMP_ACTUAL_KEY])
+  const actual = parsePrintingTurnoActual(mergedForm[IMP_ACTUAL_KEY])
   const estado = readEstadoArea(mergedForm[IMP_ESTADO_KEY])
 
   let next: Record<string, unknown> = { ...mergedForm }

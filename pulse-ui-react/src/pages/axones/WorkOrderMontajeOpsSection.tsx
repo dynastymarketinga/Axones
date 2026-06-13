@@ -1276,9 +1276,6 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
             horaArranque={props.horaArranque}
           />
           <div className="mes-timer-actions w-full min-w-0">
-            {false ? (
-              null
-            ) : (
               <TooltipProvider delayDuration={200}>
                 <div className="mes-timer-action-stack">
                   <div className="mes-timer-action-labeled">
@@ -1396,7 +1393,6 @@ export default function WorkOrderMontajeOpsSection(props: Props) {
                   ) : null}
                 </div>
               </TooltipProvider>
-            )}
           </div>
         </div>
         )}

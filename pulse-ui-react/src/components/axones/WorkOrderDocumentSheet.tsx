@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -17,11 +16,9 @@ import {
   MapPin,
   Package,
   Phone,
-  Plus,
   Printer,
   ShoppingCart,
   Tag,
-  Trash2,
   User,
 } from "lucide-react"
 
@@ -32,7 +29,6 @@ import type {
   MaterialRow,
   WorkOrderDetailRecord,
 } from "@/types/api"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -42,9 +38,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 
 type LineDraft = {
   key: string

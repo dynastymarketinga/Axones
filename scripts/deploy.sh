@@ -31,6 +31,22 @@ fi
 php artisan axones:cleanup-operational-alerts --no-interaction
 php artisan optimize --no-interaction
 
+ENV_FILE="$APP_ROOT/backend/.env"
+if [ -f "$ENV_FILE" ]; then
+  echo "==> Asistente Axones: habilitar en producción (local, sin LLM)"
+  for pair in "AXONES_ASSISTANT_ENABLED=true" "AXONES_ASSISTANT_PROVIDER=local"; do
+    key="${pair%%=*}"
+    val="${pair#*=}"
+    if grep -q "^${key}=" "$ENV_FILE"; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    else
+      echo "${key}=${val}" >> "$ENV_FILE"
+    fi
+  done
+  cd "$APP_ROOT/backend"
+  php artisan config:cache --no-interaction
+fi
+
 cd "$APP_ROOT/pulse-ui-react"
 npm ci --no-audit --no-fund
 npm run build:deploy

@@ -324,7 +324,7 @@ export async function exportWorkOrderTimeReportExcel(
 
   const ws1 = wb.addWorksheet("Resumen por área", { views: [{ state: "frozen", ySplit: 3 }] })
   writeTitle(ws1, "Reporte de tiempos — Resumen por área", `${period} · ${woLabel}`)
-  let nextRow = addTableBlock(
+  const nextRow = addTableBlock(
     ws1,
     4,
     ["Área", "Efectivo", "Muerto", "Montaje op.", "Desmontaje", "Total", "% ef."],

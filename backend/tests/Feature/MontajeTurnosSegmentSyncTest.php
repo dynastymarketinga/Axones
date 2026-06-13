@@ -154,6 +154,7 @@ class MontajeTurnosSegmentSyncTest extends TestCase
         $form = [
             'pedidoKg' => '100',
             'maquina' => 'COMEXI 1',
+            'tipoImpresionEstructura' => 'superficie',
             'montTurnosMontaje' => [],
             'montTurnoActual' => [
                 'id' => 'turno-open',

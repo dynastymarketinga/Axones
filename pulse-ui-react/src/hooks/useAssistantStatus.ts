@@ -37,7 +37,7 @@ export function useAssistantStatus(): State & { refresh: () => void } {
   useEffect(() => {
     refresh()
     return () => reqRef.current?.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   return { ...state, refresh }

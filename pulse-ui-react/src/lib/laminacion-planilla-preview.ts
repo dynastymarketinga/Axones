@@ -1,6 +1,5 @@
 import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { formatHmsFromSeconds, laminacionMesBandFromWorkOrderRow } from "@/lib/laminacion-mes-band-status"
-import { parseBobinaKgSlotNumber } from "@/lib/bobina-kg-slot"
 import {
   LAM_ACTUAL_KEY,
   LAM_ESTADO_KEY,

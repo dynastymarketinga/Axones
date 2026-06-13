@@ -1,0 +1,12 @@
+name: Enable Assistant Production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  enable-assistant:
+    name: Habilitar asistente en SERVIDOR
+    runs-on: self-hosted
+    steps:
+      - name: Enable assistant env vars
+        run: bash /var/www/axones/scripts/enable-assistant-production.sh

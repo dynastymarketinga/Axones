@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, type ComponentType } from "react"
-import { CalendarClock, Factory, PauseCircle, PlayCircle, Timer, Wrench } from "lucide-react"
+import { CalendarClock, Factory, PauseCircle, PlayCircle, Wrench } from "lucide-react"
 
 import { MesBandejaOtTimesSummary } from "@/components/axones/printing-bandeja-modals"
 import { Badge } from "@/components/ui/badge"

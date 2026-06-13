@@ -28,7 +28,7 @@ class WorkOrderSchedulingTest extends TestCase
 
     public function test_can_move_to_in_programming_and_filter_list(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'planificador']);
         $token = $user->createToken('t')->plainTextToken;
 
         $created = $this->postJson('/api/work-orders', [], ['Authorization' => 'Bearer '.$token])->assertCreated();

@@ -7,7 +7,9 @@ export function useDebouncedWindowEvent(
   delayMs = 400,
 ) {
   const handlerRef = React.useRef(handler)
-  handlerRef.current = handler
+  React.useEffect(() => {
+    handlerRef.current = handler
+  })
 
   React.useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined

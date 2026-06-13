@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
-import { formatQuantityDisplay } from "@/lib/numeric-display"
 import { apiFetch, ApiError } from "@/lib/api"
 import { formatMaterialDimensionDisplay } from "@/lib/purchase-receipt-material-label"
 import {

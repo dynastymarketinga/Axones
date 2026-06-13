@@ -87,7 +87,7 @@ class WorkOrderProgramacionBoardTest extends TestCase
 
     public function test_patch_board_stage_updates_scheduling_status(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['role' => 'planificador']);
         $token = $user->createToken('t')->plainTextToken;
 
         $created = $this->postJson('/api/work-orders', [], ['Authorization' => 'Bearer '.$token])->assertCreated();

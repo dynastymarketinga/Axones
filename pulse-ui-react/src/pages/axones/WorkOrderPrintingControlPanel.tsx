@@ -77,16 +77,12 @@ import {
   parsePrintingTurnoActual,
   parsePrintingTurnos,
   printingTurnoToMirror,
-  PRINTING_REJECT_REASONS,
   readEstadoArea,
   syncPrintingTurnoFromFormMirror,
-  sumEntradaKg,
-  sumSalidaKg,
   turnoProduccionTotals,
   type PrintingTurnoEntry,
   type PrintingTurnTimer,
   allRejectedEntriesHaveMotivo,
-  countRejectedEntryBobinas,
   countRejectedEntryKg,
   newWarehouseRejectedEntry,
   normalizeSalidaBobinaLabelMeta,
@@ -106,7 +102,7 @@ import {
   todayIsoDate,
 } from "./warehouse-return-helpers"
 import "./work-order-planilla.css"
-import { AlertCircle, CheckCircle2, CirclePause, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
+import { AlertCircle, CheckCircle2, CirclePlay, FileSearch, Flag, LogOut, NotebookPen, Save, Sparkles, Users } from "lucide-react"
 
 import { getStoredUser } from "@/lib/auth-storage"
 import { navigateToMesBandeja } from "@/lib/mes-bandeja-navigation"
@@ -1247,7 +1243,7 @@ export default function WorkOrderPrintingControlPanel({
         mesPrintingToastWarning(`Se detectaron ${outlierWarnings.length} valores atípicos. Se guardará de todas formas.`)
       }
 
-      let closedP = parsePrintingTurnos(src[IMP_TURNOS_KEY])
+      const closedP = parsePrintingTurnos(src[IMP_TURNOS_KEY])
       let actualP = parsePrintingTurnoActual(src[IMP_ACTUAL_KEY])
       if (actualP) {
         actualP = syncPrintingTurnoFromFormMirror(src, actualP)

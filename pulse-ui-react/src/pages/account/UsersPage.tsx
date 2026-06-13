@@ -401,10 +401,9 @@ export default function UsersPage() {
 
           {rows && rows.total > 0 ? (
             <CatalogListPagination
-              page={page}
+              rows={rows}
+              loading={loading}
               perPage={perPage}
-              total={rows.total}
-              lastPage={rows.last_page}
               perPageOptions={PER_PAGE_OPTIONS}
               onPageChange={setPage}
               onPerPageChange={(n) => {

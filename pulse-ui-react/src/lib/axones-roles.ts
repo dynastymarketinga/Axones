@@ -29,6 +29,18 @@ export function isAxonesFullAccess(
   return BOSS_ROLES.has(r)
 }
 
+const ASSISTANT_EXTRA_ROLES = new Set(["planificador", "supervisor"])
+
+/**
+ * ¿Este rol puede usar el asistente Axones? Espejo de AssistantAccess::allows
+ * en el backend (jefes + planificador/supervisor por defecto). El backend es
+ * la fuente de verdad: este helper solo decide si mostrar el botón.
+ */
+export function canUseAxonesAssistant(role?: string | null): boolean {
+  if (isAxonesFullAccess(role)) return true
+  return ASSISTANT_EXTRA_ROLES.has(normalizeRole(role))
+}
+
 /** Contadores y campana de almacén (insumos + tintas pendientes). */
 export function canSeeWarehouseInventoryCounts(role?: string | null): boolean {
   const r = normalizeRole(role)

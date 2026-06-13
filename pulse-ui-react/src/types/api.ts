@@ -348,12 +348,6 @@ export type WorkOrderListRow = {
   creator?: Pick<UserRecord, "id" | "name" | "role"> | null
 }
 
-export type UserRecord = {
-  id: number
-  name: string
-  role?: string | null
-}
-
 /** OC abiertas sin OT activa — columna Pendientes del tablero de programación. */
 export type ProgramacionPendingClientOrder = ClientOrderRow & {
   lines?: ClientOrderLineDetail[]

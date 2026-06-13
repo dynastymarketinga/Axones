@@ -5,6 +5,8 @@ import { OperationalAlertsStreamProvider } from "@/providers/operational-alerts-
 
 import { AxonesAppBreadcrumb } from "@/components/axones/AxonesAppBreadcrumb"
 import { AxonesDocumentTitle } from "@/components/axones/AxonesDocumentTitle"
+import { AssistantPanel } from "@/components/axones/assistant/AssistantPanel"
+import { AssistantTrigger } from "@/components/axones/assistant/AssistantTrigger"
 import { Separator } from "@/components/ui/separator"
 import {
   SidebarInset,
@@ -18,10 +20,20 @@ import Footer from "@/layouts/Footer"
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { useAssistantStatus } from "@/hooks/useAssistantStatus"
+import { getStoredUser } from "@/lib/auth-storage"
+import { canUseAxonesAssistant } from "@/lib/axones-roles"
 
 export default function AppLayout() {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(true)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const assistantStatus = useAssistantStatus()
+  const storedUser = getStoredUser()
+  const assistantAvailable =
+    (assistantStatus.status?.enabled ?? false) &&
+    (assistantStatus.status?.allowed ?? false) &&
+    canUseAxonesAssistant(storedUser?.role)
 
   useEffect(() => {
     const onScroll = () => {
@@ -41,6 +53,18 @@ export default function AppLayout() {
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
+
+  useEffect(() => {
+    if (!assistantAvailable) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault()
+        setAssistantOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [assistantAvailable])
 
 
   return (
@@ -74,12 +98,18 @@ export default function AppLayout() {
             <div className="flex items-center gap-1">
               <PwaInstallPrompt />
               <GlobalSearch />
+              {assistantAvailable ? (
+                <AssistantTrigger onClick={() => setAssistantOpen(true)} />
+              ) : null}
               <div className="relative">
                 <NotificationDropdown />
               </div>
             </div>
           </div>
         </header>
+        {assistantAvailable ? (
+          <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
+        ) : null}
 
         {/* PAGE CONTENT */}
         <main className="flex-1 p-6">

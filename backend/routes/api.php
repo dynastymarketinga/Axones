@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AreaRequestController;
+use App\Http\Controllers\Api\AssistantController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BobinaController;
 use App\Http\Controllers\Api\ClientController;
@@ -311,4 +312,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/tinta-mixtures', [TintaMixtureController::class, 'store'])
         ->middleware('area.role:tintas');
     Route::get('/tinta-mixtures/{tinta_mixture}', [TintaMixtureController::class, 'show']);
+
+    // Axones Assistant (Fase 2) — chat embebido. Feature flag + gate por rol.
+    Route::get('/assistant/status', [AssistantController::class, 'status']);
+    Route::middleware(\App\Http\Middleware\AssistantGate::class)->group(function (): void {
+        Route::get('/assistant/suggestions', [AssistantController::class, 'suggestions']);
+        Route::middleware('throttle:20,1')->post('/assistant/chat', [AssistantController::class, 'chat']);
+    });
 });

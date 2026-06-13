@@ -65,4 +65,29 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Asistente Axones (Fase 2)
+    |--------------------------------------------------------------------------
+    |
+    | Copiloto embebido en la SPA. Feature flag OFF por defecto. La API key del
+    | LLM vive solo en backend/.env — nunca expuesta al frontend.
+    |
+    */
+    'assistant' => [
+        'enabled' => env('AXONES_ASSISTANT_ENABLED', false),
+        // local = gratis, sin LLM. anthropic = requiere ANTHROPIC_API_KEY.
+        'provider' => env('AXONES_ASSISTANT_PROVIDER', 'local'),
+        'anthropic_api_key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('AXONES_ASSISTANT_MODEL', 'claude-3-5-haiku-latest'),
+        'analysis_model' => env('AXONES_ASSISTANT_ANALYSIS_MODEL', 'claude-sonnet-4-20250514'),
+        'max_tokens' => (int) env('AXONES_ASSISTANT_MAX_TOKENS', 2048),
+        'daily_limit_per_user' => (int) env('AXONES_ASSISTANT_DAILY_LIMIT', 50),
+        'timeout_seconds' => (int) env('AXONES_ASSISTANT_TIMEOUT', 45),
+        'allowed_roles' => array_values(array_filter(array_map('trim', explode(',', (string) env(
+            'AXONES_ASSISTANT_ALLOWED_ROLES',
+            'boss,admin,jefe_supremo,superadmin,jefe_operaciones,planificador,supervisor'
+        ))))),
+    ],
+
 ];

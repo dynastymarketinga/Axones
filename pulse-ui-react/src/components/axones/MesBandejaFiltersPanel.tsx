@@ -18,6 +18,10 @@ type MesBandejaFiltersPanelProps = {
   hint?: ReactNode | null
   /** Si es null, no se muestra la línea bajo el título. */
   headerSubtitle?: ReactNode | null
+  /** Título del panel (p. ej. «Filtros del listado» en catálogos). */
+  title?: string
+  /** Etiqueta del botón limpiar filtros. */
+  clearLabel?: string
   className?: string
 }
 
@@ -31,6 +35,8 @@ export function MesBandejaFiltersPanel({
   searchFields,
   hint,
   headerSubtitle = DEFAULT_HEADER_SUBTITLE,
+  title = "Filtros de la bandeja",
+  clearLabel = "Limpiar",
   className,
 }: MesBandejaFiltersPanelProps) {
   const hasActive = activeFilterCount > 0
@@ -48,7 +54,7 @@ export function MesBandejaFiltersPanel({
             <SlidersHorizontal className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold tracking-tight text-foreground">Filtros de la bandeja</p>
+            <p className="text-sm font-semibold tracking-tight text-foreground">{title}</p>
             {showHeaderSubtitle && headerSubtitle ? (
               <p className="text-muted-foreground hidden text-xs leading-snug sm:block">{headerSubtitle}</p>
             ) : null}
@@ -77,7 +83,7 @@ export function MesBandejaFiltersPanel({
             onClick={onClear}
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-            Limpiar
+            {clearLabel}
           </Button>
         </div>
       </div>

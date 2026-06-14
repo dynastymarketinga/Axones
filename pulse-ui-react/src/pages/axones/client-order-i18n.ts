@@ -1,3 +1,5 @@
+import { formatDecimalTwoDisplay } from "@/lib/decimal-two-input"
+
 /** Nombre visible del módulo OC (pedido comercial) — menú y cabeceras. */
 export const CLIENT_ORDER_MODULE_TITLE = "Pedido cliente (OC)"
 
@@ -7,8 +9,73 @@ export const CLIENT_ORDER_MODULE_LIST_FOCUS = "órdenes OC cliente"
 /** Pantalla crear OC (título de página). */
 export const CLIENT_ORDER_MODULE_NEW_TITLE = "Nueva orden — pedido cliente"
 
+/** Subtítulo pantalla crear OC. */
+export const CLIENT_ORDER_MODULE_NEW_SUBTITLE =
+  "Registre cliente, notas y líneas de producto para generar el pedido comercial (OC)."
+
 /** Botón «Nueva» en listados (evita repetir el título largo de pantalla). */
 export const CLIENT_ORDER_NEW_BUTTON_LABEL = "Nueva orden"
+
+/** Subtítulo del listado de pedidos cliente (OC). */
+export const CLIENT_ORDER_LIST_SUBTITLE =
+  "Pedidos comerciales del cliente antes de pasar a producción (OT)."
+
+/** Búsqueda del listado (`client-orders?q=` — código, cliente o producto). */
+export const CLIENT_ORDER_LIST_SEARCH_LABEL = "Buscar (código, cliente, producto)"
+export const CLIENT_ORDER_LIST_SEARCH_PLACEHOLDER = "Ej. OC-CLI… o Víctor"
+
+/** Panel de filtros del listado. */
+export const CLIENT_ORDER_LIST_FILTERS_SUBTITLE =
+  "Estado y pendiente OT al servidor; búsqueda al escribir."
+export const CLIENT_ORDER_LIST_FILTERS_HINT =
+  "Enter fuerza búsqueda inmediata · «Solo sin OT» muestra pedidos abiertos sin orden de producción vinculada."
+
+/** Columnas del listado (primera línea con producto). */
+export const CLIENT_ORDER_LIST_PRODUCT_COLUMN = "Producto"
+export const CLIENT_ORDER_LIST_QUANTITY_COLUMN = "Cantidad"
+
+export function clientOrderListProductLabel(row: {
+  first_line_with_product?: {
+    product?: { name?: string | null } | null
+  } | null
+}): string {
+  const name = row.first_line_with_product?.product?.name?.trim()
+  if (!name) return "—"
+  return name
+}
+
+export function clientOrderListExtraLinesCount(row: { lines_count?: number }): number {
+  const total = row.lines_count ?? 0
+  return total > 1 ? total - 1 : 0
+}
+
+export function clientOrderListQuantityLabel(row: {
+  first_line_with_product?: {
+    quantity?: string
+    unit?: string
+  } | null
+}): string {
+  const line = row.first_line_with_product
+  if (!line?.quantity) return "—"
+  const qty = formatDecimalTwoDisplay(line.quantity)
+  const unit = line.unit?.trim()
+  return unit ? `${qty} ${unit}` : qty
+}
+
+/** Paginación local del editor de líneas (alta / edición OC). */
+export const CLIENT_ORDER_LINES_PAGE_SIZE = 5
+
+export function clientOrderLinesPagerLabel(
+  from: number,
+  to: number,
+  total: number,
+  page: number,
+  totalPages: number,
+): string {
+  return `Líneas ${from}–${to} de ${total} · Página ${page} de ${totalPages}`
+}
+
+export const CLIENT_ORDER_LINES_ADD_BUTTON = "Añadir línea"
 
 /** Validación campo Notas (formulario nueva OC). */
 export const CLIENT_ORDER_NOTES_PLACEHOLDER =
@@ -33,6 +100,22 @@ export const CLIENT_ORDER_LINE_DESCRIPTION_PLACEHOLDER =
   "Observación de esta línea (no modifica la ficha del producto)."
 
 export const CLIENT_ORDER_CONFIRM_ORDERED_AT_LABEL = "Fecha del pedido"
+
+/** Fecha comercial en detalle/listado (sin hora; evita desfase TZ en `YYYY-MM-DD`). */
+export function clientOrderOrderedAtDisplay(value: string | null | undefined): string {
+  if (!value?.trim()) return "—"
+  const trimmed = value.trim()
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed)
+  const parsed = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return "—"
+  return parsed.toLocaleDateString("es-VE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+}
 
 /** Validación líneas (formulario nueva OC). */
 export const CLIENT_ORDER_LINE_PRODUCT_REQUIRED_HELPER = "Seleccione un producto."
@@ -100,6 +183,13 @@ export const CLIENT_ORDER_TOAST_SAVE_FAILED = "No se pudo guardar el pedido clie
 export const CLIENT_ORDER_LOADING_LABEL = "Cargando pedido cliente (OC)…"
 export const CLIENT_ORDER_DETAIL_NO_OT_LINK =
   "Aún no hay OT vinculada a este pedido cliente (OC)."
+
+/** Modal detalle OC — tabla de líneas (solo lectura). */
+export const CLIENT_ORDER_DETAIL_LINES_HELPER =
+  "Vista compacta por línea: producto, C.P.E., M.P.P.S., material, descripción, cantidad y unidad."
+export const CLIENT_ORDER_DETAIL_LINE_CPE_COLUMN = "C.P.E."
+export const CLIENT_ORDER_DETAIL_LINE_MPPS_COLUMN = "M.P.P.S."
+export const CLIENT_ORDER_DETAIL_LINE_UNIT_COLUMN = "Unidad"
 
 /** Etiquetas en pantalla para estados almacenados en inglés en la API. */
 export const CLIENT_ORDER_STATUS_ES: Record<string, string> = {

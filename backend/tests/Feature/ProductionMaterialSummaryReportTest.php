@@ -234,4 +234,128 @@ class ProductionMaterialSummaryReportTest extends TestCase
 
         Carbon::setTestNow();
     }
+
+    /**
+     * Escenario de validación operativa (Valeria): 2 OTs, cada una con 2 controles
+     * de impresión, 2 de laminación y 2 de corte — verificar suma y filtrado.
+     */
+    public function test_production_material_summary_two_ots_two_controls_per_area_sums_and_filters(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 18:00:00'));
+
+        $user = User::factory()->create();
+        $h = ['Authorization' => 'Bearer '.$user->createToken('t')->plainTextToken];
+
+        $client = Client::query()->create(['name' => 'Cliente Prueba Suma', 'rif' => 'J-PRUEBA-1']);
+
+        $wo1 = WorkOrder::query()->create([
+            'code' => 'PRUEBA-SUMA-1',
+            'client_id' => $client->id,
+            'document_date' => '2026-06-13',
+            'created_at' => '2026-06-13 10:00:00',
+            'updated_at' => '2026-06-13 10:00:00',
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo1->id,
+            'form' => [
+                'impTurnosImpresion' => [
+                    ['id' => 'pi-1', 'closed_at' => '2026-06-13 11:00:00', 'salidaBobinasKg' => ['100']],
+                    ['id' => 'pi-2', 'closed_at' => '2026-06-13 12:00:00', 'salidaBobinasKg' => ['50']],
+                ],
+                'lamTurnosLaminacion' => [
+                    ['id' => 'lam-1', 'closed_at' => '2026-06-13 13:00:00', 'salidaBobinasKg' => ['80']],
+                    ['id' => 'lam-2', 'closed_at' => '2026-06-13 14:00:00', 'salidaBobinasKg' => ['20']],
+                ],
+                'cor_turnos' => [
+                    ['id' => 'cor-1', 'closed_at' => '2026-06-13 15:00:00', 'metrics' => ['salida_total_kg' => '60']],
+                    ['id' => 'cor-2', 'closed_at' => '2026-06-13 16:00:00', 'metrics' => ['salida_total_kg' => '40']],
+                ],
+            ],
+        ]);
+
+        $wo2 = WorkOrder::query()->create([
+            'code' => 'PRUEBA-SUMA-2',
+            'client_id' => $client->id,
+            'document_date' => '2026-06-13',
+            'created_at' => '2026-06-13 10:30:00',
+            'updated_at' => '2026-06-13 10:30:00',
+        ]);
+        WorkOrderTechnicalDocument::query()->create([
+            'work_order_id' => $wo2->id,
+            'form' => [
+                'impTurnosImpresion' => [
+                    ['id' => 'pi-3', 'closed_at' => '2026-06-13 11:30:00', 'salidaBobinasKg' => ['200']],
+                    ['id' => 'pi-4', 'closed_at' => '2026-06-13 12:30:00', 'salidaBobinasKg' => ['30']],
+                ],
+                'lamTurnosLaminacion' => [
+                    ['id' => 'lam-3', 'closed_at' => '2026-06-13 13:30:00', 'salidaBobinasKg' => ['70']],
+                    ['id' => 'lam-4', 'closed_at' => '2026-06-13 14:30:00', 'salidaBobinasKg' => ['30']],
+                ],
+                'cor_turnos' => [
+                    ['id' => 'cor-3', 'closed_at' => '2026-06-13 15:30:00', 'metrics' => ['salida_total_kg' => '25']],
+                    ['id' => 'cor-4', 'closed_at' => '2026-06-13 16:30:00', 'metrics' => ['salida_total_kg' => '75']],
+                ],
+            ],
+        ]);
+
+        // Suma planta: OT1 (150+100+100) + OT2 (230+100+100) = 380 + 200 + 200 = 780
+        $plant = $this->getJson('/api/reports/production-material-summary?from=2026-06-13&to=2026-06-13', $h);
+        $plant->assertOk()
+            ->assertJsonPath('totals.material_impreso_kg', '380.000')
+            ->assertJsonPath('totals.material_laminado_kg', '200.000')
+            ->assertJsonPath('totals.material_cortado_kg', '200.000')
+            ->assertJsonPath('totals.total_general_kg', '780.000')
+            ->assertJsonPath('work_order_count', 2);
+
+        $rows = $plant->json('work_orders');
+        $this->assertCount(2, $rows);
+        $byCode = collect($rows)->keyBy('work_order_code');
+        $this->assertSame('150.000', $byCode['PRUEBA-SUMA-1']['material_impreso_kg']);
+        $this->assertSame('100.000', $byCode['PRUEBA-SUMA-1']['material_laminado_kg']);
+        $this->assertSame('100.000', $byCode['PRUEBA-SUMA-1']['material_cortado_kg']);
+        $this->assertSame('230.000', $byCode['PRUEBA-SUMA-2']['material_impreso_kg']);
+        $this->assertSame('100.000', $byCode['PRUEBA-SUMA-2']['material_laminado_kg']);
+        $this->assertSame('100.000', $byCode['PRUEBA-SUMA-2']['material_cortado_kg']);
+
+        // Footer = suma de filas
+        $rowImpSum = array_sum(array_map(
+            fn (array $r): float => (float) $r['material_impreso_kg'],
+            $rows,
+        ));
+        $rowLamSum = array_sum(array_map(
+            fn (array $r): float => (float) $r['material_laminado_kg'],
+            $rows,
+        ));
+        $rowCorSum = array_sum(array_map(
+            fn (array $r): float => (float) $r['material_cortado_kg'],
+            $rows,
+        ));
+        $this->assertSame(380.0, $rowImpSum);
+        $this->assertSame(200.0, $rowLamSum);
+        $this->assertSame(200.0, $rowCorSum);
+        $this->assertSame(780.0, $rowImpSum + $rowLamSum + $rowCorSum);
+
+        // Filtrado: fuera del período no deben aparecer
+        $this->getJson('/api/reports/production-material-summary?from=2026-06-01&to=2026-06-12', $h)
+            ->assertOk()
+            ->assertJsonPath('work_order_count', 0)
+            ->assertJsonPath('totals.total_general_kg', '0.000');
+
+        // Resumen por OT (controles agregados en una sola OT)
+        $this->getJson('/api/reports/work-order-controls-summary?work_order_id='.$wo1->id, $h)
+            ->assertOk()
+            ->assertJsonPath('production_summary.material_listo.impreso.peso_total_kg', '150.000')
+            ->assertJsonPath('production_summary.material_listo.laminado.peso_total_salida_kg', '100.000')
+            ->assertJsonPath('production_summary.material_listo.corte_kg_salida', '100.000')
+            ->assertJsonPath('production_summary.material_listo.total_general_kg', '350.000');
+
+        $this->getJson('/api/reports/work-order-controls-summary?work_order_id='.$wo2->id, $h)
+            ->assertOk()
+            ->assertJsonPath('production_summary.material_listo.impreso.peso_total_kg', '230.000')
+            ->assertJsonPath('production_summary.material_listo.laminado.peso_total_salida_kg', '100.000')
+            ->assertJsonPath('production_summary.material_listo.corte_kg_salida', '100.000')
+            ->assertJsonPath('production_summary.material_listo.total_general_kg', '430.000');
+
+        Carbon::setTestNow();
+    }
 }

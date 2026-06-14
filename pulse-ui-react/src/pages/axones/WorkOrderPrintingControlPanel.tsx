@@ -13,6 +13,7 @@ import {
 } from "@/components/axones/mes"
 import { apiFetch, ApiError } from "@/lib/api"
 import type { LaravelPaginated, MaterialRow, SupplierRecord } from "@/types/api"
+import { showAxonesSuccessSwal, type AxonesSwalTone } from "@/lib/axones-success-swal"
 import { appAbsoluteUrl } from "@/lib/app-base-path"
 import { Button } from "@/components/ui/button"
 import {
@@ -271,34 +272,88 @@ function MesPrintingConfirmDialog(props: MesPrintingConfirmDialogProps) {
   )
 }
 
-const MES_PRINTING_SUCCESS_TOAST_CLASSNAMES = {
+const MES_PRINTING_WARNING_TOAST_CLASSNAMES = {
   toast:
-    "!border !border-slate-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
+    "!border !border-amber-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
   title: "!text-slate-900 text-sm font-medium",
-  success: "!bg-white !border-slate-200 !text-slate-900",
+  warning: "!bg-white !border-amber-200 !text-slate-900",
   description: "!text-slate-600 text-sm leading-snug",
-  icon: "text-violet-600",
+  icon: "text-amber-600",
 } as const
 
-function mesPrintingToastSuccess(message: string) {
-  toast.success(message, {
-    richColors: false,
-    classNames: MES_PRINTING_SUCCESS_TOAST_CLASSNAMES,
-    icon: createElement(Sparkles, { className: "h-4 w-4 shrink-0 text-violet-600", "aria-hidden": true }),
-  })
+function mesPrintingShowSwal(
+  tone: AxonesSwalTone,
+  title: string,
+  text?: string,
+  options?: { html?: string },
+) {
+  void showAxonesSuccessSwal(title, text, { ...options, tone })
 }
 
 function mesPrintingToastWarning(message: string) {
   toast.warning(message, {
     richColors: false,
-    classNames: {
-      ...MES_PRINTING_SUCCESS_TOAST_CLASSNAMES,
-      toast: "!border !border-amber-200 !bg-white !text-slate-900 shadow-md [&_[data-description]]:!text-slate-600",
-      warning: "!bg-white !border-amber-200 !text-slate-900",
-      icon: "text-amber-600",
-    },
+    classNames: MES_PRINTING_WARNING_TOAST_CLASSNAMES,
     icon: createElement(AlertCircle, { className: "h-4 w-4 shrink-0 text-amber-600", "aria-hidden": true }),
   })
+}
+
+/** Texto del modal «Guardado» según estado MES y permisos. */
+function printingGuardadoSwalContent(
+  formSnapshot: Record<string, unknown>,
+  canFinalizeArea: boolean,
+): { text?: string; html?: string } {
+  const op = derivePrintingOperativoEstado(formSnapshot)
+  const wf = op.workflow
+
+  if (wf === "entre_turnos") {
+    const finalizeAreaLine = canFinalizeArea
+      ? `<li><span class="font-semibold">Finalizar cierre</span>: si ya no queda impresión en esta OT, pulse <span class="font-semibold">Guardar</span> y elija esta opción del área Impresión.</li>`
+      : `<li><span class="font-semibold">Finalizar cierre</span>: avise a jefatura cuando la impresión de la OT esté completa.</li>`
+    return {
+      html: `<p class="text-sm leading-relaxed">Estado: <span class="font-semibold">Entre turnos</span> — datos guardados en el servidor.</p>
+<p class="mt-3 text-sm font-semibold">Próximo paso</p>
+<ul class="mt-1 list-disc space-y-2 pl-5 text-left text-sm leading-relaxed">
+<li><span class="font-semibold">Finalizar turno</span> (siguiente cuadrilla): abra un <span class="font-semibold">turno nuevo</span> arriba; al terminar la jornada, <span class="font-semibold">Guardar → Finalizar turno</span>.</li>
+${finalizeAreaLine}
+</ul>`,
+    }
+  }
+
+  if (wf === "turno_abierto") {
+    const finalizeAreaHint = canFinalizeArea
+      ? ' o <span class="font-semibold">Finalizar cierre</span> del área Impresión'
+      : ""
+    return {
+      html: `<p class="text-sm leading-relaxed">Turno de planta abierto y guardado. Use play en «Cronómetro de producción» para iniciar tiempos.</p>
+<p class="mt-2 text-sm leading-relaxed">Al terminar la jornada: <span class="font-semibold">Guardar → Finalizar turno</span>${finalizeAreaHint}.</p>`,
+    }
+  }
+
+  const text = op.title.trim()
+  return text ? { text } : {}
+}
+
+/** Modal breve: título + detalle opcional (estado en bandeja). */
+function mesPrintingSwalWithBandeja(
+  formSnapshot: Record<string, unknown>,
+  title: string,
+  detail?: string,
+  canFinalizeArea = false,
+  tone: AxonesSwalTone = "guardado",
+) {
+  if (detail?.trim()) {
+    void showAxonesSuccessSwal(title, detail.trim(), { tone })
+    return
+  }
+  if (title === "Guardado") {
+    const content = printingGuardadoSwalContent(formSnapshot, canFinalizeArea)
+    void showAxonesSuccessSwal(title, content.text, { html: content.html, tone: "guardado" })
+    return
+  }
+  const op = derivePrintingOperativoEstado(formSnapshot)
+  const text = op.title.trim()
+  void showAxonesSuccessSwal(title, text && text !== title ? text : undefined, { tone })
 }
 
 function purgeLegacyPrintingControlDraft(workOrderId: number) {
@@ -540,6 +595,8 @@ export default function WorkOrderPrintingControlPanel({
 
   const formRef = useRef(form)
   formRef.current = form
+  const canFinalizeOrderRef = useRef(canFinalizeOrder)
+  canFinalizeOrderRef.current = canFinalizeOrder
 
   const closedTurnos = useMemo(() => parsePrintingTurnos(form[IMP_TURNOS_KEY]), [form])
   const lastClosedTurno = useMemo(() => getLastClosedPrintingTurno(closedTurnos), [closedTurnos])
@@ -968,7 +1025,7 @@ export default function WorkOrderPrintingControlPanel({
     }
     patchActiveTurn(() => nextTurn)
     setTakeoverConfirmOpen(false)
-    mesPrintingToastSuccess("Control tomado. Puede editar el turno.")
+    mesPrintingShowSwal("control", "Control tomado", "Puede editar el turno.")
     void persistPrintingForm(
       {
         ...form,
@@ -1188,7 +1245,8 @@ export default function WorkOrderPrintingControlPanel({
         skipProductionSaveGuard?: boolean
         notifyProductionSave?: boolean
         successMessage?: string
-        /** Evita toast por defecto cuando el llamador muestra uno propio. */
+        successTone?: AxonesSwalTone
+        /** Evita aviso por defecto cuando el llamador muestra SweetAlert propio. */
         suppressSuccessToast?: boolean
       },
     ): Promise<boolean> => {
@@ -1339,14 +1397,25 @@ export default function WorkOrderPrintingControlPanel({
         })
         setForm(bootstrapPrintingFormState(normalizedForm))
         if (!options?.suppressSuccessToast) {
-          mesPrintingToastSuccess(
-            options?.successMessage ??
-              (shouldFlushCaptura
-                ? "Producción guardada. Bobinas y desperdicio del turno quedaron en cero para un nuevo registro."
-                : notifyProductionSave
-                  ? "Control de impresión guardado."
-                  : "Turno de planta guardado en el servidor."),
-          )
+          if (options?.successMessage) {
+            mesPrintingShowSwal(
+              options.successTone ?? "guardado",
+              options.successMessage,
+            )
+          } else if (shouldFlushCaptura) {
+            mesPrintingShowSwal(
+              "guardado",
+              "Producción guardada",
+              "Bobinas y desperdicio del turno quedaron en cero para un nuevo registro.",
+            )
+          } else {
+            mesPrintingSwalWithBandeja(
+              normalizedForm,
+              "Guardado",
+              undefined,
+              canFinalizeOrderRef.current,
+            )
+          }
         }
         window.dispatchEvent(
           new CustomEvent(PRINTING_CONTROL_SAVED_EVENT, { detail: { workOrderId } }),
@@ -1388,6 +1457,7 @@ export default function WorkOrderPrintingControlPanel({
         skipProductionSaveGuard: true,
         notifyProductionSave: false,
         successMessage,
+        successTone: "timer",
       },
     )
   }
@@ -1484,6 +1554,7 @@ export default function WorkOrderPrintingControlPanel({
         skipProductionSaveGuard: true,
         notifyProductionSave: false,
         successMessage: "Producción reanudada.",
+        successTone: "timer",
       },
     )
   }
@@ -1567,8 +1638,12 @@ export default function WorkOrderPrintingControlPanel({
           suppressSuccessToast: true,
         }).then((ok) => {
           if (ok) {
-            mesPrintingToastSuccess(
-              "Parada registrada. El cronómetro sigue en pausa; use play para reanudar el tiempo efectivo.",
+            mesPrintingSwalWithBandeja(
+              nextForm,
+              "Parada guardada",
+              "El cronómetro sigue en pausa; use play para reanudar el tiempo efectivo.",
+              false,
+              "timer",
             )
           }
         })
@@ -1621,12 +1696,14 @@ export default function WorkOrderPrintingControlPanel({
     setDraftStaging({ name: "", role: "operador" })
     setStartTurnConfirmOpen(false)
     void (async () => {
-      await persistPrintingForm(nextForm, {
+      const ok = await persistPrintingForm(nextForm, {
         skipProductionSaveGuard: true,
         notifyProductionSave: false,
-        successMessage:
-          "Turno de planta abierto y guardado. Use play en «Cronómetro de producción» para iniciar tiempos.",
+        suppressSuccessToast: true,
       })
+      if (ok) {
+        mesPrintingSwalWithBandeja(nextForm, "Guardado", undefined, canFinalizeOrder)
+      }
       await tryAdvanceBoardStageToImpresion()
     })()
   }
@@ -1692,7 +1769,9 @@ export default function WorkOrderPrintingControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesPrintingToastSuccess(
+      mesPrintingShowSwal(
+        "turno",
+        "Turno cerrado",
         options?.successMessage ??
           "Turno guardado en el historial. Elija Turno, Grupo y Personal para iniciar el siguiente.",
       )
@@ -1808,7 +1887,11 @@ export default function WorkOrderPrintingControlPanel({
       suppressSuccessToast: true,
     })
     if (ok) {
-      mesPrintingToastSuccess("Área de impresión finalizada.")
+      mesPrintingShowSwal(
+        "finalizado",
+        "Área finalizada",
+        "El área de impresión quedó cerrada en el sistema.",
+      )
       navigateToMesBandeja(navigate, "printing", "finalizadas")
     }
   }
@@ -2162,7 +2245,9 @@ export default function WorkOrderPrintingControlPanel({
         rechazadaEntries: [newWarehouseRejectedEntry()],
       })
       setReturnWarehouseOpen(false)
-      mesPrintingToastSuccess(
+      mesPrintingShowSwal(
+        "warehouse",
+        hasBuena ? "Devolución registrada" : "Solicitud enviada",
         hasBuena
           ? "Devolución buena registrada: el stock de sustrato se actualizó en Materiales."
           : "Solicitud enviada a almacén. Devoluciones registradas.",
@@ -2181,6 +2266,7 @@ export default function WorkOrderPrintingControlPanel({
       skipProductionSaveGuard: true,
       notifyProductionSave: false,
       successMessage: "Producción acumulada sincronizada con el servidor.",
+      successTone: "sync",
     })
   }
 

@@ -118,6 +118,8 @@ export type ClientOrderRow = {
   first_line_with_product?: {
     id: number
     product_id: number
+    quantity?: string
+    unit?: string
     product?: Pick<ProductRecord, "id" | "name" | "cpe" | "mps"> | null
   } | null
 }
@@ -174,7 +176,7 @@ export type ClientOrderLineDetail = {
   unit?: string
   description?: string | null
   notes?: string | null
-  product?: Pick<ProductRecord, "id" | "name"> | null
+  product?: Pick<ProductRecord, "id" | "name" | "cpe" | "mps"> | null
   material?: Pick<MaterialRow, "id" | "sku" | "name"> | null
 }
 

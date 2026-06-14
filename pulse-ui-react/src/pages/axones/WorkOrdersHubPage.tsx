@@ -21,8 +21,10 @@ import {
   Layers,
   ListOrdered,
   Package,
+  Plus,
   Scale,
   Scissors,
+  SearchX,
   Settings2,
   SlidersHorizontal,
   UserCircle,
@@ -44,32 +46,36 @@ import {
   type HubSupervisorBucket,
   type HubSupervisorFilter,
 } from "@/lib/work-order-hub-supervisor"
-import { CLIENT_ORDER_MODULE_LIST_FOCUS } from "@/pages/axones/client-order-i18n"
 import type {
   ClientOrderDetailRecord,
-  ClientOrderRow,
   LaravelPaginated,
   WorkOrderListRow,
 } from "@/types/api"
+import { ClientOrderCombobox } from "@/components/axones/ClientOrderCombobox"
 import { getStoredUser } from "@/lib/auth-storage"
-import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
+import { CatalogEmptyState } from "@/components/axones/CatalogEmptyState"
+import { CatalogListPagination } from "@/components/axones/CatalogListPagination"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
   CatalogTableHead,
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
+import { InsumosBandejaTableCard } from "@/components/axones/InsumosBandejaTable"
+import { MesBandejaFiltersPanel } from "@/components/axones/MesBandejaFiltersPanel"
 import {
   catalogActionButtonClass,
+  catalogMasterFormPanelWideClass,
+  catalogMasterFormSectionClass,
   catalogSelectTriggerClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
-import { InlineSpinner, LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { catalogCountLabel } from "@/lib/catalog-count-label"
+import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import {
   Table,
@@ -624,13 +630,12 @@ export default function WorkOrdersHubPage() {
   const [qApi, setQApi] = useState("")
   const qDebounceRef = useRef<number | null>(null)
   const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<WorkOrderListRow> | null>(null)
   const [supervisorFilter, setSupervisorFilter] = useState<SupervisorFilter>("all")
   const [mesNow, setMesNow] = useState(() => Date.now())
 
-  const [coLoading, setCoLoading] = useState(false)
-  const [clientOrders, setClientOrders] = useState<ClientOrderRow[]>([])
   const [clientOrderId, setClientOrderId] = useState<string>("")
   const [coDetail, setCoDetail] = useState<ClientOrderDetailRecord | null>(null)
   const [coDetailLoading, setCoDetailLoading] = useState(false)
@@ -700,7 +705,7 @@ export default function WorkOrdersHubPage() {
       const data = await apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", {
         query: {
           page,
-          per_page: 20,
+          per_page: perPage,
           q: qApi || undefined,
           include_area_summaries: "tintas",
         },
@@ -713,23 +718,7 @@ export default function WorkOrdersHubPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, qApi])
-
-  const loadClientOrders = useCallback(async () => {
-    setCoLoading(true)
-    try {
-      const data = await apiFetch<LaravelPaginated<ClientOrderRow>>("client-orders", {
-        query: { per_page: 100, page: 1, sort: "asc" },
-      })
-      setClientOrders(data.data ?? [])
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error(`No se pudieron cargar las ${CLIENT_ORDER_MODULE_LIST_FOCUS}.`)
-      setClientOrders([])
-    } finally {
-      setCoLoading(false)
-    }
-  }, [])
+  }, [page, perPage, qApi])
 
   useEffect(() => {
     void loadList()
@@ -779,13 +768,6 @@ export default function WorkOrdersHubPage() {
     }
   }, [rows?.data, mesNow])
 
-  function clientOrderLabel(c: ClientOrderRow): string {
-    const parts = [c.code, c.client?.name, c.first_line_with_product?.product?.name]
-      .map((p) => (typeof p === "string" && p.trim() ? p.trim() : null))
-      .filter((p): p is string => Boolean(p))
-    return parts.length ? parts.join(" — ") : c.code
-  }
-
   function createOt() {
     if (!canCreateOt) {
       toast.error("Su rol no tiene permiso para crear órdenes de trabajo.")
@@ -834,12 +816,117 @@ export default function WorkOrdersHubPage() {
   )
   const currentSlide = summarySlides[summarySlideIndex] ?? null
 
+  const hasActiveFilters = supervisorFilter !== "all" || qApi.trim() !== ""
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0
+    if (supervisorFilter !== "all") n++
+    if (qApi.trim()) n++
+    return n
+  }, [supervisorFilter, qApi])
+
+  const clearFilters = useCallback(() => {
+    setSupervisorFilter("all")
+    setQInput("")
+    setQApi("")
+    setPage(1)
+  }, [])
+
+  const supervisorTabsRow = (
+    <div
+      role="tablist"
+      aria-label="Filtro por etapa de supervisión"
+      className="flex flex-wrap items-center gap-2"
+    >
+      {SUPERVISOR_TAB_DEFS.map(({ filter: f, label, Icon }) => {
+        const active = supervisorFilter === f
+        const count = supervisorCounts[f]
+        if (f === "all") {
+          return (
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={cn(
+                SUPERVISOR_TAB_BTN_CLASS,
+                active ? ALL_TAB_STYLES.tabActive : ALL_TAB_STYLES.tabInactive,
+              )}
+              onClick={() => setSupervisorFilter("all")}
+            >
+              <Icon
+                className={cn(
+                  "h-4 w-4 shrink-0",
+                  active ? ALL_TAB_STYLES.iconActive : ALL_TAB_STYLES.iconIdle,
+                )}
+                aria-hidden
+              />
+              {label} ({count})
+            </button>
+          )
+        }
+        const st = SUPERVISOR_BUCKET_STYLES[f as HubSupervisorBucket]
+        return (
+          <button
+            key={f}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={cn(
+              SUPERVISOR_TAB_BTN_CLASS,
+              active ? st.tabActive : st.tabInactive,
+            )}
+            onClick={() => setSupervisorFilter(f)}
+          >
+            <Icon
+              className={cn(
+                "h-4 w-4 shrink-0",
+                active ? st.iconClassActive : st.iconClass,
+              )}
+              aria-hidden
+            />
+            {label} ({count})
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  const searchFields = (
+    <CatalogSearchField
+      id="wo-q"
+      label="Buscar orden (número / referencia / cliente)"
+      placeholder="Ej: OT-2026-0007, PED-…, Millennium…"
+      value={qInput}
+      onChange={(ev) => {
+        setPage(1)
+        setQInput(ev.target.value)
+      }}
+      onKeyDown={(ev) => {
+        if (ev.key === "Enter") {
+          setPage(1)
+          const next = ev.currentTarget.value.trim()
+          setQApi(next)
+        }
+      }}
+      className="min-w-0"
+    />
+  )
+
   return (
     <TooltipProvider delayDuration={150}>
       <CatalogPageShell
         title="Órdenes de trabajo"
         subtitle="Lista, creación desde pedido cliente (OC) y acceso a planillas."
         icon={ClipboardList}
+        headerVariant="elevated"
+        statBadge={
+          rows && !loading ? (
+            <Badge variant="secondary" className="font-normal tabular-nums">
+              {catalogCountLabel(rows.total, "orden", "órdenes")}
+            </Badge>
+          ) : null
+        }
       >
         <Dialog
           open={deactivateOpen}
@@ -1007,198 +1094,107 @@ export default function WorkOrdersHubPage() {
         ) : (
           <>
             {canCreateOt ? (
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-center text-base font-semibold">
+              <div className={catalogMasterFormPanelWideClass}>
+                <div className={catalogMasterFormSectionClass}>
+                  <h2 className="text-center text-base font-semibold tracking-tight">
                     Crear orden de trabajo
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="grid gap-3 md:grid-cols-3">
-                <p className="md:col-span-3 text-sm text-muted-foreground">
-                  Elija el{" "}
-                  <span className="font-medium text-foreground">pedido cliente (OC)</span> y, si ya lo sabe, la{" "}
-                  <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
-                  <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
-                  <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
-                  <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
-                </p>
-                <div className="grid min-w-0 gap-2 md:col-span-2">
-                  <Label>Pedido cliente (OC) a vincular *</Label>
-                  <Select
-                    value={clientOrderId || undefined}
-                    onValueChange={(v) => setClientOrderId(v)}
-                    onOpenChange={(open) => {
-                      if (open && clientOrders.length === 0 && !coLoading) void loadClientOrders()
-                    }}
-                  >
-                    <SelectTrigger
-                      className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
-                    >
-                      <SelectValue placeholder={coLoading ? "Cargando…" : "Seleccione…"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clientOrders.map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {clientOrderLabel(c)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {clientOrderId && coDetailLoading ? (
-                    <p className="text-sm text-muted-foreground">
-                      <span className="inline-flex items-center gap-2">
-                        <InlineSpinner />
-                        Cargando...
-                      </span>
+                  </h2>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <p className="md:col-span-3 text-sm text-muted-foreground">
+                      Elija el{" "}
+                      <span className="font-medium text-foreground">pedido cliente (OC)</span> y, si ya lo sabe, la{" "}
+                      <span className="font-medium text-foreground">máquina</span>. Al pulsar{" "}
+                      <span className="font-medium text-foreground">Crear orden</span> se abre la planilla en modo borrador: la OT{" "}
+                      <span className="font-medium text-foreground">no</span> aparece en la lista hasta que pulse{" "}
+                      <span className="font-medium text-foreground">Guardar orden</span> en esa pantalla.
                     </p>
-                  ) : null}
-                  {clientOrderId && !coDetailLoading && !coDetail ? (
-                    <p className="text-sm text-destructive">
-                      No se pudo cargar la información del pedido cliente (OC). Intente otra vez en unos segundos.
-                    </p>
-                  ) : null}
-                </div>
+                    <div className="grid min-w-0 gap-2 md:col-span-2">
+                      <Label htmlFor="wo-create-co">Pedido cliente (OC) a vincular *</Label>
+                      <ClientOrderCombobox
+                        id="wo-create-co"
+                        value={clientOrderId}
+                        onValueChange={setClientOrderId}
+                      />
+                      {clientOrderId && !coDetailLoading && !coDetail ? (
+                        <p className="text-sm text-destructive">
+                          No se pudo cargar la información del pedido cliente (OC). Intente otra vez en unos segundos.
+                        </p>
+                      ) : null}
+                    </div>
 
-                <div className="grid min-w-0 gap-2 self-start">
-                  <Label>Máquina</Label>
-                  <Select
-                    value={maquina || undefined}
-                    onValueChange={(v) =>
-                      setMaquina(v === "__clear__" ? "" : (v as MachineValue))
-                    }
-                  >
-                    <SelectTrigger
-                      className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
-                    >
-                      <SelectValue placeholder="Seleccionar…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__clear__">Seleccionar…</SelectItem>
-                      {MACHINE_OPTIONS.map((g) => (
-                        <SelectGroup key={g.group}>
-                          <SelectLabel>{g.group}</SelectLabel>
-                          {g.options.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
+                    <div className="grid min-w-0 gap-2 self-start">
+                      <Label>Máquina</Label>
+                      <Select
+                        value={maquina || undefined}
+                        onValueChange={(v) =>
+                          setMaquina(v === "__clear__" ? "" : (v as MachineValue))
+                        }
+                      >
+                        <SelectTrigger
+                          className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
+                        >
+                          <SelectValue placeholder="Seleccionar…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__clear__">Seleccionar…</SelectItem>
+                          {MACHINE_OPTIONS.map((g) => (
+                            <SelectGroup key={g.group}>
+                              <SelectLabel>{g.group}</SelectLabel>
+                              {g.options.map((o) => (
+                                <SelectItem key={o.value} value={o.value}>
+                                  {o.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
                           ))}
-                        </SelectGroup>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                <div className="md:col-span-3 flex justify-center">
-                  <Button type="button" onClick={() => createOt()}>
-                    Crear orden
-                  </Button>
+                    <div className="md:col-span-3 flex justify-center">
+                      <Button type="button" className="gap-2 shadow-sm" onClick={() => createOt()}>
+                        <Plus className="h-4 w-4" aria-hidden />
+                        Crear orden
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </CardContent>
-              </Card>
+              </div>
             ) : (
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-center text-base font-semibold">
+              <div className={catalogMasterFormPanelWideClass}>
+                <div className={catalogMasterFormSectionClass}>
+                  <h2 className="text-center text-base font-semibold tracking-tight">
                     Crear orden de trabajo
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-center text-sm text-muted-foreground">
+                  </h2>
+                  <p className="mt-4 text-center text-sm text-muted-foreground">
                     Su rol tiene acceso de ejecución en producción, pero no permiso para crear órdenes de trabajo.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
 
-            <div
-              role="tablist"
-              aria-label="Filtro por etapa de supervisión"
-              className="flex flex-wrap items-center gap-2"
-            >
-              {SUPERVISOR_TAB_DEFS.map(({ filter: f, label, Icon }) => {
-                const active = supervisorFilter === f
-                const count = supervisorCounts[f]
-                if (f === "all") {
-                  return (
-                    <button
-                      key={f}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      className={cn(
-                        SUPERVISOR_TAB_BTN_CLASS,
-                        active ? ALL_TAB_STYLES.tabActive : ALL_TAB_STYLES.tabInactive,
-                      )}
-                      onClick={() => setSupervisorFilter("all")}
-                    >
-                      <Icon
-                        className={cn(
-                          "h-4 w-4 shrink-0",
-                          active ? ALL_TAB_STYLES.iconActive : ALL_TAB_STYLES.iconIdle,
-                        )}
-                        aria-hidden
-                      />
-                      {label} ({count})
-                    </button>
-                  )
-                }
-                const st = SUPERVISOR_BUCKET_STYLES[f as HubSupervisorBucket]
-                return (
-                  <button
-                    key={f}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className={cn(
-                      SUPERVISOR_TAB_BTN_CLASS,
-                      active ? st.tabActive : st.tabInactive,
-                    )}
-                    onClick={() => setSupervisorFilter(f)}
-                  >
-                    <Icon
-                      className={cn(
-                        "h-4 w-4 shrink-0",
-                        active ? st.iconClassActive : st.iconClass,
-                      )}
-                      aria-hidden
-                    />
-                    {label} ({count})
-                  </button>
-                )
-              })}
-            </div>
+            <MesBandejaFiltersPanel
+              title="Filtros del listado"
+              headerSubtitle="Etapa en la página actual; búsqueda al escribir."
+              activeFilterCount={activeFilterCount}
+              onClear={clearFilters}
+              criteriaRow={supervisorTabsRow}
+              searchFields={searchFields}
+              hint={
+                <>
+                  <p className="text-muted-foreground text-xs">
+                    El listado se actualiza al escribir (filtro con breve demora).
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    En la lista, use Acciones para editar una OT o abrir la vista previa del reporte cuando esté disponible.
+                  </p>
+                </>
+              }
+            />
 
-            <CatalogFilterGrid>
-              <CatalogSearchField
-                id="wo-q"
-                label="Buscar orden (número / referencia / cliente)"
-                placeholder="Ej: OT-2026-0007, PED-…, Millennium…"
-                value={qInput}
-                onChange={(ev) => {
-                  setPage(1)
-                  setQInput(ev.target.value)
-                }}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter") {
-                    setPage(1)
-                    const next = ev.currentTarget.value.trim()
-                    setQApi(next)
-                  }
-                }}
-                className="min-w-0 md:col-span-12"
-              />
-              <p className="text-muted-foreground text-xs md:col-span-12">
-                El listado se actualiza al escribir (filtro con breve demora).
-              </p>
-            </CatalogFilterGrid>
-
-            <p className="text-muted-foreground text-xs md:col-span-12">
-              En la lista, use Acciones para editar una OT o abrir la vista previa del reporte cuando esté disponible.
-            </p>
-
-            <div className="bg-card w-full min-w-0 overflow-x-auto rounded-2xl border shadow-sm">
-              <Table>
-                <TableHeader>
+            <InsumosBandejaTableCard>
+              <Table className="w-full min-w-[960px]">
+                <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
                   <TableRow className={catalogTableHeaderRowClass}>
                     <CatalogTableHead icon={ListOrdered} className="min-w-[9rem] whitespace-nowrap">
                       N.º
@@ -1225,12 +1221,19 @@ export default function WorkOrdersHubPage() {
                   {loading ? (
                     <LoadingTableRow colSpan={11} />
                   ) : !groupedVisible.length ? (
-                    <TableRow className={catalogTableBodyRowClass}>
-                      <TableCell
-                        colSpan={11}
-                        className={cn("text-muted-foreground", catalogTableBodyCellClass)}
-                      >
-                        Sin órdenes para este filtro.
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={11} className="p-0">
+                        <CatalogEmptyState
+                          icon={hasActiveFilters ? SearchX : ClipboardList}
+                          title={hasActiveFilters ? "Sin resultados" : "Sin órdenes de trabajo"}
+                          description={
+                            hasActiveFilters
+                              ? "Prueba otros filtros o pulsa Limpiar."
+                              : canCreateOt
+                                ? "Cree la primera desde un pedido cliente (OC) con el formulario de arriba."
+                                : "Aún no hay órdenes registradas en el sistema."
+                          }
+                        />
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -1394,38 +1397,24 @@ export default function WorkOrdersHubPage() {
                   )}
                 </TableBody>
               </Table>
-            </div>
+            </InsumosBandejaTableCard>
 
             <p className="text-muted-foreground text-xs">
               Varias OT del mismo pedido cliente y producto aparecen agrupadas; use la flecha para ver cada
               código OT y sus acciones.
             </p>
 
-            {rows && rows.last_page > 1 ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                <span className="text-muted-foreground">
-                  Página {rows.current_page} de {rows.last_page} · {rows.total}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={rows.current_page <= 1 || loading}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  >
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={rows.current_page >= rows.last_page || loading}
-                    onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                  >
-                    Siguiente
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+            <CatalogListPagination
+              rows={rows}
+              loading={loading}
+              perPage={perPage}
+              onPerPageChange={(v) => {
+                setPerPage(v)
+                setPage(1)
+              }}
+              onPageChange={setPage}
+              selectId="wo-per-page"
+            />
           </>
         )}
       </CatalogPageShell>

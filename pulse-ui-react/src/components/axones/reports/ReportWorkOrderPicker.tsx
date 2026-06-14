@@ -109,25 +109,27 @@ export function ReportWorkOrderPicker({
   return (
     <CatalogLabeledField label={label} icon={Barcode} className={cn("min-w-0", className)}>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            disabled={disabled}
-            className={cn(
-              "h-11 w-full justify-between px-3 font-normal",
-              catalogSelectTriggerClass,
-              highlighted && value.trim() && "border-amber-500/50 bg-amber-500/[0.06]",
-            )}
-          >
-            <span className="truncate text-left">{selectedLabel}</span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
-          </Button>
-        </PopoverTrigger>
+        <div className="min-w-0 w-full">
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              disabled={disabled}
+              className={cn(
+                "h-11 w-full min-w-0 justify-between overflow-hidden px-3 font-normal",
+                catalogSelectTriggerClass,
+                highlighted && value.trim() && "border-amber-500/50 bg-amber-500/[0.06]",
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate text-left">{selectedLabel}</span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
+            </Button>
+          </PopoverTrigger>
+        </div>
         <PopoverContent
-          className="w-[var(--radix-popover-trigger-width)] min-w-[20rem] max-w-[100vw] p-0"
+          className="w-[var(--radix-popover-trigger-width)] max-w-[min(100vw-2rem,24rem)] p-0"
           align="start"
           side="bottom"
         >

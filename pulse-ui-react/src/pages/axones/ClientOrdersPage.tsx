@@ -5,57 +5,52 @@ import { Link } from "react-router-dom"
 import {
   Ban,
   Barcode,
-  Check,
-  ChevronsUpDown,
+  CheckCircle2,
   CircleDot,
+  ClipboardList,
   Eye,
-  HelpCircle,
+  List,
   ListOrdered,
+  Package,
   Pencil,
+  Plus,
+  Scale,
   ScrollText,
+  SearchX,
   Settings2,
   Users,
+  XCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch, ApiError } from "@/lib/api"
-import type {
-  ClientOrderDetailRecord,
-  ClientOrderRow,
-  ClientRecord,
-  LaravelPaginated,
-} from "@/types/api"
+import type { ClientOrderDetailRecord, ClientOrderRow, LaravelPaginated } from "@/types/api"
+import { CatalogEmptyState } from "@/components/axones/CatalogEmptyState"
 import { CatalogFilterGrid } from "@/components/axones/CatalogFilterGrid"
-import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
+import { CatalogListPagination } from "@/components/axones/CatalogListPagination"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
 import { CatalogSearchField } from "@/components/axones/CatalogSearchField"
 import {
   CatalogTableHead,
   CatalogTableHeadRight,
 } from "@/components/axones/CatalogTableHead"
+import { InsumosBandejaTableCard } from "@/components/axones/InsumosBandejaTable"
+import {
+  MesBandejaCriteriaField,
+  mesBandejaCriteriaSelectClass,
+} from "@/components/axones/MesBandejaCriteriaField"
+import { MesBandejaFiltersPanel } from "@/components/axones/MesBandejaFiltersPanel"
 import {
   catalogActionButtonClass,
-  catalogPaginationOutlineButtonClass,
-  catalogPaginationSelectTriggerClass,
-  catalogSelectTriggerClass,
   catalogTableBodyCellClass,
   catalogTableBodyRowClass,
   catalogTableHeaderRowClass,
 } from "@/components/axones/catalog-list-classes"
+import { catalogCountLabel } from "@/lib/catalog-count-label"
+import { formatDecimalTwoDisplay } from "@/lib/decimal-two-input"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -71,25 +66,36 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import {
   clientOrderAwaitingOtBadgeClass,
   clientOrderAwaitingProductionOt,
   clientOrderStatusBadgeClass,
   clientOrderStatusLabel,
   CLIENT_ORDER_AWAITING_OT_BADGE,
   CLIENT_ORDER_CANCEL_DIALOG_TITLE,
+  CLIENT_ORDER_DETAIL_LINE_CPE_COLUMN,
+  CLIENT_ORDER_DETAIL_LINE_MPPS_COLUMN,
+  CLIENT_ORDER_DETAIL_LINE_UNIT_COLUMN,
+  CLIENT_ORDER_DETAIL_LINES_HELPER,
   CLIENT_ORDER_DETAIL_NO_OT_LINK,
   CLIENT_ORDER_EDIT_LINES_SECTION_TITLE,
+  CLIENT_ORDER_LINE_DESCRIPTION_LABEL,
+  CLIENT_ORDER_LINE_MATERIAL_LABEL,
   CLIENT_ORDER_MODULE_LIST_FOCUS,
   CLIENT_ORDER_MODULE_TITLE,
+  CLIENT_ORDER_LIST_FILTERS_HINT,
+  CLIENT_ORDER_LIST_FILTERS_SUBTITLE,
+  CLIENT_ORDER_LIST_PRODUCT_COLUMN,
+  CLIENT_ORDER_LIST_QUANTITY_COLUMN,
+  CLIENT_ORDER_LIST_SEARCH_LABEL,
+  CLIENT_ORDER_LIST_SEARCH_PLACEHOLDER,
+  CLIENT_ORDER_LIST_SUBTITLE,
   CLIENT_ORDER_NEW_BUTTON_LABEL,
   CLIENT_ORDER_STATUS_HELP,
   CLIENT_ORDER_TOAST_LOAD_FAILED,
+  clientOrderListExtraLinesCount,
+  clientOrderListProductLabel,
+  clientOrderListQuantityLabel,
+  clientOrderOrderedAtDisplay,
 } from "@/pages/axones/client-order-i18n"
 import { cn } from "@/lib/utils"
 import {
@@ -102,62 +108,35 @@ import {
 } from "@/components/ui/dialog"
 import { Card, CardContent } from "@/components/ui/card"
 
-const CODE_SEARCH_DEBOUNCE_MS = 400
+const SEARCH_DEBOUNCE_MS = 400
 
-/** Valores de `per_page` usados en la petición (paginación en servidor). */
-const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
+const CLIENT_ORDER_DETAIL_LINE_GRID =
+  "grid grid-cols-[2.5rem_minmax(11rem,1.4fr)_6.5rem_6.5rem_minmax(10rem,1.1fr)_minmax(12rem,1.2fr)_8.5rem_6rem] items-start gap-x-3 gap-y-1"
 
 export default function ClientOrdersPage() {
-  const [codeQuery, setCodeQuery] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const [search, setSearch] = useState("")
-  const [clientId, setClientId] = useState<string>("all")
   const [status, setStatus] = useState<string>("all")
   const [awaitingOt, setAwaitingOt] = useState(false)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState<number>(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<ClientOrderRow> | null>(null)
-  const [clients, setClients] = useState<ClientRecord[]>([])
   const [cancellingId, setCancellingId] = useState<number | null>(null)
   const [pendingCancelId, setPendingCancelId] = useState<number | null>(null)
-  const [clientComboOpen, setClientComboOpen] = useState(false)
   const [detailModalId, setDetailModalId] = useState<number | null>(null)
   const [detailModalRecord, setDetailModalRecord] = useState<ClientOrderDetailRecord | null>(null)
   const [detailModalLoading, setDetailModalLoading] = useState(false)
-
-  const selectedClientLabel = useMemo(() => {
-    if (clientId === "all") return "Todos los clientes"
-    const c = clients.find((x) => String(x.id) === clientId)
-    if (!c) return "Cliente"
-    return c.rif ? `${c.name} · ${c.rif}` : c.name
-  }, [clientId, clients])
-
-  useEffect(() => {
-    let c = false
-    void (async () => {
-      try {
-        const res = await apiFetch<LaravelPaginated<ClientRecord>>("clients", {
-          query: { per_page: 500, page: 1 },
-        })
-        if (!c) setClients(res.data)
-      } catch {
-        if (!c) setClients([])
-      }
-    })()
-    return () => {
-      c = true
-    }
-  }, [])
 
   const skipSearchDrivenPageReset = useRef(true)
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      const next = codeQuery.trim()
+      const next = searchQuery.trim()
       setSearch((prev) => (prev === next ? prev : next))
-    }, CODE_SEARCH_DEBOUNCE_MS)
+    }, SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(id)
-  }, [codeQuery])
+  }, [searchQuery])
 
   useEffect(() => {
     if (skipSearchDrivenPageReset.current) {
@@ -170,14 +149,12 @@ export default function ClientOrdersPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const cid = clientId !== "all" ? Number(clientId) : undefined
       const st = status !== "all" ? status : undefined
       const data = await apiFetch<LaravelPaginated<ClientOrderRow>>("client-orders", {
         query: {
           page,
           per_page: perPage,
           q: search || undefined,
-          client_id: cid,
           status: st,
           awaiting_ot: awaitingOt ? 1 : undefined,
         },
@@ -190,7 +167,7 @@ export default function ClientOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, search, clientId, status, awaitingOt])
+  }, [page, perPage, search, status, awaitingOt])
 
   useEffect(() => {
     void load()
@@ -242,233 +219,203 @@ export default function ClientOrdersPage() {
     }
   }
 
-  const listSubtitle = "Filtros por código, cliente y estado."
+  const hasActiveFilters = status !== "all" || awaitingOt || search.trim() !== ""
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0
+    if (status !== "all") n++
+    if (awaitingOt) n++
+    if (search.trim()) n++
+    return n
+  }, [status, awaitingOt, search])
+
+  const clearFilters = useCallback(() => {
+    setSearchQuery("")
+    setSearch("")
+    setStatus("all")
+    setAwaitingOt(false)
+    setPage(1)
+  }, [])
+
+  const totalCount = rows?.total ?? 0
+
+  const newOrderButton = (
+    <Button asChild className="gap-2 shrink-0 shadow-sm">
+      <Link to="/ordenes-cliente/nueva">
+        <Plus className="h-4 w-4" aria-hidden />
+        {CLIENT_ORDER_NEW_BUTTON_LABEL}
+      </Link>
+    </Button>
+  )
+
+  const criteriaRow = (
+    <CatalogFilterGrid>
+      <MesBandejaCriteriaField
+        label="Estado"
+        icon={CircleDot}
+        accent="sky"
+        active={status !== "all"}
+        className="min-w-0 sm:col-span-6 md:col-span-6"
+      >
+        <Select
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className={mesBandejaCriteriaSelectClass("sky", status !== "all")}>
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              {status === "open" ? (
+                <CircleDot className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              ) : status === "fulfilled" ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+              ) : status === "cancelled" ? (
+                <XCircle className="h-4 w-4 shrink-0 text-rose-600" aria-hidden />
+              ) : (
+                <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              )}
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent className="border-sky-500/20">
+            <SelectItem value="all" title="Incluye abiertas, cumplidas y anuladas" className="gap-2.5 font-medium">
+              <List className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              Todos los estados
+            </SelectItem>
+            <SelectItem value="open" title={CLIENT_ORDER_STATUS_HELP["open"]} className="gap-2.5 font-medium">
+              <CircleDot className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+              Abierta
+            </SelectItem>
+            <SelectItem value="fulfilled" title={CLIENT_ORDER_STATUS_HELP["fulfilled"]} className="gap-2.5 font-medium">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+              Cumplida
+            </SelectItem>
+            <SelectItem value="cancelled" title={CLIENT_ORDER_STATUS_HELP["cancelled"]} className="gap-2.5 font-medium">
+              <XCircle className="h-4 w-4 shrink-0 text-rose-600" aria-hidden />
+              Anulada
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </MesBandejaCriteriaField>
+
+      <MesBandejaCriteriaField
+        label="Pendiente OT"
+        icon={ClipboardList}
+        accent="amber"
+        active={awaitingOt}
+        className="min-w-0 sm:col-span-6 md:col-span-6"
+      >
+        <Select
+          value={awaitingOt ? "awaiting" : "all"}
+          onValueChange={(v) => {
+            setAwaitingOt(v === "awaiting")
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className={mesBandejaCriteriaSelectClass("amber", awaitingOt)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="border-amber-500/20">
+            <SelectItem value="all" className="gap-2.5 font-medium">
+              Todos
+            </SelectItem>
+            <SelectItem value="awaiting" className="gap-2.5 font-medium">
+              Solo sin OT
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </MesBandejaCriteriaField>
+    </CatalogFilterGrid>
+  )
+
+  const searchFields = (
+    <CatalogSearchField
+      id="co-q"
+      label={CLIENT_ORDER_LIST_SEARCH_LABEL}
+      placeholder={CLIENT_ORDER_LIST_SEARCH_PLACEHOLDER}
+      value={searchQuery}
+      onChange={(ev) => setSearchQuery(ev.target.value)}
+      onKeyDown={(ev) => {
+        if (ev.key === "Enter") {
+          const next = ev.currentTarget.value.trim()
+          setSearch((prev) => (prev === next ? prev : next))
+          setPage(1)
+        }
+      }}
+      className="min-w-0"
+    />
+  )
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <>
-        <CatalogPageShell
-          title={CLIENT_ORDER_MODULE_TITLE}
-          subtitle={listSubtitle}
-          icon={ScrollText}
-          action={
-            <Button asChild className="shrink-0">
-              <Link to="/ordenes-cliente/nueva">{CLIENT_ORDER_NEW_BUTTON_LABEL}</Link>
-            </Button>
-          }
-        >
+    <>
+      <CatalogPageShell
+        title={CLIENT_ORDER_MODULE_TITLE}
+        subtitle={CLIENT_ORDER_LIST_SUBTITLE}
+        icon={ScrollText}
+        headerVariant="elevated"
+        statBadge={
+          rows && !loading ? (
+            <Badge variant="secondary" className="font-normal tabular-nums">
+              {catalogCountLabel(totalCount, "pedido", "pedidos")}
+            </Badge>
+          ) : null
+        }
+        action={newOrderButton}
+      >
           {showInitialSkeleton ? (
             <div className="space-y-4">
               <PageLoadingBlock />
               <PageLoadingBlock />
             </div>
           ) : (
-            <>
-              <CatalogFilterGrid>
-                <CatalogSearchField
-                  id="co-q"
-                  label="Código (OC)"
-                  placeholder="Ej. OC-CLI…"
-                  value={codeQuery}
-                  onChange={(ev) => setCodeQuery(ev.target.value)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter") {
-                      const next = ev.currentTarget.value.trim()
-                      setSearch((prev) => (prev === next ? prev : next))
-                      setPage(1)
-                    }
-                  }}
-                  className="min-w-0 md:col-span-5"
-                />
-                <CatalogLabeledField label="Cliente" className="min-w-0 md:col-span-4">
-                  <Popover open={clientComboOpen} onOpenChange={setClientComboOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={clientComboOpen}
-                        className={cn(
-                          "h-11 w-full justify-between px-3 font-normal",
-                          catalogSelectTriggerClass,
-                        )}
-                      >
-                        <span className="truncate text-left">{selectedClientLabel}</span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem] max-w-[100vw]"
-                      align="start"
-                      side="bottom"
-                    >
-                      <Command shouldFilter>
-                        <CommandInput placeholder="Escriba para buscar (nombre, RIF)…" />
-                        <CommandList>
-                          <CommandEmpty>Ningún cliente coincide.</CommandEmpty>
-                          <CommandGroup>
-                            <CommandItem
-                              value="todos"
-                              onSelect={() => {
-                                setClientId("all")
-                                setPage(1)
-                                setClientComboOpen(false)
-                              }}
-                            >
-                              <Check
-                                className={cn("mr-2 h-4 w-4", clientId === "all" ? "opacity-100" : "opacity-0")}
-                                aria-hidden
-                              />
-                              Todos los clientes
-                            </CommandItem>
-                            {clients.map((c) => {
-                              const line = c.rif ? `${c.name} ${c.rif}` : c.name
-                              return (
-                                <CommandItem
-                                  key={c.id}
-                                  value={line}
-                                  onSelect={() => {
-                                    setClientId(String(c.id))
-                                    setPage(1)
-                                    setClientComboOpen(false)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      clientId === String(c.id) ? "opacity-100" : "opacity-0",
-                                    )}
-                                    aria-hidden
-                                  />
-                                  {c.rif ? `${c.name} · ${c.rif}` : c.name}
-                                </CommandItem>
-                              )
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </CatalogLabeledField>
-                <div className="grid min-w-0 gap-2 md:col-span-3">
-                  <div className="flex items-center gap-1.5">
-                    <Label
-                      htmlFor="co-status"
-                      className="text-sm font-medium text-muted-foreground"
-                    >
-                      Estado
-                    </Label>
-                    <Tooltip>
-                      <TooltipTrigger
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label="Ayuda estados"
-                      >
-                        <HelpCircle className="h-4 w-4 shrink-0" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs p-3 text-left font-normal" side="top">
-                        <p className="mb-2 font-medium">Estados del pedido cliente (OC)</p>
-                        <ul className="list-disc pl-4 space-y-1 text-xs">
-                          <li>
-                            <strong>Abierta:</strong> la orden sigue vigente para su flujo comercial.
-                          </li>
-                          <li>
-                            <strong>Cumplida:</strong> se considera cerrada o entregada en lo comercial.
-                          </li>
-                          <li>
-                            <strong>Anulada:</strong> deja de aplicar como orden activa.
-                          </li>
-                        </ul>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <Select
-                    value={status}
-                    onValueChange={(v) => {
-                      setStatus(v)
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger
-                      id="co-status"
-                      className={cn("h-11 w-full font-normal", catalogSelectTriggerClass)}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all" title="Incluye abiertas, cumplidas y anuladas">
-                        Todos los estados
-                      </SelectItem>
-                      <SelectItem value="open" title={CLIENT_ORDER_STATUS_HELP["open"]}>
-                        Abierta
-                      </SelectItem>
-                      <SelectItem value="fulfilled" title={CLIENT_ORDER_STATUS_HELP["fulfilled"]}>
-                        Cumplida
-                      </SelectItem>
-                      <SelectItem value="cancelled" title={CLIENT_ORDER_STATUS_HELP["cancelled"]}>
-                        Anulada
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-muted-foreground text-xs md:col-span-12">Filtra al escribir.</p>
-                <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-primary/20 bg-muted/30 px-3 py-2.5 md:col-span-12">
-                  <Checkbox
-                    id="await-ot"
-                    checked={awaitingOt}
-                    onCheckedChange={(v) => {
-                      setAwaitingOt(v === true)
-                      setPage(1)
-                    }}
-                    className="h-4 w-4 border-primary/50"
-                  />
-                  <label htmlFor="await-ot" className="cursor-pointer text-sm font-medium leading-snug text-foreground">
-                    Solo sin orden de producción aún
-                  </label>
-                  <Tooltip>
-                    <TooltipTrigger
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground"
-                      aria-label="Qué significa este filtro"
-                    >
-                      <HelpCircle className="h-4 w-4 shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs p-3 text-left text-xs" side="top">
-                      Si lo marca, verá{" "}
-                      <strong className="text-foreground">pedidos cliente (OC)</strong>{" "}
-                      <strong>abiertas</strong> que aún no tienen vinculado en el sistema un documento de producción (OT)
-                      asociado a esta solicitud. Útil para ver qué falta por pasar a planta.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </CatalogFilterGrid>
+          <>
+            <MesBandejaFiltersPanel
+              title="Filtros del listado"
+              headerSubtitle={CLIENT_ORDER_LIST_FILTERS_SUBTITLE}
+              activeFilterCount={activeFilterCount}
+              onClear={clearFilters}
+              criteriaRow={criteriaRow}
+              searchFields={searchFields}
+              hint={
+                <p className="text-muted-foreground text-xs">{CLIENT_ORDER_LIST_FILTERS_HINT}</p>
+              }
+            />
 
-              <div className="bg-card w-full min-w-0 overflow-x-auto rounded-2xl border shadow-sm">
-                <Table className="w-full min-w-[560px]">
-                  <TableHeader>
-                    <TableRow className={catalogTableHeaderRowClass}>
-                      <CatalogTableHead icon={ListOrdered} className="w-14">
-                        N.º
-                      </CatalogTableHead>
-                      <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
-                      <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
-                      <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
-                      <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
+            <InsumosBandejaTableCard>
+              <Table className="w-full min-w-[760px]">
+                <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
+                  <TableRow className={catalogTableHeaderRowClass}>
+                    <CatalogTableHead icon={ListOrdered} className="w-14">
+                      N.º
+                    </CatalogTableHead>
+                    <CatalogTableHead icon={Barcode}>Código</CatalogTableHead>
+                    <CatalogTableHead icon={Users}>Cliente</CatalogTableHead>
+                    <CatalogTableHead icon={Package}>{CLIENT_ORDER_LIST_PRODUCT_COLUMN}</CatalogTableHead>
+                    <CatalogTableHead icon={Scale}>{CLIENT_ORDER_LIST_QUANTITY_COLUMN}</CatalogTableHead>
+                    <CatalogTableHead icon={CircleDot}>Estado</CatalogTableHead>
+                    <CatalogTableHeadRight icon={Settings2}>Acciones</CatalogTableHeadRight>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <LoadingTableRow colSpan={7} />
+                  ) : !rows?.data.length ? (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={7} className="p-0">
+                        <CatalogEmptyState
+                          icon={hasActiveFilters ? SearchX : ScrollText}
+                          title={hasActiveFilters ? "Sin resultados" : "Sin pedidos cliente (OC)"}
+                          description={
+                            hasActiveFilters
+                              ? "Prueba otros filtros o pulsa Limpiar."
+                              : "Registre el primero para vincular órdenes de producción (OT)."
+                          }
+                          action={hasActiveFilters ? undefined : newOrderButton}
+                        />
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? (
-                      <LoadingTableRow colSpan={5} />
-                    ) : !rows?.data.length ? (
-                      <TableRow className={catalogTableBodyRowClass}>
-                        <TableCell
-                          colSpan={5}
-                          className={cn("text-muted-foreground", catalogTableBodyCellClass)}
-                        >
-                          Sin pedidos cliente (OC).
-                        </TableCell>
-                      </TableRow>
-                    ) : (
+                  ) : (
                       rows.data.map((r, index) => {
                         const n = (rows.current_page - 1) * rows.per_page + index + 1
                         return (
@@ -491,6 +438,24 @@ export default function ClientOrdersPage() {
                             </TableCell>
                             <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
                               {r.client?.name ?? `#${r.client_id}`}
+                            </TableCell>
+                            <TableCell className={cn("min-w-0", catalogTableBodyCellClass)}>
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className="truncate">{clientOrderListProductLabel(r)}</span>
+                                {clientOrderListExtraLinesCount(r) > 0 ? (
+                                  <Badge variant="secondary" className="shrink-0 font-normal tabular-nums">
+                                    +{clientOrderListExtraLinesCount(r)}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell
+                              className={cn(
+                                "min-w-0 font-mono text-sm tabular-nums whitespace-nowrap",
+                                catalogTableBodyCellClass,
+                              )}
+                            >
+                              {clientOrderListQuantityLabel(r)}
                             </TableCell>
                             <TableCell className={cn("align-middle", catalogTableBodyCellClass)}>
                               <div className="flex flex-wrap items-center gap-1.5">
@@ -580,77 +545,25 @@ export default function ClientOrdersPage() {
                           </TableRow>
                         )
                       })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                  )}
+                </TableBody>
+              </Table>
+            </InsumosBandejaTableCard>
 
-              {rows ? (
-                <div className="mt-4 flex flex-col items-center gap-3 text-center text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:text-left">
-            <p className="text-muted-foreground min-w-0">
-              {rows.total === 0
-                ? "Sin resultados con los filtros actuales."
-                : rows.last_page > 1
-                  ? `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} · página ${rows.current_page} de ${rows.last_page}`
-                  : `Mostrando ${rows.from ?? 0} a ${rows.to ?? 0} de ${rows.total} registros`}
-            </p>
-            <div className="flex w-full flex-wrap items-center justify-center gap-3 sm:w-auto sm:shrink-0 sm:justify-end">
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Por página</span>
-                <Select
-                  value={String(perPage)}
-                  onValueChange={(v) => {
-                    setPerPage(Number(v))
-                    setPage(1)
-                  }}
-                >
-                  <SelectTrigger
-                    id="co-per-page"
-                    className={cn(
-                      "h-8 w-[4.5rem] text-sm",
-                      catalogPaginationSelectTriggerClass,
-                    )}
-                    aria-label="Registros por página"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PER_PAGE_OPTIONS.map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                  disabled={rows.current_page <= 1 || loading}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  type="button"
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn("h-8", catalogPaginationOutlineButtonClass)}
-                  disabled={rows.current_page >= rows.last_page || loading}
-                  onClick={() => setPage((p) => Math.min(rows.last_page, p + 1))}
-                  type="button"
-                >
-                  Siguiente
-                </Button>
-              </div>
-                </div>
-                </div>
-              ) : null}
-            </>
-          )}
-        </CatalogPageShell>
+            <CatalogListPagination
+              rows={rows}
+              loading={loading}
+              perPage={perPage}
+              onPerPageChange={(v) => {
+                setPerPage(v)
+                setPage(1)
+              }}
+              onPageChange={setPage}
+              selectId="co-per-page"
+            />
+          </>
+        )}
+      </CatalogPageShell>
 
         <Dialog
           open={detailModalId !== null}
@@ -706,11 +619,7 @@ export default function ClientOrdersPage() {
                         </span>
                         {detailModalRecord.ordered_at ? (
                           <span className="text-xs">
-                            Pedido:{" "}
-                            {new Date(detailModalRecord.ordered_at).toLocaleString("es-VE", {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })}
+                            Pedido: {clientOrderOrderedAtDisplay(detailModalRecord.ordered_at)}
                           </span>
                         ) : null}
                       </div>
@@ -744,42 +653,63 @@ export default function ClientOrdersPage() {
                         <h3 className="text-base font-semibold tracking-tight">
                           {CLIENT_ORDER_EDIT_LINES_SECTION_TITLE}
                         </h3>
-                        <p className="text-sm text-muted-foreground">
-                          Cada ítem muestra qué se pidió, con cantidad y unidad por separado.
-                        </p>
+                        <p className="text-sm text-muted-foreground">{CLIENT_ORDER_DETAIL_LINES_HELPER}</p>
                       </div>
                       {!detailModalRecord.lines?.length ? (
                         <p className="text-muted-foreground text-sm">Sin líneas en este pedido.</p>
                       ) : (
-                        <ul className="space-y-4">
-                          {detailModalRecord.lines.map((ln) => {
-                            const label =
-                              ln.product?.name ||
-                              (ln.material ? `${ln.material.sku} — ${ln.material.name}` : null) ||
-                              ln.description ||
-                              "—"
-                            return (
-                              <li key={ln.id} className="space-y-3 rounded-lg bg-muted/35 px-4 py-3">
-                                <div>
-                                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                    Producto / material / texto
-                                  </p>
-                                  <p className="mt-1 text-sm font-medium leading-snug text-foreground">{label}</p>
-                                </div>
-                                <dl className="grid gap-3 sm:grid-cols-2">
-                                  <div>
-                                    <dt className="text-xs font-medium text-muted-foreground">Cantidad</dt>
-                                    <dd className="mt-0.5 font-mono text-sm tabular-nums">{ln.quantity}</dd>
+                        <div className="overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]">
+                          <div className="min-w-[56rem] rounded-xl border border-border bg-muted/20 p-3">
+                            <div
+                              className={cn(
+                                CLIENT_ORDER_DETAIL_LINE_GRID,
+                                "border-border/60 border-b pb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground",
+                              )}
+                            >
+                              <span>#</span>
+                              <span>{CLIENT_ORDER_LIST_PRODUCT_COLUMN}</span>
+                              <span>{CLIENT_ORDER_DETAIL_LINE_CPE_COLUMN}</span>
+                              <span>{CLIENT_ORDER_DETAIL_LINE_MPPS_COLUMN}</span>
+                              <span>{CLIENT_ORDER_LINE_MATERIAL_LABEL}</span>
+                              <span>{CLIENT_ORDER_LINE_DESCRIPTION_LABEL}</span>
+                              <span>{CLIENT_ORDER_LIST_QUANTITY_COLUMN}</span>
+                              <span>{CLIENT_ORDER_DETAIL_LINE_UNIT_COLUMN}</span>
+                            </div>
+                            <div className="divide-y divide-border/50">
+                              {detailModalRecord.lines.map((ln, index) => {
+                                const materialLabel = ln.material
+                                  ? `${ln.material.sku} — ${ln.material.name}`
+                                  : "—"
+                                const description = ln.description?.trim() || "—"
+                                return (
+                                  <div
+                                    key={ln.id}
+                                    className={cn(CLIENT_ORDER_DETAIL_LINE_GRID, "py-2.5 text-sm")}
+                                  >
+                                    <span className="text-muted-foreground tabular-nums">{index + 1}</span>
+                                    <span className="min-w-0 font-medium leading-snug text-foreground">
+                                      {ln.product?.name ?? "—"}
+                                    </span>
+                                    <span className="font-mono text-xs tabular-nums">
+                                      {ln.product?.cpe?.trim() || "—"}
+                                    </span>
+                                    <span className="font-mono text-xs tabular-nums">
+                                      {ln.product?.mps?.trim() || "—"}
+                                    </span>
+                                    <span className="min-w-0 text-xs leading-snug">{materialLabel}</span>
+                                    <span className="min-w-0 text-xs leading-snug text-muted-foreground">
+                                      {description}
+                                    </span>
+                                    <span className="font-mono tabular-nums">
+                                      {formatDecimalTwoDisplay(ln.quantity)}
+                                    </span>
+                                    <span>{ln.unit?.trim() || "—"}</span>
                                   </div>
-                                  <div>
-                                    <dt className="text-xs font-medium text-muted-foreground">Unidad</dt>
-                                    <dd className="mt-0.5 text-sm">{ln.unit ?? "—"}</dd>
-                                  </div>
-                                </dl>
-                              </li>
-                            )
-                          })}
-                        </ul>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </section>
 
@@ -876,7 +806,6 @@ export default function ClientOrdersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </>
-    </TooltipProvider>
+    </>
   )
 }

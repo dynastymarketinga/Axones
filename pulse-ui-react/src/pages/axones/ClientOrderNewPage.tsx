@@ -1,26 +1,25 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
-  ArrowLeft,
   CalendarDays,
   Check,
   CheckCircle2,
   ChevronsUpDown,
-  Hash,
-  Layers,
   Package,
-  Plus,
-  Scale,
+  ScrollText,
   StickyNote,
-  Trash2,
   UserPlus,
   Users,
 } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import {
+  formatDecimalTwoOnBlur,
+  parseDecimalTwoInput,
+} from "@/lib/decimal-two-input"
 import type {
   ClientRecord,
   LaravelPaginated,
@@ -28,8 +27,18 @@ import type {
   ProductRecord,
 } from "@/types/api"
 import { LoadingButtonLabel } from "@/components/axones/LoadingStates"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { CatalogMasterFormDateInput } from "@/components/axones/CatalogMasterFormDateInput"
+import { ClientOrderLinesEditor } from "@/components/axones/ClientOrderLinesEditor"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormInputClass,
+  catalogMasterFormPanelWideClass,
+  catalogMasterFormPlainInputClass,
+  catalogMasterFormSectionClass,
+} from "@/components/axones/catalog-list-classes"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -51,19 +60,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import {
   CLIENT_ORDER_CONFIRM_ORDERED_AT_LABEL,
-  CLIENT_ORDER_LINE_DESCRIPTION_LABEL,
-  CLIENT_ORDER_LINE_DESCRIPTION_PLACEHOLDER,
   CLIENT_ORDER_LINE_INVALID_PRODUCT_HELPER,
   CLIENT_ORDER_LINE_INVALID_PRODUCT_TOAST,
-  CLIENT_ORDER_LINE_MATERIAL_EMPTY,
-  CLIENT_ORDER_LINE_MATERIAL_LABEL,
-  CLIENT_ORDER_LINE_MATERIAL_PLACEHOLDER,
-  CLIENT_ORDER_LINE_MATERIAL_SEARCH_PLACEHOLDER,
   CLIENT_ORDER_LINE_NO_PRODUCT_TOAST,
   CLIENT_ORDER_LINE_PRODUCT_REQUIRED_HELPER,
   CLIENT_ORDER_LINE_QUANTITY_BLUR_TOAST,
   CLIENT_ORDER_LINE_QUANTITY_REQUIRED_HELPER,
   CLIENT_ORDER_LINE_QUANTITY_TOAST,
+  CLIENT_ORDER_MODULE_NEW_SUBTITLE,
   CLIENT_ORDER_MODULE_NEW_TITLE,
   CLIENT_ORDER_MODULE_TITLE,
   CLIENT_ORDER_NOTES_PLACEHOLDER,
@@ -73,19 +77,15 @@ import {
   CLIENT_ORDER_ORDERED_AT_LABEL,
 } from "@/pages/axones/client-order-i18n"
 
-const notesFieldIconClass =
-  "pointer-events-none absolute left-3 top-3 h-4 w-4 transition-colors"
-
 /** Tras crear/editar producto desde esta pantalla, volver aquí (también en `?returnTo=`). */
 const RETURN_TO_NEW_CLIENT_ORDER_PATH = "/ordenes-cliente/nueva"
 
-/** Secondary casi igual a muted en reposo; refuerzo hover sombreado + tinte primario. */
-const CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER =
-  "transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:bg-primary/12 hover:text-foreground hover:shadow-md active:translate-y-0 active:shadow-sm dark:hover:bg-primary/18"
+const notesFieldIconClass =
+  "pointer-events-none absolute left-3 top-3 h-4 w-4 transition-colors text-muted-foreground group-focus-within/field:text-primary"
 
-/** Anillo/sombra al enfocar (coherente entre inputs y combos). */
-const CO_FOCUS_RING =
-  "transition-[box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:shadow-md"
+/** Secondary con hover en atajos a maestros. */
+const CLIENT_ORDER_MASTER_SECONDARY_HOVER =
+  "transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:bg-primary/12 hover:text-foreground hover:shadow-md active:translate-y-0 active:shadow-sm dark:hover:bg-primary/18"
 
 function todayLocalDateInput(): string {
   const d = new Date()
@@ -98,9 +98,8 @@ function todayLocalDateInput(): string {
 function isLineQuantityInvalid(productId: string, quantity: string): boolean {
   const pid = productId.trim()
   if (!pid) return false
-  const qtyTrim = quantity.trim()
-  const q = Number(qtyTrim)
-  return !qtyTrim || !Number.isFinite(q) || q <= 0
+  const q = parseDecimalTwoInput(quantity)
+  return q === null || q <= 0
 }
 
 type LineDraft = {
@@ -150,9 +149,8 @@ function gatePayloadLines(lines: LineDraft[], allowedIds: Set<string>): LineSubm
   const payloadLines = buildPayloadLines(lines)
   if (payloadLines.length === 0) return { ok: false, reason: "no_product" }
   for (const l of payloadLines) {
-    const qtyTrim = l.quantity.trim()
-    const q = Number(qtyTrim)
-    if (!qtyTrim || !Number.isFinite(q) || q <= 0) {
+    const q = parseDecimalTwoInput(l.quantity)
+    if (q === null || q <= 0) {
       return { ok: false, reason: "bad_quantity" }
     }
   }
@@ -186,8 +184,8 @@ function lineUiErrorsFromGate(
       const pid = row.product_id?.trim()
       if (!pid) continue
       const qtyTrim = (row.quantity || "").trim()
-      const q = Number(qtyTrim)
-      if (!qtyTrim || !Number.isFinite(q) || q <= 0) {
+      const q = parseDecimalTwoInput(qtyTrim)
+      if (q === null || q <= 0) {
         map.set(row.key, { quantity: CLIENT_ORDER_LINE_QUANTITY_REQUIRED_HELPER })
       }
     }
@@ -264,9 +262,10 @@ export default function ClientOrderNewPage() {
   const notesRef = useRef<HTMLTextAreaElement>(null)
   const notesBlurToastIssuedRef = useRef(false)
   const qtyBlurToastIssuedRef = useRef<Set<string>>(new Set())
+  const initialLoadDoneRef = useRef(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (options?: { background?: boolean }) => {
+    if (!options?.background) setLoading(true)
     try {
       const [cl, pr, mat] = await Promise.all([
         apiFetch<LaravelPaginated<ClientRecord>>("clients", {
@@ -286,7 +285,8 @@ export default function ClientOrderNewPage() {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudieron cargar clientes, productos o materiales.")
     } finally {
-      setLoading(false)
+      initialLoadDoneRef.current = true
+      if (!options?.background) setLoading(false)
     }
   }, [])
 
@@ -365,7 +365,9 @@ export default function ClientOrderNewPage() {
 
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === "visible") void load()
+      if (document.visibilityState === "visible" && initialLoadDoneRef.current) {
+        void load({ background: true })
+      }
     }
     document.addEventListener("visibilitychange", onVis)
     return () => document.removeEventListener("visibilitychange", onVis)
@@ -564,12 +566,12 @@ export default function ClientOrderNewPage() {
       const resolvedLines = pendingPost.lines.map((l) => {
         const line: {
           product_id: number
-          quantity: string
+          quantity: number
           material_id?: number
           description?: string
         } = {
           product_id: Number(l.product_id_raw),
-          quantity: l.quantity,
+          quantity: parseDecimalTwoInput(l.quantity)!,
         }
         const mid = l.material_id_raw.trim()
         if (mid && Number.isFinite(Number(mid)) && Number(mid) >= 1) {
@@ -687,111 +689,136 @@ export default function ClientOrderNewPage() {
     }
   }
 
-  return (
-    <div className="space-y-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 max-w-6xl">
-          <h1 className="text-2xl font-semibold tracking-tight">{CLIENT_ORDER_MODULE_NEW_TITLE}</h1>
-        </div>
-        <Button type="button" variant="outline" size="icon" asChild>
-          <Link to="/ordenes-cliente" aria-label="Volver al listado">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-      </div>
+  function handleQuantityFieldBlur(
+    rowKey: string,
+    lineIndex: number,
+    productId: string,
+    quantity: string,
+  ) {
+    const formatted = formatDecimalTwoOnBlur(quantity)
+    if (formatted !== quantity) {
+      updateLine(lineIndex, { quantity: formatted })
+    }
+    handleQuantityBlur(rowKey, productId, formatted || quantity)
+  }
 
+  return (
+    <CatalogPageShell
+      title={CLIENT_ORDER_MODULE_NEW_TITLE}
+      subtitle={CLIENT_ORDER_MODULE_NEW_SUBTITLE}
+      icon={ScrollText}
+      headerVariant="elevated"
+      action={<CatalogMasterFormBackButton to="/ordenes-cliente" />}
+    >
       <form
         noValidate
         onSubmit={handleFormSubmit}
-        className="mx-auto w-full max-w-3xl space-y-4 rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm md:max-w-5xl xl:max-w-6xl"
+        className={catalogMasterFormPanelWideClass}
       >
+        <div className={catalogMasterFormSectionClass}>
+          <h2 className="text-base font-semibold tracking-tight">Datos del pedido</h2>
+          <p className="text-muted-foreground text-sm">
+            Cliente y notas son obligatorios. La fecha refleja el día comercial del pedido.
+          </p>
+        </div>
+
         <div className="space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="grid w-full min-w-0 flex-1 gap-1.5">
-              <Label
-                htmlFor="co-cliente"
-                className="flex items-center gap-2 text-sm font-medium text-foreground"
-              >
-                <Users className="h-4 w-4 text-muted-foreground" />
-                Cliente que encarga la orden *
-              </Label>
-              <Popover open={clientComboOpen} onOpenChange={setClientComboOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    role="combobox"
-                    id="co-cliente"
-                    aria-required="true"
-                    aria-expanded={clientComboOpen}
-                    className={cn(
-                      "h-10 w-full justify-between bg-background text-foreground font-normal",
-                      CO_FOCUS_RING,
-                      !selectedClient && "text-muted-foreground",
-                      showClientError
-                        ? "border-destructive focus-visible:ring-destructive"
-                        : "focus-visible:ring-primary/35",
-                    )}
-                  >
-                    <span className="truncate text-left">
-                      {selectedClient ? selectedClient.name : "— Seleccione el cliente —"}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[20rem]"
-                  align="start"
-                >
-                  <Command shouldFilter>
-                    <CommandInput placeholder="Buscar cliente por nombre o RIF…" />
-                    <CommandList>
-                      <CommandEmpty>
-                        <div className="space-y-2 p-2 text-sm text-muted-foreground">
-                          No hay clientes que coincidan.
-                        </div>
-                      </CommandEmpty>
-                      <CommandGroup>
-                        {clients.map((c) => (
-                          <CommandItem
-                            key={c.id}
-                            value={`${c.name} ${c.rif ?? ""}`}
-                            onSelect={() => {
-                              setClientId(String(c.id))
-                              setClientComboOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                clientId === String(c.id) ? "opacity-100" : "opacity-0",
-                              )}
-                            />
-                            <span className="truncate">{c.name}</span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              {showClientError ? (
-                <p className="text-xs text-destructive">
-                  Debe seleccionar el cliente que encarga la orden.
-                </p>
-              ) : null}
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              asChild
-              className={cn("shrink-0", CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER)}
+          <div className="grid w-full min-w-0 gap-1.5">
+            <Label
+              htmlFor="co-cliente"
+              className="flex items-center gap-2 text-sm font-medium text-foreground"
             >
-              <Link to={newClientLink.pathname} state={newClientLink.state}>
-                <UserPlus className="mr-2 h-4 w-4" />
-                Nuevo cliente
-              </Link>
-            </Button>
+              <Users className="h-4 w-4 text-muted-foreground" />
+              Cliente que encarga la orden *
+            </Label>
+            <Popover open={clientComboOpen} onOpenChange={setClientComboOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  id="co-cliente"
+                  aria-required="true"
+                  aria-expanded={clientComboOpen}
+                  className={cn(
+                    catalogMasterFormPlainInputClass,
+                    "justify-between px-3 font-normal",
+                    !selectedClient && "text-muted-foreground",
+                    showClientError
+                      ? "border-destructive focus-visible:ring-destructive"
+                      : "",
+                  )}
+                >
+                  <span className="truncate text-left">
+                    {selectedClient ? selectedClient.name : "— Seleccione el cliente —"}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[20rem]"
+                align="start"
+              >
+                <Command shouldFilter>
+                  <CommandInput placeholder="Buscar cliente por nombre o RIF…" />
+                  <CommandList>
+                    <CommandEmpty>
+                      <div className="space-y-2 p-2 text-sm">
+                        <p className="text-muted-foreground">No hay clientes que coincidan.</p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className={CLIENT_ORDER_MASTER_SECONDARY_HOVER}
+                          onClick={() => {
+                            setClientComboOpen(false)
+                            nav(newClientLink.pathname, { state: newClientLink.state })
+                          }}
+                        >
+                          <UserPlus className="mr-2 h-4 w-4" aria-hidden />
+                          Nuevo cliente
+                        </Button>
+                      </div>
+                    </CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="nuevo cliente crear"
+                        onSelect={() => {
+                          setClientComboOpen(false)
+                          nav(newClientLink.pathname, { state: newClientLink.state })
+                        }}
+                      >
+                        <UserPlus className="mr-2 h-4 w-4" aria-hidden />
+                        Nuevo cliente
+                      </CommandItem>
+                      {clients.map((c) => (
+                        <CommandItem
+                          key={c.id}
+                          value={`${c.name} ${c.rif ?? ""}`}
+                          onSelect={() => {
+                            setClientId(String(c.id))
+                            setClientComboOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              clientId === String(c.id) ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          <span className="truncate">{c.name}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {showClientError ? (
+              <p className="text-xs text-destructive">
+                Debe seleccionar el cliente que encarga la orden.
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -826,11 +853,11 @@ export default function ClientOrderNewPage() {
               aria-required="true"
               aria-invalid={showNotesError}
               className={cn(
-                "resize-y bg-background pl-10 pt-2.5 min-h-[5.5rem]",
-                CO_FOCUS_RING,
+                "resize-y pl-10 pt-2.5 min-h-[5.5rem]",
+                catalogMasterFormInputClass,
                 showNotesError
                   ? "border-destructive bg-destructive/5 focus-visible:ring-destructive"
-                  : "focus-visible:ring-primary/35",
+                  : "",
               )}
               placeholder={CLIENT_ORDER_NOTES_PLACEHOLDER}
             />
@@ -848,441 +875,57 @@ export default function ClientOrderNewPage() {
             <CalendarDays className="h-4 w-4 text-muted-foreground" />
             {CLIENT_ORDER_ORDERED_AT_LABEL}
           </Label>
-          <Input
+          <CatalogMasterFormDateInput
             id="co-ordered-at"
-            type="date"
             value={orderedAt}
-            onChange={(e) => setOrderedAt(e.target.value)}
-            className={cn("h-10 max-w-xs bg-background", CO_FOCUS_RING, "focus-visible:ring-primary/35")}
+            onChange={setOrderedAt}
+            disabled={saving}
           />
           <p className="text-muted-foreground text-xs">{CLIENT_ORDER_ORDERED_AT_HELPER}</p>
         </div>
 
         <div
           className={cn(
-            "space-y-3 border-t pt-4 transition-opacity",
+            "space-y-3 border-t border-primary/10 pt-6 transition-opacity",
             clientMissing && "pointer-events-none opacity-50",
           )}
           aria-disabled={clientMissing}
         >
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            <Package className="h-4 w-4 text-muted-foreground" />
-            Líneas de la solicitud *
-          </h2>
-
-          {lines.map((row, i) => {
-            const selected = selectedProductByLineKey.get(row.key) ?? null
-            const selectedMat = selectedMaterialByLineKey.get(row.key) ?? null
-            const lineErr = lineFieldErrorsByKey.get(row.key)
-            const prodErr = lineErr?.product
-            const qtyErrGate = lineErr?.quantity
-            const qtyErrBlur =
-              qtyBlurKeys.has(row.key) &&
-              row.product_id.trim() &&
-              isLineQuantityInvalid(row.product_id, row.quantity)
-                ? CLIENT_ORDER_LINE_QUANTITY_REQUIRED_HELPER
-                : undefined
-            const qtyErr = qtyErrGate ?? qtyErrBlur
-            return (
-              <div
-                key={row.key}
-                className="grid gap-3 rounded-xl border border-border bg-muted/20 p-3 sm:grid-cols-2"
-              >
-                <div className="grid gap-2 sm:col-span-2">
-                  <Label className="text-sm font-medium leading-snug">Producto *</Label>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <div className="min-w-0 flex-1">
-                      <Popover
-                        open={productComboOpenKey === row.key}
-                        onOpenChange={(open) => setProductComboOpenKey(open ? row.key : null)}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            id={`co-product-${row.key}`}
-                            aria-expanded={productComboOpenKey === row.key}
-                            aria-invalid={Boolean(prodErr)}
-                            className={cn(
-                              "h-10 w-full justify-between gap-2 bg-background px-3 font-normal",
-                              CO_FOCUS_RING,
-                              prodErr
-                                ? "border-destructive bg-destructive/5 focus-visible:ring-destructive"
-                                : "focus-visible:ring-primary/35",
-                            )}
-                          >
-                            <Package
-                              className={cn(
-                                "h-4 w-4 shrink-0",
-                                prodErr ? "text-destructive" : "text-muted-foreground",
-                              )}
-                              aria-hidden
-                            />
-                            <span
-                              className={cn(
-                                "min-w-0 flex-1 truncate text-left",
-                                selected
-                                  ? "text-foreground"
-                                  : prodErr
-                                    ? "text-destructive"
-                                    : "text-muted-foreground",
-                              )}
-                            >
-                              {selected ? selected.name : "Seleccione un producto"}
-                            </span>
-                            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                          className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
-                          align="start"
-                        >
-                          <Command shouldFilter>
-                            <CommandInput placeholder="Buscar por nombre, C.P.E. o M.P.P.S…" />
-                            <CommandList>
-                              <CommandEmpty>
-                                <div className="space-y-2 p-2 text-sm">
-                                  <p>No hay productos que coincidan.</p>
-                                  <Button type="button" variant="secondary" size="sm" asChild>
-                                    <Link
-                                      className="inline-flex items-center"
-                                      to={{
-                                        pathname: newProductLink.pathname,
-                                        search: newProductLink.search,
-                                      }}
-                                      state={newProductLink.state}
-                                      onClick={() => setProductComboOpenKey(null)}
-                                    >
-                                      <Plus className="mr-2 h-4 w-4" />
-                                      Crear producto
-                                    </Link>
-                                  </Button>
-                                </div>
-                              </CommandEmpty>
-                              <CommandGroup>
-                                <CommandItem
-                                  value="sin-producto"
-                                  onSelect={() => {
-                                    updateLine(i, { product_id: "" })
-                                    setProductComboOpenKey(null)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      row.product_id ? "opacity-0" : "opacity-100",
-                                    )}
-                                  />
-                                  Sin producto
-                                </CommandItem>
-                                {productsForClient.map((p) => (
-                                  <CommandItem
-                                    key={p.id}
-                                    value={`${p.name} ${p.cpe ?? ""} ${p.mps ?? ""}`}
-                                    onSelect={() => {
-                                      updateLine(i, { product_id: p.id })
-                                      setProductComboOpenKey(null)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        row.product_id === p.id ? "opacity-100" : "opacity-0",
-                                      )}
-                                    />
-                                    <span className="truncate">{p.name}</span>
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    {clientMissing ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className={cn(
-                          "h-10 shrink-0 sm:self-end",
-                          CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER,
-                        )}
-                        disabled
-                        title="Seleccione un cliente primero"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Nuevo producto
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className={cn(
-                          "h-10 shrink-0 sm:self-end",
-                          CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER,
-                        )}
-                        asChild
-                      >
-                        <Link
-                          className="inline-flex items-center"
-                          to={{
-                            pathname: newProductLink.pathname,
-                            search: newProductLink.search,
-                          }}
-                          state={newProductLink.state}
-                        >
-                          <Plus className="mr-2 h-4 w-4" />
-                          Nuevo producto
-                        </Link>
-                      </Button>
-                    )}
-                  </div>
-                  {prodErr ? <p className="text-destructive text-xs">{prodErr}</p> : null}
-                </div>
-
-                <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-                  <div className="grid gap-1.5">
-                    <Label className="flex items-center gap-2 text-sm font-medium">
-                      <Hash className="h-4 w-4 text-muted-foreground" />
-                      C.P.E.
-                    </Label>
-                    <Input
-                      value={selected?.cpe ?? ""}
-                      readOnly
-                      tabIndex={-1}
-                      className={cn(
-                        "h-10 bg-background",
-                        CO_FOCUS_RING,
-                        "focus-visible:ring-muted-foreground/25",
-                      )}
-                      placeholder="Dato maestro"
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label className="flex items-center gap-2 text-sm font-medium">
-                      <Hash className="h-4 w-4 text-muted-foreground" />
-                      M.P.P.S.
-                    </Label>
-                    <Input
-                      value={selected?.mps ?? ""}
-                      readOnly
-                      tabIndex={-1}
-                      className={cn(
-                        "h-10 bg-background",
-                        CO_FOCUS_RING,
-                        "focus-visible:ring-muted-foreground/25",
-                      )}
-                      placeholder="Dato maestro"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-2 sm:col-span-2">
-                  <Label className="flex items-center gap-2 text-sm font-medium leading-snug">
-                    <Layers className="h-4 w-4 text-muted-foreground" />
-                    {CLIENT_ORDER_LINE_MATERIAL_LABEL}
-                  </Label>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <div className="min-w-0 flex-1">
-                      <Popover
-                        open={materialComboOpenKey === row.key}
-                        onOpenChange={(open) => setMaterialComboOpenKey(open ? row.key : null)}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            id={`co-material-${row.key}`}
-                            aria-expanded={materialComboOpenKey === row.key}
-                            className={cn(
-                              "h-10 w-full justify-between gap-2 bg-background px-3 font-normal",
-                              CO_FOCUS_RING,
-                              "focus-visible:ring-primary/35",
-                            )}
-                          >
-                            <Layers className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                            <span className="min-w-0 flex-1 truncate text-left">
-                              {selectedMat
-                                ? `${selectedMat.sku} — ${selectedMat.name}`
-                                : CLIENT_ORDER_LINE_MATERIAL_PLACEHOLDER}
-                            </span>
-                            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                          className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
-                          align="start"
-                        >
-                          <Command shouldFilter>
-                            <CommandInput placeholder={CLIENT_ORDER_LINE_MATERIAL_SEARCH_PLACEHOLDER} />
-                            <CommandList>
-                              <CommandEmpty>
-                                <div className="space-y-2 p-2 text-sm">
-                                  <p>No hay materiales que coincidan.</p>
-                                  <Button type="button" variant="secondary" size="sm" asChild>
-                                    <Link
-                                      className="inline-flex items-center"
-                                      to={newMaterialLink.pathname}
-                                      state={newMaterialLink.state}
-                                      onClick={() => setMaterialComboOpenKey(null)}
-                                    >
-                                      <Plus className="mr-2 h-4 w-4" />
-                                      Crear material
-                                    </Link>
-                                  </Button>
-                                </div>
-                              </CommandEmpty>
-                              <CommandGroup>
-                                <CommandItem
-                                  value="sin-material"
-                                  onSelect={() => {
-                                    updateLine(i, { material_id: "" })
-                                    setMaterialComboOpenKey(null)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      row.material_id ? "opacity-0" : "opacity-100",
-                                    )}
-                                  />
-                                  {CLIENT_ORDER_LINE_MATERIAL_EMPTY}
-                                </CommandItem>
-                                {materials.map((m) => (
-                                  <CommandItem
-                                    key={m.id}
-                                    value={`${m.sku} ${m.name}`}
-                                    onSelect={() => {
-                                      updateLine(i, { material_id: String(m.id) })
-                                      setMaterialComboOpenKey(null)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        row.material_id === String(m.id) ? "opacity-100" : "opacity-0",
-                                      )}
-                                    />
-                                    <span className="truncate">
-                                      {m.sku} — {m.name}
-                                    </span>
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className={cn(
-                        "h-10 shrink-0 sm:self-end",
-                        CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER,
-                      )}
-                      asChild
-                    >
-                      <Link
-                        className="inline-flex items-center"
-                        to={newMaterialLink.pathname}
-                        state={newMaterialLink.state}
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Nuevo material
-                      </Link>
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid gap-2 sm:col-span-2">
-                  <Label
-                    htmlFor={`co-line-desc-${row.key}`}
-                    className="text-sm font-medium leading-snug"
-                  >
-                    {CLIENT_ORDER_LINE_DESCRIPTION_LABEL}
-                  </Label>
-                  <Input
-                    id={`co-line-desc-${row.key}`}
-                    type="text"
-                    maxLength={512}
-                    value={row.description}
-                    onChange={(e) => updateLine(i, { description: e.target.value })}
-                    placeholder={CLIENT_ORDER_LINE_DESCRIPTION_PLACEHOLDER}
-                    className={cn("h-10 bg-background", CO_FOCUS_RING, "focus-visible:ring-primary/35")}
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label
-                    htmlFor={`co-qty-${row.key}`}
-                    className="text-sm font-medium leading-snug"
-                  >
-                    Cantidad a solicitar *
-                  </Label>
-                  <div className="group/qty relative">
-                    <Scale
-                      className={cn(
-                        "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                        qtyErr
-                          ? "text-destructive"
-                          : "text-muted-foreground group-focus-within/qty:text-primary",
-                      )}
-                      aria-hidden
-                    />
-                    <Input
-                      id={`co-qty-${row.key}`}
-                      type="text"
-                      inputMode="decimal"
-                      aria-invalid={Boolean(qtyErr)}
-                      className={cn(
-                        "h-10 bg-background pl-10",
-                        CO_FOCUS_RING,
-                        qtyErr
-                          ? "border-destructive bg-destructive/5 focus-visible:ring-destructive"
-                          : "focus-visible:ring-primary/35",
-                      )}
-                      value={row.quantity}
-                      onChange={(e) => updateLine(i, { quantity: e.target.value })}
-                      onBlur={() =>
-                        handleQuantityBlur(row.key, row.product_id, row.quantity)
-                      }
-                      placeholder="Ej. 1000"
-                    />
-                  </div>
-                  {qtyErr ? <p className="text-destructive text-xs">{qtyErr}</p> : null}
-                </div>
-                <div className="flex justify-center sm:col-span-2 sm:justify-start">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeLine(i)}
-                    disabled={lines.length <= 1}
-                  >
-                    <Trash2 className="mr-1 h-4 w-4" />
-                    Quitar línea
-                  </Button>
-                </div>
-              </div>
-            )
-          })}
-          <div className="flex justify-center sm:justify-start">
-            <Button
-              type="button"
-              variant="secondary"
-              className={CLIENT_ORDER_SIDEBAR_SECONDARY_HOVER}
-              onClick={addLine}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Añadir línea
-            </Button>
+          <div className={catalogMasterFormSectionClass}>
+            <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              Líneas de la solicitud *
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              Cada línea debe tener producto y cantidad. Puede añadir material o descripción opcional.
+            </p>
           </div>
+
+          <ClientOrderLinesEditor
+            variant="new"
+            lines={lines}
+            disabled={saving}
+            clientMissing={clientMissing}
+            productsForClient={productsForClient}
+            materials={materials}
+            productComboOpenKey={productComboOpenKey}
+            onProductComboOpenKeyChange={setProductComboOpenKey}
+            materialComboOpenKey={materialComboOpenKey}
+            onMaterialComboOpenKeyChange={setMaterialComboOpenKey}
+            selectedProductByLineKey={selectedProductByLineKey}
+            selectedMaterialByLineKey={selectedMaterialByLineKey}
+            lineFieldErrorsByKey={lineFieldErrorsByKey}
+            qtyBlurKeys={qtyBlurKeys}
+            newProductLink={newProductLink}
+            newMaterialLink={newMaterialLink}
+            onUpdateLine={(i, patch) => updateLine(i, patch)}
+            onRemoveLine={(i) => removeLine(i)}
+            onAddLine={addLine}
+            onQuantityBlur={handleQuantityFieldBlur}
+          />
         </div>
 
-        <div className="flex flex-col-reverse items-stretch justify-center gap-3 border-t pt-4 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className={catalogMasterFormActionsClass}>
           <Button type="button" variant="outline" asChild className="w-full sm:w-auto">
             <Link to="/ordenes-cliente">Cancelar</Link>
           </Button>
@@ -1401,6 +1044,6 @@ export default function ClientOrderNewPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </CatalogPageShell>
   )
 }

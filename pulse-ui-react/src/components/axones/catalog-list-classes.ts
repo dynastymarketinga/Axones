@@ -114,3 +114,10 @@ export const catalogMasterFormActionsClass =
 /** Encabezado interno de sección en formularios maestros. */
 export const catalogMasterFormSectionClass =
   "space-y-1 border-b border-primary/10 pb-5"
+
+/** Scroll fino en listas de combobox / popover (ver `.ax-scroll-thin` en index.css). */
+export const catalogComboboxScrollClass = "ax-scroll-thin"
+
+/** Popover alineado al ancho del trigger en combobox de catálogo. */
+export const catalogComboboxPopoverClass =
+  "overflow-hidden rounded-lg border border-primary/25 bg-popover p-0 shadow-md ring-1 ring-primary/10"

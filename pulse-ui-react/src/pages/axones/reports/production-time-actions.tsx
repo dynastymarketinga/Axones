@@ -3,7 +3,6 @@
 import { Building2, Eye, FileDown, FileSpreadsheet, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 
 type ProductionTimeActionsProps = {
   loadingDownloads: boolean
@@ -13,7 +12,7 @@ type ProductionTimeActionsProps = {
 }
 
 const actionBtnClass =
-  "h-9 w-full justify-start gap-2 text-xs font-medium sm:justify-center xl:justify-start"
+  "h-9 w-full min-w-0 justify-start gap-2 text-xs font-medium sm:justify-center"
 
 export function ProductionTimeActions({
   loadingDownloads,
@@ -28,7 +27,7 @@ export function ProductionTimeActions({
         Tiempos del período
       </p>
 
-      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3 xl:grid-cols-1">
+      <div className="grid min-w-0 grid-cols-1 gap-1.5 sm:grid-cols-3">
         <Button type="button" size="sm" className={actionBtnClass} onClick={onPreview}>
           <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden />
           Vista previa
@@ -52,7 +51,7 @@ export function ProductionTimeActions({
           type="button"
           variant="outline"
           size="sm"
-          className={cn(actionBtnClass, "sm:col-span-1")}
+          className={actionBtnClass}
           disabled={loadingDownloads}
           onClick={onExcel}
         >

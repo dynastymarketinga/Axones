@@ -52,8 +52,8 @@ function FilterColumn({
   return (
     <div
       className={cn(
-        "min-w-0 space-y-2.5 sm:space-y-3",
-        showDivider && "xl:border-border xl:border-l xl:pl-4",
+        "min-w-0 overflow-hidden space-y-2.5 sm:space-y-3",
+        showDivider && "lg:border-border lg:border-l lg:pl-4",
         className,
       )}
     >
@@ -101,13 +101,13 @@ export function ProductionTimeReportFilters({
       activeFilterCount={(aggregateAll ? 1 : 0) + (woId.trim() ? 1 : 0) + (includeLive ? 1 : 0)}
       theme={theme}
     >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-4 xl:gap-3">
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
         <FilterColumn
           title="Período"
           accentClass="text-sky-800 dark:text-sky-200"
           dotClass="bg-sky-500"
         >
-          <div className="grid grid-cols-2 gap-2 xl:grid-cols-1 xl:gap-3">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 lg:gap-3">
             <CatalogLabeledField label="Desde" icon={CalendarDays} className="min-w-0">
               <Input
                 type="date"
@@ -167,8 +167,9 @@ export function ProductionTimeReportFilters({
           accentClass="text-amber-800 dark:text-amber-200"
           dotClass="bg-amber-500"
           showDivider
+          className="sm:col-span-2"
         >
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <div className="flex items-center gap-2">
               <Checkbox
                 id="aggregate-all"
@@ -196,7 +197,7 @@ export function ProductionTimeReportFilters({
           accentClass="text-emerald-800 dark:text-emerald-200"
           dotClass="bg-emerald-500"
           showDivider
-          className="sm:col-span-2 xl:col-span-1"
+          className="sm:col-span-2"
         >
           {actionsSlot}
         </FilterColumn>

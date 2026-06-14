@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
@@ -6,15 +6,13 @@ import { toast } from "sonner"
 import {
   ArrowLeftRight,
   Check,
-  ChevronsUpDown,
-  Hash,
   Package,
-  Plus,
-  Trash2,
+  ScrollText,
   UserPlus,
 } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
+import { parseDecimalTwoInput } from "@/lib/decimal-two-input"
 import type {
   ClientOrderDetailRecord,
   ClientOrderLineDetail,
@@ -22,8 +20,17 @@ import type {
   LaravelPaginated,
   ProductRecord,
 } from "@/types/api"
+import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
+import { ClientOrderLinesEditor } from "@/components/axones/ClientOrderLinesEditor"
+import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { PageLoadingBlock } from "@/components/axones/LoadingStates"
+import {
+  catalogMasterFormActionsClass,
+  catalogMasterFormPanelWideClass,
+  catalogMasterFormPlainInputClass,
+  catalogMasterFormSectionClass,
+} from "@/components/axones/catalog-list-classes"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -60,7 +67,6 @@ import {
   CLIENT_ORDER_TOAST_SAVE_FAILED,
   CLIENT_ORDER_TOAST_UPDATED,
 } from "@/pages/axones/client-order-i18n"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import {
@@ -71,10 +77,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
-const CO_FOCUS_RING =
-  "transition-[box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:shadow-md"
+/** Secondary con hover en atajos a maestros. */
+const CLIENT_ORDER_MASTER_SECONDARY_HOVER =
+  "transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:bg-primary/12 hover:text-foreground hover:shadow-md active:translate-y-0 active:shadow-sm dark:hover:bg-primary/18"
 
 function todayLocalDateInput(): string {
   const d = new Date()
@@ -139,9 +145,8 @@ function orderLinesToDrafts(lines: ClientOrderLineDetail[]): LineDraft[] {
 }
 
 function isLineQuantityInvalid(quantity: string): boolean {
-  const qtyTrim = quantity.trim()
-  const q = Number(qtyTrim)
-  return !qtyTrim || !Number.isFinite(q) || q <= 0
+  const q = parseDecimalTwoInput(quantity)
+  return q === null || q <= 0
 }
 
 export default function ClientOrderEditPage() {
@@ -274,13 +279,12 @@ export default function ClientOrderEditPage() {
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible") {
-        void load()
         void loadClientsAndProducts()
       }
     }
     document.addEventListener("visibilitychange", onVis)
     return () => document.removeEventListener("visibilitychange", onVis)
-  }, [load, loadClientsAndProducts])
+  }, [loadClientsAndProducts])
 
   function updateLine(key: string, patch: Partial<LineDraft>) {
     setLineDrafts((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)))
@@ -364,7 +368,7 @@ export default function ClientOrderEditPage() {
 
     payload.lines = lineDrafts.map((row) => ({
       product_id: Number(row.product_id),
-      quantity: row.quantity.trim(),
+      quantity: parseDecimalTwoInput(row.quantity)!,
       unit: row.unit.trim() || "kg",
     }))
 
@@ -411,64 +415,69 @@ export default function ClientOrderEditPage() {
 
   if (!Number.isFinite(orderId) || orderId < 1) {
     return (
-      <div className="p-4 md:p-6">
+      <CatalogPageShell
+        title={CLIENT_ORDER_MODULE_EDIT_TITLE}
+        icon={ScrollText}
+        headerVariant="elevated"
+        action={<CatalogMasterFormBackButton to="/ordenes-cliente" />}
+      >
         <p className="text-destructive text-sm">Identificador de orden no válido.</p>
-        <Button className="mt-4" variant="outline" asChild>
-          <Link to="/ordenes-cliente">Volver al listado</Link>
-        </Button>
-      </div>
+      </CatalogPageShell>
     )
   }
 
   if (loading) {
     return (
-      <div className="p-4 md:p-6">
+      <CatalogPageShell
+        title={CLIENT_ORDER_MODULE_EDIT_TITLE}
+        icon={ScrollText}
+        headerVariant="elevated"
+        action={<CatalogMasterFormBackButton to="/ordenes-cliente" />}
+      >
+        <PageLoadingBlock />
         <p className="text-muted-foreground text-sm">{CLIENT_ORDER_LOADING_LABEL}</p>
-      </div>
+      </CatalogPageShell>
     )
   }
 
   if (!orderCode) {
     return (
-      <div className="p-4 md:p-6">
+      <CatalogPageShell
+        title={CLIENT_ORDER_MODULE_EDIT_TITLE}
+        icon={ScrollText}
+        headerVariant="elevated"
+        action={<CatalogMasterFormBackButton to="/ordenes-cliente" />}
+      >
         <p className="text-muted-foreground text-sm">No se encontró la orden.</p>
-        <Button className="mt-4" variant="outline" asChild>
-          <Link to="/ordenes-cliente">Volver al listado</Link>
-        </Button>
-      </div>
+      </CatalogPageShell>
     )
   }
 
   const linesLocked = !canEdit || hasNonProductLines
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{CLIENT_ORDER_MODULE_EDIT_TITLE}</h1>
-          <p className="text-foreground/90 font-mono text-sm">{orderCode}</p>
-          <div className="flex flex-wrap items-center gap-2 pt-1 text-sm text-muted-foreground">
-            <span>Estado</span>
-            <Badge
-              variant="outline"
-              className={cn("font-medium border", clientOrderStatusBadgeClass(orderStatus))}
-            >
-              {clientOrderStatusLabel(orderStatus)}
-            </Badge>
-            {canEdit ? (
-              <span className="max-w-xl text-muted-foreground">· {CLIENT_ORDER_EDIT_HEADER_HINT}</span>
-            ) : (
-              <span>· Solo lectura.</span>
-            )}
-          </div>
+    <CatalogPageShell
+      title={CLIENT_ORDER_MODULE_EDIT_TITLE}
+      subtitle={
+        canEdit
+          ? CLIENT_ORDER_EDIT_HEADER_HINT
+          : "Solo lectura: la orden no está en estado Abierta."
+      }
+      icon={ScrollText}
+      headerVariant="elevated"
+      action={<CatalogMasterFormBackButton to="/ordenes-cliente" />}
+      headerExtras={
+        <div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
+          <span className="font-mono text-base font-medium text-foreground">{orderCode}</span>
+          <Badge
+            variant="outline"
+            className={cn("font-medium border", clientOrderStatusBadgeClass(orderStatus))}
+          >
+            {clientOrderStatusLabel(orderStatus)}
+          </Badge>
         </div>
-        <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
-          <Button type="button" variant="default" size="sm" asChild>
-            <Link to="/ordenes-cliente">Volver al listado</Link>
-          </Button>
-        </div>
-      </div>
-
+      }
+    >
       {!canEdit ? (
         <p className="text-sm text-amber-800 dark:text-amber-200 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
           Esta orden no está <strong>Abierta</strong>, por lo que no se permite editar notas ni cambiar el cliente. Use el
@@ -482,282 +491,91 @@ export default function ClientOrderEditPage() {
         </p>
       ) : null}
 
-      <form
-        onSubmit={(ev) => void submit(ev)}
-        className="space-y-6 rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-sm"
-      >
-        <Card className="border-0 bg-muted/30 shadow-none">
-          <CardHeader className="space-y-1 pb-2">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <CardTitle className="text-base">Cliente</CardTitle>
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="shrink-0"
-                  disabled={!canEdit || hasNonProductLines}
-                  onClick={() => {
-                    setReplaceDraftId(selectedClientId !== null ? String(selectedClientId) : "")
-                    setReplaceDialogOpen(true)
-                  }}
-                >
-                  <ArrowLeftRight className="mr-2 h-4 w-4" />
-                  {CLIENT_ORDER_REPLACE_CLIENT_BUTTON}
-                </Button>
-                <Button variant="link" size="sm" className="h-auto shrink-0 px-2 text-muted-foreground" asChild>
-                  <Link to={newClientLink.pathname} state={newClientLink.state}>
-                    <UserPlus className="mr-1.5 h-4 w-4" />
-                    {CLIENT_ORDER_CREATE_CLIENT_LINK}
-                  </Link>
-                </Button>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">{CLIENT_ORDER_EDIT_CLIENT_SECTION_HELPER}</p>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {displayClient ? (
-              <div className="text-sm">
-                <p className="text-base font-medium text-foreground">
-                  {displayClient.name}
-                  {displayClient.rif ? (
-                    <span className="font-normal text-muted-foreground"> · {displayClient.rif}</span>
-                  ) : null}
-                </p>
-                {displayClient.city || displayClient.state || displayClient.address ? (
-                  <p className="text-muted-foreground mt-1.5">
-                    {[displayClient.address, [displayClient.city, displayClient.state].filter(Boolean).join(", ")]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                ) : null}
-              </div>
-            ) : selectedClientId !== null ? (
-              <p className="text-sm text-muted-foreground">Cliente #{selectedClientId}</p>
-            ) : (
-              <p className="text-sm text-muted-foreground">Sin cliente seleccionado.</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <div
-          className={cn(
-            "space-y-3 border-t border-border pt-4",
-            linesLocked && "pointer-events-none opacity-60",
-          )}
-        >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <form onSubmit={(ev) => void submit(ev)} className={catalogMasterFormPanelWideClass}>
+        <div className={catalogMasterFormSectionClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="flex items-center gap-2 text-base font-semibold">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                {CLIENT_ORDER_EDIT_LINES_SECTION_TITLE}
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1">{CLIENT_ORDER_EDIT_LINES_HELPER}</p>
+              <h2 className="text-base font-semibold tracking-tight">Cliente</h2>
+              <p className="text-muted-foreground text-sm">{CLIENT_ORDER_EDIT_CLIENT_SECTION_HELPER}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={linesLocked || !selectedClientId}
-                className="shrink-0"
-                asChild
+                className={cn("shrink-0", CLIENT_ORDER_MASTER_SECONDARY_HOVER)}
+                disabled={!canEdit || hasNonProductLines}
+                onClick={() => {
+                  setReplaceDraftId(selectedClientId !== null ? String(selectedClientId) : "")
+                  setReplaceDialogOpen(true)
+                }}
               >
-                <Link
-                  className="inline-flex items-center"
-                  to={{ pathname: newProductLink.pathname, search: newProductLink.search }}
-                  state={newProductLink.state}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Nuevo producto
-                </Link>
+                <ArrowLeftRight className="mr-2 h-4 w-4" />
+                {CLIENT_ORDER_REPLACE_CLIENT_BUTTON}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={linesLocked}
-                onClick={() => addLine()}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Añadir línea
+              <Button variant="link" size="sm" className="h-auto shrink-0 px-2 text-muted-foreground" asChild>
+                <Link to={newClientLink.pathname} state={newClientLink.state}>
+                  <UserPlus className="mr-1.5 h-4 w-4" />
+                  {CLIENT_ORDER_CREATE_CLIENT_LINK}
+                </Link>
               </Button>
             </div>
           </div>
-
-          {lineDrafts.length === 0 ? (
-            <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border bg-muted/20 p-4">
-              No hay líneas con producto. Pulse «Añadir línea» o cargue la orden de nuevo.
-            </p>
+          {displayClient ? (
+            <div className="text-sm pt-2">
+              <p className="text-base font-medium text-foreground">
+                {displayClient.name}
+                {displayClient.rif ? (
+                  <span className="font-normal text-muted-foreground"> · {displayClient.rif}</span>
+                ) : null}
+              </p>
+              {displayClient.city || displayClient.state || displayClient.address ? (
+                <p className="text-muted-foreground mt-1.5">
+                  {[displayClient.address, [displayClient.city, displayClient.state].filter(Boolean).join(", ")]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              ) : null}
+            </div>
+          ) : selectedClientId !== null ? (
+            <p className="text-sm text-muted-foreground pt-2">Cliente #{selectedClientId}</p>
           ) : (
-            lineDrafts.map((row, i) => {
-              const selected = selectedProductByLineKey.get(row.key) ?? null
-              return (
-                <div
-                  key={row.key}
-                  className="grid gap-3 rounded-xl border border-border bg-muted/20 p-3 sm:grid-cols-2"
-                >
-                  <div className="grid gap-2 sm:col-span-2">
-                    <Label className="text-sm font-medium leading-snug">Producto</Label>
-                    <Popover
-                      open={productComboOpenKey === row.key}
-                      onOpenChange={(open) => setProductComboOpenKey(open ? row.key : null)}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          disabled={linesLocked}
-                          aria-expanded={productComboOpenKey === row.key}
-                          className={cn(
-                            "h-10 w-full justify-between gap-2 bg-background px-3 font-normal",
-                            CO_FOCUS_RING,
-                            "focus-visible:ring-primary/35",
-                          )}
-                        >
-                          <Package className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate text-left",
-                              selected ? "text-foreground" : "text-muted-foreground",
-                            )}
-                          >
-                            {selected ? selected.name : "Seleccione un producto del cliente"}
-                          </span>
-                          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
-                        align="start"
-                      >
-                        <Command shouldFilter>
-                          <CommandInput placeholder="Buscar por nombre, C.P.E. o M.P.P.S…" />
-                          <CommandList>
-                            <CommandEmpty>
-                              <div className="space-y-2 p-2 text-sm">
-                                <p>No hay productos que coincidan.</p>
-                                <Button type="button" variant="secondary" size="sm" asChild>
-                                  <Link
-                                    className="inline-flex items-center"
-                                    to={{
-                                      pathname: newProductLink.pathname,
-                                      search: newProductLink.search,
-                                    }}
-                                    state={newProductLink.state}
-                                    onClick={() => setProductComboOpenKey(null)}
-                                  >
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    Crear producto
-                                  </Link>
-                                </Button>
-                              </div>
-                            </CommandEmpty>
-                            <CommandGroup>
-                              {productsForClient.map((p) => (
-                                <CommandItem
-                                  key={p.id}
-                                  value={`${p.name} ${p.cpe ?? ""} ${p.mps ?? ""}`}
-                                  onSelect={() => {
-                                    updateLine(row.key, { product_id: p.id })
-                                    setProductComboOpenKey(null)
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      row.product_id === p.id ? "opacity-100" : "opacity-0",
-                                    )}
-                                  />
-                                  <span className="truncate">{p.name}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
-                    <div className="grid gap-1.5">
-                      <Label className="flex items-center gap-2 text-sm font-medium">
-                        <Hash className="h-4 w-4 text-muted-foreground" />
-                        C.P.E.
-                      </Label>
-                      <Input
-                        value={selected?.cpe ?? ""}
-                        readOnly
-                        tabIndex={-1}
-                        className={cn(
-                          "h-10 bg-background",
-                          CO_FOCUS_RING,
-                          "focus-visible:ring-muted-foreground/25",
-                        )}
-                        placeholder="—"
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label className="flex items-center gap-2 text-sm font-medium">
-                        <Hash className="h-4 w-4 text-muted-foreground" />
-                        M.P.P.S.
-                      </Label>
-                      <Input
-                        value={selected?.mps ?? ""}
-                        readOnly
-                        tabIndex={-1}
-                        className={cn(
-                          "h-10 bg-background",
-                          CO_FOCUS_RING,
-                          "focus-visible:ring-muted-foreground/25",
-                        )}
-                        placeholder="—"
-                      />
-                    </div>
-                    <div className="grid gap-1.5 sm:col-span-1">
-                      <Label className="text-sm font-medium">Cantidad</Label>
-                      <Input
-                        inputMode="decimal"
-                        disabled={linesLocked}
-                        value={row.quantity}
-                        onChange={(e) => updateLine(row.key, { quantity: e.target.value })}
-                        className={cn("h-10 bg-background", CO_FOCUS_RING, "focus-visible:ring-primary/35")}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:items-end sm:justify-between">
-                    <div className="grid gap-1.5 max-w-[8rem]">
-                      <Label className="text-sm font-medium">Unidad</Label>
-                      <Input
-                        disabled={linesLocked}
-                        value={row.unit}
-                        onChange={(e) => updateLine(row.key, { unit: e.target.value })}
-                        className={cn("h-10 bg-background", CO_FOCUS_RING, "focus-visible:ring-primary/35")}
-                        placeholder="kg"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10"
-                      disabled={linesLocked}
-                      onClick={() => removeLine(row.key)}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Quitar línea {i + 1}
-                    </Button>
-                  </div>
-                </div>
-              )
-            })
+            <p className="text-sm text-muted-foreground pt-2">Sin cliente seleccionado.</p>
           )}
         </div>
 
-        <div className="space-y-2">
+        <div
+          className={cn(
+            "space-y-3 border-t border-primary/10 pt-6",
+            linesLocked && "pointer-events-none opacity-60",
+          )}
+        >
+          <div className={catalogMasterFormSectionClass}>
+            <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              {CLIENT_ORDER_EDIT_LINES_SECTION_TITLE}
+            </h2>
+            <p className="text-muted-foreground text-sm mt-1">{CLIENT_ORDER_EDIT_LINES_HELPER}</p>
+          </div>
+
+          <ClientOrderLinesEditor
+            variant="edit"
+            lines={lineDrafts}
+            disabled={linesLocked || saving}
+            clientMissing={!selectedClientId}
+            productsForClient={productsForClient}
+            productComboOpenKey={productComboOpenKey}
+            onProductComboOpenKeyChange={setProductComboOpenKey}
+            selectedProductByLineKey={selectedProductByLineKey}
+            newProductLink={newProductLink}
+            productPlaceholder="Seleccione un producto del cliente"
+            onUpdateLine={(i, patch) => updateLine(lineDrafts[i]!.key, patch)}
+            onRemoveLine={(i) => removeLine(lineDrafts[i]!.key)}
+            onAddLine={addLine}
+          />
+        </div>
+
+        <div className="space-y-2 border-t border-primary/10 pt-6">
           <Label htmlFor="co-notes" className="text-foreground">
             Notas <span className="font-normal text-muted-foreground">(opcional)</span>
           </Label>
@@ -766,18 +584,18 @@ export default function ClientOrderEditPage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={4}
-            className="min-h-[120px] resize-y bg-background"
+            className={cn(catalogMasterFormPlainInputClass, "min-h-[120px] h-auto resize-y py-2.5")}
             placeholder={CLIENT_ORDER_NOTES_PLACEHOLDER}
             disabled={!canEdit}
           />
         </div>
 
-        <div className="flex w-full flex-wrap items-center justify-center gap-2 border-t border-border/80 pt-4">
-          <Button type="submit" size="lg" disabled={saving || !canEdit} className="min-w-40">
-            {saving ? "Guardando…" : "Guardar cambios"}
-          </Button>
-          <Button type="button" variant="outline" asChild>
+        <div className={catalogMasterFormActionsClass}>
+          <Button type="button" variant="outline" asChild className="w-full sm:w-auto">
             <Link to="/ordenes-cliente">Cancelar</Link>
+          </Button>
+          <Button type="submit" size="lg" disabled={saving || !canEdit} className="min-w-40 w-full sm:w-auto">
+            {saving ? "Guardando…" : "Guardar cambios"}
           </Button>
         </div>
       </form>
@@ -831,6 +649,6 @@ export default function ClientOrderEditPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </CatalogPageShell>
   )
 }

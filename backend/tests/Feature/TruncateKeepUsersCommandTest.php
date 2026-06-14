@@ -55,7 +55,7 @@ class TruncateKeepUsersCommandTest extends TestCase
 
         $this->assertSame($usersBefore, User::query()->count());
         $this->assertSame(1, DB::table('sessions')->count());
-        $this->assertSame(1, DB::table('cache')->count());
+        $this->assertSame(0, DB::table('cache')->count());
         $this->assertSame(1, DB::table('personal_access_tokens')->count());
         $this->assertSame(0, Supplier::query()->count());
         $this->assertSame(0, Material::query()->count());

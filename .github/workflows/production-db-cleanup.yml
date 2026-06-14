@@ -11,6 +11,9 @@ jobs:
     steps:
       - name: Vaciar tablas de negocio
         run: |
-          cd /var/www/axones/backend
-          echo "==> Limpieza BD: conserva users, cache, sessions, personal_access_tokens"
+          cd /var/www/axones
+          git fetch origin main
+          git reset --hard origin/main
+          cd backend
+          echo "==> Limpieza BD: conserva users, sessions, personal_access_tokens, migrations"
           php artisan axones:truncate-keep-users --force --no-interaction

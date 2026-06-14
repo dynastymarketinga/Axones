@@ -13,12 +13,11 @@ class TruncateKeepUsersCommand extends Command
                             {--force : Obligatorio en production y para omitir confirmación}
                             {--dry-run : Solo listar tablas que se vaciarían}';
 
-    protected $description = 'Vacía todas las tablas de la BD excepto users, cache, sessions, personal_access_tokens y migrations.';
+    protected $description = 'Vacía todas las tablas de la BD excepto users, sessions, personal_access_tokens y migrations.';
 
     /** @var list<string> */
     private array $preserve = [
         'users',
-        'cache',
         'sessions',
         'personal_access_tokens',
         'migrations',
@@ -52,7 +51,7 @@ class TruncateKeepUsersCommand extends Command
         }
 
         if (! $this->option('force') && ! $this->confirm(
-            '¿Vaciar '.count($tables).' tablas? Se conservan users, cache, sessions, personal_access_tokens y migrations.',
+            '¿Vaciar '.count($tables).' tablas? Se conservan users, sessions, personal_access_tokens y migrations.',
             false,
         )) {
             $this->line('Cancelado.');

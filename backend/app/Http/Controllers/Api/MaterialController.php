@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\InventoryMovementType;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\MaterialBulkImportRequest;
 use App\Http\Requests\MaterialIndexRequest;
 use App\Http\Requests\StoreMaterialRequest;
 use App\Http\Requests\UpdateMaterialRequest;
+use App\Services\MaterialBulkImportService;
 use App\Models\InventoryChangeApproval;
 use App\Models\InventoryMovement;
 use App\Models\Material;
@@ -20,6 +22,10 @@ use Illuminate\Support\Facades\DB;
 
 class MaterialController extends Controller
 {
+    public function __construct(
+        private readonly MaterialBulkImportService $bulkImport,
+    ) {}
+
     public function index(MaterialIndexRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -136,6 +142,23 @@ class MaterialController extends Controller
         $per = min((int) ($validated['per_page'] ?? 20), 500);
 
         return response()->json($query->paginate($per));
+    }
+
+    public function bulkImport(MaterialBulkImportRequest $request): JsonResponse
+    {
+        $this->assertCanManageMaterials($request);
+
+        $validated = $request->validated();
+        $dryRun = (bool) ($validated['dry_run'] ?? false);
+
+        $result = $this->bulkImport->import(
+            $validated['rows'],
+            $request->user(),
+            $dryRun,
+            isset($validated['source_filename']) ? (string) $validated['source_filename'] : null,
+        );
+
+        return response()->json($result);
     }
 
     public function checkDuplicates(Request $request): JsonResponse

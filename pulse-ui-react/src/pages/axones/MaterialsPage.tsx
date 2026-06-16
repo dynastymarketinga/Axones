@@ -8,8 +8,11 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Download,
+  FileSpreadsheet,
   Filter,
   Layers,
+  Loader2,
   Package,
   Pencil,
   Plus,
@@ -18,6 +21,7 @@ import {
   SlidersHorizontal,
   Tag,
   Truck,
+  Upload,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -39,6 +43,7 @@ import {
 } from "@/components/axones/catalog-list-classes"
 import { AxonesInventoryModuleNav } from "@/components/axones/inventory-page-layout"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { MaterialsVictorExcelDialog } from "@/components/axones/MaterialsVictorExcelDialog"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
@@ -51,6 +56,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiFetch, ApiError, isApiAbortError } from "@/lib/api"
+import { exportVictorExcel, exportVictorTemplateExcel } from "@/lib/materials-victor-excel"
 import { getStoredUser } from "@/lib/auth-storage"
 import { canSeeWarehouseInventoryCounts } from "@/lib/axones-roles"
 import {
@@ -163,6 +169,9 @@ export default function MaterialsPage() {
   const [perPage, setPerPage] = useState(20)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<LaravelPaginated<MaterialRow> | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false)
   const loadAbortRef = useRef<AbortController | null>(null)
 
   const showDimensions = activeArea === "material"
@@ -227,6 +236,53 @@ export default function MaterialsPage() {
     void load()
   }, [load])
 
+  const handleExportVictor = useCallback(async () => {
+    setExporting(true)
+    try {
+      const all: MaterialRow[] = []
+      let pageNum = 1
+      let lastPage = 1
+      do {
+        const data = await apiFetch<LaravelPaginated<MaterialRow>>("materials", {
+          query: {
+            page: pageNum,
+            per_page: 500,
+            inventory_area: activeArea !== "all" ? activeArea : undefined,
+            sort_by: sortBy,
+            sort_dir: sortDir,
+          },
+        })
+        all.push(...data.data)
+        lastPage = data.last_page
+        pageNum += 1
+      } while (pageNum <= lastPage)
+
+      if (all.length === 0) {
+        toast.error("No hay materiales para exportar.")
+        return
+      }
+
+      await exportVictorExcel(all)
+      toast.success("Excel exportado.")
+    } catch {
+      toast.error("No se pudo exportar el Excel.")
+    } finally {
+      setExporting(false)
+    }
+  }, [activeArea, sortBy, sortDir])
+
+  const handleDownloadTemplate = useCallback(async () => {
+    setDownloadingTemplate(true)
+    try {
+      await exportVictorTemplateExcel()
+      toast.success("Plantilla descargada.")
+    } catch {
+      toast.error("No se pudo generar la plantilla.")
+    } finally {
+      setDownloadingTemplate(false)
+    }
+  }, [])
+
   const showInitialSkeleton = loading && rows === null
 
   const hasActiveFilters =
@@ -244,12 +300,51 @@ export default function MaterialsPage() {
         subtitle="Sustratos, tintas, químicos y misceláneos con stock por área. No incluye producto terminado: el terminado se declara en Corte."
         icon={Boxes}
         action={
-          <Button type="button" asChild className="shadow-sm">
-            <Link to="/materiales/nuevo">
-              <Plus className="mr-2 size-4" aria-hidden />
-              Nuevo material
-            </Link>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="shadow-sm"
+              disabled={downloadingTemplate}
+              onClick={() => void handleDownloadTemplate()}
+            >
+              {downloadingTemplate ? (
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+              ) : (
+                <FileSpreadsheet className="mr-2 size-4" aria-hidden />
+              )}
+              Plantilla vacía
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="shadow-sm"
+              disabled={exporting}
+              onClick={() => void handleExportVictor()}
+            >
+              {exporting ? (
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+              ) : (
+                <Download className="mr-2 size-4" aria-hidden />
+              )}
+              Exportar Excel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="shadow-sm"
+              onClick={() => setImportOpen(true)}
+            >
+              <Upload className="mr-2 size-4" aria-hidden />
+              Importar Excel
+            </Button>
+            <Button type="button" asChild className="shadow-sm">
+              <Link to="/materiales/nuevo">
+                <Plus className="mr-2 size-4" aria-hidden />
+                Nuevo material
+              </Link>
+            </Button>
+          </div>
         }
       >
         <AxonesInventoryModuleNav active="materiales" variant="catalog" />
@@ -653,6 +748,12 @@ export default function MaterialsPage() {
           </>
         )}
       </CatalogPageShell>
+
+      <MaterialsVictorExcelDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={() => void load()}
+      />
     </div>
   )
 }

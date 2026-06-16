@@ -285,6 +285,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/material-requests/{material_request}/dispatch', [MaterialRequestController::class, 'invokeDispatch']);
 
     Route::get('/materials', [MaterialController::class, 'index']);
+    Route::post('/materials/bulk-import', [MaterialController::class, 'bulkImport'])
+        ->middleware('area.role:inventory');
     Route::get('/materials/check-duplicates', [MaterialController::class, 'checkDuplicates']);
     Route::post('/materials', [MaterialController::class, 'store'])
         ->middleware('area.role:inventory');

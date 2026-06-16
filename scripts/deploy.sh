@@ -22,7 +22,7 @@ composer install --no-dev --optimize-autoloader --no-interaction
 php artisan migrate --force --no-interaction
 
 if [ "${AXONES_TRUNCATE_KEEP_AUTH:-}" = "1" ]; then
-  echo "==> Limpieza BD: conserva users, sessions, personal_access_tokens, migrations"
+  echo "==> Limpieza BD: conserva users, sessions, cache, personal_access_tokens, migrations"
   php artisan axones:truncate-keep-users --force --no-interaction
 else
   echo "==> BD: sin cambios (deploy normal, no se vacían tablas)"

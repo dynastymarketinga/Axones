@@ -15,5 +15,5 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           cd backend
-          echo "==> Limpieza BD: conserva users, sessions, personal_access_tokens, migrations"
+          echo "==> Limpieza BD: conserva users, sessions, cache, personal_access_tokens, migrations"
           php artisan axones:truncate-keep-users --force --no-interaction

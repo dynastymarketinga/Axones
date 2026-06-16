@@ -12,6 +12,7 @@ use App\Http\Requests\ReportRejectedBobinasRequest;
 use App\Http\Requests\ReportWorkOrderMaterialSummaryRequest;
 use App\Http\Requests\ScrapReportRequest;
 use App\Http\Requests\WorkOrderTimeReportRequest;
+use App\Models\Client;
 use App\Models\Supplier;
 use App\Models\WorkOrder;
 use App\Services\InventoryReportService;
@@ -658,61 +659,22 @@ class ReportController extends Controller
         $payload = $this->reports->productionMaterialSummary($from, $to, $clientId);
 
         if (($validated['format'] ?? null) === 'csv') {
-            $csvRows = [
-                [
-                    'section' => 'resumen',
-                    'work_order_code' => 'TOTAL',
-                    'client_name' => '',
-                    'material_impreso_kg' => $payload['totals']['material_impreso_kg'] ?? '0.000',
-                    'material_laminado_kg' => $payload['totals']['material_laminado_kg'] ?? '0.000',
-                    'material_cortado_kg' => $payload['totals']['material_cortado_kg'] ?? '0.000',
-                    'total_general_kg' => $payload['totals']['total_general_kg'] ?? '0.000',
-                    'impreso_bobinas' => $payload['totals']['impreso_bobinas'] ?? 0,
-                    'laminado_bobinas' => $payload['totals']['laminado_bobinas'] ?? 0,
-                    'material_area' => '',
-                    'material_label' => '',
-                    'material_line_kg' => '',
-                    'material_line_bobinas' => '',
-                ],
-            ];
+            $clientLabel = $clientId !== null
+                ? (Client::query()->whereKey($clientId)->value('name') ?? 'Cliente')
+                : 'Todos los clientes';
 
-            foreach (['impreso' => 'material_impreso_lines', 'laminado' => 'material_laminado_lines', 'cortado' => 'material_cortado_lines'] as $area => $linesKey) {
-                foreach ((array) ($payload['totals'][$linesKey] ?? []) as $line) {
-                    $csvRows[] = [
-                        'section' => 'material_'.$area,
-                        'work_order_code' => 'TOTAL',
-                        'client_name' => '',
-                        'material_impreso_kg' => '',
-                        'material_laminado_kg' => '',
-                        'material_cortado_kg' => '',
-                        'total_general_kg' => '',
-                        'impreso_bobinas' => '',
-                        'laminado_bobinas' => '',
-                        'material_area' => $area,
-                        'material_label' => $line['label'] ?? '',
-                        'material_line_kg' => $line['kg'] ?? '0.000',
-                        'material_line_bobinas' => $line['bobinas'] ?? 0,
-                    ];
-                }
-            }
-
-            foreach ((array) ($payload['work_orders'] ?? []) as $row) {
-                $csvRows[] = ['section' => 'detalle'] + $row + [
-                    'total_general_kg' => number_format(
-                        (float) ($row['material_impreso_kg'] ?? 0)
-                        + (float) ($row['material_laminado_kg'] ?? 0)
-                        + (float) ($row['material_cortado_kg'] ?? 0),
-                        3,
-                        '.',
-                        '',
-                    ),
-                    'material_area' => '',
-                    'material_label' => '',
-                    'material_line_kg' => '',
-                    'material_line_bobinas' => '',
-                ];
-            }
-            $csv = $this->reports->rowsToCsv($csvRows);
+            $csvRows = $this->reports->productionMaterialSummaryCsvRows(
+                $payload,
+                $from,
+                $to,
+                $clientLabel,
+            );
+            $csv = $this->reports->rowsToCsv(
+                $csvRows,
+                ';',
+                true,
+                'Resumen de producción — Salida Kg',
+            );
 
             return new Response($csv, 200, [
                 'Content-Type' => 'text/csv; charset=UTF-8',

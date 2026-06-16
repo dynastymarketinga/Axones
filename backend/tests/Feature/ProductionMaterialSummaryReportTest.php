@@ -87,9 +87,20 @@ class ProductionMaterialSummaryReportTest extends TestCase
         $csv = $this->get('/api/reports/production-material-summary?from=2026-03-01&to=2026-03-31&format=csv', $h);
         $csv->assertOk();
         $body = (string) $csv->getContent();
-        $this->assertStringContainsString('material_impreso_kg', $body);
-        $this->assertStringContainsString('TOTAL', $body);
+        $this->assertStringContainsString('sep=;', $body);
+        $this->assertStringContainsString('Sección', $body);
+        $this->assertStringContainsString('Kg impreso', $body);
+        $this->assertStringContainsString('Material o referencia', $body);
+        $this->assertStringContainsString('Resumen planta', $body);
+        $this->assertStringContainsString('Material planta', $body);
+        $this->assertStringContainsString('Total por OT', $body);
+        $this->assertStringContainsString('Material por OT', $body);
+        $this->assertStringContainsString('Total planta', $body);
         $this->assertStringContainsString('OT-PROD-A', $body);
+        $this->assertStringContainsString('175.000', $body);
+        $this->assertStringContainsString('225.000', $body);
+        $this->assertStringNotContainsString('material_impreso_kg', $body);
+        $this->assertStringNotContainsString('[{', $body);
 
         Carbon::setTestNow();
     }

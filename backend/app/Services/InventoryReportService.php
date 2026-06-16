@@ -2715,6 +2715,173 @@ class InventoryReportService
     }
 
     /**
+     * Filas CSV legibles (encabezados en español) para el resumen de material producido.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return list<array<string, mixed>>
+     */
+    public function productionMaterialSummaryCsvRows(
+        array $payload,
+        Carbon $from,
+        Carbon $to,
+        string $clientFilterLabel,
+    ): array {
+        $totals = (array) ($payload['totals'] ?? []);
+        $fromLabel = $from->format('d/m/Y');
+        $toLabel = $to->format('d/m/Y');
+
+        $base = [
+            'Desde' => $fromLabel,
+            'Hasta' => $toLabel,
+            'Cliente filtrado' => $clientFilterLabel,
+            'OT' => '',
+            'Cliente' => '',
+            'Kg impreso' => '',
+            'Kg laminado' => '',
+            'Kg cortado' => '',
+            'Total Kg' => '',
+            'Bobinas impresión' => '',
+            'Bobinas laminación' => '',
+            'Proceso' => '',
+            'Material o referencia' => '',
+            'Kg material' => '',
+            'Cantidad' => '',
+            'Unidad' => '',
+        ];
+
+        $rows = [];
+
+        $rows[] = array_merge($base, [
+            'Sección' => 'Resumen planta',
+            'Kg impreso' => $totals['material_impreso_kg'] ?? '0.000',
+            'Kg laminado' => $totals['material_laminado_kg'] ?? '0.000',
+            'Kg cortado' => $totals['material_cortado_kg'] ?? '0.000',
+            'Total Kg' => $totals['total_general_kg'] ?? '0.000',
+            'Bobinas impresión' => $totals['impreso_bobinas'] ?? 0,
+            'Bobinas laminación' => $totals['laminado_bobinas'] ?? 0,
+        ]);
+
+        foreach ([
+            'Impresión' => 'material_impreso_lines',
+            'Laminación' => 'material_laminado_lines',
+            'Corte' => 'material_cortado_lines',
+        ] as $procesoLabel => $linesKey) {
+            $unit = $procesoLabel === 'Corte' ? 'rollo' : 'bobina';
+            foreach ((array) ($totals[$linesKey] ?? []) as $line) {
+                if (! is_array($line)) {
+                    continue;
+                }
+                $kg = (float) ($line['kg'] ?? 0);
+                if ($kg < 0.0005) {
+                    continue;
+                }
+                $rows[] = array_merge($base, [
+                    'Sección' => 'Material planta',
+                    'Proceso' => $procesoLabel,
+                    'Material o referencia' => $line['label'] ?? '',
+                    'Kg material' => $line['kg'] ?? '0.000',
+                    'Cantidad' => $line['bobinas'] ?? 0,
+                    'Unidad' => $unit,
+                ]);
+            }
+        }
+
+        foreach ((array) ($payload['work_orders'] ?? []) as $wo) {
+            if (! is_array($wo)) {
+                continue;
+            }
+            $impKg = (float) ($wo['material_impreso_kg'] ?? 0);
+            $lamKg = (float) ($wo['material_laminado_kg'] ?? 0);
+            $corKg = (float) ($wo['material_cortado_kg'] ?? 0);
+            $otCode = (string) ($wo['work_order_code'] ?? '');
+            $clientName = (string) ($wo['client_name'] ?? '');
+
+            $rows[] = array_merge($base, [
+                'Sección' => 'Total por OT',
+                'OT' => $otCode,
+                'Cliente' => $clientName,
+                'Kg impreso' => $wo['material_impreso_kg'] ?? '0.000',
+                'Kg laminado' => $wo['material_laminado_kg'] ?? '0.000',
+                'Kg cortado' => $wo['material_cortado_kg'] ?? '0.000',
+                'Total Kg' => number_format($impKg + $lamKg + $corKg, 3, '.', ''),
+                'Bobinas impresión' => $wo['impreso_bobinas'] ?? 0,
+                'Bobinas laminación' => $wo['laminado_bobinas'] ?? 0,
+            ]);
+
+            foreach ([
+                'Impresión' => ['material_impreso_lines', 'bobina'],
+                'Laminación' => ['material_laminado_lines', 'bobina'],
+                'Corte' => ['material_cortado_lines', 'rollo'],
+            ] as $procesoLabel => [$linesKey, $unit]) {
+                foreach ((array) ($wo[$linesKey] ?? []) as $line) {
+                    if (! is_array($line)) {
+                        continue;
+                    }
+                    $kg = (float) ($line['kg'] ?? 0);
+                    if ($kg < 0.0005) {
+                        continue;
+                    }
+                    $rows[] = array_merge($base, [
+                        'Sección' => 'Material por OT',
+                        'OT' => $otCode,
+                        'Cliente' => $clientName,
+                        'Proceso' => $procesoLabel,
+                        'Material o referencia' => $line['label'] ?? '',
+                        'Kg material' => $line['kg'] ?? '0.000',
+                        'Cantidad' => $line['bobinas'] ?? 0,
+                        'Unidad' => $unit,
+                    ]);
+                }
+            }
+        }
+
+        $rows[] = array_merge($base, [
+            'Sección' => 'Total planta',
+            'Kg impreso' => $totals['material_impreso_kg'] ?? '0.000',
+            'Kg laminado' => $totals['material_laminado_kg'] ?? '0.000',
+            'Kg cortado' => $totals['material_cortado_kg'] ?? '0.000',
+            'Total Kg' => $totals['total_general_kg'] ?? '0.000',
+        ]);
+
+        return $this->normalizeProductionMaterialSummaryCsvRowOrder($rows);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeProductionMaterialSummaryCsvRowOrder(array $rows): array
+    {
+        $headers = [
+            'Sección',
+            'Desde',
+            'Hasta',
+            'Cliente filtrado',
+            'OT',
+            'Cliente',
+            'Kg impreso',
+            'Kg laminado',
+            'Kg cortado',
+            'Total Kg',
+            'Bobinas impresión',
+            'Bobinas laminación',
+            'Proceso',
+            'Material o referencia',
+            'Kg material',
+            'Cantidad',
+            'Unidad',
+        ];
+
+        return array_map(
+            static fn (array $row): array => array_merge(
+                array_fill_keys($headers, ''),
+                array_intersect_key($row, array_flip($headers)),
+            ),
+            $rows,
+        );
+    }
+
+    /**
      * @param  array<string, mixed>|null  $form
      * @return array<int, string>
      */

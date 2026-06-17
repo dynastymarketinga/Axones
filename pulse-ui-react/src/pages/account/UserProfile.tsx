@@ -232,7 +232,7 @@ export default function UserProfile() {
                 </div>
               </div>
 
-              <div className={cn(catalogMasterFormActionsClass, "sm:justify-start")}>
+              <div className={catalogMasterFormActionsClass}>
                 <Button type="submit" disabled={saving}>
                   {saving ? "Guardando…" : "Actualizar contraseña"}
                 </Button>
@@ -241,7 +241,7 @@ export default function UserProfile() {
           </div>
 
           {fullAccess ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
               <Button type="button" variant="outline" asChild className="gap-2">
                 <Link to="/account/users">
                   <Users className="h-4 w-4" aria-hidden />

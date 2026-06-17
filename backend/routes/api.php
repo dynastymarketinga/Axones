@@ -143,6 +143,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/products', [ProductController::class, 'index']);
     Route::post('/products', [ProductController::class, 'store']);
+    Route::post('/products/bulk-import', [ProductController::class, 'bulkImport']);
     Route::get('/products/{product}', [ProductController::class, 'show']);
     Route::patch('/products/{product}', [ProductController::class, 'update']);
 

@@ -6,9 +6,12 @@ import {
   Barcode,
   Boxes,
   CalendarDays,
+  Download,
   Eye,
+  FileSpreadsheet,
   Filter,
   ListOrdered,
+  Loader2,
   Package,
   Pencil,
   Plus,
@@ -16,6 +19,7 @@ import {
   Rows3,
   SearchX,
   Settings2,
+  Upload,
   Users,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -45,6 +49,7 @@ import {
   mesBandejaFilterActiveControlClass,
 } from "@/components/axones/catalog-list-classes"
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
+import { ProductsListadoExcelDialog } from "@/components/axones/ProductsListadoExcelDialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -63,6 +68,11 @@ import {
 } from "@/components/ui/table"
 import { apiFetch, ApiError } from "@/lib/api"
 import { catalogCountLabel } from "@/lib/catalog-count-label"
+import {
+  buildListadoExportRows,
+  exportListadoProductosExcel,
+  exportListadoProductosTemplateExcel,
+} from "@/lib/products-listado-excel"
 import type { ClientRecord, LaravelPaginated, ProductRecord } from "@/types/api"
 import { cn } from "@/lib/utils"
 
@@ -114,6 +124,9 @@ export default function ProductsPage() {
   const [detailId, setDetailId] = useState<number | null>(null)
   const [detailRowNumber, setDetailRowNumber] = useState<number | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [detail, setDetail] = useState<ProductRecord | null>(null)
   const debounceRef = useRef<number | null>(null)
   const skipSearchPageReset = useRef(true)
@@ -232,6 +245,65 @@ export default function ProductsPage() {
     </Button>
   )
 
+  const handleExportListado = useCallback(async () => {
+    setExporting(true)
+    try {
+      const allProducts: ProductRecord[] = []
+      let pageNum = 1
+      let lastPage = 1
+      const clientId = clientFilter !== "all" ? Number(clientFilter) : undefined
+      do {
+        const data = await apiFetch<LaravelPaginated<ProductRecord>>("products", {
+          query: {
+            q: search || undefined,
+            page: pageNum,
+            per_page: 500,
+            client_id: clientId,
+          },
+        })
+        allProducts.push(...data.data)
+        lastPage = data.last_page
+        pageNum += 1
+      } while (pageNum <= lastPage)
+
+      if (allProducts.length === 0) {
+        toast.error("No hay especificaciones para exportar.")
+        return
+      }
+
+      const clientsMap = new Map<number, ClientRecord>()
+      let clientPage = 1
+      let clientLastPage = 1
+      do {
+        const clientData = await apiFetch<LaravelPaginated<ClientRecord>>("clients", {
+          query: { page: clientPage, per_page: 500 },
+        })
+        for (const c of clientData.data) clientsMap.set(c.id, c)
+        clientLastPage = clientData.last_page
+        clientPage += 1
+      } while (clientPage <= clientLastPage)
+
+      await exportListadoProductosExcel(buildListadoExportRows(allProducts, clientsMap))
+      toast.success("Excel exportado.")
+    } catch {
+      toast.error("No se pudo exportar el Excel.")
+    } finally {
+      setExporting(false)
+    }
+  }, [clientFilter, search])
+
+  const handleDownloadTemplate = useCallback(async () => {
+    setDownloadingTemplate(true)
+    try {
+      await exportListadoProductosTemplateExcel()
+      toast.success("Plantilla descargada.")
+    } catch {
+      toast.error("No se pudo generar la plantilla.")
+    } finally {
+      setDownloadingTemplate(false)
+    }
+  }, [])
+
   const detailFields =
     detail && !detailLoading
       ? [
@@ -280,7 +352,48 @@ export default function ProductsPage() {
           </Badge>
         ) : null
       }
-      action={newProductButton}
+      action={
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="shadow-sm"
+            disabled={downloadingTemplate}
+            onClick={() => void handleDownloadTemplate()}
+          >
+            {downloadingTemplate ? (
+              <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+            ) : (
+              <FileSpreadsheet className="mr-2 size-4" aria-hidden />
+            )}
+            Plantilla vacía
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="shadow-sm"
+            disabled={exporting}
+            onClick={() => void handleExportListado()}
+          >
+            {exporting ? (
+              <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+            ) : (
+              <Download className="mr-2 size-4" aria-hidden />
+            )}
+            Exportar Excel
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="shadow-sm"
+            onClick={() => setImportOpen(true)}
+          >
+            <Upload className="mr-2 size-4" aria-hidden />
+            Importar Excel
+          </Button>
+          {newProductButton}
+        </div>
+      }
     >
       {showInitialSkeleton ? (
         <div className="space-y-4">
@@ -518,6 +631,12 @@ export default function ProductsPage() {
           />
         </>
       )}
+
+      <ProductsListadoExcelDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={() => void load()}
+      />
     </CatalogPageShell>
   )
 }

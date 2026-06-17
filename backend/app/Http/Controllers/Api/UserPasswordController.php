@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PasswordResetRequest;
 use App\Models\User;
 use App\Services\UserAdminAuditService;
-use App\Support\BossAccess;
+use App\Support\AccountAdminAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -23,6 +23,10 @@ class UserPasswordController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+
+        if (! AccountAdminAccess::allows($user)) {
+            return response()->json(['message' => 'No autorizado.'], 403);
+        }
 
         $data = $request->validate([
             'current_password' => ['required', 'string'],
@@ -50,8 +54,14 @@ class UserPasswordController extends Controller
     public function update(Request $request, User $user): JsonResponse
     {
         $actor = $request->user();
-        if (! BossAccess::allows($actor)) {
+        if (! AccountAdminAccess::allows($actor)) {
             return response()->json(['message' => 'No autorizado.'], 403);
+        }
+
+        if (AccountAdminAccess::isProtectedAccount($user)) {
+            return response()->json([
+                'message' => 'No se puede restablecer la contraseña de esta cuenta desde aquí.',
+            ], 422);
         }
 
         $data = $request->validate([

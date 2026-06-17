@@ -7,10 +7,12 @@ use App\Models\PasswordResetRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Tests\Support\CreatesAccountAdmins;
 use Tests\TestCase;
 
 class PasswordResetRequestTest extends TestCase
 {
+    use CreatesAccountAdmins;
     use RefreshDatabase;
 
     public function test_guest_password_reset_request_returns_generic_message_and_creates_row_when_user_exists(): void
@@ -69,10 +71,20 @@ class PasswordResetRequestTest extends TestCase
         ])->assertForbidden();
     }
 
-    public function test_boss_can_list_pending_requests(): void
+    public function test_jefe_operaciones_cannot_list_password_reset_requests(): void
     {
-        $boss = User::factory()->create(['role' => 'boss']);
-        $token = $boss->createToken('t')->plainTextToken;
+        $chief = User::factory()->create(['role' => 'jefe_operaciones', 'username' => 'ajaure']);
+        $token = $chief->createToken('t')->plainTextToken;
+
+        $this->getJson('/api/password-reset-requests', [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertForbidden();
+    }
+
+    public function test_account_admin_can_list_pending_requests(): void
+    {
+        $admin = $this->createVictor();
+        $token = $admin->createToken('t')->plainTextToken;
 
         $subject = User::factory()->create(['username' => 'need_help']);
         PasswordResetRequest::query()->create([
@@ -87,10 +99,10 @@ class PasswordResetRequestTest extends TestCase
             ->assertJsonPath('data.0.user.username', 'need_help');
     }
 
-    public function test_boss_can_set_user_password_and_closes_pending_requests(): void
+    public function test_account_admin_can_set_user_password_and_closes_pending_requests(): void
     {
-        $boss = User::factory()->create(['role' => 'boss']);
-        $bossToken = $boss->createToken('t')->plainTextToken;
+        $admin = $this->createValeria();
+        $adminToken = $admin->createToken('t')->plainTextToken;
 
         $subject = User::factory()->create(['username' => 'pw_target']);
         PasswordResetRequest::query()->create([
@@ -102,7 +114,7 @@ class PasswordResetRequestTest extends TestCase
             'password' => 'new-password-99',
             'password_confirmation' => 'new-password-99',
         ], [
-            'Authorization' => 'Bearer '.$bossToken,
+            'Authorization' => 'Bearer '.$adminToken,
         ])->assertOk();
 
         $subject->refresh();

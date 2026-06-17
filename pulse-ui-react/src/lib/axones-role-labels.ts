@@ -73,13 +73,9 @@ export function getAssignableAxonesRoles(): { value: string; label: string }[] {
   ]
 }
 
-/** Iniciales para avatar (máx. 2 letras). */
+/** Primera letra del primer nombre para avatar (p. ej. Valeria → V). */
 export function getUserInitials(name?: string | null): string {
-  const parts = (name ?? "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toUpperCase()
+  const first = (name ?? "").trim().split(/\s+/).filter(Boolean)[0]
+  if (!first) return "?"
+  return first[0]?.toUpperCase() ?? "?"
 }

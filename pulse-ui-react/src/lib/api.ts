@@ -296,3 +296,33 @@ export async function updateCurrentUserPassword(
     body: JSON.stringify(payload),
   })
 }
+
+export type UserAvatarResponse = {
+  message: string
+  user: AuthUser
+}
+
+export async function uploadUserAvatar(file: File): Promise<UserAvatarResponse> {
+  const token = getStoredToken()
+  const form = new FormData()
+  form.append("avatar", file)
+
+  const res = await fetch(`${apiBase()}/user/avatar`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: form,
+  })
+
+  const data = (await res.json().catch(() => ({}))) as UserAvatarResponse & ApiErrorBody
+  if (!res.ok) {
+    throw new ApiError(data.message || "No se pudo subir la foto.", res.status, data)
+  }
+  return data
+}
+
+export async function deleteUserAvatar(): Promise<UserAvatarResponse> {
+  return apiFetch<UserAvatarResponse>("user/avatar", { method: "DELETE" })
+}

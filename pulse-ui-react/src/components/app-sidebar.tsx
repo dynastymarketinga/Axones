@@ -37,10 +37,17 @@ const data = {
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   useLocation()
-  const session = getStoredUser()
+  const [session, setSession] = React.useState(() => getStoredUser())
+
+  React.useEffect(() => {
+    const sync = () => setSession(getStoredUser())
+    window.addEventListener("axones-auth-updated", sync)
+    return () => window.removeEventListener("axones-auth-updated", sync)
+  }, [])
+
   const showWarehouseCounts = canSeeWarehouseInventoryCounts(session?.role)
   const navUser = session
-    ? { name: session.name, email: session.email, avatar: "" }
+    ? { name: session.name, email: session.email, avatar: session.avatar_url ?? "" }
     : data.user
 
   const { data: areaCounts } = useAreaBandejaCounts()
@@ -51,8 +58,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { count: pendingPurchaseOrders } = usePendingPurchaseOrdersCount()
 
   const axonesFiltered = React.useMemo(
-    () => filterAxonesMenuTree(AXONES_MENU_TREE, session?.role, session?.id),
-    [session?.id, session?.role],
+    () => filterAxonesMenuTree(AXONES_MENU_TREE, session?.role, session?.id, session),
+    [session],
   )
 
   const axonesWithCounts = React.useMemo(() => {
@@ -83,8 +90,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }, [areaCounts.counts, axonesFiltered, pendingPurchaseOrders, tintasWarehouseCounts, warehouseInsumosPending])
 
   const accountLeaves = React.useMemo(
-    () => getAccountLeaves(session?.role, session?.id),
-    [session?.id, session?.role],
+    () => getAccountLeaves(session),
+    [session],
   )
 
   const navMain = React.useMemo(

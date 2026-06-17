@@ -4,13 +4,15 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\CreatesAccountAdmins;
 use Tests\TestCase;
 
 class UserApiTest extends TestCase
 {
+    use CreatesAccountAdmins;
     use RefreshDatabase;
 
-    public function test_users_crud_requires_boss_role(): void
+    public function test_users_crud_requires_account_admin(): void
     {
         $inventory = User::factory()->create(['role' => 'inventory', 'username' => 'inv1']);
         $token = $inventory->createToken('t')->plainTextToken;
@@ -29,10 +31,19 @@ class UserApiTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_boss_can_create_list_update_and_deactivate_user(): void
+    public function test_jefe_operaciones_cannot_list_users(): void
     {
-        $boss = User::factory()->create(['role' => 'boss', 'username' => 'boss1']);
-        $token = $boss->createToken('t')->plainTextToken;
+        $chief = User::factory()->create(['role' => 'jefe_operaciones', 'username' => 'ajaure']);
+        $token = $chief->createToken('t')->plainTextToken;
+
+        $this->getJson('/api/users', ['Authorization' => 'Bearer '.$token])
+            ->assertForbidden();
+    }
+
+    public function test_account_admin_can_create_list_update_and_deactivate_user(): void
+    {
+        $admin = $this->createValeria();
+        $token = $admin->createToken('t')->plainTextToken;
         $headers = ['Authorization' => 'Bearer '.$token];
 
         $create = $this->postJson('/api/users', [
@@ -71,10 +82,10 @@ class UserApiTest extends TestCase
 
     public function test_user_cannot_deactivate_self(): void
     {
-        $boss = User::factory()->create(['role' => 'boss', 'username' => 'boss_self']);
-        $token = $boss->createToken('t')->plainTextToken;
+        $admin = $this->createVictor();
+        $token = $admin->createToken('t')->plainTextToken;
 
-        $this->patchJson('/api/users/'.$boss->getKey(), ['active' => false], [
+        $this->patchJson('/api/users/'.$admin->getKey(), ['active' => false], [
             'Authorization' => 'Bearer '.$token,
         ])
             ->assertUnprocessable();

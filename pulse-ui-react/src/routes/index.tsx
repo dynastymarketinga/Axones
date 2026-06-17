@@ -16,6 +16,7 @@ import UserProfile from "@/pages/account/UserProfile"
 import PasswordResetRequestsPage from "@/pages/account/PasswordResetRequestsPage"
 import UsersPage from "@/pages/account/UsersPage"
 import UserFormPage from "@/pages/account/UserFormPage"
+import AccountActivityPage from "@/pages/account/AccountActivityPage"
 import ClientsPage from "@/pages/axones/ClientsPage"
 import ProductsPage from "@/pages/axones/ProductsPage"
 import SuppliersPage from "@/pages/axones/SuppliersPage"
@@ -98,7 +99,7 @@ function AxonesRouteGuard({
   children: ReactElement
 }): ReactElement {
   const user = getStoredUser()
-  const allowed = isAxonesUrlAllowed(routeKey, user?.role, user?.id)
+  const allowed = isAxonesUrlAllowed(routeKey, user?.role, user?.id, user)
   if (!allowed) return <Navigate to="/resumen" replace />
   return children
 }
@@ -383,6 +384,13 @@ export const router = createBrowserRouter(
           element: guardAxonesRoute({
             routeKey: "account/password-reset-requests",
             element: <PasswordResetRequestsPage />,
+          }),
+        },
+        {
+          path: "account/activity",
+          element: guardAxonesRoute({
+            routeKey: "account/activity",
+            element: <AccountActivityPage />,
           }),
         },
 

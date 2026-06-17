@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { AXONES_MENU_TREE } from "@/lib/axones-menu"
-import { filterAxonesMenuTree, isAxonesUrlAllowed } from "@/lib/axones-roles"
+import { filterAxonesMenuTree, isAxonesAccountAdmin, isAxonesUrlAllowed } from "@/lib/axones-roles"
 
 function topLevelTitles(role: string): string[] {
   return filterAxonesMenuTree(AXONES_MENU_TREE, role).map((n) => n.title)
@@ -107,5 +107,52 @@ describe("axones-roles — otros roles no ven menú de almacén completo", () =>
 
   it("boss ve producción", () => {
     expect(topLevelTitles("boss")).toContain("Producción")
+  })
+})
+
+describe("axones-roles — gestión de cuentas (solo Víctor y Valeria)", () => {
+  const victor = {
+    id: 1,
+    name: "Víctor Carrillo",
+    email: "victorcarrillox2@gmail.com",
+    username: "Desarrollador",
+    role: "boss",
+  }
+  const valeria = {
+    id: 2,
+    name: "Valeria Rodrigues",
+    email: "admin@axones.com",
+    username: "admin",
+    role: "admin",
+  }
+  const plant = {
+    id: 3,
+    name: "Operador",
+    email: "op@axones.com",
+    username: "operador",
+    role: "corte",
+  }
+  const jefeOps = {
+    id: 4,
+    name: "Alexis",
+    email: "ajaure@axones.com",
+    username: "ajaure",
+    role: "jefe_operaciones",
+  }
+
+  it("identifica administradores de cuenta", () => {
+    expect(isAxonesAccountAdmin(victor)).toBe(true)
+    expect(isAxonesAccountAdmin(valeria)).toBe(true)
+    expect(isAxonesAccountAdmin(plant)).toBe(false)
+    expect(isAxonesAccountAdmin(jefeOps)).toBe(false)
+  })
+
+  it("rutas de cuenta bloqueadas para planta y jefe operaciones", () => {
+    for (const user of [plant, jefeOps]) {
+      expect(isAxonesUrlAllowed("account/users", user.role, user.id, user)).toBe(false)
+      expect(isAxonesUrlAllowed("account/activity", user.role, user.id, user)).toBe(false)
+    }
+    expect(isAxonesUrlAllowed("account/users", victor.role, victor.id, victor)).toBe(true)
+    expect(isAxonesUrlAllowed("account/profile", plant.role, plant.id, plant)).toBe(true)
   })
 })

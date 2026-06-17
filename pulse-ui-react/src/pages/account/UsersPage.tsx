@@ -6,9 +6,7 @@ import {
   AtSign,
   Ban,
   CalendarDays,
-  ChevronDown,
   CircleDot,
-  History,
   ListOrdered,
   Mail,
   Pencil,
@@ -39,21 +37,13 @@ import {
 import { LoadingTableRow, PageLoadingBlock } from "@/components/axones/LoadingStates"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { catalogCountLabel } from "@/lib/catalog-count-label"
 import { apiFetch, ApiError } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth-storage"
 import { formatAxonesRoleLabel } from "@/lib/axones-role-labels"
-import {
-  formatUserAdminActorName,
-  formatUserAdminEventDetail,
-  formatUserAdminEventLabel,
-  formatUserAdminTargetName,
-} from "@/lib/user-admin-event-labels"
-import type { LaravelPaginated, UserAdminEventRecord, UserRecord } from "@/types/api"
-import { cn } from "@/lib/utils"
+import type { LaravelPaginated, UserRecord } from "@/types/api"
 
 const SEARCH_DEBOUNCE_MS = 320
 const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const
@@ -95,9 +85,6 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [rows, setRows] = useState<LaravelPaginated<UserRecord> | null>(null)
-  const [auditOpen, setAuditOpen] = useState(false)
-  const [auditLoading, setAuditLoading] = useState(false)
-  const [auditRows, setAuditRows] = useState<LaravelPaginated<UserAdminEventRecord> | null>(null)
   const debounceRef = useRef<number | null>(null)
 
   const from = location.pathname + location.search
@@ -147,27 +134,6 @@ export default function UsersPage() {
     void load()
   }, [load])
 
-  const loadAudit = useCallback(async () => {
-    setAuditLoading(true)
-    try {
-      const data = await apiFetch<LaravelPaginated<UserAdminEventRecord>>("user-admin-events", {
-        query: { per_page: 50 },
-      })
-      setAuditRows(data)
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(e.message)
-      else toast.error("No se pudo cargar la actividad reciente.")
-    } finally {
-      setAuditLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (auditOpen && auditRows === null) {
-      void loadAudit()
-    }
-  }, [auditOpen, auditRows, loadAudit])
-
   const toggleActive = useCallback(
     async (user: UserRecord) => {
       if (session?.id === user.id && user.active) {
@@ -184,13 +150,11 @@ export default function UsersPage() {
         if (nextActive) {
           setViewTab("active")
           setPage(1)
-        toast.success("Usuario activado.")
-        void loadAudit()
-      } else {
-        setViewTab("inactive")
-        setPage(1)
-        toast.success("Usuario desactivado. Ya no podrá iniciar sesión.")
-        void loadAudit()
+          toast.success("Usuario activado.")
+        } else {
+          setViewTab("inactive")
+          setPage(1)
+          toast.success("Usuario desactivado. Ya no podrá iniciar sesión.")
         }
       } catch (e) {
         if (e instanceof ApiError) toast.error(e.message)
@@ -199,7 +163,7 @@ export default function UsersPage() {
         setTogglingId(null)
       }
     },
-    [session?.id, loadAudit],
+    [session?.id],
   )
 
   const emptyState = useMemo(() => {
@@ -413,78 +377,6 @@ export default function UsersPage() {
               selectId="user-per-page"
             />
           ) : null}
-
-          <Collapsible open={auditOpen} onOpenChange={setAuditOpen}>
-            <div className={catalogMasterTablePanelClass}>
-              <CollapsibleTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="flex w-full items-center justify-between gap-2 px-4 py-3 h-auto font-medium"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <History className="h-4 w-4 text-primary" aria-hidden />
-                    Actividad reciente
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                      auditOpen && "rotate-180",
-                    )}
-                    aria-hidden
-                  />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div className="border-t border-border/60 px-2 pb-2 pt-1">
-                  <Table className="w-full min-w-[860px]">
-                    <TableHeader>
-                      <TableRow className={catalogTableHeaderRowClass}>
-                        <CatalogTableHead icon={CalendarDays}>Fecha</CatalogTableHead>
-                        <CatalogTableHead icon={User}>Quién</CatalogTableHead>
-                        <CatalogTableHead icon={History}>Acción</CatalogTableHead>
-                        <CatalogTableHead icon={Users}>Usuario afectado</CatalogTableHead>
-                        <CatalogTableHead icon={ListOrdered}>Detalle</CatalogTableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {auditLoading ? (
-                        <LoadingTableRow colSpan={5} />
-                      ) : !auditRows?.data.length ? (
-                        <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={5} className={catalogTableBodyCellClass}>
-                            <p className="text-muted-foreground py-6 text-center text-sm">
-                              Aún no hay eventos registrados.
-                            </p>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        auditRows.data.map((event) => (
-                          <TableRow key={event.id} className={catalogTableBodyRowClass}>
-                            <TableCell className={catalogTableBodyCellClass}>
-                              {formatDateDMY(event.created_at)}
-                            </TableCell>
-                            <TableCell className={catalogTableBodyCellClass}>
-                              {formatUserAdminActorName(event.actor)}
-                            </TableCell>
-                            <TableCell className={catalogTableBodyCellClass}>
-                              {formatUserAdminEventLabel(event.event_type)}
-                            </TableCell>
-                            <TableCell className={catalogTableBodyCellClass}>
-                              {formatUserAdminTargetName(event.target)}
-                            </TableCell>
-                            <TableCell className={catalogTableBodyCellClass}>
-                              {formatUserAdminEventDetail(event.event_type, event.metadata)}
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
         </>
       )}
     </CatalogPageShell>

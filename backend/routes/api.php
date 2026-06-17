@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\TintaMixtureController;
 use App\Http\Controllers\Api\UserAdminEventController;
+use App\Http\Controllers\Api\UserAvatarController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserPasswordController;
 use App\Http\Controllers\Api\VendorController;
@@ -56,18 +57,12 @@ Route::middleware('throttle:5,1')->post('/auth/password-reset-request', [Passwor
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
-        $u = $request->user();
-
-        return [
-            'id' => $u->id,
-            'name' => $u->name,
-            'email' => $u->email,
-            'username' => $u->username,
-            'role' => $u->role ?? 'general',
-        ];
+        return $request->user()->toAuthArray();
     });
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::patch('/user/password', [UserPasswordController::class, 'updateSelf']);
+    Route::post('/user/avatar', [UserAvatarController::class, 'store']);
+    Route::delete('/user/avatar', [UserAvatarController::class, 'destroy']);
 
     Route::get('/password-reset-requests', [PasswordResetRequestController::class, 'index']);
     Route::patch('/password-reset-requests/{password_reset_request}/resolve', [PasswordResetRequestController::class, 'resolve']);

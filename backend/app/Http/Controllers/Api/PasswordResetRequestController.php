@@ -8,7 +8,7 @@ use App\Models\OperationalAlert;
 use App\Models\PasswordResetRequest;
 use App\Models\User;
 use App\Services\UserAdminAuditService;
-use App\Support\BossAccess;
+use App\Support\AccountAdminAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -80,7 +80,7 @@ class PasswordResetRequestController extends Controller
     public function index(Request $request): JsonResponse
     {
         $actor = $request->user();
-        if (! BossAccess::allows($actor)) {
+        if (! AccountAdminAccess::allows($actor)) {
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
@@ -95,7 +95,7 @@ class PasswordResetRequestController extends Controller
     public function resolve(Request $request, PasswordResetRequest $password_reset_request): JsonResponse
     {
         $actor = $request->user();
-        if (! BossAccess::allows($actor)) {
+        if (! AccountAdminAccess::allows($actor)) {
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 

@@ -7,6 +7,7 @@ export type AuthUser = {
   email: string
   username?: string | null
   role?: string
+  avatar_url?: string | null
 }
 
 export function getStoredToken(): string | null {
@@ -26,6 +27,9 @@ export function getStoredUser(): AuthUser | null {
 export function setAuthSession(token: string, user: AuthUser): void {
   localStorage.setItem(TOKEN_KEY, token)
   localStorage.setItem(USER_KEY, JSON.stringify(user))
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("axones-auth-updated"))
+  }
 }
 
 export function clearAuthSession(): void {

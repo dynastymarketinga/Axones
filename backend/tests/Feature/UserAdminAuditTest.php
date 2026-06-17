@@ -5,16 +5,18 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Models\UserAdminEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\CreatesAccountAdmins;
 use Tests\TestCase;
 
 class UserAdminAuditTest extends TestCase
 {
+    use CreatesAccountAdmins;
     use RefreshDatabase;
 
-    public function test_boss_actions_create_audit_events(): void
+    public function test_account_admin_actions_create_audit_events(): void
     {
-        $boss = User::factory()->create(['role' => 'boss', 'username' => 'boss_audit']);
-        $token = $boss->createToken('t')->plainTextToken;
+        $admin = $this->createVictor();
+        $token = $admin->createToken('t')->plainTextToken;
         $headers = ['Authorization' => 'Bearer '.$token];
 
         $create = $this->postJson('/api/users', [
@@ -29,7 +31,7 @@ class UserAdminAuditTest extends TestCase
         $id = (int) $create->json('id');
 
         $this->assertDatabaseHas('user_admin_events', [
-            'actor_user_id' => $boss->getKey(),
+            'actor_user_id' => $admin->getKey(),
             'target_user_id' => $id,
             'event_type' => 'created',
         ]);
@@ -61,18 +63,18 @@ class UserAdminAuditTest extends TestCase
         ]);
     }
 
-    public function test_boss_can_list_user_admin_events(): void
+    public function test_account_admin_can_list_user_admin_events(): void
     {
-        $boss = User::factory()->create(['role' => 'boss', 'username' => 'boss_list']);
+        $admin = $this->createValeria();
         $target = User::factory()->create(['role' => 'inventory', 'username' => 'inv_list']);
         UserAdminEvent::query()->create([
-            'actor_user_id' => $boss->getKey(),
+            'actor_user_id' => $admin->getKey(),
             'target_user_id' => $target->getKey(),
             'event_type' => 'created',
             'metadata' => ['role' => 'inventory'],
         ]);
 
-        $token = $boss->createToken('t')->plainTextToken;
+        $token = $admin->createToken('t')->plainTextToken;
 
         $this->getJson('/api/user-admin-events', ['Authorization' => 'Bearer '.$token])
             ->assertOk()
@@ -80,7 +82,7 @@ class UserAdminAuditTest extends TestCase
             ->assertJsonPath('data.0.target.id', $target->getKey());
     }
 
-    public function test_non_boss_cannot_list_user_admin_events(): void
+    public function test_non_account_admin_cannot_list_user_admin_events(): void
     {
         $inventory = User::factory()->create(['role' => 'inventory', 'username' => 'inv_no_audit']);
         $token = $inventory->createToken('t')->plainTextToken;

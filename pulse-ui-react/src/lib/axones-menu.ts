@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Factory,
   FlaskConical,
+  History,
   KeyRound,
   Layers2,
   Package,
@@ -23,8 +24,9 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
-import { isAxonesFullAccess, type AxonesMenuNode } from "@/lib/axones-roles"
+import { isAxonesAccountAdmin, type AxonesMenuNode } from "@/lib/axones-roles"
 import { CLIENT_ORDER_MODULE_TITLE } from "@/pages/axones/client-order-i18n"
+import type { AuthUser } from "@/lib/auth-storage"
 
 const MENU_HIDDEN_URLS = new Set([
   "miscelaneos",
@@ -151,6 +153,7 @@ export const AXONES_ACCOUNT_BREADCRUMB_LEAVES: { title: string; url: string }[] 
   { title: "Perfil", url: "account/profile" },
   { title: "Usuarios", url: "account/users" },
   { title: "Solicitudes de contraseña", url: "account/password-reset-requests" },
+  { title: "Actividad reciente", url: "account/activity" },
 ]
 
 const ACCOUNT_USERS: AxonesAccountMenuLeaf = {
@@ -165,14 +168,17 @@ const ACCOUNT_PASSWORD_RESET_REQUESTS: AxonesAccountMenuLeaf = {
   icon: KeyRound,
 }
 
-/** Hojas de menú Cuenta visibles según rol (jefes ven solicitudes internas de restablecimiento). */
-export function getAccountLeaves(
-  role?: string | null,
-  userId?: number | null,
-): AxonesAccountMenuLeaf[] {
+const ACCOUNT_ACTIVITY: AxonesAccountMenuLeaf = {
+  title: "Actividad reciente",
+  url: "account/activity",
+  icon: History,
+}
+
+/** Hojas de menú Cuenta visibles según rol (solo Víctor y Valeria gestionan cuentas). */
+export function getAccountLeaves(user?: AuthUser | null): AxonesAccountMenuLeaf[] {
   const leaves = [...AXONES_ACCOUNT_LEAVES_BASE]
-  if (isAxonesFullAccess(role, userId)) {
-    leaves.push(ACCOUNT_USERS, ACCOUNT_PASSWORD_RESET_REQUESTS)
+  if (isAxonesAccountAdmin(user)) {
+    leaves.push(ACCOUNT_USERS, ACCOUNT_PASSWORD_RESET_REQUESTS, ACCOUNT_ACTIVITY)
   }
   return leaves
 }

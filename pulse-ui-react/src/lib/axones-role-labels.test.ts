@@ -19,7 +19,8 @@ describe("axones-role-labels", () => {
   })
 
   it("genera iniciales del nombre", () => {
-    expect(getUserInitials("Desarrollador Ingeniero Víctor")).toBe("DV")
-    expect(getUserInitials("Axones")).toBe("AX")
+    expect(getUserInitials("Desarrollador Ingeniero Víctor")).toBe("D")
+    expect(getUserInitials("Valeria Rodrigues")).toBe("V")
+    expect(getUserInitials("Axones")).toBe("A")
   })
 })

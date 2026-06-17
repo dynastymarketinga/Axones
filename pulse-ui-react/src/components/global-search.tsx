@@ -44,10 +44,15 @@ function flattenAxonesMenu(
 }
 
 /** Atajos con ruta propia; visibles si el rol puede la ruta o el módulo base. */
-function shortcutAllowed(url: string, role?: string | null, userId?: number | null) {
-  if (isAxonesUrlAllowed(url, role, userId)) return true
+function shortcutAllowed(
+  url: string,
+  role?: string | null,
+  userId?: number | null,
+  user?: ReturnType<typeof getStoredUser>,
+) {
+  if (isAxonesUrlAllowed(url, role, userId, user)) return true
   const base = url.split("/")[0]
-  if (base) return isAxonesUrlAllowed(base, role, userId)
+  if (base) return isAxonesUrlAllowed(base, role, userId, user)
   return false
 }
 
@@ -62,19 +67,19 @@ export function GlobalSearch() {
   const session = getStoredUser()
 
   const menuEntries = React.useMemo(() => {
-    const filtered = filterAxonesMenuTree(AXONES_MENU_TREE, session?.role, session?.id)
+    const filtered = filterAxonesMenuTree(AXONES_MENU_TREE, session?.role, session?.id, session)
     const fromMenu = flattenAxonesMenu(filtered)
-    const cuenta = getAccountLeaves(session?.role, session?.id).map((l) => ({
+    const cuenta = getAccountLeaves(session).map((l) => ({
       title: l.title,
       pathLabel: `Cuenta › ${l.title}`,
       href: toHref(l.url),
     }))
     return [...fromMenu, ...cuenta]
-  }, [session?.id, session?.role])
+  }, [session])
 
   const directShortcuts = React.useMemo(
     () =>
-      MENU_SHORTCUTS.filter((s) => shortcutAllowed(s.url, session?.role, session?.id)).map(
+      MENU_SHORTCUTS.filter((s) => shortcutAllowed(s.url, session?.role, session?.id, session)).map(
         (s) => ({
           title: s.title,
           pathLabel: "Acceso directo",

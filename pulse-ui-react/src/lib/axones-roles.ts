@@ -17,6 +17,27 @@ export function isAxonesDeveloperSession(user?: AuthUser | null): boolean {
 
 const BOSS_ROLES = new Set(["boss", "admin", "jefe_supremo", "superadmin", "jefe_operaciones"])
 
+const ACCOUNT_ADMIN_URLS = new Set([
+  "account/users",
+  "account/users/form",
+  "account/password-reset-requests",
+  "account/activity",
+])
+
+/** Solo Víctor y Valeria: gestión de cuentas, contraseñas y auditoría. */
+export function isAxonesAccountAdmin(user?: AuthUser | null): boolean {
+  if (!user) return false
+  const role = normalizeRole(user.role)
+  const email = (user.email ?? "").toLowerCase().trim()
+  const username = (user.username ?? "").trim()
+
+  if (role === "boss" && (email === AXONES_DEVELOPER_EMAIL || username === "Desarrollador")) {
+    return true
+  }
+
+  return role === "admin" && username === "admin"
+}
+
 /** Jefes / admin: ven todo el menú Axones. */
 export function isAxonesFullAccess(
   role?: string | null,
@@ -170,16 +191,18 @@ export function isAxonesUrlAllowed(
   url: string,
   role?: string | null,
   userId?: number | null,
+  user?: AuthUser | null,
 ): boolean {
   if (url === "asistente") return false
-  if (isAxonesFullAccess(role, userId)) return true
-  if (
-    url === "account/password-reset-requests" ||
-    url === "account/users" ||
-    url === "account/users/form"
-  ) {
-    return isAxonesFullAccess(role, userId)
+  if (url === "account/profile") return true
+
+  if (ACCOUNT_ADMIN_URLS.has(url)) {
+    return isAxonesAccountAdmin(
+      user ?? (role != null ? { id: userId ?? 0, name: "", email: "", role, username: null } : null),
+    )
   }
+
+  if (isAxonesFullAccess(role, userId)) return true
   // Hub de datos maestros: página contenedora (filtra internamente por rol).
   if (url === "datos-maestros") {
     return true
@@ -243,13 +266,14 @@ export function filterAxonesMenuTree(
   nodes: AxonesMenuNode[],
   role?: string | null,
   userId?: number | null,
+  user?: AuthUser | null,
 ): AxonesMenuNode[] {
   if (isAxonesFullAccess(role, userId)) return nodes
 
   const out: AxonesMenuNode[] = []
   for (const node of nodes) {
     if (isBranch(node)) {
-      const children = filterAxonesMenuTree(node.items, role, userId)
+      const children = filterAxonesMenuTree(node.items, role, userId, user)
       if (children.length > 0) {
         out.push({
           title: node.title,
@@ -258,7 +282,7 @@ export function filterAxonesMenuTree(
           items: children,
         })
       }
-    } else if (isAxonesUrlAllowed(node.url, role, userId)) {
+    } else if (isAxonesUrlAllowed(node.url, role, userId, user)) {
       out.push(node)
     }
   }

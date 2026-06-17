@@ -99,6 +99,11 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      "/storage": {
+        target: laravelTarget,
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
 }

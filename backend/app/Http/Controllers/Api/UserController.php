@@ -7,7 +7,7 @@ use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Models\User;
 use App\Services\UserAdminAuditService;
-use App\Support\BossAccess;
+use App\Support\AccountAdminAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -19,7 +19,7 @@ class UserController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        if (! BossAccess::allows($request->user())) {
+        if (! AccountAdminAccess::allows($request->user())) {
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
@@ -45,7 +45,7 @@ class UserController extends Controller
     public function store(StoreUserRequest $request): JsonResponse
     {
         $actor = $request->user();
-        if (! BossAccess::allows($actor)) {
+        if (! AccountAdminAccess::allows($actor)) {
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
@@ -64,7 +64,7 @@ class UserController extends Controller
 
     public function show(Request $request, User $user): JsonResponse
     {
-        if (! BossAccess::allows($request->user())) {
+        if (! AccountAdminAccess::allows($request->user())) {
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
@@ -74,7 +74,7 @@ class UserController extends Controller
     public function update(UpdateUserRequest $request, User $user): JsonResponse
     {
         $actor = $request->user();
-        if (! BossAccess::allows($actor)) {
+        if (! AccountAdminAccess::allows($actor)) {
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
@@ -84,6 +84,11 @@ class UserController extends Controller
             if ((int) $actor->getKey() === (int) $user->getKey()) {
                 return response()->json([
                     'message' => 'No puede desactivar su propia cuenta.',
+                ], 422);
+            }
+            if (AccountAdminAccess::isProtectedAccount($user)) {
+                return response()->json([
+                    'message' => 'No se puede desactivar esta cuenta.',
                 ], 422);
             }
         }

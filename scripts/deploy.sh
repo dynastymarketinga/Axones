@@ -20,6 +20,7 @@ echo "==> Commit desplegado: $DEPLOY_COMMIT_SHORT ($DEPLOY_COMMIT)"
 cd "$APP_ROOT/backend"
 composer install --no-dev --optimize-autoloader --no-interaction
 php artisan migrate --force --no-interaction
+php artisan storage:link --no-interaction 2>/dev/null || true
 
 if [ "${AXONES_TRUNCATE_KEEP_AUTH:-}" = "1" ]; then
   echo "==> Limpieza BD: conserva users, sessions, cache, personal_access_tokens, migrations"

@@ -7,6 +7,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -26,6 +27,7 @@ class User extends Authenticatable
         'password',
         'role',
         'active',
+        'avatar_path',
     ];
 
     /**
@@ -66,6 +68,37 @@ class User extends Authenticatable
         $role = strtolower(trim((string) ($this->role ?? '')));
 
         return in_array($role, $allowed, true);
+    }
+
+    public function avatarUrl(): ?string
+    {
+        $path = trim((string) ($this->avatar_path ?? ''));
+        if ($path === '') {
+            return null;
+        }
+
+        $disk = Storage::disk('public');
+        if (! $disk->exists($path)) {
+            return null;
+        }
+
+        // Ruta relativa: mismo origen que el SPA (Vite proxy /storage en dev).
+        return '/storage/'.ltrim(str_replace('\\', '/', $path), '/');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toAuthArray(): array
+    {
+        return [
+            'id' => $this->getKey(),
+            'name' => $this->name,
+            'email' => $this->email,
+            'username' => $this->username,
+            'role' => $this->role ?? 'general',
+            'avatar_url' => $this->avatarUrl(),
+        ];
     }
 
     /**

@@ -5,7 +5,6 @@ import { Link } from "react-router-dom"
 import {
   AtSign,
   BadgeCheck,
-  Hash,
   KeyRound,
   Mail,
   User,
@@ -16,25 +15,24 @@ import { toast } from "sonner"
 
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
 import { CatalogPageShell } from "@/components/axones/CatalogPageShell"
+import { ProfileAvatarEditor } from "@/components/axones/ProfileAvatarEditor"
 import {
   catalogMasterFormActionsClass,
   catalogMasterFormPanelClass,
   catalogMasterFormPlainInputClass,
   catalogMasterFormSectionClass,
 } from "@/components/axones/catalog-list-classes"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { updateCurrentUserPassword } from "@/lib/api"
 import { ApiError } from "@/lib/api"
-import { clearAuthSession, getStoredUser } from "@/lib/auth-storage"
+import { clearAuthSession, getStoredUser, type AuthUser } from "@/lib/auth-storage"
 import {
   formatAxonesRoleHint,
   formatAxonesRoleLabel,
-  getUserInitials,
 } from "@/lib/axones-role-labels"
-import { isAxonesFullAccess } from "@/lib/axones-roles"
+import { isAxonesAccountAdmin } from "@/lib/axones-roles"
 import { toastFieldValidationErrors } from "@/lib/form-validation-toast"
 import { cn } from "@/lib/utils"
 
@@ -69,17 +67,62 @@ function ProfileField({
   )
 }
 
+function ProfileIdentityHeader({
+  name,
+  roleLabel,
+  roleHint,
+  accentBadge,
+  avatarUrl,
+  onAvatarChange,
+}: {
+  name: string
+  roleLabel: string
+  roleHint?: string | null
+  accentBadge?: boolean
+  avatarUrl?: string | null
+  onAvatarChange?: (user: AuthUser) => void
+}) {
+  return (
+    <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
+      <ProfileAvatarEditor
+        name={name}
+        avatarUrl={avatarUrl}
+        onAvatarChange={onAvatarChange}
+      />
+      <div className="min-w-0 space-y-2">
+        <h2 className="text-xl font-semibold tracking-tight">{name}</h2>
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+          <Badge
+            variant={accentBadge ? "default" : "secondary"}
+            className="gap-1.5 font-normal"
+          >
+            <BadgeCheck className="h-3.5 w-3.5" aria-hidden />
+            {roleLabel}
+          </Badge>
+          {roleHint ? (
+            <span className="text-muted-foreground text-sm">{roleHint}</span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UserProfile() {
-  const session = getStoredUser()
+  const [session, setSession] = useState<AuthUser | null>(() => getStoredUser())
   const roleLabel = formatAxonesRoleLabel(session?.role)
   const roleHint = formatAxonesRoleHint(session?.role)
-  const fullAccess = isAxonesFullAccess(session?.role)
+  const accountAdmin = isAxonesAccountAdmin(session)
 
   const [currentPassword, setCurrentPassword] = useState("")
   const [password, setPassword] = useState("")
   const [passwordConfirmation, setPasswordConfirmation] = useState("")
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const handleAvatarChange = useCallback((user: AuthUser) => {
+    setSession(user)
+  }, [])
 
   const redirectToLogin = useCallback(() => {
     clearAuthSession()
@@ -123,7 +166,11 @@ export default function UserProfile() {
   return (
     <CatalogPageShell
       title="Perfil"
-      subtitle="Consulte sus datos de acceso y actualice su contraseña cuando lo necesite."
+      subtitle={
+        accountAdmin
+          ? "Consulte sus datos de acceso y actualice su contraseña cuando lo necesite."
+          : "Su sesión en Axones."
+      }
       icon={UserRound}
       headerVariant="elevated"
     >
@@ -131,31 +178,30 @@ export default function UserProfile() {
         <div className={catalogMasterFormPanelClass}>
           <p className="text-muted-foreground text-sm">No hay sesión cargada.</p>
         </div>
+      ) : !accountAdmin ? (
+        <div className="mx-auto w-full max-w-lg">
+          <div className={catalogMasterFormPanelClass}>
+            <ProfileIdentityHeader
+              name={session.name}
+              roleLabel={roleLabel}
+              avatarUrl={session.avatar_url}
+              onAvatarChange={handleAvatarChange}
+            />
+          </div>
+        </div>
       ) : (
         <div className="mx-auto w-full max-w-5xl space-y-6">
           <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
             <div className={cn(catalogMasterFormPanelClass, "h-full")}>
-              <div className="flex flex-col gap-5 border-b border-primary/10 pb-6 sm:flex-row sm:items-center">
-                <Avatar className="h-20 w-20 rounded-2xl ring-2 ring-primary/15 shadow-sm">
-                  <AvatarFallback className="rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-violet-500/15 text-lg font-semibold text-primary">
-                    {getUserInitials(session.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 space-y-2">
-                  <h2 className="text-xl font-semibold tracking-tight">{session.name}</h2>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant={fullAccess ? "default" : "secondary"}
-                      className="gap-1.5 font-normal"
-                    >
-                      <BadgeCheck className="h-3.5 w-3.5" aria-hidden />
-                      {roleLabel}
-                    </Badge>
-                    {roleHint ? (
-                      <span className="text-muted-foreground text-sm">{roleHint}</span>
-                    ) : null}
-                  </div>
-                </div>
+              <div className="border-b border-primary/10 pb-6">
+                <ProfileIdentityHeader
+                  name={session.name}
+                  roleLabel={roleLabel}
+                  roleHint={roleHint}
+                  accentBadge
+                  avatarUrl={session.avatar_url}
+                  onAvatarChange={handleAvatarChange}
+                />
               </div>
 
               <div className="grid gap-6 pt-6 sm:grid-cols-2">
@@ -165,7 +211,6 @@ export default function UserProfile() {
                   <ProfileField label="Usuario" value={session.username} icon={AtSign} />
                 ) : null}
                 <ProfileField label="Rol" value={roleLabel} icon={BadgeCheck} />
-                <ProfileField label="ID de usuario" value={String(session.id)} icon={Hash} />
               </div>
             </div>
 
@@ -240,22 +285,20 @@ export default function UserProfile() {
             </form>
           </div>
 
-          {fullAccess ? (
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button type="button" variant="outline" asChild className="gap-2">
-                <Link to="/account/users">
-                  <Users className="h-4 w-4" aria-hidden />
-                  Gestionar usuarios
-                </Link>
-              </Button>
-              <Button type="button" variant="outline" asChild className="gap-2">
-                <Link to="/account/password-reset-requests">
-                  <KeyRound className="h-4 w-4" aria-hidden />
-                  Solicitudes de contraseña
-                </Link>
-              </Button>
-            </div>
-          ) : null}
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button type="button" variant="outline" asChild className="gap-2">
+              <Link to="/account/users">
+                <Users className="h-4 w-4" aria-hidden />
+                Gestionar usuarios
+              </Link>
+            </Button>
+            <Button type="button" variant="outline" asChild className="gap-2">
+              <Link to="/account/password-reset-requests">
+                <KeyRound className="h-4 w-4" aria-hidden />
+                Solicitudes de contraseña
+              </Link>
+            </Button>
+          </div>
         </div>
       )}
     </CatalogPageShell>

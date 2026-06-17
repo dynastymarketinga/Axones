@@ -1,7 +1,17 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { AtSign, BadgeCheck, KeyRound, Mail, User, UserRound } from "lucide-react"
+import { Link } from "react-router-dom"
+import {
+  AtSign,
+  BadgeCheck,
+  Hash,
+  KeyRound,
+  Mail,
+  User,
+  UserRound,
+  Users,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { CatalogLabeledField } from "@/components/axones/CatalogLabeledField"
@@ -113,7 +123,7 @@ export default function UserProfile() {
   return (
     <CatalogPageShell
       title="Perfil"
-      subtitle="Datos de su sesión en Axones. Para cambiar la contraseña use la sección inferior."
+      subtitle="Consulte sus datos de acceso y actualice su contraseña cuando lo necesite."
       icon={UserRound}
       headerVariant="elevated"
     >
@@ -122,108 +132,130 @@ export default function UserProfile() {
           <p className="text-muted-foreground text-sm">No hay sesión cargada.</p>
         </div>
       ) : (
-        <div className="space-y-6 max-w-3xl">
-          <div className={cn(catalogMasterFormPanelClass)}>
-            <div className="flex flex-col gap-5 border-b border-primary/10 pb-6 sm:flex-row sm:items-center">
-              <Avatar className="h-20 w-20 rounded-2xl ring-2 ring-primary/15 shadow-sm">
-                <AvatarFallback className="rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-violet-500/15 text-lg font-semibold text-primary">
-                  {getUserInitials(session.name)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 space-y-2">
-                <h2 className="text-xl font-semibold tracking-tight">{session.name}</h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge
-                    variant={fullAccess ? "default" : "secondary"}
-                    className="gap-1.5 font-normal"
-                  >
-                    <BadgeCheck className="h-3.5 w-3.5" aria-hidden />
-                    {roleLabel}
-                  </Badge>
-                  {roleHint ? (
-                    <span className="text-muted-foreground text-sm">{roleHint}</span>
-                  ) : null}
+        <div className="mx-auto w-full max-w-5xl space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+            <div className={cn(catalogMasterFormPanelClass, "h-full")}>
+              <div className="flex flex-col gap-5 border-b border-primary/10 pb-6 sm:flex-row sm:items-center">
+                <Avatar className="h-20 w-20 rounded-2xl ring-2 ring-primary/15 shadow-sm">
+                  <AvatarFallback className="rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-violet-500/15 text-lg font-semibold text-primary">
+                    {getUserInitials(session.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 space-y-2">
+                  <h2 className="text-xl font-semibold tracking-tight">{session.name}</h2>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={fullAccess ? "default" : "secondary"}
+                      className="gap-1.5 font-normal"
+                    >
+                      <BadgeCheck className="h-3.5 w-3.5" aria-hidden />
+                      {roleLabel}
+                    </Badge>
+                    {roleHint ? (
+                      <span className="text-muted-foreground text-sm">{roleHint}</span>
+                    ) : null}
+                  </div>
                 </div>
+              </div>
+
+              <div className="grid gap-6 pt-6 sm:grid-cols-2">
+                <ProfileField label="Nombre" value={session.name} icon={User} />
+                <ProfileField label="Correo" value={session.email ?? "—"} icon={Mail} />
+                {session.username ? (
+                  <ProfileField label="Usuario" value={session.username} icon={AtSign} />
+                ) : null}
+                <ProfileField label="Rol" value={roleLabel} icon={BadgeCheck} />
+                <ProfileField label="ID de usuario" value={String(session.id)} icon={Hash} />
               </div>
             </div>
 
-            <div className="grid gap-6 pt-6 sm:grid-cols-2">
-              <ProfileField label="Nombre" value={session.name} icon={User} />
-              <ProfileField label="Correo" value={session.email ?? "—"} icon={Mail} />
-              {session.username ? (
-                <ProfileField label="Usuario" value={session.username} icon={AtSign} />
-              ) : null}
-              <ProfileField label="Rol" value={roleLabel} icon={BadgeCheck} />
-            </div>
+            <form
+              className={cn(catalogMasterFormPanelClass, "h-full")}
+              onSubmit={(ev) => void handlePasswordSubmit(ev)}
+            >
+              <div className={catalogMasterFormSectionClass}>
+                <h3 className="inline-flex items-center gap-2 text-base font-semibold">
+                  <KeyRound className="h-4 w-4 text-primary" aria-hidden />
+                  Cambiar mi contraseña
+                </h3>
+                <p className="text-muted-foreground text-sm">
+                  Tras guardar deberá iniciar sesión de nuevo con la nueva clave.
+                </p>
+              </div>
+
+              <div className="grid gap-4">
+                <CatalogLabeledField label="Contraseña actual" htmlFor="current-password">
+                  <Input
+                    id="current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    className={catalogMasterFormPlainInputClass}
+                    value={currentPassword}
+                    onChange={(ev) => setCurrentPassword(ev.target.value)}
+                    aria-invalid={Boolean(errors.current_password)}
+                  />
+                  {errors.current_password ? (
+                    <p className="text-destructive text-sm">{errors.current_password}</p>
+                  ) : null}
+                </CatalogLabeledField>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <CatalogLabeledField label="Nueva contraseña" htmlFor="new-password">
+                    <Input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      className={catalogMasterFormPlainInputClass}
+                      value={password}
+                      onChange={(ev) => setPassword(ev.target.value)}
+                      aria-invalid={Boolean(errors.password)}
+                    />
+                    {errors.password ? (
+                      <p className="text-destructive text-sm">{errors.password}</p>
+                    ) : null}
+                  </CatalogLabeledField>
+
+                  <CatalogLabeledField label="Confirmar contraseña" htmlFor="confirm-password">
+                    <Input
+                      id="confirm-password"
+                      type="password"
+                      autoComplete="new-password"
+                      className={catalogMasterFormPlainInputClass}
+                      value={passwordConfirmation}
+                      onChange={(ev) => setPasswordConfirmation(ev.target.value)}
+                      aria-invalid={Boolean(errors.password_confirmation)}
+                    />
+                    {errors.password_confirmation ? (
+                      <p className="text-destructive text-sm">{errors.password_confirmation}</p>
+                    ) : null}
+                  </CatalogLabeledField>
+                </div>
+              </div>
+
+              <div className={cn(catalogMasterFormActionsClass, "sm:justify-start")}>
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Guardando…" : "Actualizar contraseña"}
+                </Button>
+              </div>
+            </form>
           </div>
 
-          <form
-            className={catalogMasterFormPanelClass}
-            onSubmit={(ev) => void handlePasswordSubmit(ev)}
-          >
-            <div className={catalogMasterFormSectionClass}>
-              <h3 className="inline-flex items-center gap-2 text-base font-semibold">
-                <KeyRound className="h-4 w-4 text-primary" aria-hidden />
-                Cambiar mi contraseña
-              </h3>
-              <p className="text-muted-foreground text-sm">
-                Tras guardar deberá iniciar sesión de nuevo con la nueva clave.
-              </p>
-            </div>
-
-            <div className="grid gap-4 sm:max-w-md">
-              <CatalogLabeledField label="Contraseña actual" htmlFor="current-password">
-                <Input
-                  id="current-password"
-                  type="password"
-                  autoComplete="current-password"
-                  className={catalogMasterFormPlainInputClass}
-                  value={currentPassword}
-                  onChange={(ev) => setCurrentPassword(ev.target.value)}
-                  aria-invalid={Boolean(errors.current_password)}
-                />
-                {errors.current_password ? (
-                  <p className="text-destructive text-sm">{errors.current_password}</p>
-                ) : null}
-              </CatalogLabeledField>
-
-              <CatalogLabeledField label="Nueva contraseña" htmlFor="new-password">
-                <Input
-                  id="new-password"
-                  type="password"
-                  autoComplete="new-password"
-                  className={catalogMasterFormPlainInputClass}
-                  value={password}
-                  onChange={(ev) => setPassword(ev.target.value)}
-                  aria-invalid={Boolean(errors.password)}
-                />
-                {errors.password ? (
-                  <p className="text-destructive text-sm">{errors.password}</p>
-                ) : null}
-              </CatalogLabeledField>
-
-              <CatalogLabeledField label="Confirmar contraseña" htmlFor="confirm-password">
-                <Input
-                  id="confirm-password"
-                  type="password"
-                  autoComplete="new-password"
-                  className={catalogMasterFormPlainInputClass}
-                  value={passwordConfirmation}
-                  onChange={(ev) => setPasswordConfirmation(ev.target.value)}
-                  aria-invalid={Boolean(errors.password_confirmation)}
-                />
-                {errors.password_confirmation ? (
-                  <p className="text-destructive text-sm">{errors.password_confirmation}</p>
-                ) : null}
-              </CatalogLabeledField>
-            </div>
-
-            <div className={catalogMasterFormActionsClass}>
-              <Button type="submit" disabled={saving}>
-                {saving ? "Guardando…" : "Actualizar contraseña"}
+          {fullAccess ? (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" asChild className="gap-2">
+                <Link to="/account/users">
+                  <Users className="h-4 w-4" aria-hidden />
+                  Gestionar usuarios
+                </Link>
+              </Button>
+              <Button type="button" variant="outline" asChild className="gap-2">
+                <Link to="/account/password-reset-requests">
+                  <KeyRound className="h-4 w-4" aria-hidden />
+                  Solicitudes de contraseña
+                </Link>
               </Button>
             </div>
-          </form>
+          ) : null}
         </div>
       )}
     </CatalogPageShell>

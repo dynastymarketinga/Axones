@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Factory,
   FlaskConical,
+  KeyRound,
   Layers2,
   Package,
   PackageOpen,
@@ -16,9 +17,11 @@ import {
   ShoppingCart,
   Tags,
   Truck,
+  UserRound,
   Users,
   Warehouse,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
 import { isAxonesFullAccess, type AxonesMenuNode } from "@/lib/axones-roles"
 import { CLIENT_ORDER_MODULE_TITLE } from "@/pages/axones/client-order-i18n"
@@ -133,8 +136,14 @@ const AXONES_MENU_TREE_BASE: AxonesMenuNode[] = [
 
 export const AXONES_MENU_TREE: AxonesMenuNode[] = hideMenuNodes(AXONES_MENU_TREE_BASE)
 
-const AXONES_ACCOUNT_LEAVES_BASE: { title: string; url: string }[] = [
-  { title: "Perfil", url: "account/profile" },
+export type AxonesAccountMenuLeaf = {
+  title: string
+  url: string
+  icon: LucideIcon
+}
+
+const AXONES_ACCOUNT_LEAVES_BASE: AxonesAccountMenuLeaf[] = [
+  { title: "Perfil", url: "account/profile", icon: UserRound },
 ]
 
 /** Rutas Cuenta para migas de pan (independiente del rol visible en menú). */
@@ -144,21 +153,23 @@ export const AXONES_ACCOUNT_BREADCRUMB_LEAVES: { title: string; url: string }[] 
   { title: "Solicitudes de contraseña", url: "account/password-reset-requests" },
 ]
 
-const ACCOUNT_USERS: { title: string; url: string } = {
+const ACCOUNT_USERS: AxonesAccountMenuLeaf = {
   title: "Usuarios",
   url: "account/users",
+  icon: Users,
 }
 
-const ACCOUNT_PASSWORD_RESET_REQUESTS: { title: string; url: string } = {
+const ACCOUNT_PASSWORD_RESET_REQUESTS: AxonesAccountMenuLeaf = {
   title: "Solicitudes de contraseña",
   url: "account/password-reset-requests",
+  icon: KeyRound,
 }
 
 /** Hojas de menú Cuenta visibles según rol (jefes ven solicitudes internas de restablecimiento). */
 export function getAccountLeaves(
   role?: string | null,
   userId?: number | null,
-): { title: string; url: string }[] {
+): AxonesAccountMenuLeaf[] {
   const leaves = [...AXONES_ACCOUNT_LEAVES_BASE]
   if (isAxonesFullAccess(role, userId)) {
     leaves.push(ACCOUNT_USERS, ACCOUNT_PASSWORD_RESET_REQUESTS)

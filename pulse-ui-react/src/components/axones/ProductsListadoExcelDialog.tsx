@@ -96,6 +96,8 @@ export function ProductsListadoExcelDialog({
           cpe: p.cpe,
           mps: p.mps,
           cod_barra: p.cod_barra,
+          tipo_impresion: p.tipo_impresion,
+          estructura: p.estructura,
           sheet_name: p.sheet_name,
           row_number: p.row_number,
         })),
@@ -157,8 +159,9 @@ export function ProductsListadoExcelDialog({
             Importar listado de productos
           </DialogTitle>
           <DialogDescription>
-            Carga el formato <strong>LISTADO DE PRODUCTOS.xlsx</strong> (original de planta u organizado
-            con hojas CLIENTES + PRODUCTOS). Se crearán o actualizarán clientes y especificaciones.{" "}
+            Carga el formato <strong>LISTADO DE PRODUCTOS.xlsx</strong> (plantilla Axones, listado de planta u
+            exportación previa). Se crearán o actualizarán clientes y especificaciones. Los campos opcionales
+            incluyen tipo de impresión (Superficie, Bilaminado, Trilaminado) y estructura.{" "}
             <a
               href={`${import.meta.env.BASE_URL.replace(/\/?$/, "")}/formato-listado-productos.md`}
               target="_blank"
@@ -185,8 +188,9 @@ export function ProductsListadoExcelDialog({
           <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8">
             <Upload className="size-10 text-muted-foreground" aria-hidden />
             <p className="text-muted-foreground text-center text-sm">
-              Seleccione el archivo .xlsx con producto, cliente (nombre + RIF), CPE, M.P.P.S y código de
-              barra.
+              Use la hoja PRODUCTOS de la plantilla Axones (encabezados en español) o el listado original de
+              planta. Campos: producto, cliente (RIF), C.P.E., M.P.P.S., código de barra, tipo de impresión y
+              estructura.
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               <Button

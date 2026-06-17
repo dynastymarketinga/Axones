@@ -6,51 +6,91 @@ También puede descargar la **plantilla vacía** desde la misma pantalla (**Plan
 
 ---
 
+## Flujo recomendado (3 pasos)
+
+1. **Complete la hoja CLIENTES** — nombre del cliente y RIF (obligatorio).
+2. **Complete la hoja PRODUCTOS** — una fila por especificación; el RIF del cliente debe coincidir.
+3. En Axones: **Importar Excel** → revise la vista previa → **Confirmar importación**.
+
+---
+
 ## Qué importa este Excel
 
-Cada fila es una **especificación de producto** (plantilla técnico-comercial por cliente): nombre, CPE, M.P.P.S, código de barra.
+Cada fila es una **especificación de producto** (plantilla técnico-comercial por cliente):
 
-**No incluye** tipo de impresión ni estructura del material; complételos después en Axones si hace falta.
+| Campo en Axones | Columna en Excel (hoja PRODUCTOS) |
+|-----------------|-----------------------------------|
+| Nombre | Nombre del producto |
+| Cliente (RIF) | RIF del cliente |
+| Cliente (nombre) | Nombre del cliente |
+| C.P.E. | C.P.E. |
+| M.P.P.S. | M.P.P.S. |
+| Código de barra | Código de barra |
+| Tipo de impresión *(opcional)* | Tipo de impresión |
+| Estructura *(opcional)* | Estructura |
+
+**Tipo de impresión** aceptado: `Superficie`, `Bilaminado` o `Trilaminado`.
 
 ---
 
-## Formatos aceptados
+## Estructura del libro
 
-### 1. Original (como viene de planta)
+### Plantilla vacía (descarga desde Axones)
 
-Una sola hoja (p. ej. `Hoja1`):
-
-| Fila | Contenido |
+| Hoja | Contenido |
 |------|-----------|
-| **6** | Encabezados (fila amarilla) |
-| **7+** | Datos |
+| **INSTRUCCIONES** | Guía paso a paso |
+| **CLIENTES** | Encabezados en fila 1 (verde) |
+| **PRODUCTOS** | Encabezados en fila 1 (verde) |
 
-| Col | Encabezado | Campo en Axones |
-|-----|------------|-----------------|
-| A | producto | Nombre de la especificación |
-| B | cliente | `Nombre empresa (RIF J-12345678-9)` |
-| C | cpe | C.P.E. (texto; conservar ceros a la izquierda) |
-| D | mps | M.P.P.S. |
-| E | cod_barra | Código de barra maestro |
+### Exportación desde Axones
 
-Valores **N/A** en CPE, MPS o código de barra se interpretan como vacío.
+Las mismas hojas **más**:
 
-### 2. Organizado (recomendado para mantenimiento)
-
-Pestañas:
-
-- **INSTRUCCIONES** — guía (opcional)
-- **CLIENTES** — `nombre_cliente | rif | cantidad_productos`
-- **PRODUCTOS** — `producto | rif_cliente | nombre_cliente | cpe | mps | cod_barra | fila_origen`
-
-El importador detecta automáticamente el formato por el nombre de las hojas.
+| Hoja | Contenido |
+|------|-----------|
+| **ORIGINAL** | Formato listado de planta (encabezados fila 6, amarillo). No es necesario editarla en el flujo habitual. |
 
 ---
 
-## Orden de carga
+## Encabezados en español (hoja CLIENTES)
 
-1. **Clientes** — se crean o actualizan por RIF (obligatorio para clientes nuevos).
-2. **Productos** — se enlazan al cliente por RIF; si ya existe el mismo nombre para ese cliente, se actualizan CPE, MPS y código de barra.
+| Columna | Encabezado |
+|---------|------------|
+| A | Nombre del cliente |
+| B | RIF |
+| C | Cantidad de productos *(solo informativo al exportar)* |
+
+## Encabezados en español (hoja PRODUCTOS)
+
+| Columna | Encabezado |
+|---------|------------|
+| A | Nombre del producto |
+| B | RIF del cliente |
+| C | Nombre del cliente |
+| D | C.P.E. |
+| E | M.P.P.S. |
+| F | Código de barra |
+| G | Tipo de impresión |
+| H | Estructura |
+
+El importador también acepta encabezados técnicos legacy (`producto`, `rif_cliente`, `cpe`, etc.).
+
+---
+
+## Formato original de planta (alternativa)
+
+Una sola hoja con encabezados en **fila 6** y datos desde **fila 7**:
+
+| Col | Encabezado | Campo |
+|-----|------------|-------|
+| A | producto | Nombre |
+| B | cliente | `Nombre empresa (RIF J-12345678-9)` |
+| C | cpe | C.P.E. |
+| D | mps | M.P.P.S. |
+| E | cod_barra | Código de barra |
+
+En este formato **no** vienen tipo de impresión ni estructura.
 
 ---
 
@@ -58,8 +98,9 @@ El importador detecta automáticamente el formato por el nombre de las hojas.
 
 - No puede haber dos especificaciones con el **mismo nombre** para el **mismo cliente**.
 - El RIF debe poder parsearse (ej. `J-30827011-3`). Sin RIF no se puede dar de alta un cliente nuevo desde el Excel.
-- Use formato **Texto** en Excel para CPE y código de barra (evita notación científica y pierde ceros).
-- La exportación desde Axones genera un libro con hojas CLIENTES, PRODUCTOS y ORIGINAL (encabezados fila 6) para round-trip.
+- Use formato **Texto** en Excel para C.P.E. y código de barra (evita notación científica y pierde ceros).
+- Valores **N/A** en campos opcionales se interpretan como vacío.
+- Al **actualizar** un producto existente, si deja vacío tipo de impresión o estructura en el Excel, **no se borran** los valores ya guardados en Axones.
 
 ---
 

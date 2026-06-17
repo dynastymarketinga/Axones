@@ -31,6 +31,8 @@ class ProductBulkImportRequest extends FormRequest
             'products.*.cpe' => ['nullable', 'string', 'max:255'],
             'products.*.mps' => ['nullable', 'string', 'max:255'],
             'products.*.cod_barra' => ['nullable', 'string', 'max:255'],
+            'products.*.tipo_impresion' => ['nullable', 'string', 'max:255'],
+            'products.*.estructura' => ['nullable', 'string', 'max:255'],
             'products.*.sheet_name' => ['nullable', 'string', 'max:64'],
             'products.*.row_number' => ['nullable', 'integer', 'min:0'],
         ];

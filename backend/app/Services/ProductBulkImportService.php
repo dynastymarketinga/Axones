@@ -10,6 +10,8 @@ use Illuminate\Validation\ValidationException;
 
 class ProductBulkImportService
 {
+    private const ALLOWED_PRINT_TYPES = ['Superficie', 'Bilaminado', 'Trilaminado'];
+
     /**
      * @param  list<array<string, mixed>>  $clients
      * @param  list<array<string, mixed>>  $products
@@ -237,10 +239,15 @@ class ProductBulkImportService
             ]);
         }
 
+        $printType = $this->nullablePrintType($row['tipo_impresion'] ?? null);
+        $structure = $this->nullableString($row['estructura'] ?? null);
+
         $payload = [
             'cpe' => $this->nullableString($row['cpe'] ?? null),
             'mps' => $this->nullableString($row['mps'] ?? null),
             'barcode' => $this->nullableString($row['cod_barra'] ?? null),
+            'print_type' => $printType,
+            'structure' => $structure,
         ];
 
         /** @var Product|null $product */
@@ -256,15 +263,28 @@ class ProductBulkImportService
                 'cpe' => $payload['cpe'],
                 'mps' => $payload['mps'],
                 'barcode' => $payload['barcode'],
-                'print_type' => null,
-                'structure' => null,
+                'print_type' => $payload['print_type'],
+                'structure' => $payload['structure'],
             ]);
 
             return ['action' => 'created'];
         }
 
         $dirty = false;
-        foreach ($payload as $field => $value) {
+        foreach (['cpe', 'mps', 'barcode'] as $field) {
+            $value = $payload[$field];
+            $current = $product->{$field};
+            $currentNorm = $current === null ? null : trim((string) $current);
+            if ($currentNorm !== $value) {
+                $product->{$field} = $value;
+                $dirty = true;
+            }
+        }
+        foreach (['print_type', 'structure'] as $field) {
+            $value = $payload[$field];
+            if ($value === null) {
+                continue;
+            }
             $current = $product->{$field};
             $currentNorm = $current === null ? null : trim((string) $current);
             if ($currentNorm !== $value) {
@@ -298,6 +318,24 @@ class ProductBulkImportService
         }
 
         return $t;
+    }
+
+    private function nullablePrintType(mixed $value): ?string
+    {
+        $t = $this->nullableString($value);
+        if ($t === null) {
+            return null;
+        }
+
+        foreach (self::ALLOWED_PRINT_TYPES as $allowed) {
+            if (mb_strtolower($allowed) === mb_strtolower($t)) {
+                return $allowed;
+            }
+        }
+
+        throw ValidationException::withMessages([
+            'tipo_impresion' => ['Tipo de impresión no válido. Use: Superficie, Bilaminado o Trilaminado.'],
+        ]);
     }
 
     /**

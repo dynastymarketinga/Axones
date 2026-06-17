@@ -155,4 +155,104 @@ class ProductBulkImportTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('errors.0.kind', 'client');
     }
+
+    public function test_bulk_import_creates_product_with_print_type_and_structure(): void
+    {
+        $user = User::factory()->create(['role' => 'admin']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->postJson(
+            '/api/products/bulk-import',
+            [
+                'clients' => [
+                    ['nombre_cliente' => 'IMPROA SANTONI, C.A.', 'rif' => 'J-30827011-3'],
+                ],
+                'products' => [
+                    [
+                        'producto' => 'ARROZ PREMIUM SANTONI 900g',
+                        'rif_cliente' => 'J-30827011-3',
+                        'nombre_cliente' => 'IMPROA SANTONI, C.A.',
+                        'tipo_impresion' => 'Superficie',
+                        'estructura' => 'BOPP / tinta',
+                    ],
+                ],
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $this->assertDatabaseHas('products', [
+            'name' => 'ARROZ PREMIUM SANTONI 900g',
+            'print_type' => 'Superficie',
+            'structure' => 'BOPP / tinta',
+        ]);
+    }
+
+    public function test_bulk_import_update_preserves_print_type_when_excel_empty(): void
+    {
+        $user = User::factory()->create(['role' => 'admin']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $client = Client::query()->create([
+            'name' => 'IMPROA SANTONI, C.A.',
+            'rif' => 'J-30827011-3',
+        ]);
+
+        $product = Product::query()->create([
+            'client_id' => $client->id,
+            'name' => 'ARROZ PREMIUM SANTONI 900g',
+            'print_type' => 'Bilaminado',
+            'structure' => 'BOPP / PE',
+        ]);
+
+        $this->postJson(
+            '/api/products/bulk-import',
+            [
+                'products' => [
+                    [
+                        'producto' => 'ARROZ PREMIUM SANTONI 900g',
+                        'rif_cliente' => 'J-30827011-3',
+                        'nombre_cliente' => 'IMPROA SANTONI, C.A.',
+                        'mps' => 'A-101.240',
+                    ],
+                ],
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        )->assertOk();
+
+        $product->refresh();
+        $this->assertSame('Bilaminado', $product->print_type);
+        $this->assertSame('BOPP / PE', $product->structure);
+        $this->assertSame('A-101.240', $product->mps);
+    }
+
+    public function test_bulk_import_rejects_invalid_print_type(): void
+    {
+        $user = User::factory()->create(['role' => 'admin']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $client = Client::query()->create([
+            'name' => 'IMPROA SANTONI, C.A.',
+            'rif' => 'J-30827011-3',
+        ]);
+
+        $response = $this->postJson(
+            '/api/products/bulk-import',
+            [
+                'products' => [
+                    [
+                        'producto' => 'PRODUCTO TIPO INVALIDO',
+                        'rif_cliente' => 'J-30827011-3',
+                        'nombre_cliente' => 'IMPROA SANTONI, C.A.',
+                        'tipo_impresion' => 'Cuatrilaminado',
+                    ],
+                ],
+            ],
+            ['Authorization' => 'Bearer '.$token],
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('errors.0.kind', 'product');
+        $this->assertDatabaseMissing('products', ['name' => 'PRODUCTO TIPO INVALIDO']);
+    }
 }

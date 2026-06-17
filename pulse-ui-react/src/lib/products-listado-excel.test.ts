@@ -5,10 +5,12 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildListadoExportRows,
+  canonicalizePrintType,
   formatClienteExportLabel,
   normalizeRif,
   parseClienteCell,
   parseListadoProductosExcel,
+  PRODUCT_HEADERS_ES,
 } from "@/lib/products-listado-excel"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")
@@ -32,6 +34,12 @@ describe("products-listado-excel helpers", () => {
     )
   })
 
+  it("canonicalizes print type", () => {
+    expect(canonicalizePrintType("superficie")).toBe("Superficie")
+    expect(canonicalizePrintType("Bilaminado")).toBe("Bilaminado")
+    expect(canonicalizePrintType("invalido")).toBeNull()
+  })
+
   it("builds export rows from products and clients map", () => {
     const rows = buildListadoExportRows(
       [
@@ -43,7 +51,7 @@ describe("products-listado-excel helpers", () => {
           mps: "A-101.240",
           barcode: "7592498220457",
           print_type: "Superficie",
-          structure: null,
+          structure: "BOPP / tinta",
         },
       ],
       new Map([
@@ -65,6 +73,40 @@ describe("products-listado-excel helpers", () => {
     expect(rows[0]?.producto).toBe("ARROZ PREMIUM SANTONI 900g")
     expect(rows[0]?.rif_cliente).toBe("J-30827011-3")
     expect(rows[0]?.cpe).toBe("0422515856")
+    expect(rows[0]?.tipo_impresion).toBe("Superficie")
+    expect(rows[0]?.estructura).toBe("BOPP / tinta")
+  })
+
+  it("parses organized workbook with Spanish headers", async () => {
+    const ExcelJS = (await import("exceljs")).default
+    const wb = new ExcelJS.Workbook()
+    const wsClients = wb.addWorksheet("CLIENTES")
+    wsClients.getRow(1).values = ["Nombre del cliente", "RIF", "Cantidad de productos"]
+    wsClients.getRow(2).values = ["IMPROA SANTONI, C.A.", "J-30827011-3", 1]
+
+    const wsProducts = wb.addWorksheet("PRODUCTOS")
+    wsProducts.getRow(1).values = [...PRODUCT_HEADERS_ES]
+    wsProducts.getRow(2).values = [
+      "ARROZ PREMIUM SANTONI 900g",
+      "J-30827011-3",
+      "IMPROA SANTONI, C.A.",
+      "0422515856",
+      "A-101.240",
+      "7592498220457",
+      "Superficie",
+      "BOPP / tinta",
+    ]
+
+    const buffer = await wb.xlsx.writeBuffer()
+    const file = new File([buffer], "organizado-es.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+    const result = await parseListadoProductosExcel(file)
+
+    expect(result.format).toBe("organizado")
+    expect(result.products).toHaveLength(1)
+    expect(result.products[0]?.tipo_impresion).toBe("Superficie")
+    expect(result.products[0]?.estructura).toBe("BOPP / tinta")
   })
 })
 

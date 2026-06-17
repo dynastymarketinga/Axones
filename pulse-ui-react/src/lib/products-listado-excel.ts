@@ -16,6 +16,8 @@ export type ListadoImportProduct = {
   cpe: string | null
   mps: string | null
   cod_barra: string | null
+  tipo_impresion: string | null
+  estructura: string | null
   sheet_name: string
   row_number: number
 }
@@ -33,10 +35,101 @@ export type ListadoParseResult = {
   issues: ListadoParseIssue[]
 }
 
+export const PRODUCT_PRINT_TYPES = ["Superficie", "Bilaminado", "Trilaminado"] as const
+
+export const CLIENT_HEADERS_ES = [
+  "Nombre del cliente",
+  "RIF",
+  "Cantidad de productos",
+] as const
+
+export const PRODUCT_HEADERS_ES = [
+  "Nombre del producto",
+  "RIF del cliente",
+  "Nombre del cliente",
+  "C.P.E.",
+  "M.P.P.S.",
+  "Código de barra",
+  "Tipo de impresión",
+  "Estructura",
+] as const
+
 const ORIGINAL_HEADER_ROW = 6
 const ORIGINAL_DATA_START = 7
 
 const NA_VALUES = new Set(["N/A", "NA", "N.A.", "—", "-"])
+
+const GREEN_HEADER_FILL: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFE2EFDA" },
+}
+
+const YELLOW_HEADER_FILL: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFFFC000" },
+}
+
+const CLIENT_COL_WIDTHS = [36, 16, 18] as const
+const PRODUCT_COL_WIDTHS = [42, 16, 36, 14, 14, 18, 18, 40] as const
+const ORIGINAL_COL_WIDTHS = [42, 48, 14, 14, 18] as const
+
+/** Encabezado normalizado → clave de campo en hoja CLIENTES. */
+const CLIENT_HEADER_ALIASES: Record<string, "nombre_cliente" | "rif" | "cantidad_productos"> = {
+  NOMBRE_CLIENTE: "nombre_cliente",
+  "NOMBRE DEL CLIENTE": "nombre_cliente",
+  RIF: "rif",
+  CANTIDAD_PRODUCTOS: "cantidad_productos",
+  "CANTIDAD DE PRODUCTOS": "cantidad_productos",
+}
+
+/** Encabezado normalizado → clave de campo en hoja PRODUCTOS. */
+const PRODUCT_HEADER_ALIASES: Record<
+  string,
+  | "producto"
+  | "rif_cliente"
+  | "nombre_cliente"
+  | "cpe"
+  | "mps"
+  | "cod_barra"
+  | "tipo_impresion"
+  | "estructura"
+> = {
+  PRODUCTO: "producto",
+  "NOMBRE DEL PRODUCTO": "producto",
+  NOMBRE_PRODUCTO: "producto",
+  RIF_CLIENTE: "rif_cliente",
+  "RIF DEL CLIENTE": "rif_cliente",
+  NOMBRE_CLIENTE: "nombre_cliente",
+  "NOMBRE DEL CLIENTE": "nombre_cliente",
+  CPE: "cpe",
+  "C.P.E.": "cpe",
+  "C.P.E": "cpe",
+  MPS: "mps",
+  "M.P.P.S.": "mps",
+  "M.P.P.S": "mps",
+  MPPS: "mps",
+  COD_BARRA: "cod_barra",
+  "CODIGO DE BARRA": "cod_barra",
+  "CODIGO DE BARRAS": "cod_barra",
+  TIPO_IMPRESION: "tipo_impresion",
+  "TIPO DE IMPRESION": "tipo_impresion",
+  PRINT_TYPE: "tipo_impresion",
+  ESTRUCTURA: "estructura",
+  STRUCTURE: "estructura",
+}
+
+const LEGACY_PRODUCT_HEADERS = [
+  "producto",
+  "rif_cliente",
+  "nombre_cliente",
+  "cpe",
+  "mps",
+  "cod_barra",
+] as const
+
+const LEGACY_CLIENT_HEADERS = ["nombre_cliente", "rif", "cantidad_productos"] as const
 
 function normalizeHeader(value: string): string {
   return value
@@ -48,7 +141,8 @@ function normalizeHeader(value: string): string {
 
 function cellText(value: ExcelJS.CellValue | null | undefined): string {
   if (value == null) return ""
-  if (typeof value === "string" || typeof value === "boolean") return value.trim()
+  if (typeof value === "string") return value.trim()
+  if (typeof value === "boolean") return String(value)
   if (typeof value === "number") {
     if (Number.isInteger(value)) return String(value)
     const s = String(value)
@@ -116,7 +210,46 @@ export function formatClienteExportLabel(name: string, rif: string | null | unde
   return `${n} (RIF ${r})`
 }
 
-function sheetHasHeaders(ws: ExcelJS.Worksheet, headers: string[], rowNumber = 1): boolean {
+export function canonicalizePrintType(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").trim()
+  if (!t) return null
+  const lower = t.toLowerCase()
+  for (const allowed of PRODUCT_PRINT_TYPES) {
+    if (allowed.toLowerCase() === lower) return allowed
+  }
+  return null
+}
+
+type ColumnMap<T extends string> = Partial<Record<T, number>>
+
+function buildColumnMap<T extends string>(
+  ws: ExcelJS.Worksheet,
+  aliases: Record<string, T>,
+  rowNumber = 1,
+): ColumnMap<T> {
+  const row = ws.getRow(rowNumber)
+  const map: ColumnMap<T> = {}
+  const colCount = Math.max(row.cellCount, ws.columnCount, 12)
+  for (let c = 1; c <= colCount; c++) {
+    const header = normalizeHeader(cellText(row.getCell(c).value))
+    if (!header) continue
+    const key = aliases[header]
+    if (key && map[key] == null) map[key] = c
+  }
+  return map
+}
+
+function sheetHasProductHeaders(ws: ExcelJS.Worksheet, rowNumber = 1): boolean {
+  const map = buildColumnMap(ws, PRODUCT_HEADER_ALIASES, rowNumber)
+  return map.producto != null && (map.rif_cliente != null || map.nombre_cliente != null)
+}
+
+function sheetHasClientHeaders(ws: ExcelJS.Worksheet, rowNumber = 1): boolean {
+  const map = buildColumnMap(ws, CLIENT_HEADER_ALIASES, rowNumber)
+  return map.nombre_cliente != null && map.rif != null
+}
+
+function sheetHasLegacyHeaders(ws: ExcelJS.Worksheet, headers: readonly string[], rowNumber = 1): boolean {
   const row = ws.getRow(rowNumber)
   return headers.every((h, i) => normalizeHeader(cellText(row.getCell(i + 1).value)) === normalizeHeader(h))
 }
@@ -124,10 +257,8 @@ function sheetHasHeaders(ws: ExcelJS.Worksheet, headers: string[], rowNumber = 1
 function detectFormat(wb: ExcelJS.Workbook): "original" | "organizado" {
   for (const ws of wb.worksheets) {
     const name = normalizeHeader(ws.name)
-    if (name === "PRODUCTOS" && sheetHasHeaders(ws, ["producto", "rif_cliente", "nombre_cliente", "cpe", "mps", "cod_barra"])) {
-      return "organizado"
-    }
-    if (name === "CLIENTES" && sheetHasHeaders(ws, ["nombre_cliente", "rif", "cantidad_productos"])) {
+    if (name === "PRODUCTOS" && sheetHasProductHeaders(ws)) return "organizado"
+    if (name === "CLIENTES" && (sheetHasClientHeaders(ws) || sheetHasLegacyHeaders(ws, LEGACY_CLIENT_HEADERS))) {
       return "organizado"
     }
   }
@@ -140,6 +271,12 @@ function findWorksheet(wb: ExcelJS.Workbook, ...names: string[]): ExcelJS.Worksh
     if (wanted.has(normalizeHeader(ws.name))) return ws
   }
   return null
+}
+
+function getCellByMap(row: ExcelJS.Row, map: ColumnMap<string>, key: string): string {
+  const col = map[key]
+  if (col == null) return ""
+  return cellText(row.getCell(col).value)
 }
 
 function parseOriginalSheet(ws: ExcelJS.Worksheet, sheetName: string): Pick<ListadoParseResult, "clients" | "products" | "issues"> {
@@ -183,6 +320,8 @@ function parseOriginalSheet(ws: ExcelJS.Worksheet, sheetName: string): Pick<List
       cpe,
       mps,
       cod_barra: codBarra,
+      tipo_impresion: null,
+      estructura: null,
       sheet_name: sheetName,
       row_number: r,
     })
@@ -195,24 +334,28 @@ function parseOrganizadoWorkbook(wb: ExcelJS.Workbook): Pick<ListadoParseResult,
   const issues: ListadoParseIssue[] = []
   const clients: ListadoImportClient[] = []
   const clientByRif = new Map<string, ListadoImportClient>()
-  const clientByName = new Map<string, ListadoImportClient>()
 
   const wsClients = findWorksheet(wb, "CLIENTES")
   if (wsClients) {
+    const clientMap = buildColumnMap(wsClients, CLIENT_HEADER_ALIASES)
+    if (clientMap.nombre_cliente == null && sheetHasLegacyHeaders(wsClients, LEGACY_CLIENT_HEADERS)) {
+      clientMap.nombre_cliente = 1
+      clientMap.rif = 2
+    }
     const max = wsClients.rowCount || 1
     for (let r = 2; r <= max; r++) {
-      const nombre = cellText(wsClients.getRow(r).getCell(1).value)
-      const rif = normalizeRif(cellText(wsClients.getRow(r).getCell(2).value))
+      const row = wsClients.getRow(r)
+      const nombre = getCellByMap(row, clientMap, "nombre_cliente")
+      const rif = normalizeRif(getCellByMap(row, clientMap, "rif"))
       if (!nombre && !rif) continue
-      const row: ListadoImportClient = {
+      const entry: ListadoImportClient = {
         nombre_cliente: nombre,
         rif,
         sheet_name: wsClients.name,
         row_number: r,
       }
-      clients.push(row)
-      if (rif) clientByRif.set(rif, row)
-      if (nombre) clientByName.set(nombre.toUpperCase(), row)
+      clients.push(entry)
+      if (rif) clientByRif.set(rif, entry)
       if (!rif) {
         issues.push({ sheet_name: wsClients.name, row_number: r, message: `Cliente sin RIF: ${nombre}` })
       }
@@ -226,19 +369,50 @@ function parseOrganizadoWorkbook(wb: ExcelJS.Workbook): Pick<ListadoParseResult,
     return { clients, products, issues }
   }
 
+  let productMap = buildColumnMap(wsProducts, PRODUCT_HEADER_ALIASES)
+  if (productMap.producto == null && sheetHasLegacyHeaders(wsProducts, LEGACY_PRODUCT_HEADERS)) {
+    productMap = {
+      producto: 1,
+      rif_cliente: 2,
+      nombre_cliente: 3,
+      cpe: 4,
+      mps: 5,
+      cod_barra: 6,
+      tipo_impresion: 7,
+      estructura: 8,
+    }
+  }
+
   const max = wsProducts.rowCount || 1
   for (let r = 2; r <= max; r++) {
-    const producto = cellText(wsProducts.getRow(r).getCell(1).value)
+    const row = wsProducts.getRow(r)
+    const producto = getCellByMap(row, productMap, "producto")
     if (!producto) continue
 
-    const rif = normalizeRif(cellText(wsProducts.getRow(r).getCell(2).value))
-    const nombre = cellText(wsProducts.getRow(r).getCell(3).value)
-    const cpe = normalizeFieldText(cellText(wsProducts.getRow(r).getCell(4).value))
-    const mps = normalizeFieldText(cellText(wsProducts.getRow(r).getCell(5).value))
-    const codBarra = normalizeFieldText(cellText(wsProducts.getRow(r).getCell(6).value))
+    const rif = normalizeRif(getCellByMap(row, productMap, "rif_cliente"))
+    const nombre = getCellByMap(row, productMap, "nombre_cliente")
+    const cpe = normalizeFieldText(getCellByMap(row, productMap, "cpe"))
+    const mps = normalizeFieldText(getCellByMap(row, productMap, "mps"))
+    const codBarra = normalizeFieldText(getCellByMap(row, productMap, "cod_barra"))
+    const tipoRaw = normalizeFieldText(getCellByMap(row, productMap, "tipo_impresion"))
+    const estructura = normalizeFieldText(getCellByMap(row, productMap, "estructura"))
+
+    let tipoImpresion: string | null = null
+    if (tipoRaw) {
+      const canonical = canonicalizePrintType(tipoRaw)
+      if (canonical) {
+        tipoImpresion = canonical
+      } else {
+        issues.push({
+          sheet_name: wsProducts.name,
+          row_number: r,
+          message: `Tipo de impresión no reconocido («${tipoRaw}»). Use: Superficie, Bilaminado o Trilaminado.`,
+        })
+      }
+    }
 
     if (!rif && !nombre) {
-      issues.push({ sheet_name: wsProducts.name, row_number: r, message: "Falta rif_cliente y nombre_cliente" })
+      issues.push({ sheet_name: wsProducts.name, row_number: r, message: "Falta RIF del cliente y nombre del cliente" })
       continue
     }
     if (!rif) {
@@ -254,7 +428,6 @@ function parseOrganizadoWorkbook(wb: ExcelJS.Workbook): Pick<ListadoParseResult,
       }
       clients.push(inferred)
       clientByRif.set(rif, inferred)
-      clientByName.set(nombre.toUpperCase(), inferred)
     }
 
     products.push({
@@ -264,6 +437,8 @@ function parseOrganizadoWorkbook(wb: ExcelJS.Workbook): Pick<ListadoParseResult,
       cpe,
       mps,
       cod_barra: codBarra,
+      tipo_impresion: tipoImpresion,
+      estructura,
       sheet_name: wsProducts.name,
       row_number: r,
     })
@@ -295,6 +470,8 @@ export type ListadoExportRow = {
   cpe: string | null
   mps: string | null
   cod_barra: string | null
+  tipo_impresion: string | null
+  estructura: string | null
 }
 
 export function buildListadoExportRows(
@@ -313,6 +490,8 @@ export function buildListadoExportRows(
       cpe: p.cpe,
       mps: p.mps,
       cod_barra: p.barcode ?? null,
+      tipo_impresion: p.print_type ?? null,
+      estructura: p.structure ?? null,
     }
   })
 }
@@ -329,15 +508,14 @@ function triggerDownload(buffer: ArrayBuffer, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-const HEADER_FILL: ExcelJS.Fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "FFFFC000" },
+function styleGreenHeaderRow(row: ExcelJS.Row) {
+  row.font = { bold: true }
+  row.fill = GREEN_HEADER_FILL
 }
 
-function styleHeaderRow(row: ExcelJS.Row) {
+function styleYellowHeaderRow(row: ExcelJS.Row) {
   row.font = { bold: true }
-  row.fill = HEADER_FILL
+  row.fill = YELLOW_HEADER_FILL
 }
 
 function setTextColumn(ws: ExcelJS.Worksheet, col: number, fromRow: number, toRow: number) {
@@ -346,6 +524,120 @@ function setTextColumn(ws: ExcelJS.Worksheet, col: number, fromRow: number, toRo
     cell.numFmt = "@"
     if (cell.value != null && cell.value !== "") cell.value = String(cell.value)
   }
+}
+
+function applyColumnWidths(ws: ExcelJS.Worksheet, widths: readonly number[]) {
+  widths.forEach((w, i) => {
+    ws.getColumn(i + 1).width = w
+  })
+}
+
+function freezeBelowHeader(ws: ExcelJS.Worksheet, splitRow: number) {
+  const topLeft = `A${splitRow + 1}`
+  ws.views = [{ state: "frozen", ySplit: splitRow, topLeftCell: topLeft, activeCell: topLeft }]
+}
+
+function writeInstructionsSheet(ws: ExcelJS.Worksheet, exportMode: boolean) {
+  ws.getColumn(1).width = 88
+  const title = exportMode
+    ? "LISTADO DE PRODUCTOS — Exportado desde Axones"
+    : "LISTADO DE PRODUCTOS — Plantilla para Axones"
+  const lines = exportMode
+    ? [
+        "",
+        "Este archivo contiene sus especificaciones exportadas desde Axones.",
+        "",
+        "PASO 1 — Revise la hoja CLIENTES (resumen por RIF).",
+        "PASO 2 — Edite la hoja PRODUCTOS si necesita cambios.",
+        "PASO 3 — Importe de nuevo en Axones → Especificaciones de producto → Importar Excel.",
+        "",
+        "La hoja ORIGINAL conserva el formato del listado de planta (encabezados en fila 6).",
+        "No es necesario editar ORIGINAL para el flujo habitual.",
+        "",
+        "Guía completa: /formato-listado-productos.md",
+      ]
+    : [
+        "",
+        "Use este archivo para cargar especificaciones en:",
+        "Datos maestros → Especificaciones de producto → Importar Excel",
+        "",
+        "PASO 1 — Complete la hoja CLIENTES (nombre del cliente + RIF obligatorio).",
+        "PASO 2 — Complete la hoja PRODUCTOS (una fila por especificación; el RIF debe coincidir).",
+        "PASO 3 — En Axones, use Importar Excel, revise la vista previa y confirme.",
+        "",
+        "Tipo de impresión (opcional): Superficie, Bilaminado o Trilaminado.",
+        "C.P.E. y código de barra: use formato Texto en Excel para conservar ceros.",
+        "N/A en campos opcionales se interpreta como vacío.",
+        "",
+        "También se acepta el listado original de planta (una hoja, encabezados fila 6).",
+        "",
+        "Guía completa: /formato-listado-productos.md",
+      ]
+  ws.getCell(1, 1).value = title
+  ws.getCell(1, 1).font = { bold: true, size: 14 }
+  lines.forEach((line, i) => {
+    ws.getCell(i + 2, 1).value = line
+  })
+}
+
+function writeClientsSheet(
+  ws: ExcelJS.Worksheet,
+  clients: Array<{ nombre: string; rif: string; count: number }>,
+) {
+  const header = ws.getRow(1)
+  header.values = [...CLIENT_HEADERS_ES]
+  styleGreenHeaderRow(header)
+  applyColumnWidths(ws, CLIENT_COL_WIDTHS)
+  clients.forEach((c, i) => {
+    ws.getRow(i + 2).values = [c.nombre, c.rif, c.count]
+  })
+  const lastRow = Math.max(2, ws.rowCount)
+  setTextColumn(ws, 2, 2, lastRow)
+  freezeBelowHeader(ws, 1)
+}
+
+function writeProductsSheet(ws: ExcelJS.Worksheet, rows: ListadoExportRow[]) {
+  const header = ws.getRow(1)
+  header.values = [...PRODUCT_HEADERS_ES]
+  styleGreenHeaderRow(header)
+  applyColumnWidths(ws, PRODUCT_COL_WIDTHS)
+  rows.forEach((row, i) => {
+    ws.getRow(i + 2).values = [
+      row.producto,
+      row.rif_cliente,
+      row.nombre_cliente,
+      row.cpe ?? "",
+      row.mps ?? "",
+      row.cod_barra ?? "",
+      row.tipo_impresion ?? "",
+      row.estructura ?? "",
+    ]
+  })
+  const lastRow = Math.max(2, ws.rowCount)
+  setTextColumn(ws, 2, 2, lastRow)
+  setTextColumn(ws, 4, 2, lastRow)
+  setTextColumn(ws, 6, 2, lastRow)
+  freezeBelowHeader(ws, 1)
+}
+
+function writeOriginalSheet(ws: ExcelJS.Worksheet, rows: ListadoExportRow[]) {
+  applyColumnWidths(ws, ORIGINAL_COL_WIDTHS)
+  const origHeader = ws.getRow(ORIGINAL_HEADER_ROW)
+  origHeader.values = ["producto", "cliente", "cpe", "mps", "cod_barra"]
+  styleYellowHeaderRow(origHeader)
+  rows.forEach((row, i) => {
+    ws.getRow(ORIGINAL_DATA_START + i).values = [
+      row.producto,
+      row.cliente_label,
+      row.cpe ?? "",
+      row.mps ?? "",
+      row.cod_barra ?? "",
+    ]
+  })
+  const lastRow = Math.max(ORIGINAL_DATA_START, ws.rowCount)
+  setTextColumn(ws, 3, ORIGINAL_DATA_START, lastRow)
+  setTextColumn(ws, 5, ORIGINAL_DATA_START, lastRow)
+  freezeBelowHeader(ws, ORIGINAL_HEADER_ROW)
 }
 
 function buildClientsFromRows(rows: ListadoExportRow[]): Array<{ nombre: string; rif: string; count: number }> {
@@ -365,6 +657,18 @@ function buildClientsFromRows(rows: ListadoExportRow[]): Array<{ nombre: string;
   return [...map.values()]
 }
 
+const TEMPLATE_EXAMPLE_PRODUCT: ListadoExportRow = {
+  producto: "ARROZ PREMIUM SANTONI 900g",
+  cliente_label: "IMPROA SANTONI, C.A. (RIF J-30827011-3)",
+  nombre_cliente: "IMPROA SANTONI, C.A.",
+  rif_cliente: "J-30827011-3",
+  cpe: "0422515856",
+  mps: "A-101.240",
+  cod_barra: "7592498220457",
+  tipo_impresion: "Superficie",
+  estructura: "BOPP / tinta",
+}
+
 export async function exportListadoProductosExcel(
   rows: ListadoExportRow[],
   filename?: string,
@@ -376,64 +680,12 @@ export async function exportListadoProductosExcel(
 
   const clients = buildClientsFromRows(rows)
 
-  const wsClients = wb.addWorksheet("CLIENTES")
-  const clientHeader = wsClients.getRow(1)
-  clientHeader.values = ["nombre_cliente", "rif", "cantidad_productos"]
-  styleHeaderRow(clientHeader)
-  clients.forEach((c, i) => {
-    wsClients.getRow(i + 2).values = [c.nombre, c.rif, c.count]
-  })
-  setTextColumn(wsClients, 2, 2, wsClients.rowCount)
+  const wsInstr = wb.addWorksheet("INSTRUCCIONES")
+  writeInstructionsSheet(wsInstr, true)
 
-  const wsProducts = wb.addWorksheet("PRODUCTOS")
-  const productHeader = wsProducts.getRow(1)
-  productHeader.values = ["producto", "rif_cliente", "nombre_cliente", "cpe", "mps", "cod_barra", "fila_origen"]
-  styleHeaderRow(productHeader)
-  rows.forEach((row, i) => {
-    wsProducts.getRow(i + 2).values = [
-      row.producto,
-      row.rif_cliente,
-      row.nombre_cliente,
-      row.cpe ?? "",
-      row.mps ?? "",
-      row.cod_barra ?? "",
-      String(i + 7),
-    ]
-  })
-  setTextColumn(wsProducts, 2, 2, wsProducts.rowCount)
-  setTextColumn(wsProducts, 4, 2, wsProducts.rowCount)
-  setTextColumn(wsProducts, 6, 2, wsProducts.rowCount)
-
-  const wsOriginal = wb.addWorksheet("ORIGINAL")
-  const origHeader = wsOriginal.getRow(ORIGINAL_HEADER_ROW)
-  origHeader.values = ["producto", "cliente", "cpe", "mps", "cod_barra"]
-  styleHeaderRow(origHeader)
-  rows.forEach((row, i) => {
-    wsOriginal.getRow(ORIGINAL_DATA_START + i).values = [
-      row.producto,
-      row.cliente_label,
-      row.cpe ?? "",
-      row.mps ?? "",
-      row.cod_barra ?? "",
-    ]
-  })
-  setTextColumn(wsOriginal, 3, ORIGINAL_DATA_START, wsOriginal.rowCount)
-  setTextColumn(wsOriginal, 5, ORIGINAL_DATA_START, wsOriginal.rowCount)
-
-  const wsInstr = wb.addWorksheet("INSTRUCCIONES", 0)
-  wsInstr.getColumn(1).width = 92
-  const lines = [
-    "LISTADO DE PRODUCTOS — Exportado desde Axones",
-    "",
-    "Hojas CLIENTES y PRODUCTOS: formato organizado para reimportar.",
-    "Hoja ORIGINAL: mismo layout que el listado de planta (encabezados fila 6).",
-    "",
-    "Guía: /formato-listado-productos.md",
-  ]
-  lines.forEach((line, i) => {
-    wsInstr.getCell(i + 1, 1).value = line
-    if (i === 0) wsInstr.getCell(i + 1, 1).font = { bold: true, size: 12 }
-  })
+  writeClientsSheet(wb.addWorksheet("CLIENTES"), clients)
+  writeProductsSheet(wb.addWorksheet("PRODUCTOS"), rows)
+  writeOriginalSheet(wb.addWorksheet("ORIGINAL"), rows)
 
   const buffer = await wb.xlsx.writeBuffer()
   const stamp = new Date().toISOString().slice(0, 10)
@@ -447,67 +699,12 @@ export async function exportListadoProductosTemplateExcel(): Promise<void> {
   wb.created = new Date()
 
   const wsInstr = wb.addWorksheet("INSTRUCCIONES")
-  wsInstr.getColumn(1).width = 92
-  const lines = [
-    "LISTADO DE PRODUCTOS — Plantilla para Axones",
-    "",
-    "Puede cargar este archivo en Datos maestros → Especificaciones de producto → Importar Excel.",
-    "",
-    "FORMATOS ACEPTADOS:",
-    "  1. ORIGINAL (una hoja): encabezados en fila 6, datos desde fila 7.",
-    "     Columnas: producto | cliente (Nombre + RIF) | cpe | mps | cod_barra",
-    "  2. ORGANIZADO: pestañas CLIENTES + PRODUCTOS (como esta plantilla).",
-    "",
-    "ORDEN: primero clientes (por RIF), luego productos enlazados al mismo RIF.",
-    "CPE y código de barra: usar formato Texto para conservar ceros a la izquierda.",
-    "N/A en cpe, mps o cod_barra se interpreta como vacío.",
-    "",
-    "Tipo de impresión y estructura NO vienen del Excel; complételos después en Axones.",
-    "",
-    "Guía completa: /formato-listado-productos.md",
-  ]
-  lines.forEach((line, i) => {
-    wsInstr.getCell(i + 1, 1).value = line
-    if (i === 0) wsInstr.getCell(i + 1, 1).font = { bold: true, size: 12 }
-  })
+  writeInstructionsSheet(wsInstr, false)
 
-  const wsClients = wb.addWorksheet("CLIENTES")
-  const ch = wsClients.getRow(1)
-  ch.values = ["nombre_cliente", "rif", "cantidad_productos"]
-  styleHeaderRow(ch)
-  wsClients.getRow(2).values = ["EJEMPLO C.A.", "J-12345678-9", 1]
-  setTextColumn(wsClients, 2, 2, 2)
-
-  const wsProducts = wb.addWorksheet("PRODUCTOS")
-  const ph = wsProducts.getRow(1)
-  ph.values = ["producto", "rif_cliente", "nombre_cliente", "cpe", "mps", "cod_barra", "fila_origen"]
-  styleHeaderRow(ph)
-  wsProducts.getRow(2).values = [
-    "ARROZ PREMIUM SANTONI 900g",
-    "J-30827011-3",
-    "IMPROA SANTONI, C.A.",
-    "0422515856",
-    "A-101.240",
-    "7592498220457",
-    "7",
-  ]
-  setTextColumn(wsProducts, 2, 2, 2)
-  setTextColumn(wsProducts, 4, 2, 2)
-  setTextColumn(wsProducts, 6, 2, 2)
-
-  const wsOrig = wb.addWorksheet("ORIGINAL_EJEMPLO")
-  const oh = wsOrig.getRow(ORIGINAL_HEADER_ROW)
-  oh.values = ["producto", "cliente", "cpe", "mps", "cod_barra"]
-  styleHeaderRow(oh)
-  wsOrig.getRow(ORIGINAL_DATA_START).values = [
-    "ARROZ PREMIUM SANTONI 900g",
-    "IMPROA SANTONI, C.A. (RIF J-30827011-3)",
-    "0422515856",
-    "A-101.240",
-    "7592498220457",
-  ]
-  setTextColumn(wsOrig, 3, ORIGINAL_DATA_START, ORIGINAL_DATA_START)
-  setTextColumn(wsOrig, 5, ORIGINAL_DATA_START, ORIGINAL_DATA_START)
+  writeClientsSheet(wb.addWorksheet("CLIENTES"), [
+    { nombre: "EJEMPLO C.A.", rif: "J-12345678-9", count: 1 },
+  ])
+  writeProductsSheet(wb.addWorksheet("PRODUCTOS"), [TEMPLATE_EXAMPLE_PRODUCT])
 
   const buffer = await wb.xlsx.writeBuffer()
   triggerDownload(buffer, "plantilla-listado-productos.xlsx")

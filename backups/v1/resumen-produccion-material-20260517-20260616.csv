@@ -1,0 +1,8 @@
+section,work_order_code,client_name,material_impreso_kg,material_laminado_kg,material_cortado_kg,total_general_kg,impreso_bobinas,laminado_bobinas,material_area,material_label,material_line_kg,material_line_bobinas,work_order_id,client_id,material_impreso_lines,material_laminado_lines,material_cortado_lines
+resumen,TOTAL,,86.000,87.000,121.000,294.000,6,4,,,,,,,,,
+material_impreso,TOTAL,,,,,,,,impreso,"Bobina impresa (sin referencia)",59.000,4,,,,,
+material_impreso,TOTAL,,,,,,,,impreso,Polietileno,27.000,2,,,,,
+material_laminado,TOTAL,,,,,,,,laminado,"Bobina laminada (sin referencia)",87.000,4,,,,,
+material_cortado,TOTAL,,,,,,,,cortado,Polietileno,121.000,11,,,,,
+detalle,OT-2026-00002,Val,59.000,87.000,0.000,146.000,4,4,,,,,2,1,"[{""label"":""Bobina impresa (sin referencia)"",""kg"":""59.000"",""bobinas"":4}]","[{""label"":""Bobina laminada (sin referencia)"",""kg"":""87.000"",""bobinas"":4}]",[]
+detalle,OT-2026-00003,Valeria,27.000,0.000,121.000,148.000,2,0,,,,,3,2,"[{""label"":""Polietileno"",""kg"":""27.000"",""bobinas"":2}]",[],"[{""label"":""Polietileno"",""kg"":""121.000"",""bobinas"":11}]"

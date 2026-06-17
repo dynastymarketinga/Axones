@@ -1,0 +1,21 @@
+name: Production Seed Import
+
+# Carga LISTADO DE PRODUCTOS + INVENTARIO VICTOR en producción.
+on:
+  workflow_dispatch:
+
+jobs:
+  import-seed-excel:
+    name: Cargar productos e inventario Victor
+    runs-on: self-hosted
+    steps:
+      - name: Importar Excel de fábrica
+        run: |
+          cd /var/www/axones
+          git fetch origin main
+          git reset --hard origin/main
+          cd pulse-ui-react
+          npm ci --no-audit --no-fund
+          cd ../backend
+          echo "==> Importando scripts/seed-data/*.xlsx"
+          php artisan axones:import-seed-excel --force --no-interaction

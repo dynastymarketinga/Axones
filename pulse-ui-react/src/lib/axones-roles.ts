@@ -6,16 +6,13 @@ export function normalizeRole(role?: string | null): string {
   return (role ?? "").toLowerCase().trim()
 }
 
-/** Usuario único con herramientas de desarrollo (seed local, id 2). */
-const AXONES_DEVELOPER_USER_ID = 2
 const AXONES_DEVELOPER_EMAIL = "victorcarrillox2@gmail.com"
 
 /** Solo la sesión de Víctor (Desarrollador Ingeniero) — no otros jefes ni cuentas demo. */
 export function isAxonesDeveloperSession(user?: AuthUser | null): boolean {
   if (!user) return false
   const email = (user.email ?? "").toLowerCase().trim()
-  if (email !== AXONES_DEVELOPER_EMAIL) return false
-  return user.id === AXONES_DEVELOPER_USER_ID
+  return email === AXONES_DEVELOPER_EMAIL
 }
 
 const BOSS_ROLES = new Set(["boss", "admin", "jefe_supremo", "superadmin", "jefe_operaciones"])

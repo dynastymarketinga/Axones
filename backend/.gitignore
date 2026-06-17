@@ -18,6 +18,7 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/storage/app/private/credenciales-usuarios-axones.csv
 /vendor
 Homestead.json
 Homestead.yaml

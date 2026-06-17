@@ -13,18 +13,13 @@ class DatabaseSeeder extends Seeder
     /**
      * Seed the application's database.
      *
-     * Carga un volumen amplio de datos demo (≈20 filas por tabla de dominio) para pruebas de UI.
-     * Usuarios locales (inventario@axones.local, etc.) y contraseña por defecto: password.
+     * Usuarios: Víctor (boss), Valeria (admin) y planta Millennium.
+     * Contraseña planta: Axones2026!{usuario} (ver AxonesUserCredentials).
      */
     public function run(): void
     {
         $this->call(AxonesUsersSeeder::class);
-
-        // Usuarios reales Millennium: definir AXONES_SEED_MILLENNIUM_USERS=1 en .env
-        $millennium = strtolower(trim((string) env('AXONES_SEED_MILLENNIUM_USERS', '')));
-        if (in_array($millennium, ['1', 'true', 'yes', 'on'], true)) {
-            $this->call(MillenniumProductionUsersSeeder::class);
-        }
+        $this->call(MillenniumProductionUsersSeeder::class);
 
         // Por defecto, no cargar datos demo para evitar contaminar pruebas reales.
         // Para habilitar demo volumen completo: AXONES_DEMO_SEED=1

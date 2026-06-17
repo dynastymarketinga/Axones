@@ -287,7 +287,7 @@ export default function UsersPage() {
           >
             <CatalogSearchField
               id="user-q"
-              placeholder="Ej. inventario, @axones.local…"
+              placeholder="Ej. inventario, @axones.com…"
               value={query}
               onChange={(ev) => setQuery(ev.target.value)}
               onKeyDown={(ev) => {

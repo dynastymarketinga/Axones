@@ -3,140 +3,70 @@
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Support\AxonesUserCredentials;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 /**
- * Usuarios mínimos para pruebas reales (1 por rol). Contraseña por defecto: "password".
- * Usar cuando quieras BD "en cero" sin clientes/pedidos demo:
+ * Cuentas base del sistema: desarrollador (boss) y administradora (admin).
+ * Los usuarios de planta los carga MillenniumProductionUsersSeeder.
  *
- *   php artisan migrate:fresh
  *   php artisan db:seed --class=AxonesUsersSeeder
- *
- * (Opcional) materiales mínimos para pruebas de OT/importación:
- *   php artisan db:seed --class=DemoMaterialsSeeder
+ *   php artisan db:seed --class=MillenniumProductionUsersSeeder
  */
 class AxonesUsersSeeder extends Seeder
 {
     public function run(): void
     {
-        $keepEmails = array_values(array_unique(array_merge(
-            [
-                // Boss principal (usuario real)
-                'victorcarrillox2@gmail.com',
-                'admin@axones.local',
+        $valeriaEmail = AxonesUserCredentials::emailForUsername('admin');
 
-                // Un usuario por rol (local)
-                'inventario@axones.local',
-                'impresion@axones.local',
-                'laminacion@axones.local',
-                'corte@axones.local',
-                'tintas@axones.local',
-                'calidad@axones.local',
-                'vigilancia@axones.local',
-                'solicitante@axones.local',
-            ],
+        $keepEmails = array_values(array_unique(array_merge(
+            [AxonesUserCredentials::VICTOR_EMAIL, $valeriaEmail],
             MillenniumProductionUsersSeeder::expectedEmails(),
         )));
 
-        // Boss principal
-        User::query()->updateOrCreate(
-            ['email' => 'victorcarrillox2@gmail.com'],
-            [
-                'name' => 'Desarrollador Ingeniero Víctor',
+        $victor = User::query()->where('email', AxonesUserCredentials::VICTOR_EMAIL)->first();
+
+        if ($victor === null) {
+            User::query()->create([
+                'name' => 'Víctor Carrillo',
+                'email' => AxonesUserCredentials::VICTOR_EMAIL,
                 'username' => 'Desarrollador',
                 'role' => 'boss',
-                'password' => 'password',
-            ],
-        );
+                'active' => true,
+                'password' => Hash::make(AxonesUserCredentials::passwordForUsername('Desarrollador')),
+            ]);
+        } else {
+            $victor->name = 'Víctor Carrillo';
+            $victor->username = 'Desarrollador';
+            $victor->role = 'boss';
+            $victor->active = true;
+            $victor->save();
+        }
 
-        // Segundo full access (rol distinto para diferenciar)
-        User::query()->updateOrCreate(
-            ['email' => 'admin@axones.local'],
-            [
-                'name' => 'Axones Administrador',
+        $valeria = User::query()
+            ->where('email', $valeriaEmail)
+            ->orWhere('email', AxonesUserCredentials::migrateEmailFromLegacy('admin@axones.local'))
+            ->first();
+
+        if ($valeria === null) {
+            User::query()->create([
+                'name' => 'Valeria Rodrigues',
+                'email' => $valeriaEmail,
                 'username' => 'admin',
                 'role' => 'admin',
-                'password' => 'password',
-            ],
-        );
+                'active' => true,
+                'password' => Hash::make(AxonesUserCredentials::passwordForUsername('admin')),
+            ]);
+        } else {
+            $valeria->name = 'Valeria Rodrigues';
+            $valeria->email = $valeriaEmail;
+            $valeria->username = 'admin';
+            $valeria->role = 'admin';
+            $valeria->active = true;
+            $valeria->save();
+        }
 
-        // Inventario
-        User::query()->updateOrCreate(
-            ['email' => 'inventario@axones.local'],
-            [
-                'name' => 'Axones Inventario',
-                'username' => 'inventario',
-                'role' => 'inventory',
-                'password' => 'password',
-            ],
-        );
-
-        // Producción por áreas
-        User::query()->updateOrCreate(
-            ['email' => 'impresion@axones.local'],
-            [
-                'name' => 'Axones Impresión',
-                'username' => 'impresion',
-                'role' => 'impresion',
-                'password' => 'password',
-            ],
-        );
-        User::query()->updateOrCreate(
-            ['email' => 'laminacion@axones.local'],
-            [
-                'name' => 'Axones Laminación',
-                'username' => 'laminacion',
-                'role' => 'laminacion',
-                'password' => 'password',
-            ],
-        );
-        User::query()->updateOrCreate(
-            ['email' => 'corte@axones.local'],
-            [
-                'name' => 'Axones Corte',
-                'username' => 'corte',
-                'role' => 'corte',
-                'password' => 'password',
-            ],
-        );
-        User::query()->updateOrCreate(
-            ['email' => 'tintas@axones.local'],
-            [
-                'name' => 'Axones Tintas',
-                'username' => 'tintas',
-                'role' => 'tintas',
-                'password' => 'password',
-            ],
-        );
-        User::query()->updateOrCreate(
-            ['email' => 'calidad@axones.local'],
-            [
-                'name' => 'Axones Calidad',
-                'username' => 'calidad',
-                'role' => 'calidad',
-                'password' => 'password',
-            ],
-        );
-        User::query()->updateOrCreate(
-            ['email' => 'vigilancia@axones.local'],
-            [
-                'name' => 'Axones Vigilancia',
-                'username' => 'vigilancia',
-                'role' => 'vigilancia',
-                'password' => 'password',
-            ],
-        );
-        User::query()->updateOrCreate(
-            ['email' => 'solicitante@axones.local'],
-            [
-                'name' => 'Axones Solicitante',
-                'username' => 'solicitante',
-                'role' => 'solicitante',
-                'password' => 'password',
-            ],
-        );
-
-        // Reducir usuarios: borrar todo lo que no sea parte del set mínimo.
         User::query()->whereNotIn('email', $keepEmails)->delete();
     }
 }

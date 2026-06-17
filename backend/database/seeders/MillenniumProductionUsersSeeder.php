@@ -3,19 +3,18 @@
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Support\AxonesUserCredentials;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
 /**
- * Usuarios reales Millennium (Portuguesa). No modifica la cuenta del desarrollador (boss).
+ * Usuarios de planta Millennium (Portuguesa). No modifica Víctor ni Valeria.
  *
- * Emails: {username}@axones.local salvo cuentas ya existentes con otro correo.
- * Contraseña por defecto: password. Cuenta admin: admin123 (solo al crear el usuario).
+ * Emails: {username}@axones.com
+ * Contraseña: Axones2026!{username}
  *
  * Ejecutar:
  *   php artisan db:seed --class=MillenniumProductionUsersSeeder
- *
- * O en .env: AXONES_SEED_MILLENNIUM_USERS=1 junto con db:seed.
  */
 class MillenniumProductionUsersSeeder extends Seeder
 {
@@ -29,29 +28,28 @@ class MillenniumProductionUsersSeeder extends Seeder
     public static function definitionRows(): array
     {
         return [
-            ['username' => 'rparra', 'name' => 'ROBERT PARRA', 'role' => 'jefe_operaciones'],
-            ['username' => 'ajaure', 'name' => 'ALEXIS JAURE', 'role' => 'jefe_operaciones'],
-            ['username' => 'aanare', 'name' => 'ANGEL ANARE', 'role' => 'planificador'],
-            ['username' => 'rguape', 'name' => 'ROXANA GUAPE', 'role' => 'supervisor'],
-            ['username' => 'harzola', 'name' => 'HENRY ARZOLA', 'role' => 'supervisor'],
-            ['username' => 'lgonzalez', 'name' => 'LEONARDO GONZALEZ', 'role' => 'inventory_chief'],
-            ['username' => 'gmujica', 'name' => 'GONZALO MUJICA', 'role' => 'impresion'],
-            ['username' => 'ncamacaro', 'name' => 'NELSON CAMACARO', 'role' => 'impresion'],
-            ['username' => 'scobos', 'name' => 'STIVEN COBOS', 'role' => 'impresion'],
-            ['username' => 'nnino', 'name' => 'NESTOR NINO', 'role' => 'impresion'],
-            ['username' => 'mnieves', 'name' => 'MIGUEL NIEVES', 'role' => 'impresion'],
-            ['username' => 'jcolmenares', 'name' => 'JACSON COLMENARES', 'role' => 'laminacion'],
-            ['username' => 'arodriguez', 'name' => 'ANGEL RODRIGUEZ', 'role' => 'laminacion'],
-            ['username' => 'yaranguren', 'name' => 'YSAIAS ARANGUREN', 'role' => 'laminacion'],
-            ['username' => 'jguzman', 'name' => 'JUAN GUZMAN', 'role' => 'corte'],
-            ['username' => 'apinero', 'name' => 'ALIS PINERO', 'role' => 'corte'],
-            ['username' => 'imonroy', 'name' => 'IAN MONROY', 'role' => 'corte'],
-            ['username' => 'fabarca', 'name' => 'FERNANDO ABARCA', 'role' => 'corte'],
-            ['username' => 'rpena', 'name' => 'RAMIRO PENA', 'role' => 'corte'],
-            ['username' => 'emarquez', 'name' => 'EFREN MARQUEZ', 'role' => 'corte'],
-            ['username' => 'jmartinez', 'name' => 'JESUS MARTINEZ', 'role' => 'corte'],
-            ['username' => 'alaya', 'name' => 'ASDRUBAL LAYA', 'role' => 'tintas'],
-            ['username' => 'admin', 'name' => 'Administrador', 'role' => 'admin'],
+            ['username' => 'rparra', 'name' => 'Robert Parra', 'role' => 'jefe_operaciones'],
+            ['username' => 'ajaure', 'name' => 'Alexis Jaure', 'role' => 'jefe_operaciones'],
+            ['username' => 'aanare', 'name' => 'Angel Anare', 'role' => 'planificador'],
+            ['username' => 'rguape', 'name' => 'Roxana Guape', 'role' => 'supervisor'],
+            ['username' => 'harzola', 'name' => 'Henry Arzola', 'role' => 'supervisor'],
+            ['username' => 'alaya', 'name' => 'Asdrubal Laya', 'role' => 'tintas'],
+            ['username' => 'lgonzalez', 'name' => 'Leonardo González', 'role' => 'jefe_almacen'],
+            ['username' => 'gmujica', 'name' => 'Gonzalo Mujica', 'role' => 'impresion'],
+            ['username' => 'ncamacaro', 'name' => 'Nelson Camacaro', 'role' => 'impresion'],
+            ['username' => 'scobos', 'name' => 'Stiven Cobos', 'role' => 'impresion'],
+            ['username' => 'nnino', 'name' => 'Nestor Niño', 'role' => 'impresion'],
+            ['username' => 'mnieves', 'name' => 'Miguel Nieves', 'role' => 'impresion'],
+            ['username' => 'jcolmenares', 'name' => 'Jacson Colmenares', 'role' => 'laminacion'],
+            ['username' => 'arodriguez', 'name' => 'Angel Rodríguez', 'role' => 'laminacion'],
+            ['username' => 'yaranguren', 'name' => 'Ysaias Aranguren', 'role' => 'laminacion'],
+            ['username' => 'jguzman', 'name' => 'Juan Guzman', 'role' => 'corte'],
+            ['username' => 'apinero', 'name' => 'Alis Pinero', 'role' => 'corte'],
+            ['username' => 'imonroy', 'name' => 'Ian Monroy', 'role' => 'corte'],
+            ['username' => 'fabarca', 'name' => 'Fernando Abarca', 'role' => 'corte'],
+            ['username' => 'rpena', 'name' => 'Ramiro Peña', 'role' => 'corte'],
+            ['username' => 'emarquez', 'name' => 'Efren Márquez', 'role' => 'corte'],
+            ['username' => 'jmartinez', 'name' => 'Jesús Martínez', 'role' => 'corte'],
         ];
     }
 
@@ -63,23 +61,29 @@ class MillenniumProductionUsersSeeder extends Seeder
     public static function expectedEmails(): array
     {
         return array_map(
-            fn (array $r) => $r['username'].'@axones.local',
+            fn (array $r) => AxonesUserCredentials::emailForUsername($r['username']),
             self::definitionRows(),
         );
     }
 
     public function run(): void
     {
-        $preserve = array_map('strtolower', self::PRESERVE_EMAILS);
+        $preserve = array_map('strtolower', array_merge(
+            self::PRESERVE_EMAILS,
+            [AxonesUserCredentials::emailForUsername('admin')],
+        ));
 
         foreach (self::definitionRows() as $row) {
-            $email = $row['username'].'@axones.local';
+            $email = AxonesUserCredentials::emailForUsername($row['username']);
+            $legacyEmail = AxonesUserCredentials::migrateEmailFromLegacy($row['username'].'@axones.local');
 
-            $user = User::query()->where('email', $email)->first();
+            $user = User::query()
+                ->where('email', $email)
+                ->orWhere('email', $legacyEmail)
+                ->orWhere('username', $row['username'])
+                ->first();
 
-            $password = $row['username'] === 'admin'
-                ? Hash::make('admin123')
-                : Hash::make('password');
+            $password = Hash::make(AxonesUserCredentials::passwordForUsername($row['username']));
 
             if ($user === null) {
                 User::query()->create([
@@ -87,6 +91,7 @@ class MillenniumProductionUsersSeeder extends Seeder
                     'email' => $email,
                     'username' => $row['username'],
                     'role' => $row['role'],
+                    'active' => true,
                     'password' => $password,
                 ]);
 
@@ -98,11 +103,11 @@ class MillenniumProductionUsersSeeder extends Seeder
             }
 
             $user->name = $row['name'];
+            $user->email = $email;
             $user->username = $row['username'];
             $user->role = $row['role'];
-            if ($row['username'] === 'admin') {
-                $user->password = Hash::make('admin123');
-            }
+            $user->active = true;
+            $user->password = $password;
             $user->save();
         }
     }

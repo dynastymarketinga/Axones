@@ -25,7 +25,10 @@ class AxonesUsersSeeder extends Seeder
             MillenniumProductionUsersSeeder::expectedEmails(),
         )));
 
-        $victor = User::query()->where('email', AxonesUserCredentials::VICTOR_EMAIL)->first();
+        $victor = User::query()
+            ->where('email', AxonesUserCredentials::VICTOR_EMAIL)
+            ->orWhere('username', 'Desarrollador')
+            ->first();
 
         if ($victor === null) {
             User::query()->create([
@@ -47,6 +50,7 @@ class AxonesUsersSeeder extends Seeder
         $valeria = User::query()
             ->where('email', $valeriaEmail)
             ->orWhere('email', AxonesUserCredentials::migrateEmailFromLegacy('admin@axones.local'))
+            ->orWhere('username', 'admin')
             ->first();
 
         if ($valeria === null) {

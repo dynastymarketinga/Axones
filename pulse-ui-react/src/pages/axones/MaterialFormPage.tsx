@@ -208,7 +208,7 @@ export default function MaterialFormPage() {
       setMicras(formatMaterialDimensionDisplay(row.micras))
       setAncho(formatMaterialDimensionDisplay(row.ancho))
       setNotes(row.notes ?? "")
-      setWarehouseLocation((row as any).warehouse_location ?? "") // <-- CARGAMOS EL ALMACEN
+      setWarehouseLocation((row as MaterialRow & { warehouse_location?: string }).warehouse_location ?? "") // <-- CARGAMOS EL ALMACEN
       setConsumibleUnit(MISC_UNITS.includes((row.unit ?? "") as (typeof MISC_UNITS)[number]) ? (row.unit as (typeof MISC_UNITS)[number]) : "unidad")
       setSelectedProductIds((row.substrate_products ?? []).map((p) => p.id))
       const sid = row.supplier_id ?? row.supplier?.id ?? null

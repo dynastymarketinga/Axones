@@ -633,7 +633,7 @@ export default function MaterialsPage() {
                       
                       // LOGICA PARA MOSTRAR LA TILDE SOLO EN LA VISTA
                       let warehouseDisplay = "—";
-                      const rawWarehouse = (m as any).warehouse_location;
+                      const rawWarehouse = (m as MaterialRow & { warehouse_location?: string }).warehouse_location;
                       if (rawWarehouse === "La Dinastia") warehouseDisplay = "La Dinastía";
                       else if (rawWarehouse === "Galpon") warehouseDisplay = "Galpón";
                       else if (rawWarehouse) warehouseDisplay = rawWarehouse;

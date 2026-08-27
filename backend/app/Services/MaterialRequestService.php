@@ -210,11 +210,15 @@ class MaterialRequestService
                         "lines.$idx.quantity" => ['La cantidad debe ser mayor que cero.'],
                     ]);
                 }
-                if (bccomp($qty, $remaining, 3) === 1) {
-                    throw ValidationException::withMessages([
-                        "lines.$idx.quantity" => ['La cantidad excede lo pendiente de despacho ('.$remaining.').'],
-                    ]);
-                }
+
+                // ==========================================
+                // CAMBIO: SE COMENTÓ LA VALIDACIÓN DE EXCESO
+                // ==========================================
+                // if (bccomp($qty, $remaining, 3) === 1) {
+                //     throw ValidationException::withMessages([
+                //         "lines.$idx.quantity" => ['La cantidad excede lo pendiente de despacho ('.$remaining.').'],
+                //     ]);
+                // }
 
                 if ($mrl->material_id === null) {
                     $resolvedMaterialId = isset($lineInput['material_id']) ? (int) $lineInput['material_id'] : null;
@@ -319,8 +323,13 @@ class MaterialRequestService
             $mr->refresh();
             $mr->load('lines');
 
+            // ==========================================
+            // CAMBIO: DE "=== 0" A ">= 0" PARA ACEPTAR EXCESOS
+            // bccomp devuelve 1 si cantidad_despachada > quantity_requested, y 0 si son iguales.
+            // Con >= 0, la solicitud se cerrará si se envía lo pedido O MÁS.
+            // ==========================================
             $allComplete = $mr->lines->every(function (MaterialRequestLine $l) {
-                return bccomp((string) $l->quantity_dispatched, (string) $l->quantity_requested, 3) === 0;
+                return bccomp((string) $l->quantity_dispatched, (string) $l->quantity_requested, 3) >= 0;
             });
 
             $anyDispatched = $mr->lines->contains(function (MaterialRequestLine $l) {

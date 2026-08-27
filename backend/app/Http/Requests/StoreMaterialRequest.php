@@ -42,6 +42,7 @@ class StoreMaterialRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id'],
             'no_supplier_reason' => ['nullable', 'string', 'max:1000'],
+            'warehouse_location' => ['nullable', 'string', 'max:100'], // <-- AÑADIDO
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
         ];

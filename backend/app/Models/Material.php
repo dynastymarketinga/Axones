@@ -25,6 +25,7 @@ class Material extends Model
         'notes',
         'supplier_id',
         'no_supplier_reason',
+        'warehouse_location', // <-- AÑADIDO: Para que Laravel permita guardar el almacén
     ];
 
     protected function casts(): array

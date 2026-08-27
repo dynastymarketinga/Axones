@@ -29,6 +29,7 @@ class InventoryLedgerService
         ?int $referenceId = null,
         ?array $metadata = null,
         ?\DateTimeInterface $occurredAt = null,
+        ?string $warehouseLocation = null, // <-- NUEVO: Recibimos el almacén
     ): InventoryMovement {
         if (bccomp($quantity, '0', 3) !== 1) {
             throw ValidationException::withMessages([
@@ -36,7 +37,7 @@ class InventoryLedgerService
             ]);
         }
 
-        return DB::transaction(function () use ($material, $type, $quantity, $user, $referenceType, $referenceId, $metadata, $occurredAt) {
+        return DB::transaction(function () use ($material, $type, $quantity, $user, $referenceType, $referenceId, $metadata, $occurredAt, $warehouseLocation) {
             /** @var Material $locked */
             $locked = Material::query()->whereKey($material->getKey())->lockForUpdate()->firstOrFail();
 
@@ -55,6 +56,7 @@ class InventoryLedgerService
             $movement = InventoryMovement::query()->create([
                 'material_id' => $locked->getKey(),
                 'movement_type' => $type->value,
+                'warehouse_location' => $warehouseLocation, // <-- NUEVO: Lo guardamos en la BD
                 'quantity' => $quantity,
                 'reference_type' => $referenceType,
                 'reference_id' => $referenceId,

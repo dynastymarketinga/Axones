@@ -71,6 +71,14 @@ class MaterialController extends Controller
             });
         }
 
+        // ====== AQUÍ ESTÁ LA MAGIA ======
+        // Leemos directo del $request saltándonos el validador estricto para evitar que lo borre
+        $warehouseLocation = trim((string) $request->input('warehouse_location', 'all'));
+        if ($warehouseLocation !== 'all' && $warehouseLocation !== '') {
+            $query->where('warehouse_location', $warehouseLocation);
+        }
+        // ================================
+
         $productId = (int) ($validated['product_id'] ?? 0);
         if ($productId > 0) {
             $inventoryArea = (string) ($validated['inventory_area'] ?? '');
@@ -330,6 +338,7 @@ class MaterialController extends Controller
             'min_stock' => (string) $material->min_stock,
             'supplier_id' => $material->supplier_id,
             'no_supplier_reason' => $material->no_supplier_reason,
+            'warehouse_location' => $material->warehouse_location, 
             'notes' => $material->notes,
             'tinta_subarea' => optional($material->tintaSubareas->first())->subarea,
             'product_ids' => $material->substrateProducts->pluck('id')->map(fn ($id) => (int) $id)->sort()->values()->all(),

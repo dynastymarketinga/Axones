@@ -22,6 +22,7 @@ import {
   Tag,
   Truck,
   Upload,
+  Warehouse // <-- IMPORTANTE: Importamos el icono
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -162,6 +163,7 @@ export default function MaterialsPage() {
   const [sortPreset, setSortPreset] = useState<SortPreset>("name_asc")
   const [stockState, setStockState] = useState<StockState>("all")
   const [tintaSubarea, setTintaSubarea] = useState<TintaSubarea>("all")
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("all") // <-- FILTRO DE ALMACEN
   const [stockMin, setStockMin] = useState("")
   const [stockMax, setStockMax] = useState("")
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -176,7 +178,7 @@ export default function MaterialsPage() {
 
   const showDimensions = activeArea === "material"
   const showTintaSubareaFilter = activeArea === "all" || activeArea === "tintas"
-  const tableColSpan = showDimensions ? 9 : 7
+  const tableColSpan = showDimensions ? 10 : 8 // <-- SUMAMOS 1 A LA COLUMNA
 
   const { sortBy, sortDir } = SORT_PRESET_MAP[sortPreset]
 
@@ -212,6 +214,7 @@ export default function MaterialsPage() {
             sort_dir: sortDir,
             stock_state: stockState !== "all" ? stockState : undefined,
             tinta_subarea: tintaSubarea !== "all" ? tintaSubarea : undefined,
+            warehouse_location: warehouseFilter !== "all" ? warehouseFilter : undefined, // <-- SE ENVIA EL ALMACEN LIMPIO (Sin tildes)
             stock_min: stockMin.trim() ? stockMin.trim() : undefined,
             stock_max: stockMax.trim() ? stockMax.trim() : undefined,
           },
@@ -230,7 +233,7 @@ export default function MaterialsPage() {
     } finally {
       if (!ac.signal.aborted) setLoading(false)
     }
-  }, [page, perPage, qApi, activeArea, sortBy, sortDir, stockState, tintaSubarea, stockMin, stockMax])
+  }, [page, perPage, qApi, activeArea, sortBy, sortDir, stockState, tintaSubarea, warehouseFilter, stockMin, stockMax])
 
   useEffect(() => {
     void load()
@@ -290,6 +293,7 @@ export default function MaterialsPage() {
     stockState !== "all" ||
     sortPreset !== "name_asc" ||
     tintaSubarea !== "all" ||
+    warehouseFilter !== "all" ||
     stockMin.trim() !== "" ||
     stockMax.trim() !== ""
 
@@ -477,9 +481,31 @@ export default function MaterialsPage() {
                   <div
                     className={cn(
                       "grid gap-3",
-                      showTintaSubareaFilter ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2",
+                      showTintaSubareaFilter ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-2 lg:grid-cols-3",
                     )}
                   >
+                    {/* NUEVO FILTRO ALMACÉN FÍSICO */}
+                    <CatalogLabeledField label="Almacén físico">
+                      <Select
+                        value={warehouseFilter}
+                        onValueChange={(value) => {
+                          setWarehouseFilter(value)
+                          setPage(1)
+                        }}
+                      >
+                        <SelectTrigger className={cn("font-normal", catalogSelectTriggerClass)}>
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {/* El value NO tiene tildes. El usuario SÍ ve las tildes. */}
+                          <SelectItem value="all">Todos</SelectItem>
+                          <SelectItem value="La Dinastia">La Dinastía</SelectItem>
+                          <SelectItem value="Galpon">Galpón</SelectItem>
+                          <SelectItem value="Empresa">Empresa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </CatalogLabeledField>
+                    
                     {showTintaSubareaFilter ? (
                       <CatalogLabeledField label="Subárea (tintas)">
                         <Select
@@ -547,6 +573,7 @@ export default function MaterialsPage() {
                     setSortPreset("name_asc")
                     setStockState("all")
                     setTintaSubarea("all")
+                    setWarehouseFilter("all") // <-- LIMPIAR ALMACEN
                     setStockMin("")
                     setStockMax("")
                     setAdvancedOpen(false)
@@ -572,6 +599,9 @@ export default function MaterialsPage() {
                       Proveedor
                     </CatalogTableHead>
                     <CatalogTableHead icon={Layers}>Área</CatalogTableHead>
+                    {/* NUEVA COLUMNA ALMACEN EN LA TABLA */}
+                    <CatalogTableHead icon={Warehouse}>Almacén Físico</CatalogTableHead>
+
                     {showDimensions ? (
                       <CatalogTableHead icon={SlidersHorizontal}>Micras</CatalogTableHead>
                     ) : null}
@@ -600,6 +630,14 @@ export default function MaterialsPage() {
                     rows.data.map((m) => {
                       const stock = parseStock(m.quantity_on_hand)
                       const areaPillClass = getMaterialAreaPillClass(m.inventory_area)
+                      
+                      // LOGICA PARA MOSTRAR LA TILDE SOLO EN LA VISTA
+                      let warehouseDisplay = "—";
+                      const rawWarehouse = (m as any).warehouse_location;
+                      if (rawWarehouse === "La Dinastia") warehouseDisplay = "La Dinastía";
+                      else if (rawWarehouse === "Galpon") warehouseDisplay = "Galpón";
+                      else if (rawWarehouse) warehouseDisplay = rawWarehouse;
+
                       return (
                         <TableRow
                           key={m.id}
@@ -626,6 +664,11 @@ export default function MaterialsPage() {
                               {areaLabel(m.inventory_area)}
                             </span>
                           </TableCell>
+                          {/* MOSTRAMOS EL ALMACÉN CON LA TILDE CORREGIDA */}
+                          <TableCell className="p-3 align-middle whitespace-nowrap text-muted-foreground font-medium">
+                            {warehouseDisplay}
+                          </TableCell>
+
                           {showDimensions ? (
                             <TableCell className="p-3 align-middle tabular-nums">
                               {m.micras ?? "—"}

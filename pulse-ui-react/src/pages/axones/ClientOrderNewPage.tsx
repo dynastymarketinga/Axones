@@ -487,12 +487,7 @@ export default function ClientOrderNewPage() {
       toast.error("Seleccione el cliente que encarga la orden.")
       return null
     }
-    if (!notes.trim()) {
-      toast.error(CLIENT_ORDER_NOTES_REQUIRED_TOAST)
-      notesRef.current?.focus({ preventScroll: true })
-      notesRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
-      return null
-    }
+    
 
     const allowedIds = new Set(
       allProductOptions.filter((p) => p.client_id === cid).map((p) => p.id),
@@ -824,7 +819,7 @@ export default function ClientOrderNewPage() {
 
         <div className="grid gap-2">
           <Label htmlFor="co-notes" className="text-sm font-medium leading-snug">
-            Notas *
+            Notas 
           </Label>
           <div className="group/field relative">
             <StickyNote

@@ -14,7 +14,7 @@ import {
   lineUnit,
   stockOnHand,
   usesBobinaPicker,
-  validateApprovalQty,
+  // validateApprovalQty, <-- YA NO LO NECESITAMOS, LO COMENTO
   type BobinaDispatchRow,
   type InventoryResolutionTab,
   type MaterialRequestDispatchLine,
@@ -109,15 +109,25 @@ function isLineAssignmentReady(
       const w = b?.weight_kg ? Number(b.weight_kg) : 0
       return acc + (Number.isFinite(w) ? w : 0)
     }, 0)
-    if (!Number.isFinite(total) || total <= 0 || total > rem + 0.0005) return false
+    // ==========================================
+    // CAMBIO: Volamos la validación visual de exceso para las bobinas también
+    // if (!Number.isFinite(total) || total <= 0 || total > rem + 0.0005) return false
+    // ==========================================
+    if (!Number.isFinite(total) || total <= 0) return false
     return true
   }
 
   const qn = Number(assignment.quantity)
   if (!Number.isFinite(qn) || qn <= 0) return false
-  const unit = assignment.material.unit || lineUnit(ln)
-  const stock = stockOnHand(assignment.material)
-  return validateApprovalQty(rem, qn, unit, stock, false, true) == null
+  
+  // ==========================================
+  // CAMBIO: Volamos la validación de qty aquí para que el botón se ponga verde (activo)
+  // const unit = assignment.material.unit || lineUnit(ln)
+  // const stock = stockOnHand(assignment.material)
+  // return validateApprovalQty(rem, qn, unit, stock, false, true) == null
+  // ==========================================
+  
+  return true; // Siempre está ready si el número es > 0
 }
 
 export function MaterialRequestInventoryResolutionCard({
@@ -270,10 +280,16 @@ export function MaterialRequestInventoryResolutionCard({
       toast.error("Seleccione primero una línea del pedido (izquierda).")
       return
     }
+    // ==========================================
+    // NOTA: Podrías querer quitar esto también si quieres permitir
+    // asignar un material incluso si el stock es 0 (y que quede en negativo). 
+    // Por ahora lo dejé para evitar locuras.
     if (stockOnHand(material) <= 0.0005) {
       toast.error(`Sin stock para ${material.sku} · ${material.name}.`)
       return
     }
+    // ==========================================
+    
     const bobinas = await loadBobinasForMaterial(material.id)
     const qty = defaultApprovalQty(activeLine, material, bobinas)
     setAssignments((prev) => ({
@@ -318,11 +334,11 @@ export function MaterialRequestInventoryResolutionCard({
         return null
       }
 
-      const rem = lineRemaining(ln)
-      const unit = assignment.material.unit || lineUnit(ln)
+      // const rem = lineRemaining(ln) <-- Ya no lo usamos para bloquear
+      // const unit = assignment.material.unit || lineUnit(ln) <-- Ya no lo usamos
       const bobinas = bobinasByMaterial[assignment.material.id] ?? []
       const bobinaPicker = usesBobinaPicker(assignment.material.inventory_area, bobinas)
-      const stock = stockOnHand(assignment.material)
+      // const stock = stockOnHand(assignment.material) <-- Ya no lo usamos
 
       if (bobinaPicker) {
         const sel = selectedBobinaIds[ln.id] ?? {}
@@ -343,10 +359,15 @@ export function MaterialRequestInventoryResolutionCard({
           toast.error(`Rollos inválidos para: ${lineLabel(ln)}`)
           return null
         }
-        if (total > rem + 0.0005) {
-          toast.error(`La selección de rollos excede lo pendiente (${formatQuantityDisplay(rem)} ${unit}).`)
-          return null
-        }
+        
+        // ==========================================
+        // CAMBIO: Volamos la alerta visual que bloqueaba las bobinas si te pasabas
+        // if (total > rem + 0.0005) {
+        //   toast.error(`La selección de rollos excede lo pendiente (${formatQuantityDisplay(rem)} ${unit}).`)
+        //   return null
+        // }
+        // ==========================================
+
         const entry: {
           material_request_line_id: number
           quantity: number
@@ -367,11 +388,16 @@ export function MaterialRequestInventoryResolutionCard({
         toast.error(`Indique la cantidad a aprobar para: ${lineLabel(ln)}`)
         return null
       }
-      const err = validateApprovalQty(rem, qn, unit, stock, false, true)
-      if (err) {
-        toast.error(err)
-        return null
-      }
+      
+      // ==========================================
+      // CAMBIO: Volamos la validación a la hora de enviar.
+      // const err = validateApprovalQty(rem, qn, unit, stock, false, true)
+      // if (err) {
+      //   toast.error(err)
+      //   return null
+      // }
+      // ==========================================
+
       const entry: {
         material_request_line_id: number
         quantity: number
@@ -699,10 +725,13 @@ export function MaterialRequestInventoryResolutionCard({
                                   <input
                                     type="checkbox"
                                     checked={Boolean(sel[String(b.id)])}
-                                    disabled={
-                                      rem <= 0 ||
-                                      (!sel[String(b.id)] && selectedKg >= rem - 0.0005)
-                                    }
+                                    
+                                    // ==========================================
+                                    // CAMBIO: Volamos la validación visual que inhabilitaba 
+                                    // más bobinas si el peso ya superaba el rem
+                                    disabled={rem <= 0}
+                                    // ==========================================
+                                    
                                     onChange={(ev) => {
                                       const checked = ev.target.checked
                                       setSelectedBobinaIds((prev) => ({
@@ -723,7 +752,8 @@ export function MaterialRequestInventoryResolutionCard({
                           <Input
                             inputMode="decimal"
                             className="h-11 bg-background/90"
-                            placeholder={`Cantidad a aprobar (máx. ${formatQuantityDisplay(rem)} ${assignment.material.unit})`}
+                            // CAMBIO DE PLACEHOLDER: Para no decir "max X" ya que se puede pasar
+                            placeholder="Cantidad a aprobar (puede ser mayor a lo pendiente)"
                             value={assignment.quantity}
                             onChange={(ev) => updateAssignmentQuantity(ln.id, ev.target.value)}
                             onClick={(ev) => ev.stopPropagation()}

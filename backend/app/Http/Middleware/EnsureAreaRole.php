@@ -18,11 +18,11 @@ class EnsureAreaRole
         'tintas' => ['tintas', 'planificador', 'supervisor'],
         'montaje' => ['montaje', 'planificador', 'supervisor'],
         /** @deprecated Usar planilla_read / planilla_write; se mantiene por compatibilidad. */
-        'planilla' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad', 'planificador', 'supervisor'],
+        'planilla' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'montaje', 'calidad', 'planificador', 'supervisor'],
         /** Lectura de planilla técnica + resumen producción (incluye operadores de impresión). */
-        'planilla_read' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'calidad', 'quality', 'planificador', 'supervisor'],
+        'planilla_read' => ['printing', 'impresion', 'laminacion', 'corte', 'tintas', 'montaje', 'calidad', 'quality', 'planificador', 'supervisor'],
         /** Escritura planilla completa y PATCH de OT; excluye operadores que solo usan control de impresión. */
-        'planilla_write' => ['laminacion', 'corte', 'tintas', 'calidad', 'quality', 'planificador', 'supervisor'],
+        'planilla_write' => ['laminacion', 'corte', 'tintas', 'montaje', 'calidad', 'quality', 'planificador', 'supervisor'],
     ];
 
     public function handle(Request $request, Closure $next, string $area): Response

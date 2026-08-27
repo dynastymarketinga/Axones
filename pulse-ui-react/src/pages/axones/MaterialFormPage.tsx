@@ -119,6 +119,7 @@ export default function MaterialFormPage() {
   const [micras, setMicras] = useState("")
   const [ancho, setAncho] = useState("")
   const [notes, setNotes] = useState("")
+  const [warehouseLocation, setWarehouseLocation] = useState("") // <-- NUEVO ESTADO PARA ALMACEN
   const [products, setProducts] = useState<ProductRecord[]>([])
   const [clients, setClients] = useState<ClientRecord[]>([])
   const [productComboOpen, setProductComboOpen] = useState(false)
@@ -207,6 +208,7 @@ export default function MaterialFormPage() {
       setMicras(formatMaterialDimensionDisplay(row.micras))
       setAncho(formatMaterialDimensionDisplay(row.ancho))
       setNotes(row.notes ?? "")
+      setWarehouseLocation((row as any).warehouse_location ?? "") // <-- CARGAMOS EL ALMACEN
       setConsumibleUnit(MISC_UNITS.includes((row.unit ?? "") as (typeof MISC_UNITS)[number]) ? (row.unit as (typeof MISC_UNITS)[number]) : "unidad")
       setSelectedProductIds((row.substrate_products ?? []).map((p) => p.id))
       const sid = row.supplier_id ?? row.supplier?.id ?? null
@@ -389,6 +391,7 @@ export default function MaterialFormPage() {
 
   function buildPayloadByTab() {
     const commonNotes = notes.trim() || null
+    const commonWarehouse = warehouseLocation || null // <-- NUEVO ALMACEN FÍSICO
 
     if (tab === "sustratos") {
       return {
@@ -404,6 +407,7 @@ export default function MaterialFormPage() {
         notes: commonNotes,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
+        warehouse_location: commonWarehouse, // <-- INYECTADO
       }
     }
     if (tab === "tintas") {
@@ -418,6 +422,7 @@ export default function MaterialFormPage() {
         notes: notes.trim() || null,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
+        warehouse_location: commonWarehouse, // <-- INYECTADO
       }
     }
     if (tab === "quimicos") {
@@ -431,6 +436,7 @@ export default function MaterialFormPage() {
         notes: notes.trim() || null,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
+        warehouse_location: commonWarehouse, // <-- INYECTADO
       }
     }
     return {
@@ -445,6 +451,7 @@ export default function MaterialFormPage() {
       notes: notes.trim() || null,
       supplier_id: noSupplier ? null : supplierId ?? null,
       no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
+      warehouse_location: commonWarehouse, // <-- INYECTADO
     }
   }
 
@@ -891,7 +898,7 @@ export default function MaterialFormPage() {
                             {supplierOptions.map((supplier) => (
                               <CommandItem
                                 key={supplier.id}
-                                value={`${supplier.name} ${supplier.rif ?? ""}`}
+                                value={`tintas-${supplier.id}-${supplier.name} ${supplier.rif ?? ""}`}
                                 onSelect={() => {
                                   setSupplierId(supplier.id)
                                   setPreferredSupplierOpen(false)
@@ -1113,6 +1120,28 @@ export default function MaterialFormPage() {
           </Tabs>
 
           <div className="space-y-4 rounded-xl border border-primary/15 bg-background/60 p-4">
+            {/* NUEVO CAMPO: ALMACÉN FÍSICO */}
+            <div className="grid gap-2">
+              <Label htmlFor="m-warehouse">Almacén Físico (Opcional)</Label>
+              <div className="group/field relative">
+                <Warehouse className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within/field:text-primary" aria-hidden />
+                <select
+                  id="m-warehouse"
+                  className={cn("border-input h-10 w-full appearance-none rounded-md border px-3 pl-10 pr-10 text-sm", FILTER_INPUT_CLASS)}
+                  value={warehouseLocation}
+                  onChange={(ev) => setWarehouseLocation(ev.target.value)}
+                >
+                  <option value="">Seleccione el almacén...</option>
+                  <option value="La Dinastia">La Dinastía</option>
+                  <option value="Galpon">Galpón</option>
+                  <option value="Empresa">Empresa</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              </div>
+              <p className="text-xs text-muted-foreground">Ubicación física del material para separar inventario.</p>
+            </div>
+            {/* FIN NUEVO CAMPO */}
+
             <div className="grid gap-2">
               <Label htmlFor="m-notes">Notas</Label>
               <div className="group/field relative">
@@ -1326,4 +1355,3 @@ export default function MaterialFormPage() {
     </div>
   )
 }
-

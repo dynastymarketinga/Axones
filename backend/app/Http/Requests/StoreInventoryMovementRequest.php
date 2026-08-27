@@ -22,6 +22,7 @@ class StoreInventoryMovementRequest extends FormRequest
         return [
             'movement_type' => ['required', 'string', Rule::in(InventoryMovementType::values())],
             'quantity' => ['required', 'numeric', 'min:0.001'],
+            'warehouse_location' => ['nullable', 'string', 'max:50'], // <-- NUEVO CAMPO ACEPTADO
             'reference_type' => ['nullable', 'string', 'max:128'],
             'reference_id' => ['nullable', 'integer'],
             'metadata' => ['nullable', 'array'],

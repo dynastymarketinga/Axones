@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { CalendarDays } from "lucide-react"
+import { CalendarDays, Factory } from "lucide-react"
 
 import { ReportFiltersPanel } from "@/components/axones/reports/ReportFiltersPanel"
 import type { ReportWorkOrderOption } from "@/components/axones/reports/ReportWorkOrderPicker"
@@ -11,10 +11,10 @@ import { catalogFilterDateInputClass } from "@/components/axones/catalog-list-cl
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import type { WorkOrderTimeCandidate } from "./report-shared"
-
 import type { ReportFiltersTheme } from "./report-identities"
 
 type ProductionTimeReportFiltersProps = {
@@ -32,6 +32,9 @@ type ProductionTimeReportFiltersProps = {
   loading?: boolean
   actionsSlot: ReactNode
   theme: ReportFiltersTheme
+  // 🔥 NUEVOS PROPS PARA EL FILTRO DE MÁQUINA
+  machineFilter?: string
+  onMachineFilterChange?: (v: string) => void
 }
 
 function FilterColumn({
@@ -86,6 +89,8 @@ export function ProductionTimeReportFilters({
   loading,
   actionsSlot,
   theme,
+  machineFilter,
+  onMachineFilterChange,
 }: ProductionTimeReportFiltersProps) {
   const woPickerOptions: ReportWorkOrderOption[] = candidates.map((r) => ({
     work_order_id: r.work_order_id,
@@ -94,16 +99,42 @@ export function ProductionTimeReportFilters({
     product_name: r.product_name,
   }))
 
+  // 🔥 LÓGICA DE LOS BOTONES DE FECHA (DIARIO Y SEMANAL)
+  function setHoy() {
+    const today = new Date();
+    const offset = today.getTimezoneOffset() * 60000;
+    const localISOTime = (new Date(today.getTime() - offset)).toISOString().slice(0, 10);
+    onFromChange(localISOTime);
+    onToChange(localISOTime);
+  }
+
+  function setEstaSemana() {
+    const curr = new Date();
+    const first = curr.getDate() - curr.getDay() + (curr.getDay() === 0 ? -6 : 1);
+    const last = first + 6;
+
+    const monday = new Date(curr.setDate(first));
+    const offsetMon = monday.getTimezoneOffset() * 60000;
+    const mondayStr = (new Date(monday.getTime() - offsetMon)).toISOString().slice(0, 10);
+
+    const sunday = new Date(curr.setDate(last));
+    const offsetSun = sunday.getTimezoneOffset() * 60000;
+    const sundayStr = (new Date(sunday.getTime() - offsetSun)).toISOString().slice(0, 10);
+
+    onFromChange(mondayStr);
+    onToChange(sundayStr);
+  }
+
   return (
     <ReportFiltersPanel
       subtitle="Período, vista en pantalla, orden de trabajo y exportación de tiempos"
       loading={loading}
-      activeFilterCount={(aggregateAll ? 1 : 0) + (woId.trim() ? 1 : 0) + (includeLive ? 1 : 0)}
+      activeFilterCount={(aggregateAll ? 1 : 0) + (woId.trim() ? 1 : 0) + (includeLive ? 1 : 0) + (machineFilter?.trim() ? 1 : 0)}
       theme={theme}
     >
       <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
         <FilterColumn
-          title="Período"
+          title="Período y Máquina"
           accentClass="text-sky-800 dark:text-sky-200"
           dotClass="bg-sky-500"
         >
@@ -123,6 +154,33 @@ export function ProductionTimeReportFilters({
                 onChange={(ev) => onToChange(ev.target.value)}
                 className={cn(catalogFilterDateInputClass, "border-sky-500/30 focus-visible:ring-sky-500/25")}
               />
+            </CatalogLabeledField>
+          </div>
+          
+          {/* 🔥 BOTONES ATAJO DIARIO Y SEMANAL */}
+          <div className="flex items-center gap-2 pt-1">
+            <Button type="button" variant="outline" size="sm" className="h-7 text-xs border-sky-500/30" onClick={setHoy}>
+              Hoy (Diario)
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="h-7 text-xs border-sky-500/30" onClick={setEstaSemana}>
+              Esta Semana
+            </Button>
+          </div>
+
+          {/* 🔥 SELECTOR DE MÁQUINA */}
+          <div className="pt-2">
+            <CatalogLabeledField label="Máquina" icon={Factory} className="min-w-0">
+              <select
+                value={machineFilter || ""}
+                onChange={(e) => onMachineFilterChange?.(e.target.value)}
+                className={cn("flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm transition-colors outline-none", "border-sky-500/30 focus-visible:ring-sky-500/25")}
+              >
+                <option value="">Todas las máquinas</option>
+                <option value="Cortadora China">Cortadora China</option>
+                <option value="Cortadora Permaco">Cortadora Permaco</option>
+                <option value="Laminadora Nexus">Laminadora Nexus</option>
+                <option value="Laminadora 2">Laminadora 2</option>
+              </select>
             </CatalogLabeledField>
           </div>
         </FilterColumn>

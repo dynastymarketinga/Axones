@@ -1,7 +1,7 @@
 "use client"
 
 import type { LucideIcon } from "lucide-react"
-import { ArrowDownToLine, ChevronDown, Disc3, Scale, Sigma, Trash2 } from "lucide-react"
+import { ArrowDownToLine, ChevronDown, Disc3, Scale, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
@@ -12,9 +12,7 @@ import {
 } from "@/lib/printing-mes-band-devoluciones"
 import { insumosBandejaTableHeadClassName } from "@/components/axones/InsumosBandejaTable"
 import {
-  MES_BANDEJA_KG_TOTAL_HEAD_LABEL,
   MES_BANDEJA_PRE_KG_COLUMN_COUNT,
-  mesBandejaMasaTotalKg,
   type MesBandejaKgTotals,
   type MesBandejaMes,
 } from "@/lib/mes-timer-band-shared"
@@ -122,14 +120,6 @@ export function MesBandejaKgTableHeadCells() {
           line2="acum."
         />
       </TableHead>
-      <TableHead className={kgHeadCellClass}>
-        <BandejaKgTableHeadLabel
-          icon={Sigma}
-          title={`${MES_BANDEJA_KG_TOTAL_HEAD_LABEL}: suma de producido + entrada + desperdicio`}
-          line1="Total"
-          line2="masa"
-        />
-      </TableHead>
     </>
   )
 }
@@ -147,13 +137,11 @@ export function MesBandejaBobinasHeadCell() {
 }
 
 export function MesBandejaKgTableRowCells({ mesBand }: { mesBand: MesBandejaMes | null }) {
-  const total = mesBandejaMasaTotalKg(mesBand)
   return (
     <>
       <KgDataCell kg={mesBand?.producidoKg} />
       <KgDataCell kg={mesBand?.entradaKg} />
       <KgDataCell kg={mesBand?.desperdicioKg} />
-      <KgDataCell kg={total} emphasized />
     </>
   )
 }
@@ -284,11 +272,6 @@ export function MesBandejaKgTableTotalsRow({
       <TableCell className={cn(kgDataCellClass, "bg-primary/[0.04] py-3.5")}>
         <div className="flex min-h-[2.75rem] items-center justify-center">
           <KgTotalValue kg={totals.desperdicioKg} />
-        </div>
-      </TableCell>
-      <TableCell className={cn(kgDataCellClass, "bg-primary/10 py-3.5 ring-1 ring-inset ring-primary/15")}>
-        <div className="flex min-h-[2.75rem] items-center justify-center">
-          <KgTotalValue kg={totals.totalMasaKg} emphasized />
         </div>
       </TableCell>
       <TableCell colSpan={2} className="py-3.5 align-middle" aria-hidden />

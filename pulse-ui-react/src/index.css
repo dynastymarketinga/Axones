@@ -36,7 +36,8 @@
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%}
+    --sidebar-ring: 217.2 91.2% 59.8%
+  }
 
   .dark {
     --background: 0 0% 3.9%;
@@ -58,7 +59,7 @@
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
     --ring: 0 0% 83.1%;
-     --chart-1: 215 90% 65%;
+    --chart-1: 215 90% 65%;
     --chart-2: 220 90% 55%;
     --chart-3: 222 90% 48%;
     --chart-4: 224 85% 42%;
@@ -70,10 +71,11 @@
     --sidebar-accent: 240 3.7% 15.9%;
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%}
+    --sidebar-ring: 217.2 91.2% 59.8%
+  }
 }
 
-/* Classic Light Theme (paleta fija de Axones) */
+/* Classic Light Theme (paleta corporativa Axones: Slate y Cyan) */
 .classic-light {
   --background: 210 40% 98%;  /* light base */
   --foreground: 222 47% 11%;
@@ -84,102 +86,77 @@
   --popover: 0 0% 100%;
   --popover-foreground: 222 47% 11%;
 
-  --primary: 262 83% 58%; /* purple accent */
+  --primary: 200 98% 39%; /* Cyan corporativo */
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 210 40% 96%;
+  --secondary: 214 32% 91%; /* Slate muy claro */
   --secondary-foreground: 222 47% 11%;
 
   --muted: 210 40% 96%;
   --muted-foreground: 215 20% 45%;
 
-  --accent: 262 83% 58%;
+  --accent: 200 98% 39%;
   --accent-foreground: 0 0% 100%;
 
-  --border: 210 30% 88%;
-  --input: 210 30% 88%;
-  --ring: 262 83% 58%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 200 98% 39%;
 
   /* charts */
-  --chart-1: 262 83% 60%;
-  --chart-2: 280 80% 65%;
-  --chart-3: 300 75% 60%;
-  --chart-4: 320 70% 55%;
-  --chart-5: 340 65% 50%;
+  --chart-1: 200 98% 39%;
+  --chart-2: 215 85% 60%;
+  --chart-3: 222 85% 52%;
+  --chart-4: 224 80% 46%;
+  --chart-5: 226 75% 40%;
 
   /* sidebar */
   --sidebar-background: 0 0% 100%;
   --sidebar-foreground: 222 47% 11%;
-  --sidebar-primary: 262 83% 58%;
+  --sidebar-primary: 200 98% 39%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 40% 96%;
+  --sidebar-accent: 214 32% 96%;
   --sidebar-accent-foreground: 222 47% 11%;
-  --sidebar-border: 210 30% 88%;
-  --sidebar-ring: 262 83% 58%;
+  --sidebar-border: 214 32% 91%;
+  --sidebar-ring: 200 98% 39%;
 }
 
+/* Fondo global limpio y corporativo */
 .classic-light body {
-  background-color: #f8fafc;
-
-  background-image:
-    radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.25), transparent 35%),
-    radial-gradient(circle at 90% 30%, rgba(168, 85, 247, 0.25), transparent 40%),
-    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.15), transparent 45%),
-
-    linear-gradient(
-      135deg,
-      #f8fafc 0%,
-      #eef2ff 40%,
-      #faf5ff 70%,
-      #fdf2f8 100%
-    );
+  background-color: #f1f5f9 !important; /* Gris pizarra ultra claro */
+  background-image: none !important; /* Cero degradados raros */
 }
 
+/* Menú lateral (Sidebar) con transparencia elegante y seria */
 .classic-light .bg-sidebar {
-  background-color: hsl(var(--sidebar-background) / 0.5); /* ✅ transparency */
+  background-color: rgba(255, 255, 255, 0.85) !important; /* Blanco 85% */
+  background-image: none !important;
 
-  background-image:
-    radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.25), transparent 35%),
-    radial-gradient(circle at 80% 30%, rgba(168, 85, 247, 0.25), transparent 40%),
-    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.15), transparent 45%);
+  backdrop-filter: blur(16px) !important; /* Efecto vidrio esmerilado elegante */
+  -webkit-backdrop-filter: blur(16px) !important;
 
-  backdrop-filter: blur(20px);              /* ✅ glass */
-  -webkit-backdrop-filter: blur(20px);
-
-  border-right: 1px solid hsl(var(--sidebar-border) / 0.2);
+  border-right: 1px solid rgba(203, 213, 225, 0.6) !important; /* Borde gris sutil */
 
   box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.15),        /* depth */
-    inset 0 1px 0 rgba(255, 255, 255, 0.1); /* subtle highlight */
+    4px 0 15px rgba(0, 0, 0, 0.03),        /* Sombra de profundidad */
+    inset 0 1px 0 rgba(255, 255, 255, 0.5); /* Brillo sutil */
 
   scrollbar-width: thin;
-  scrollbar-color: rgba(100, 100, 120, 0.4) transparent;
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
 }
 
-/* Chrome / Edge / Safari */
+/* Chrome / Edge / Safari - Barras de scroll limpias */
 .classic-light .bg-sidebar::-webkit-scrollbar {
   width: 6px;
 }
-
 .classic-light .bg-sidebar::-webkit-scrollbar-track {
-  background: transparent; /* ✅ no ugly track */
+  background: transparent;
 }
-
 .classic-light .bg-sidebar::-webkit-scrollbar-thumb {
-  background: linear-gradient(
-    180deg,
-    rgba(120, 120, 140, 0.4),
-    rgba(80, 80, 100, 0.4)
-  );
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.4), rgba(100, 116, 139, 0.4));
   border-radius: 999px;
 }
-
 .classic-light .bg-sidebar::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(
-    180deg,
-    rgba(120, 120, 140, 0.6),
-    rgba(80, 80, 100, 0.6)
-  );
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.6), rgba(100, 116, 139, 0.6));
 }
 
 @layer utilities {
@@ -188,27 +165,29 @@
     scrollbar-color: hsl(var(--primary) / 0.32) transparent;
     scrollbar-gutter: stable;
   }
-
   .ax-scroll-thin::-webkit-scrollbar {
     width: 7px;
   }
-
   .ax-scroll-thin::-webkit-scrollbar-track {
     margin-block: 4px;
     background: transparent;
   }
-
   .ax-scroll-thin::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 999px;
     background: hsl(var(--primary) / 0.28);
     background-clip: padding-box;
   }
-
   .ax-scroll-thin::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--primary) / 0.42);
     background-clip: padding-box;
   }
+}
+
+/* FIX: Seguro antidesbordamiento para pantallas pequeñas */
+html, body, #root {
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 @layer base {

@@ -262,14 +262,24 @@ export function ProductionTimeMachineTable({
   aggRows,
   loading,
   includeLive = true,
+  // 🔥 RECIBIMOS EL FILTRO DE MAQUINA AQUI
+  machineFilter = "",
 }: {
   aggRows: ProductionTimeAggRow[]
   loading: boolean
   includeLive?: boolean
+  machineFilter?: string
 }) {
+  
+  // 🔥 LÓGICA DE FILTRADO: Si hay un filtro, mostramos solo esa máquina
+  const filteredRows = useMemo(() => {
+    if (!machineFilter) return aggRows;
+    return aggRows.filter(r => r.machine_code.toLowerCase().includes(machineFilter.toLowerCase()));
+  }, [aggRows, machineFilter]);
+
   const totals = useMemo(
-    () => (aggRows.length > 0 ? sumAggRowsTotals(aggRows) : null),
-    [aggRows],
+    () => (filteredRows.length > 0 ? sumAggRowsTotals(filteredRows) : null),
+    [filteredRows],
   )
 
   const AREA_TABLE_COL_COUNT = 8
@@ -281,6 +291,8 @@ export function ProductionTimeMachineTable({
         {includeLive
           ? "turnos cerrados y en curso en el rango, agrupados por código de máquina (PDF planta usa solo cerrados)."
           : "segmentos cerrados en el rango, agrupados por código de máquina (criterio del PDF planta)."}
+        {/* Aviso visual de filtro activo */}
+        {machineFilter && <span className="font-bold text-sky-600 block mt-1">Filtro Activo: {machineFilter}</span>}
       </p>
       <ReportTableScroll tableMinWidthClass="min-w-[40rem]">
         <Table>
@@ -327,14 +339,15 @@ export function ProductionTimeMachineTable({
                   Cargando resumen…
                 </TableCell>
               </TableRow>
-            ) : aggRows.length === 0 ? (
+            ) : filteredRows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={AREA_TABLE_COL_COUNT} className="text-muted-foreground">
-                  {REPORT_EMPTY_PRODUCTION_TIME_BY_AREA}
+                  {machineFilter ? `No hay registros para la máquina: ${machineFilter}` : REPORT_EMPTY_PRODUCTION_TIME_BY_AREA}
                 </TableCell>
               </TableRow>
             ) : (
-              aggRows.map((row, idx) => (
+              // 🔥 AQUI RECORREMOS LAS FILAS FILTRADAS EN VEZ DE TODAS
+              filteredRows.map((row, idx) => (
                 <TableRow key={`${row.area}|${row.machine_code}`} className={catalogTableBodyRowClass}>
                   <TableCell className={cn("tabular-nums text-muted-foreground", catalogTableBodyCellClass)}>
                     {idx + 1}
@@ -364,7 +377,7 @@ export function ProductionTimeMachineTable({
               ))
             )}
           </TableBody>
-          {totals && aggRows.length > 0 ? (
+          {totals && filteredRows.length > 0 ? (
             <TableFooter>
               <TableRow className="border-t-2 border-primary/20 bg-muted/40 font-medium">
                 <TableCell colSpan={3} className={catalogTableBodyCellClass}>

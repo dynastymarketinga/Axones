@@ -9,6 +9,7 @@ import {
   Package,
   ScrollText,
   UserPlus,
+  Hash,
 } from "lucide-react"
 
 import { apiFetch, ApiError } from "@/lib/api"
@@ -19,6 +20,7 @@ import type {
   ClientRecord,
   LaravelPaginated,
   ProductRecord,
+  MaterialRow,
 } from "@/types/api"
 import { CatalogMasterFormBackButton } from "@/components/axones/CatalogMasterFormBackButton"
 import { ClientOrderLinesEditor } from "@/components/axones/ClientOrderLinesEditor"
@@ -32,6 +34,7 @@ import {
 } from "@/components/axones/catalog-list-classes"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Command,
@@ -78,7 +81,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-/** Secondary con hover en atajos a maestros. */
 const CLIENT_ORDER_MASTER_SECONDARY_HOVER =
   "transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:bg-primary/12 hover:text-foreground hover:shadow-md active:translate-y-0 active:shadow-sm dark:hover:bg-primary/18"
 
@@ -109,6 +111,9 @@ type LineDraft = {
   key: string
   product_id: string
   material_id: string
+  material_imprimir_id: string
+  material_laminar_id: string
+  material_trilaminar_id: string
   description: string
   quantity: string
   unit: string
@@ -119,6 +124,9 @@ function newLine(): LineDraft {
     key: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     product_id: "",
     material_id: "",
+    material_imprimir_id: "",
+    material_laminar_id: "",
+    material_trilaminar_id: "",
     description: "",
     quantity: "",
     unit: "kg",
@@ -134,10 +142,11 @@ function formatQty(q: string | number | undefined): string {
 function orderLinesToDrafts(lines: ClientOrderLineDetail[]): LineDraft[] {
   return (lines ?? []).map((l) => ({
     key: `line-${l.id}`,
-    product_id:
-      l.product_id != null && Number(l.product_id) > 0 ? String(l.product_id) : "",
-    material_id:
-      l.material_id != null && Number(l.material_id) > 0 ? String(l.material_id) : "",
+    product_id: l.product_id != null && Number(l.product_id) > 0 ? String(l.product_id) : "",
+    material_id: l.material_id != null && Number(l.material_id) > 0 ? String(l.material_id) : "",
+    material_imprimir_id: (l as any).material_imprimir_id ? String((l as any).material_imprimir_id) : "",
+    material_laminar_id: (l as any).material_laminar_id ? String((l as any).material_laminar_id) : "",
+    material_trilaminar_id: (l as any).material_trilaminar_id ? String((l as any).material_trilaminar_id) : "",
     description: (l.description ?? "").trim(),
     quantity: formatQty(l.quantity),
     unit: (l.unit ?? "kg").trim() || "kg",
@@ -163,11 +172,16 @@ export default function ClientOrderEditPage() {
 
   const [clients, setClients] = useState<ClientRecord[]>([])
   const [products, setProducts] = useState<ProductRecord[]>([])
+  const [materials, setMaterials] = useState<MaterialRow[]>([])
+  
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null)
   const initialClientIdRef = useRef<number | null>(null)
 
   const [lineDrafts, setLineDrafts] = useState<LineDraft[]>([])
   const [productComboOpenKey, setProductComboOpenKey] = useState<string | null>(null)
+  const [imprimirComboOpenKey, setImprimirComboOpenKey] = useState<string | null>(null)
+  const [laminarComboOpenKey, setLaminarComboOpenKey] = useState<string | null>(null)
+  const [trilaminarComboOpenKey, setTrilaminarComboOpenKey] = useState<string | null>(null)
 
   const [replaceDialogOpen, setReplaceDialogOpen] = useState(false)
   const [replaceDraftId, setReplaceDraftId] = useState<string>("")
@@ -209,6 +223,33 @@ export default function ClientOrderEditPage() {
     return map
   }, [lineDrafts, allProductOptions])
 
+  const selectedImprimirByLineKey = useMemo(() => {
+    const map = new Map<string, MaterialRow | null>()
+    for (const row of lineDrafts) {
+      const mid = row.material_imprimir_id?.trim()
+      map.set(row.key, mid ? materials.find((m) => String(m.id) === mid) ?? null : null)
+    }
+    return map
+  }, [lineDrafts, materials])
+
+  const selectedLaminarByLineKey = useMemo(() => {
+    const map = new Map<string, MaterialRow | null>()
+    for (const row of lineDrafts) {
+      const mid = row.material_laminar_id?.trim()
+      map.set(row.key, mid ? materials.find((m) => String(m.id) === mid) ?? null : null)
+    }
+    return map
+  }, [lineDrafts, materials])
+
+  const selectedTrilaminarByLineKey = useMemo(() => {
+    const map = new Map<string, MaterialRow | null>()
+    for (const row of lineDrafts) {
+      const mid = row.material_trilaminar_id?.trim()
+      map.set(row.key, mid ? materials.find((m) => String(m.id) === mid) ?? null : null)
+    }
+    return map
+  }, [lineDrafts, materials])
+
   useEffect(() => {
     const cid = selectedClientId
     if (!cid || cid < 1) return
@@ -224,16 +265,14 @@ export default function ClientOrderEditPage() {
 
   const loadClientsAndProducts = useCallback(async () => {
     try {
-      const [cl, pr] = await Promise.all([
-        apiFetch<LaravelPaginated<ClientRecord>>("clients", {
-          query: { per_page: 200, page: 1 },
-        }),
-        apiFetch<LaravelPaginated<ProductRecord>>("products", {
-          query: { per_page: 200, page: 1 },
-        }),
+      const [cl, pr, mat] = await Promise.all([
+        apiFetch<LaravelPaginated<ClientRecord>>("clients", { query: { per_page: 200, page: 1 } }),
+        apiFetch<LaravelPaginated<ProductRecord>>("products", { query: { per_page: 200, page: 1 } }),
+        apiFetch<LaravelPaginated<MaterialRow>>("materials", { query: { per_page: 500, page: 1 } }),
       ])
       setClients(cl.data ?? [])
       setProducts(pr.data ?? [])
+      setMaterials(mat.data ?? [])
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.message)
       else toast.error("No se pudo cargar clientes o productos.")
@@ -268,13 +307,8 @@ export default function ClientOrderEditPage() {
     }
   }, [orderId])
 
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  useEffect(() => {
-    void loadClientsAndProducts()
-  }, [loadClientsAndProducts])
+  useEffect(() => { void load() }, [load])
+  useEffect(() => { void loadClientsAndProducts() }, [loadClientsAndProducts])
 
   useEffect(() => {
     const onVis = () => {
@@ -315,6 +349,11 @@ export default function ClientOrderEditPage() {
 
     const payload: Record<string, unknown> = {
       notes: notes.trim() || null,
+    }
+    
+    // Si el usuario modificó el código correlativo manualmente, lo enviamos al backend
+    if (orderCode.trim() && orderCode.trim() !== order?.code) {
+      payload.code = orderCode.trim()
     }
 
     if (clientChanged) {
@@ -366,11 +405,19 @@ export default function ClientOrderEditPage() {
       return
     }
 
-    payload.lines = lineDrafts.map((row) => ({
-      product_id: Number(row.product_id),
-      quantity: parseDecimalTwoInput(row.quantity)!,
-      unit: row.unit.trim() || "kg",
-    }))
+    payload.lines = lineDrafts.map((row) => {
+      const line: any = {
+        product_id: Number(row.product_id),
+        quantity: parseDecimalTwoInput(row.quantity)!,
+        unit: row.unit.trim() || "kg",
+      }
+      if (row.material_id) line.material_id = Number(row.material_id)
+      if (row.material_imprimir_id) line.material_imprimir_id = Number(row.material_imprimir_id)
+      if (row.material_laminar_id) line.material_laminar_id = Number(row.material_laminar_id)
+      if (row.material_trilaminar_id) line.material_trilaminar_id = Number(row.material_trilaminar_id)
+      if (row.description.trim()) line.description = row.description.trim()
+      return line
+    })
 
     setSaving(true)
     try {
@@ -379,7 +426,7 @@ export default function ClientOrderEditPage() {
         body: JSON.stringify(payload),
       })
       toast.success(CLIENT_ORDER_TOAST_UPDATED)
-      nav("/ordenes-cliente")
+      nav(-1) // Magia: Volvemos a la página anterior manteniendo los filtros de búsqueda que estaban activos
     } catch (err) {
       if (err instanceof ApiError) toast.error(err.message)
       else toast.error(CLIENT_ORDER_TOAST_SAVE_FAILED)
@@ -403,6 +450,8 @@ export default function ClientOrderEditPage() {
       state: { from: `/ordenes-cliente/${orderId}` as const },
     }
   }, [orderId, selectedClientId])
+  
+  const newMaterialLink = { pathname: "/materiales/nuevo" as const, state: { from: `/ordenes-cliente/${orderId}` as const } }
 
   const displayClient = useMemo(() => {
     if (selectedClientId === null) return null
@@ -440,7 +489,7 @@ export default function ClientOrderEditPage() {
     )
   }
 
-  if (!orderCode) {
+  if (!order) {
     return (
       <CatalogPageShell
         title={CLIENT_ORDER_MODULE_EDIT_TITLE}
@@ -495,7 +544,7 @@ export default function ClientOrderEditPage() {
         <div className={catalogMasterFormSectionClass}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="text-base font-semibold tracking-tight">Cliente</h2>
+              <h2 className="text-base font-semibold tracking-tight">Cliente y Pedido</h2>
               <p className="text-muted-foreground text-sm">{CLIENT_ORDER_EDIT_CLIENT_SECTION_HELPER}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -542,6 +591,21 @@ export default function ClientOrderEditPage() {
           ) : (
             <p className="text-sm text-muted-foreground pt-2">Sin cliente seleccionado.</p>
           )}
+
+          {/* CÓDIGO MANUAL EDITABLE */}
+          <div className="grid gap-2 sm:col-span-2 pt-4">
+            <Label htmlFor="co-code" className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <Hash className="h-4 w-4 text-muted-foreground" /> Código de Pedido
+            </Label>
+            <Input
+              id="co-code"
+              value={orderCode}
+              onChange={(e) => setOrderCode(e.target.value)}
+              disabled={saving || !canEdit}
+              className={cn(catalogMasterFormPlainInputClass, "max-w-[200px]")}
+            />
+            <p className="text-muted-foreground text-xs">Puede modificar el código correlativo manualmente si es necesario.</p>
+          </div>
         </div>
 
         <div
@@ -564,10 +628,25 @@ export default function ClientOrderEditPage() {
             disabled={linesLocked || saving}
             clientMissing={!selectedClientId}
             productsForClient={productsForClient}
+            materials={materials}
+            
             productComboOpenKey={productComboOpenKey}
             onProductComboOpenKeyChange={setProductComboOpenKey}
+            
+            imprimirComboOpenKey={imprimirComboOpenKey}
+            onImprimirComboOpenKeyChange={setImprimirComboOpenKey}
+            laminarComboOpenKey={laminarComboOpenKey}
+            onLaminarComboOpenKeyChange={setLaminarComboOpenKey}
+            trilaminarComboOpenKey={trilaminarComboOpenKey}
+            onTrilaminarComboOpenKeyChange={setTrilaminarComboOpenKey}
+
             selectedProductByLineKey={selectedProductByLineKey}
+            selectedImprimirByLineKey={selectedImprimirByLineKey}
+            selectedLaminarByLineKey={selectedLaminarByLineKey}
+            selectedTrilaminarByLineKey={selectedTrilaminarByLineKey}
+            
             newProductLink={newProductLink}
+            newMaterialLink={newMaterialLink}
             productPlaceholder="Seleccione un producto del cliente"
             onUpdateLine={(i, patch) => updateLine(lineDrafts[i]!.key, patch)}
             onRemoveLine={(i) => removeLine(lineDrafts[i]!.key)}
@@ -592,7 +671,7 @@ export default function ClientOrderEditPage() {
 
         <div className={catalogMasterFormActionsClass}>
           <Button type="button" variant="outline" asChild className="w-full sm:w-auto">
-            <Link to="/ordenes-cliente">Cancelar</Link>
+            <Button onClick={() => nav(-1)} variant="ghost" className="w-full">Cancelar</Button>
           </Button>
           <Button type="submit" size="lg" disabled={saving || !canEdit} className="min-w-40 w-full sm:w-auto">
             {saving ? "Guardando…" : "Guardar cambios"}

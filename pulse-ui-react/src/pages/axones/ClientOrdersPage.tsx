@@ -110,8 +110,9 @@ import { Card, CardContent } from "@/components/ui/card"
 
 const SEARCH_DEBOUNCE_MS = 400
 
+// 🔥 Grilla extendida a 11 columnas para mostrar los 3 materiales nuevos y conservar el viejo.
 const CLIENT_ORDER_DETAIL_LINE_GRID =
-  "grid grid-cols-[2.5rem_minmax(11rem,1.4fr)_6.5rem_6.5rem_minmax(10rem,1.1fr)_minmax(12rem,1.2fr)_8.5rem_6rem] items-start gap-x-3 gap-y-1"
+  "grid grid-cols-[2.5rem_minmax(11rem,1.4fr)_4.5rem_4.5rem_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(10rem,1.2fr)_6.5rem_4rem] items-start gap-x-3 gap-y-1"
 
 export default function ClientOrdersPage() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -576,7 +577,7 @@ export default function ClientOrdersPage() {
         >
           <DialogContent
             overlayClassName="z-[100] !bg-black/50 backdrop-blur-sm duration-200 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-            className="z-[100] flex max-h-[min(90vh,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden rounded-2xl border p-0 shadow-2xl sm:max-w-3xl"
+            className="z-[100] flex max-h-[min(90vh,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden rounded-2xl border p-0 shadow-2xl sm:max-w-4xl"
           >
             <DialogHeader className="shrink-0 space-y-1 border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-6 py-4 pr-14 text-left">
               <DialogTitle className="text-lg leading-tight">{CLIENT_ORDER_MODULE_TITLE}</DialogTitle>
@@ -659,28 +660,40 @@ export default function ClientOrdersPage() {
                         <p className="text-muted-foreground text-sm">Sin líneas en este pedido.</p>
                       ) : (
                         <div className="overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]">
-                          <div className="min-w-[56rem] rounded-xl border border-border bg-muted/20 p-3">
+                          <div className="min-w-[85rem] rounded-xl border border-border bg-muted/20 p-3">
                             <div
                               className={cn(
                                 CLIENT_ORDER_DETAIL_LINE_GRID,
-                                "border-border/60 border-b pb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground",
+                                "border-border/60 border-b pb-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
                               )}
                             >
                               <span>#</span>
                               <span>{CLIENT_ORDER_LIST_PRODUCT_COLUMN}</span>
                               <span>{CLIENT_ORDER_DETAIL_LINE_CPE_COLUMN}</span>
                               <span>{CLIENT_ORDER_DETAIL_LINE_MPPS_COLUMN}</span>
-                              <span>{CLIENT_ORDER_LINE_MATERIAL_LABEL}</span>
+                              <span>Material (Legado)</span>
+                              <span>Imprimir</span>
+                              <span>Laminar</span>
+                              <span>Trilaminar</span>
                               <span>{CLIENT_ORDER_LINE_DESCRIPTION_LABEL}</span>
                               <span>{CLIENT_ORDER_LIST_QUANTITY_COLUMN}</span>
                               <span>{CLIENT_ORDER_DETAIL_LINE_UNIT_COLUMN}</span>
                             </div>
                             <div className="divide-y divide-border/50">
                               {detailModalRecord.lines.map((ln, index) => {
-                                const materialLabel = ln.material
-                                  ? `${ln.material.sku} — ${ln.material.name}`
-                                  : "—"
+                                const materialLabel = ln.material ? `${ln.material.sku} — ${ln.material.name}` : "—"
+                                
+                                // Extraemos los 3 materiales nuevos tolerando snake_case o camelCase por si acaso
+                                const imp = (ln as any).materialImprimir || (ln as any).material_imprimir
+                                const lam = (ln as any).materialLaminar || (ln as any).material_laminar
+                                const tri = (ln as any).materialTrilaminar || (ln as any).material_trilaminar
+
+                                const impLabel = imp ? `${imp.sku} — ${imp.name}` : "—"
+                                const lamLabel = lam ? `${lam.sku} — ${lam.name}` : "—"
+                                const triLabel = tri ? `${tri.sku} — ${tri.name}` : "—"
+
                                 const description = ln.description?.trim() || "—"
+                                
                                 return (
                                   <div
                                     key={ln.id}
@@ -697,6 +710,9 @@ export default function ClientOrdersPage() {
                                       {ln.product?.mps?.trim() || "—"}
                                     </span>
                                     <span className="min-w-0 text-xs leading-snug">{materialLabel}</span>
+                                    <span className="min-w-0 text-xs leading-snug">{impLabel}</span>
+                                    <span className="min-w-0 text-xs leading-snug">{lamLabel}</span>
+                                    <span className="min-w-0 text-xs leading-snug">{triLabel}</span>
                                     <span className="min-w-0 text-xs leading-snug text-muted-foreground">
                                       {description}
                                     </span>

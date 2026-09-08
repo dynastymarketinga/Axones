@@ -84,7 +84,14 @@ class ClientOrderController extends Controller
             return $order;
         });
 
-        return response()->json($order->load(['client', 'lines.product', 'lines.material']), 201);
+        return response()->json($order->load([
+            'client', 
+            'lines.product', 
+            'lines.material',
+            'lines.materialImprimir',
+            'lines.materialLaminar',
+            'lines.materialTrilaminar'
+        ]), 201);
     }
 
     public function show(ClientOrder $client_order): JsonResponse
@@ -93,6 +100,9 @@ class ClientOrderController extends Controller
             'client',
             'lines.product',
             'lines.material',
+            'lines.materialImprimir',
+            'lines.materialLaminar',
+            'lines.materialTrilaminar',
             'workOrders' => fn ($q) => $q->orderByDesc('id')->limit(50),
         ]);
 
@@ -116,7 +126,14 @@ class ClientOrderController extends Controller
             }
         });
 
-        return response()->json($client_order->fresh()->load(['client', 'lines.product', 'lines.material']));
+        return response()->json($client_order->fresh()->load([
+            'client', 
+            'lines.product', 
+            'lines.material',
+            'lines.materialImprimir',
+            'lines.materialLaminar',
+            'lines.materialTrilaminar'
+        ]));
     }
 
     /**
@@ -132,6 +149,9 @@ class ClientOrderController extends Controller
                 'client_order_id' => $order->getKey(),
                 'product_id' => isset($line['product_id']) ? (int) $line['product_id'] : null,
                 'material_id' => isset($line['material_id']) ? (int) $line['material_id'] : null,
+                'material_imprimir_id' => isset($line['material_imprimir_id']) ? (int) $line['material_imprimir_id'] : null,
+                'material_laminar_id' => isset($line['material_laminar_id']) ? (int) $line['material_laminar_id'] : null,
+                'material_trilaminar_id' => isset($line['material_trilaminar_id']) ? (int) $line['material_trilaminar_id'] : null,
                 'description' => $line['description'] ?? null,
                 'quantity' => $line['quantity'],
                 'unit' => $line['unit'] ?? 'kg',

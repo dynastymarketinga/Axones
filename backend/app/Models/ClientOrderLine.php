@@ -11,6 +11,9 @@ class ClientOrderLine extends Model
         'client_order_id',
         'product_id',
         'material_id',
+        'material_imprimir_id',    // Añadido
+        'material_laminar_id',     // Añadido
+        'material_trilaminar_id',  // Añadido
         'description',
         'quantity',
         'unit',
@@ -38,5 +41,20 @@ class ClientOrderLine extends Model
     public function material(): BelongsTo
     {
         return $this->belongsTo(Material::class);
+    }
+
+    public function materialImprimir(): BelongsTo
+    {
+        return $this->belongsTo(Material::class, 'material_imprimir_id');
+    }
+
+    public function materialLaminar(): BelongsTo
+    {
+        return $this->belongsTo(Material::class, 'material_laminar_id');
+    }
+
+    public function materialTrilaminar(): BelongsTo
+    {
+        return $this->belongsTo(Material::class, 'material_trilaminar_id');
     }
 }

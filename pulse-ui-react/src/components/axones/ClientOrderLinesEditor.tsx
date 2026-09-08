@@ -13,6 +13,8 @@ import {
   Plus,
   Scale,
   Trash2,
+  Printer,
+  Box,
   type LucideIcon,
 } from "lucide-react"
 
@@ -44,12 +46,6 @@ import {
 import type { MaterialRow } from "@/types/api"
 import { cn } from "@/lib/utils"
 import {
-  CLIENT_ORDER_LINE_DESCRIPTION_LABEL,
-  CLIENT_ORDER_LINE_DESCRIPTION_PLACEHOLDER,
-  CLIENT_ORDER_LINE_MATERIAL_EMPTY,
-  CLIENT_ORDER_LINE_MATERIAL_LABEL,
-  CLIENT_ORDER_LINE_MATERIAL_PLACEHOLDER,
-  CLIENT_ORDER_LINE_MATERIAL_SEARCH_PLACEHOLDER,
   CLIENT_ORDER_LINE_QUANTITY_REQUIRED_HELPER,
   CLIENT_ORDER_LINES_ADD_BUTTON,
   CLIENT_ORDER_LINES_PAGE_SIZE,
@@ -59,11 +55,13 @@ import {
 const CLIENT_ORDER_MASTER_SECONDARY_HOVER =
   "transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:bg-primary/12 hover:text-foreground hover:shadow-md active:translate-y-0 active:shadow-sm dark:hover:bg-primary/18"
 
+// 🔥 Grilla para Crear: Sin M. Legado ni Unidad (7 columnas)
 const NEW_LINE_GRID =
-  "grid grid-cols-[2.5rem_minmax(11rem,1.4fr)_6.5rem_6.5rem_minmax(10rem,1.1fr)_minmax(12rem,1.2fr)_8.5rem_2.75rem] items-start gap-x-3 gap-y-1"
+  "grid grid-cols-[2.5rem_8.5rem_minmax(18rem,2fr)_minmax(9rem,1fr)_minmax(9rem,1fr)_minmax(9rem,1fr)_2.75rem] items-start gap-x-3 gap-y-1"
 
+// 🔥 Grilla para Editar: Incluye M. Legado y Unidad (9 columnas)
 const EDIT_LINE_GRID =
-  "grid grid-cols-[2.5rem_minmax(11rem,1.4fr)_6.5rem_6.5rem_8.5rem_6rem_2.75rem] items-start gap-x-3 gap-y-1"
+  "grid grid-cols-[2.5rem_8.5rem_minmax(14rem,2fr)_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(9rem,1fr)_minmax(9rem,1fr)_4.5rem_2.75rem] items-start gap-x-3 gap-y-1"
 
 export type ClientOrderLineProductOption = {
   id: string
@@ -75,9 +73,11 @@ export type ClientOrderLineProductOption = {
 export type ClientOrderLineDraft = {
   key: string
   product_id: string
-  material_id?: string
-  description?: string
   quantity: string
+  material_id?: string             
+  material_imprimir_id?: string
+  material_laminar_id?: string
+  material_trilaminar_id?: string
   unit?: string
 }
 
@@ -96,12 +96,22 @@ type ClientOrderLinesEditorProps = {
   clientMissing?: boolean
   productsForClient: ClientOrderLineProductOption[]
   materials?: MaterialRow[]
+  
   productComboOpenKey: string | null
   onProductComboOpenKeyChange: (key: string | null) => void
-  materialComboOpenKey?: string | null
-  onMaterialComboOpenKeyChange?: (key: string | null) => void
+  
+  imprimirComboOpenKey?: string | null
+  onImprimirComboOpenKeyChange?: (key: string | null) => void
+  laminarComboOpenKey?: string | null
+  onLaminarComboOpenKeyChange?: (key: string | null) => void
+  trilaminarComboOpenKey?: string | null
+  onTrilaminarComboOpenKeyChange?: (key: string | null) => void
+
   selectedProductByLineKey: Map<string, ClientOrderLineProductOption | null>
-  selectedMaterialByLineKey?: Map<string, MaterialRow | null>
+  selectedImprimirByLineKey?: Map<string, MaterialRow | null>
+  selectedLaminarByLineKey?: Map<string, MaterialRow | null>
+  selectedTrilaminarByLineKey?: Map<string, MaterialRow | null>
+
   lineFieldErrorsByKey?: Map<string, LineFieldErrors>
   qtyBlurKeys?: Set<string>
   newProductLink: MasterLink
@@ -152,6 +162,69 @@ function ColumnHeader({
   )
 }
 
+function MaterialDropdown({
+  disabled,
+  open,
+  onOpenChange,
+  selectedMat,
+  options,
+  onSelect,
+  onClear,
+  placeholder = "Seleccione...",
+}: {
+  disabled?: boolean
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  selectedMat: MaterialRow | null
+  options: MaterialRow[]
+  onSelect: (id: string) => void
+  onClear: () => void
+  placeholder?: string
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          disabled={disabled}
+          aria-expanded={open}
+          className={cn(
+            catalogMasterFormPlainInputClass,
+            "h-11 w-full justify-between gap-2 px-3 font-normal"
+          )}
+        >
+          <span className="min-w-0 flex-1 truncate text-left text-foreground">
+            {selectedMat ? `${selectedMat.sku} — ${selectedMat.name}` : placeholder}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]" align="start">
+        <Command shouldFilter>
+          <CommandInput placeholder="Buscar material..." />
+          <CommandList>
+            <CommandEmpty>No hay materiales que coincidan.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem value="sin-material" onSelect={onClear}>
+                <Check className={cn("mr-2 h-4 w-4", !selectedMat ? "opacity-100" : "opacity-0")} />
+                Ninguno (Opcional)
+              </CommandItem>
+              {options.map((m) => (
+                <CommandItem key={m.id} value={`${m.sku} ${m.name}`} onSelect={() => onSelect(String(m.id))}>
+                  <Check className={cn("mr-2 h-4 w-4", selectedMat?.id === m.id ? "opacity-100" : "opacity-0")} />
+                  <span className="truncate">{m.sku} — {m.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function ClientOrderLinesPaginator({
   page,
   totalPages,
@@ -177,24 +250,14 @@ function ClientOrderLinesPaginator({
       </p>
       <div className="flex items-center gap-1">
         <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-8 w-8 shadow-sm"
-          disabled={disabled || page <= 1}
-          onClick={() => onPageChange(page - 1)}
-          aria-label="Página anterior de líneas"
+          type="button" variant="outline" size="icon" className="h-8 w-8 shadow-sm" disabled={disabled || page <= 1}
+          onClick={() => onPageChange(page - 1)} aria-label="Página anterior de líneas"
         >
           <ChevronLeft className="h-4 w-4" aria-hidden />
         </Button>
         <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-8 w-8 shadow-sm"
-          disabled={disabled || page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
-          aria-label="Página siguiente de líneas"
+          type="button" variant="outline" size="icon" className="h-8 w-8 shadow-sm" disabled={disabled || page >= totalPages}
+          onClick={() => onPageChange(page + 1)} aria-label="Página siguiente de líneas"
         >
           <ChevronRight className="h-4 w-4" aria-hidden />
         </Button>
@@ -210,12 +273,21 @@ export function ClientOrderLinesEditor({
   clientMissing = false,
   productsForClient,
   materials = [],
+  
   productComboOpenKey,
   onProductComboOpenKeyChange,
-  materialComboOpenKey = null,
-  onMaterialComboOpenKeyChange,
+  imprimirComboOpenKey,
+  onImprimirComboOpenKeyChange,
+  laminarComboOpenKey,
+  onLaminarComboOpenKeyChange,
+  trilaminarComboOpenKey,
+  onTrilaminarComboOpenKeyChange,
+
   selectedProductByLineKey,
-  selectedMaterialByLineKey,
+  selectedImprimirByLineKey,
+  selectedLaminarByLineKey,
+  selectedTrilaminarByLineKey,
+
   lineFieldErrorsByKey,
   qtyBlurKeys,
   newProductLink,
@@ -227,9 +299,25 @@ export function ClientOrderLinesEditor({
   onQuantityBlur,
 }: ClientOrderLinesEditorProps) {
   const [linesPage, setLinesPage] = useState(1)
+  
+  const [legacyComboOpenKey, setLegacyComboOpenKey] = useState<string | null>(null)
+
   const isNew = variant === "new"
   const gridClass = isNew ? NEW_LINE_GRID : EDIT_LINE_GRID
-  const minWidth = isNew ? "min-w-[72rem]" : "min-w-[52rem]"
+  const minWidth = isNew ? "min-w-[70rem]" : "min-w-[85rem]"
+
+  const imprimirMaterials = useMemo(() => materials.filter((m) => (m as any).is_imprimir === true), [materials])
+  const laminarMaterials = useMemo(() => materials.filter((m) => (m as any).is_laminar === true), [materials])
+  const trilaminarMaterials = useMemo(() => materials.filter((m) => (m as any).is_trilaminar === true), [materials])
+
+  const selectedLegacyByLineKey = useMemo(() => {
+    const map = new Map<string, MaterialRow | null>()
+    for (const row of lines) {
+      const mid = row.material_id?.trim()
+      map.set(row.key, mid ? materials.find((m) => String(m.id) === mid) ?? null : null)
+    }
+    return map
+  }, [lines, materials])
 
   const totalPages = Math.max(1, Math.ceil(lines.length / CLIENT_ORDER_LINES_PAGE_SIZE))
   const safePage = Math.min(linesPage, totalPages)
@@ -256,8 +344,7 @@ export function ClientOrderLinesEditor({
   function handleRemoveLine(globalIndex: number) {
     const start = (safePage - 1) * CLIENT_ORDER_LINES_PAGE_SIZE
     const isLastOnPage = lines.length > 1 && globalIndex === lines.length - 1
-    const willEmptyPage =
-      visibleLines.length === 1 && safePage > 1 && globalIndex === start
+    const willEmptyPage = visibleLines.length === 1 && safePage > 1 && globalIndex === start
     onRemoveLine(globalIndex)
     if (willEmptyPage) {
       setLinesPage((p) => Math.max(1, p - 1))
@@ -270,15 +357,8 @@ export function ClientOrderLinesEditor({
     clientMissing || disabled ? (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground"
-            disabled
-          >
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground" disabled>
             <Plus className="h-4 w-4" aria-hidden />
-            <span className="sr-only">Nuevo producto</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>Seleccione un cliente primero</TooltipContent>
@@ -286,46 +366,15 @@ export function ClientOrderLinesEditor({
     ) : (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-primary"
-            asChild
-          >
-            <Link
-              to={{ pathname: newProductLink.pathname, search: newProductLink.search }}
-              state={newProductLink.state}
-            >
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-primary" asChild>
+            <Link to={{ pathname: newProductLink.pathname, search: newProductLink.search }} state={newProductLink.state}>
               <Plus className="h-4 w-4" aria-hidden />
-              <span className="sr-only">Nuevo producto</span>
             </Link>
           </Button>
         </TooltipTrigger>
         <TooltipContent>Nuevo producto</TooltipContent>
       </Tooltip>
     )
-
-  const newMaterialHeaderAction =
-    newMaterialLink && !disabled ? (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-primary"
-            asChild
-          >
-            <Link to={newMaterialLink.pathname} state={newMaterialLink.state}>
-              <Plus className="h-4 w-4" aria-hidden />
-              <span className="sr-only">Nuevo material</span>
-            </Link>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Nuevo material</TooltipContent>
-      </Tooltip>
-    ) : null
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -334,102 +383,79 @@ export function ClientOrderLinesEditor({
           <div className={cn("rounded-xl border border-border bg-muted/20 p-3", minWidth)}>
             <div className={cn(gridClass, "border-border/60 border-b pb-3")}>
               <ColumnHeader icon={Hash} label="#" />
-              <ColumnHeader icon={Package} label="Producto *" action={newProductHeaderAction} />
-              <ColumnHeader icon={Hash} label="C.P.E." />
-              <ColumnHeader icon={Hash} label="M.P.P.S." />
-              {isNew ? (
-                <>
-                  <ColumnHeader
-                    icon={Layers}
-                    label={CLIENT_ORDER_LINE_MATERIAL_LABEL}
-                    action={newMaterialHeaderAction}
-                  />
-                  <ColumnHeader icon={Hash} label={CLIENT_ORDER_LINE_DESCRIPTION_LABEL} />
-                </>
-              ) : null}
               <ColumnHeader icon={Scale} label="Cantidad *" />
-              {!isNew ? <ColumnHeader icon={Hash} label="Unidad" /> : null}
+              <ColumnHeader icon={Package} label="Producto *" action={newProductHeaderAction} />
+              
+              {!isNew && <ColumnHeader icon={Box} label="M. Legado" />}
+              
+              <ColumnHeader icon={Printer} label="Imprimir" />
+              <ColumnHeader icon={Layers} label="Laminar" />
+              <ColumnHeader icon={Box} label="Trilaminar" />
+              
+              {!isNew && <ColumnHeader icon={Hash} label="Unidad" />}
+              
               <span className="sr-only">Quitar</span>
             </div>
 
             {lines.length === 0 ? (
-              <p className="text-muted-foreground py-6 text-center text-sm">
-                No hay líneas. Pulse «Añadir línea».
-              </p>
+              <p className="text-muted-foreground py-6 text-center text-sm">No hay líneas. Pulse «Añadir línea».</p>
             ) : (
               visibleLines.map(({ line, globalIndex }) => {
                 const selected = selectedProductByLineKey.get(line.key) ?? null
-                const selectedMat = selectedMaterialByLineKey?.get(line.key) ?? null
                 const lineErr = lineFieldErrorsByKey?.get(line.key)
                 const prodErr = lineErr?.product
                 const qtyErrGate = lineErr?.quantity
-                const qtyErrBlur =
-                  qtyBlurKeys?.has(line.key) && line.product_id.trim()
+                const qtyErrBlur = qtyBlurKeys?.has(line.key) && line.product_id.trim()
                     ? CLIENT_ORDER_LINE_QUANTITY_REQUIRED_HELPER
                     : undefined
                 const qtyErr = qtyErrGate ?? qtyErrBlur
 
                 return (
-                  <div
-                    key={line.key}
-                    className={cn(gridClass, "border-border/40 border-b py-2 last:border-b-0")}
-                  >
+                  <div key={line.key} className={cn(gridClass, "border-border/40 border-b py-2 last:border-b-0")}>
+                    
                     <div className="flex h-11 items-center justify-center">
-                      <span className="text-muted-foreground text-sm font-semibold tabular-nums">
-                        {globalIndex + 1}
-                      </span>
+                      <span className="text-muted-foreground text-sm font-semibold tabular-nums">{globalIndex + 1}</span>
                     </div>
 
                     <div className="min-w-0">
-                      <Popover
-                        open={productComboOpenKey === line.key}
-                        onOpenChange={(open) =>
-                          onProductComboOpenKeyChange(open ? line.key : null)
-                        }
-                      >
+                      <div className="group/qty relative">
+                        <Scale className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", qtyErr ? "text-destructive" : "text-muted-foreground group-focus-within/qty:text-primary")} aria-hidden />
+                        <Input
+                          id={`co-qty-${line.key}`}
+                          type="text" inputMode="decimal" disabled={disabled} aria-invalid={Boolean(qtyErr)}
+                          className={cn(catalogMasterFormInputClass, "h-11", qtyErr ? "border-destructive bg-destructive/5 focus-visible:ring-destructive" : "")}
+                          value={line.quantity}
+                          onChange={(e) => {
+                            const raw = sanitizeDecimalTwoInput(e.target.value)
+                            onUpdateLine(globalIndex, { quantity: raw })
+                          }}
+                          onBlur={() => {
+                            const formatted = formatDecimalTwoOnBlur(line.quantity)
+                            if (formatted !== line.quantity) onUpdateLine(globalIndex, { quantity: formatted })
+                            onQuantityBlur?.(line.key, globalIndex, line.product_id, formatted || line.quantity)
+                          }}
+                          placeholder="Ej. 1000"
+                        />
+                      </div>
+                      <FieldErrorSlot message={qtyErr} />
+                    </div>
+
+                    <div className="min-w-0">
+                      <Popover open={productComboOpenKey === line.key} onOpenChange={(open) => onProductComboOpenKeyChange(open ? line.key : null)}>
                         <PopoverTrigger asChild>
                           <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            disabled={disabled}
-                            id={`co-product-${line.key}`}
-                            aria-expanded={productComboOpenKey === line.key}
-                            aria-invalid={Boolean(prodErr)}
-                            className={cn(
-                              catalogMasterFormPlainInputClass,
-                              "h-11 w-full justify-between gap-2 px-3 font-normal",
-                              prodErr
-                                ? "border-destructive bg-destructive/5 focus-visible:ring-destructive"
-                                : "",
-                            )}
+                            type="button" variant="outline" role="combobox" disabled={disabled}
+                            id={`co-product-${line.key}`} aria-expanded={productComboOpenKey === line.key} aria-invalid={Boolean(prodErr)}
+                            className={cn(catalogMasterFormPlainInputClass, "h-11 w-full justify-between gap-2 px-3 font-normal", prodErr ? "border-destructive bg-destructive/5 focus-visible:ring-destructive" : "")}
                           >
-                            <Package
-                              className={cn(
-                                "h-4 w-4 shrink-0",
-                                prodErr ? "text-destructive" : "text-muted-foreground",
-                              )}
-                              aria-hidden
-                            />
-                            <span
-                              className={cn(
-                                "min-w-0 flex-1 truncate text-left",
-                                selected
-                                  ? "text-foreground"
-                                  : prodErr
-                                    ? "text-destructive"
-                                    : "text-muted-foreground",
-                              )}
-                            >
+                            <Package className={cn("h-4 w-4 shrink-0", prodErr ? "text-destructive" : "text-muted-foreground")} aria-hidden />
+                            <span className={cn("min-w-0 flex-1 truncate text-left", selected ? "text-foreground" : prodErr ? "text-destructive" : "text-muted-foreground")}>
                               {selected ? selected.name : productPlaceholder}
                             </span>
                             <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent
-                          className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
-                          align="start"
-                        >
+                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[28rem]" align="start">
                           <Command shouldFilter>
                             <CommandInput placeholder="Buscar por nombre, C.P.E. o M.P.P.S…" />
                             <CommandList>
@@ -438,55 +464,20 @@ export function ClientOrderLinesEditor({
                                   <p>No hay productos que coincidan.</p>
                                   {!clientMissing && !disabled ? (
                                     <Button type="button" variant="secondary" size="sm" asChild>
-                                      <Link
-                                        className="inline-flex items-center"
-                                        to={{
-                                          pathname: newProductLink.pathname,
-                                          search: newProductLink.search,
-                                        }}
-                                        state={newProductLink.state}
-                                        onClick={() => onProductComboOpenKeyChange(null)}
-                                      >
-                                        <Plus className="mr-2 h-4 w-4" />
-                                        Crear producto
+                                      <Link className="inline-flex items-center" to={{ pathname: newProductLink.pathname, search: newProductLink.search }} state={newProductLink.state} onClick={() => onProductComboOpenKeyChange(null)}>
+                                        <Plus className="mr-2 h-4 w-4" /> Crear producto
                                       </Link>
                                     </Button>
                                   ) : null}
                                 </div>
                               </CommandEmpty>
                               <CommandGroup>
-                                {isNew ? (
-                                  <CommandItem
-                                    value="sin-producto"
-                                    onSelect={() => {
-                                      onUpdateLine(globalIndex, { product_id: "" })
-                                      onProductComboOpenKeyChange(null)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        line.product_id ? "opacity-0" : "opacity-100",
-                                      )}
-                                    />
-                                    Sin producto
-                                  </CommandItem>
-                                ) : null}
+                                <CommandItem value="sin-producto" onSelect={() => { onUpdateLine(globalIndex, { product_id: "" }); onProductComboOpenKeyChange(null) }}>
+                                  <Check className={cn("mr-2 h-4 w-4", line.product_id ? "opacity-0" : "opacity-100")} /> Sin producto
+                                </CommandItem>
                                 {productsForClient.map((p) => (
-                                  <CommandItem
-                                    key={p.id}
-                                    value={`${p.name} ${p.cpe ?? ""} ${p.mps ?? ""}`}
-                                    onSelect={() => {
-                                      onUpdateLine(globalIndex, { product_id: p.id })
-                                      onProductComboOpenKeyChange(null)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        line.product_id === p.id ? "opacity-100" : "opacity-0",
-                                      )}
-                                    />
+                                  <CommandItem key={p.id} value={`${p.name} ${p.cpe ?? ""} ${p.mps ?? ""}`} onSelect={() => { onUpdateLine(globalIndex, { product_id: p.id }); onProductComboOpenKeyChange(null) }}>
+                                    <Check className={cn("mr-2 h-4 w-4", line.product_id === p.id ? "opacity-100" : "opacity-0")} />
                                     <span className="truncate">{p.name}</span>
                                   </CommandItem>
                                 ))}
@@ -498,208 +489,75 @@ export function ClientOrderLinesEditor({
                       <FieldErrorSlot message={prodErr} />
                     </div>
 
-                    <Input
-                      value={selected?.cpe ?? ""}
-                      readOnly
-                      tabIndex={-1}
-                      className={cn(catalogMasterFormPlainInputClass, "h-11 bg-muted/30")}
-                      placeholder="—"
-                    />
-
-                    <Input
-                      value={selected?.mps ?? ""}
-                      readOnly
-                      tabIndex={-1}
-                      className={cn(catalogMasterFormPlainInputClass, "h-11 bg-muted/30")}
-                      placeholder="—"
-                    />
-
-                    {isNew ? (
-                      <>
-                        <div className="min-w-0">
-                          <Popover
-                            open={materialComboOpenKey === line.key}
-                            onOpenChange={(open) =>
-                              onMaterialComboOpenKeyChange?.(open ? line.key : null)
-                            }
-                          >
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                role="combobox"
-                                disabled={disabled}
-                                id={`co-material-${line.key}`}
-                                aria-expanded={materialComboOpenKey === line.key}
-                                className={cn(
-                                  catalogMasterFormPlainInputClass,
-                                  "h-11 w-full justify-between gap-2 px-3 font-normal",
-                                )}
-                              >
-                                <Layers className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                                <span className="min-w-0 flex-1 truncate text-left">
-                                  {selectedMat
-                                    ? `${selectedMat.sku} — ${selectedMat.name}`
-                                    : CLIENT_ORDER_LINE_MATERIAL_PLACEHOLDER}
-                                </span>
-                                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[var(--radix-popover-trigger-width)] p-0 min-w-[18rem]"
-                              align="start"
-                            >
-                              <Command shouldFilter>
-                                <CommandInput
-                                  placeholder={CLIENT_ORDER_LINE_MATERIAL_SEARCH_PLACEHOLDER}
-                                />
-                                <CommandList>
-                                  <CommandEmpty>
-                                    <div className="space-y-2 p-2 text-sm">
-                                      <p>No hay materiales que coincidan.</p>
-                                      {newMaterialLink ? (
-                                        <Button type="button" variant="secondary" size="sm" asChild>
-                                          <Link
-                                            className="inline-flex items-center"
-                                            to={newMaterialLink.pathname}
-                                            state={newMaterialLink.state}
-                                            onClick={() => onMaterialComboOpenKeyChange?.(null)}
-                                          >
-                                            <Plus className="mr-2 h-4 w-4" />
-                                            Crear material
-                                          </Link>
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  </CommandEmpty>
-                                  <CommandGroup>
-                                    <CommandItem
-                                      value="sin-material"
-                                      onSelect={() => {
-                                        onUpdateLine(globalIndex, { material_id: "" })
-                                        onMaterialComboOpenKeyChange?.(null)
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          line.material_id ? "opacity-0" : "opacity-100",
-                                        )}
-                                      />
-                                      {CLIENT_ORDER_LINE_MATERIAL_EMPTY}
-                                    </CommandItem>
-                                    {materials.map((m) => (
-                                      <CommandItem
-                                        key={m.id}
-                                        value={`${m.sku} ${m.name}`}
-                                        onSelect={() => {
-                                          onUpdateLine(globalIndex, { material_id: String(m.id) })
-                                          onMaterialComboOpenKeyChange?.(null)
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            "mr-2 h-4 w-4",
-                                            line.material_id === String(m.id)
-                                              ? "opacity-100"
-                                              : "opacity-0",
-                                          )}
-                                        />
-                                        <span className="truncate">
-                                          {m.sku} — {m.name}
-                                        </span>
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-
-                        <Input
-                          id={`co-line-desc-${line.key}`}
-                          type="text"
-                          maxLength={512}
+                    {!isNew && (
+                      <div className="min-w-0">
+                        <MaterialDropdown
+                          open={legacyComboOpenKey === line.key}
+                          onOpenChange={(o) => setLegacyComboOpenKey(o ? line.key : null)}
+                          selectedMat={selectedLegacyByLineKey.get(line.key) ?? null}
+                          options={materials}
+                          onSelect={(id) => { onUpdateLine(globalIndex, { material_id: id }); setLegacyComboOpenKey(null) }}
+                          onClear={() => { onUpdateLine(globalIndex, { material_id: "" }); setLegacyComboOpenKey(null) }}
+                          placeholder="M. Legado..."
                           disabled={disabled}
-                          value={line.description ?? ""}
-                          onChange={(e) =>
-                            onUpdateLine(globalIndex, { description: e.target.value })
-                          }
-                          placeholder={CLIENT_ORDER_LINE_DESCRIPTION_PLACEHOLDER}
-                          className={cn(catalogMasterFormPlainInputClass, "h-11")}
-                        />
-                      </>
-                    ) : null}
-
-                    <div className="min-w-0">
-                      <div className="group/qty relative">
-                        <Scale
-                          className={cn(
-                            "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-                            qtyErr
-                              ? "text-destructive"
-                              : "text-muted-foreground group-focus-within/qty:text-primary",
-                          )}
-                          aria-hidden
-                        />
-                        <Input
-                          id={`co-qty-${line.key}`}
-                          type="text"
-                          inputMode="decimal"
-                          disabled={disabled}
-                          aria-invalid={Boolean(qtyErr)}
-                          className={cn(
-                            catalogMasterFormInputClass,
-                            "h-11",
-                            qtyErr
-                              ? "border-destructive bg-destructive/5 focus-visible:ring-destructive"
-                              : "",
-                          )}
-                          value={line.quantity}
-                          onChange={(e) => {
-                            const raw = sanitizeDecimalTwoInput(e.target.value)
-                            onUpdateLine(globalIndex, { quantity: raw })
-                          }}
-                          onBlur={() => {
-                            const formatted = formatDecimalTwoOnBlur(line.quantity)
-                            if (formatted !== line.quantity) {
-                              onUpdateLine(globalIndex, { quantity: formatted })
-                            }
-                            onQuantityBlur?.(
-                              line.key,
-                              globalIndex,
-                              line.product_id,
-                              formatted || line.quantity,
-                            )
-                          }}
-                          placeholder="Ej. 1000"
                         />
                       </div>
-                      <FieldErrorSlot message={qtyErr} />
+                    )}
+
+                    <div className="min-w-0">
+                      <MaterialDropdown
+                        open={imprimirComboOpenKey === line.key}
+                        onOpenChange={(o) => onImprimirComboOpenKeyChange?.(o ? line.key : null)}
+                        selectedMat={selectedImprimirByLineKey?.get(line.key) ?? null}
+                        options={imprimirMaterials}
+                        onSelect={(id) => { onUpdateLine(globalIndex, { material_imprimir_id: id }); onImprimirComboOpenKeyChange?.(null) }}
+                        onClear={() => { onUpdateLine(globalIndex, { material_imprimir_id: "" }); onImprimirComboOpenKeyChange?.(null) }}
+                        placeholder="M. Imprimir..."
+                        disabled={disabled}
+                      />
+                    </div>
+                    
+                    <div className="min-w-0">
+                      <MaterialDropdown
+                        open={laminarComboOpenKey === line.key}
+                        onOpenChange={(o) => onLaminarComboOpenKeyChange?.(o ? line.key : null)}
+                        selectedMat={selectedLaminarByLineKey?.get(line.key) ?? null}
+                        options={laminarMaterials}
+                        onSelect={(id) => { onUpdateLine(globalIndex, { material_laminar_id: id }); onLaminarComboOpenKeyChange?.(null) }}
+                        onClear={() => { onUpdateLine(globalIndex, { material_laminar_id: "" }); onLaminarComboOpenKeyChange?.(null) }}
+                        placeholder="M. Laminar..."
+                        disabled={disabled}
+                      />
+                    </div>
+                    
+                    <div className="min-w-0">
+                      <MaterialDropdown
+                        open={trilaminarComboOpenKey === line.key}
+                        onOpenChange={(o) => onTrilaminarComboOpenKeyChange?.(o ? line.key : null)}
+                        selectedMat={selectedTrilaminarByLineKey?.get(line.key) ?? null}
+                        options={trilaminarMaterials}
+                        onSelect={(id) => { onUpdateLine(globalIndex, { material_trilaminar_id: id }); onTrilaminarComboOpenKeyChange?.(null) }}
+                        onClear={() => { onUpdateLine(globalIndex, { material_trilaminar_id: "" }); onTrilaminarComboOpenKeyChange?.(null) }}
+                        placeholder="M. Trilaminar..."
+                        disabled={disabled}
+                      />
                     </div>
 
-                    {!isNew ? (
+                    {!isNew && (
                       <Input
-                        disabled={disabled}
-                        value={line.unit ?? "kg"}
+                        disabled={disabled} value={line.unit ?? "kg"}
                         onChange={(e) => onUpdateLine(globalIndex, { unit: e.target.value })}
-                        className={cn(catalogMasterFormPlainInputClass, "h-11")}
-                        placeholder="kg"
+                        className={cn(catalogMasterFormPlainInputClass, "h-11")} placeholder="kg"
                       />
-                    ) : null}
+                    )}
 
                     <div className="flex h-11 items-center justify-center">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
+                            type="button" variant="ghost" size="icon" disabled={disabled || lines.length <= 1}
+                            onClick={() => handleRemoveLine(globalIndex)} aria-label={`Quitar línea ${globalIndex + 1}`}
                             className="h-9 w-9 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            disabled={disabled || lines.length <= 1}
-                            onClick={() => handleRemoveLine(globalIndex)}
-                            aria-label={`Quitar línea ${globalIndex + 1}`}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -707,6 +565,7 @@ export function ClientOrderLinesEditor({
                         <TooltipContent>Quitar línea</TooltipContent>
                       </Tooltip>
                     </div>
+
                   </div>
                 )
               })
@@ -715,23 +574,13 @@ export function ClientOrderLinesEditor({
         </div>
 
         <ClientOrderLinesPaginator
-          page={safePage}
-          totalPages={totalPages}
-          totalItems={lines.length}
-          onPageChange={setLinesPage}
-          disabled={disabled}
+          page={safePage} totalPages={totalPages} totalItems={lines.length}
+          onPageChange={setLinesPage} disabled={disabled}
         />
 
         <div className="flex justify-center sm:justify-start">
-          <Button
-            type="button"
-            variant="secondary"
-            className={CLIENT_ORDER_MASTER_SECONDARY_HOVER}
-            disabled={disabled}
-            onClick={handleAddLine}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            {CLIENT_ORDER_LINES_ADD_BUTTON}
+          <Button type="button" variant="secondary" className={CLIENT_ORDER_MASTER_SECONDARY_HOVER} disabled={disabled} onClick={handleAddLine}>
+            <Plus className="mr-2 h-4 w-4" /> {CLIENT_ORDER_LINES_ADD_BUTTON}
           </Button>
         </div>
       </div>

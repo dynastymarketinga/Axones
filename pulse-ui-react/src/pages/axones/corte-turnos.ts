@@ -71,6 +71,9 @@ export type CorteTurnMetrics = {
   paletas: number
 }
 
+// 🔥 NUEVO ESTADO PARA EL TURNO: "cerrado" (normal) | "pausado" (hereda paleta)
+export type CorteTurnStatus = "abierto" | "cerrado" | "pausado"
+
 export type CorteTurnoEntry = {
   id: string
   started_at: string
@@ -81,6 +84,8 @@ export type CorteTurnoEntry = {
   operador: string
   ayudante: string
   supervisor: string
+  maquina: string // 🔥 AÑADIDO: Registro de la máquina física
+  status: CorteTurnStatus // 🔥 AÑADIDO: Para saber si pausaron el turno o lo cerraron definitivo
   kgIngresados: string
   kgMerma: string
   metraje: string
@@ -115,16 +120,15 @@ function readObject(v: unknown): Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 }
 
-function ensureStringArray(raw: unknown, size: number): string[] {
+function ensureStringArray(raw: unknown, minSize: number): string[] {
   const out: string[] = []
   if (Array.isArray(raw)) {
-    for (const v of raw.slice(0, size)) out.push(sanitizeKgCell(v))
+    for (const v of raw) out.push(sanitizeKgCell(v))
   }
-  while (out.length < size) out.push("")
+  while (out.length < minSize) out.push("")
   return out
 }
 
-/** Evita que null/undefined en JSON del servidor rompan inputs o se re-guarden como null. */
 export function sanitizeKgCell(v: unknown): string {
   if (v === null || v === undefined) return ""
   if (typeof v === "number" && Number.isFinite(v)) return String(v)
@@ -133,7 +137,12 @@ export function sanitizeKgCell(v: unknown): string {
 }
 
 export function sanitizeCorEntradaBobinasKg(raw: unknown): string[] {
-  return ensureStringArray(raw, COR_ENTRADA_SLOTS)
+  const out: string[] = []
+  if (Array.isArray(raw)) {
+    for (const v of raw.slice(0, COR_ENTRADA_SLOTS)) out.push(sanitizeKgCell(v))
+  }
+  while (out.length < COR_ENTRADA_SLOTS) out.push("")
+  return out
 }
 
 export function sanitizeCorPaletasForPersistence(paletas: CorPaleta[]): CorPaleta[] {
@@ -159,9 +168,10 @@ function toCorPaletasFromLegacy(form: Record<string, unknown>): CorPaleta[] {
 }
 
 export function getCorPaletas(form: Record<string, unknown>): CorPaleta[] {
+  let paletas: CorPaleta[] = []
+  
   const raw = form.cor_paletas
-  const paletas: CorPaleta[] = []
-  if (Array.isArray(raw)) {
+  if (Array.isArray(raw) && raw.length > 0) {
     for (const p of raw) {
       const o = readObject(p)
       const id = readString(o.id)
@@ -177,10 +187,32 @@ export function getCorPaletas(form: Record<string, unknown>): CorPaleta[] {
     }
   }
 
-  const fromLegacy = paletas.length === 0 ? toCorPaletasFromLegacy(form) : []
-  const merged = paletas.length > 0 ? paletas : fromLegacy
+  if (paletas.length === 0) {
+      paletas = toCorPaletasFromLegacy(form);
+  }
 
-  if (merged.length === 0) {
+  const allTurnos = parseCorteTurnos(form[COR_TURNOS_KEY], form);
+  if (allTurnos.length > 0) {
+      const paletasFromTurnos = new Map<string, CorPaleta>();
+      
+      paletas.forEach(p => paletasFromTurnos.set(p.id, p));
+
+      allTurnos.forEach(turno => {
+          turno.paletas.forEach(p => {
+              // 🔥 EL ASESINATO DEL ZOMBIE ESTÁ AQUÍ 🔥
+              // Si la paleta NO existe en la pantalla, la rescatamos del historial.
+              // Si YA existe en la pantalla (la estás editando), IGNORAMOS la del historial por completo. 
+              // Se acabó la vaina de "sobreescribir si la del historial pesa más".
+              if (!paletasFromTurnos.has(p.id)) {
+                  paletasFromTurnos.set(p.id, p);
+              }
+          });
+      });
+      
+      paletas = Array.from(paletasFromTurnos.values());
+  }
+
+  if (paletas.length === 0) {
     return [
       {
         id: "p-01",
@@ -191,15 +223,10 @@ export function getCorPaletas(form: Record<string, unknown>): CorPaleta[] {
     ]
   }
 
-  while (merged.length < 1) {
-    merged.push({
-      id: `p-${String(merged.length + 1).padStart(2, "0")}`,
-      label: `Paleta #${String(merged.length + 1).padStart(2, "0")}`,
-      rollosKg: emptyPaletaRollos(),
-      status: "en_progreso",
-    })
-  }
-  return merged
+  return paletas.map(p => ({
+    ...p,
+    rollosKg: ensureStringArray(p.rollosKg, COR_ROLLOS_PER_PALETA) 
+  }))
 }
 
 export function isCorPaletaCerrada(p: CorPaleta): boolean {
@@ -391,8 +418,8 @@ export function normalizeCorteTurno(raw: unknown, formFallback?: Record<string, 
 
   const paletas = parsePaletas(o.paletas)
   const entradaBobinasKg = Array.isArray(o.entradaBobinasKg)
-    ? ensureStringArray(o.entradaBobinasKg, COR_ENTRADA_SLOTS)
-    : ensureStringArray(fb.corEntradaBobinasKg, COR_ENTRADA_SLOTS)
+    ? sanitizeCorEntradaBobinasKg(o.entradaBobinasKg)
+    : sanitizeCorEntradaBobinasKg(fb.corEntradaBobinasKg)
   const entradaBobinasMeta = Array.isArray(o.entradaBobinasMeta)
     ? getMetaSeries({ [COR_ENTRADA_META_KEY]: o.entradaBobinasMeta }, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
     : getMetaSeries(fb, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS)
@@ -424,6 +451,8 @@ export function normalizeCorteTurno(raw: unknown, formFallback?: Record<string, 
     operador: readString(o.operador) || readString(fb.corOperador),
     ayudante: readString(o.ayudante) || readString(fb.corAyudante),
     supervisor: readString(o.supervisor) || readString(fb.corSupervisor),
+    maquina: readString(o.maquina) || readString(fb.corMaquina),
+    status: (readString(o.status) as CorteTurnStatus) || (o.closed_at ? "cerrado" : "abierto"),
     kgIngresados: readNumberString(o.kgIngresados) || readNumberString(fb.kgIngresadosCorte),
     kgMerma: readNumberString(o.kgMerma) || readNumberString(fb.kgMermaCorte),
     metraje: readNumberString(o.metraje) || readNumberString(fb.metrajeCorte),
@@ -456,7 +485,6 @@ export function parseCorteTurnoActual(
   return t
 }
 
-/** Turno abierto: anidado, legacy plano o objeto crudo sin cerrar. */
 export function materializeOpenCorteTurnoActual(
   form: Record<string, unknown>,
 ): CorteTurnoEntry | null {
@@ -475,7 +503,6 @@ export function materializeOpenCorteTurnoActual(
   return null
 }
 
-/** Cronómetro visible: reconcilia espejo plano (corTimer*) y timer en corTurnoActual. */
 export function resolveCorteDisplayTimer(
   activeTurno: CorteTurnoEntry | null,
   form: Record<string, unknown>,
@@ -505,7 +532,6 @@ export function resolveCorteDisplayTimer(
   return nested
 }
 
-/** Inicia o reanuda el cronómetro de producción en el formulario de corte. */
 export function startCorteProductionTimerOnForm(
   prev: Record<string, unknown>,
 ): Record<string, unknown> | null {
@@ -540,7 +566,6 @@ export function startCorteProductionTimerOnForm(
   }
 }
 
-/** Pausa el cronómetro (detiene tiempo efectivo, inicia tiempo muerto). */
 export function pauseCorteProductionTimerOnForm(
   prev: Record<string, unknown>,
   nowMs: number = Date.now(),
@@ -570,13 +595,14 @@ export function pauseCorteProductionTimerOnForm(
   }
 }
 
-/** Turno abierto heredado de claves planas + cor_turno_actual mínimo. */
 export function legacyActiveTurnoFromForm(form: Record<string, unknown>): CorteTurnoEntry | null {
   const legacy = readObject(form[COR_LEGACY_ACTUAL_KEY])
   const legacyId = readString(legacy.id)
   const turno = readString(form.corTurno).toLowerCase()
   const grupo = readString(form.corGrupo).toUpperCase()
   const operador = readString(form.corOperador)
+  const maquina = readString(form.corMaquina)
+
   if (!legacyId && !operador && !turno) return null
 
   return {
@@ -589,11 +615,13 @@ export function legacyActiveTurnoFromForm(form: Record<string, unknown>): CorteT
     operador,
     ayudante: readString(form.corAyudante),
     supervisor: readString(form.corSupervisor),
+    maquina,
+    status: "abierto",
     kgIngresados: readNumberString(form.kgIngresadosCorte),
     kgMerma: readNumberString(form.kgMermaCorte),
     metraje: readNumberString(form.metrajeCorte),
     observaciones: readString(form.corObservaciones),
-    entradaBobinasKg: ensureStringArray(form.corEntradaBobinasKg, COR_ENTRADA_SLOTS),
+    entradaBobinasKg: sanitizeCorEntradaBobinasKg(form.corEntradaBobinasKg),
     entradaBobinasMeta: getMetaSeries(form, COR_ENTRADA_META_KEY, COR_ENTRADA_SLOTS),
     paletas: getCorPaletas(form),
     timer: timerFromLegacyFlatForm(form),
@@ -607,6 +635,7 @@ export function corteTurnoToMirror(t: CorteTurnoEntry): Record<string, unknown> 
     corOperador: t.operador,
     corAyudante: t.ayudante,
     corSupervisor: t.supervisor,
+    corMaquina: t.maquina,
     kgIngresadosCorte: t.kgIngresados,
     kgMermaCorte: t.kgMerma,
     metrajeCorte: t.metraje,
@@ -627,6 +656,7 @@ export function clearCorteMirrorKeys(): Record<string, unknown> {
     corOperador: "",
     corAyudante: "",
     corSupervisor: "",
+    corMaquina: "",
     kgIngresadosCorte: "",
     kgMermaCorte: "",
     metrajeCorte: "",
@@ -636,16 +666,6 @@ export function clearCorteMirrorKeys(): Record<string, unknown> {
     corScrapMalCorteKg: "",
     corEntradaBobinasKg: Array.from({ length: COR_ENTRADA_SLOTS }, () => ""),
     [COR_ENTRADA_META_KEY]: emptyMetaSeries(COR_ENTRADA_SLOTS),
-    cor_paletas: [
-      {
-        id: "p-01",
-        label: "Paleta #01",
-        rollosKg: emptyPaletaRollos(),
-        status: "en_progreso",
-      },
-    ],
-    corSalidaPaletasKg: [emptyPaletaRollos()],
-    kgSalidaCorte: "0.00",
     ...timerToLegacyFlat(emptyCorteTurnTimer()),
   }
 }
@@ -664,7 +684,6 @@ export function syncCorteSalidaFields(form: Record<string, unknown>): Record<str
   }
 }
 
-/** Sincroniza kg ingresados desde la grilla de bobinas (30 posiciones). */
 export function syncCorteEntradaFields(form: Record<string, unknown>): Record<string, unknown> {
   const entrada = sumEntradaKgFromForm(form)
   return {
@@ -672,7 +691,6 @@ export function syncCorteEntradaFields(form: Record<string, unknown>): Record<st
   }
 }
 
-/** Métricas derivadas: entrada (grid) + salida (rollos por paleta). */
 export function syncCorteFormMetrics(form: Record<string, unknown>): Record<string, unknown> {
   const withEntrada = { ...form, ...syncCorteEntradaFields(form) }
   return { ...withEntrada, ...syncCorteSalidaFields(withEntrada) }
@@ -705,12 +723,17 @@ function reconcileCorteTurnoFromMirror(
 ): CorteTurnoEntry {
   const mirrorTurno = readString(form.corTurno).toLowerCase()
   const mirrorGrupo = readString(form.corGrupo).toUpperCase()
+  const mirrorMaquina = readString(form.corMaquina)
+  
   let next = turno
   if (mirrorTurno === "diurno" || mirrorTurno === "nocturno") {
     next = { ...next, turno: mirrorTurno }
   }
   if (mirrorGrupo === "A" || mirrorGrupo === "B" || mirrorGrupo === "C") {
     next = { ...next, grupo: mirrorGrupo }
+  }
+  if (mirrorMaquina) {
+    next = { ...next, maquina: mirrorMaquina }
   }
   if (!turno.operador.trim() && readString(form.corOperador).trim()) {
     next = {
@@ -723,67 +746,40 @@ function reconcileCorteTurnoFromMirror(
   return next
 }
 
-/**
- * Si cor_paletas tiene paletas cerradas y el turno activo aún las marca abiertas (mismos kg),
- * se prefiere el nivel superior para no revertir el cierre al guardar o al recargar.
- */
-export function shouldPreferTopCorPaletas(
-  topPaletas: CorPaleta[],
-  nestedPaletas: CorPaleta[],
-): boolean {
-  const topClosed = topPaletas.some(isCorPaletaCerrada)
-  const nestedClosed = nestedPaletas.some(isCorPaletaCerrada)
-  if (topClosed && !nestedClosed) return true
-  if (!topClosed && nestedClosed) return false
-
-  const topKg = sumSalidaKgFromPaletas(topPaletas)
-  const nestedKg = sumSalidaKgFromPaletas(nestedPaletas)
-  if (topKg > nestedKg + 0.001 || (topKg > 0 && nestedKg <= 0)) return true
-  if (topKg > 0 && topKg >= nestedKg) return true
-  if (topClosed) return true
-
-  return false
-}
-
-function mergeCorPaletaRollosKg(a: string, b: string): string {
-  const ka = readNumber(a)
-  const kb = readNumber(b)
-  return kb > ka ? sanitizeKgCell(b) : sanitizeKgCell(a)
-}
-
-/**
- * Fusiona cor_paletas (nivel OT) y paletas del turno activo por id, conservando el mayor kg por rollo.
- * Evita perder pesos al guardar cuando el espejo del turno quedó desincronizado.
- */
 export function mergeCorPaletasForSave(topPaletas: CorPaleta[], nestedPaletas: CorPaleta[]): CorPaleta[] {
   const byId = new Map<string, CorPaleta>()
-  for (const p of [...nestedPaletas, ...topPaletas]) {
+  
+  for (const p of topPaletas) {
+    byId.set(p.id, {
+      ...p,
+      rollosKg: [...p.rollosKg],
+    })
+  }
+  
+  for (const p of nestedPaletas) {
     const existing = byId.get(p.id)
     if (!existing) {
       byId.set(p.id, {
         ...p,
-        rollosKg: ensureStringArray(p.rollosKg, COR_ROLLOS_PER_PALETA),
+        rollosKg: [...p.rollosKg],
       })
       continue
     }
-    const mergedRollos = Array.from({ length: COR_ROLLOS_PER_PALETA }, (_, i) =>
-      mergeCorPaletaRollosKg(existing.rollosKg[i] ?? "", p.rollosKg[i] ?? ""),
-    )
+    
+    // 🔥 CERO AUTOCOMPLETADO Y CERO "MATH.MAX" 🔥
+    // Lo que sea que traiga la vista más reciente (nestedPaletas/p), es lo que se guarda.
     const closed = isCorPaletaCerrada(existing) || isCorPaletaCerrada(p)
     byId.set(p.id, {
       ...existing,
       label: p.label || existing.label,
-      rollosKg: mergedRollos,
+      rollosKg: [...p.rollosKg], // Se clona directamente lo que hay, sin comparar valores viejos
       status: closed ? (isCorPaletaCerrada(p) ? p.status : existing.status) : "en_progreso",
       closed_at: existing.closed_at ?? p.closed_at,
     })
   }
-  return sanitizeCorPaletasForPersistence(Array.from(byId.values()))
+  return Array.from(byId.values())
 }
 
-/**
- * Elige cor_paletas vs paletas del turno activo (misma regla que persistCorteForm al guardar).
- */
 export function pickAuthoritativeCorPaletas(
   topPaletas: CorPaleta[],
   nestedPaletas: CorPaleta[],
@@ -791,14 +787,12 @@ export function pickAuthoritativeCorPaletas(
   return mergeCorPaletasForSave(topPaletas, nestedPaletas)
 }
 
-/** Paletas definitivas para PATCH corte-control (incluye saldo provisional en Despacho). */
 export function resolveCorPaletasForSave(form: Record<string, unknown>): CorPaleta[] {
   const topPaletas = getCorPaletas(form)
   const actual = materializeOpenCorteTurnoActual(form)
   return mergeCorPaletasForSave(topPaletas, actual?.paletas ?? [])
 }
 
-/** Al cerrar turno de planta: paletas con kg pasan a cerrada (listas para nota de entrega). */
 export function autoClosePaletasWithKgForTurnEnd(paletas: CorPaleta[]): CorPaleta[] {
   const now = new Date().toISOString()
   return paletas.map((p) => {
@@ -808,19 +802,21 @@ export function autoClosePaletasWithKgForTurnEnd(paletas: CorPaleta[]): CorPalet
   })
 }
 
-/**
- * Tras finalizar turno: conserva paletas cerradas en cor_paletas (despacho) y deja una abierta vacía.
- */
 export function buildCorPaletasPersistedAfterTurnClose(
   turnPaletas: CorPaleta[],
   existingOtPaletas: CorPaleta[],
+  turnoStatus: CorteTurnStatus = "cerrado" 
 ): CorPaleta[] {
-  const autoClosed = autoClosePaletasWithKgForTurnEnd(
-    mergeCorPaletasForSave(existingOtPaletas, turnPaletas),
-  )
+  const merged = mergeCorPaletasForSave(existingOtPaletas, turnPaletas)
+  
+  if (turnoStatus === "pausado") {
+      return merged
+  }
+
+  const autoClosed = autoClosePaletasWithKgForTurnEnd(merged)
   const cerradas = autoClosed.filter(isCorPaletaCerrada)
   const nextIndex = cerradas.length + 1
-  return sanitizeCorPaletasForPersistence([
+  return [
     ...cerradas,
     {
       id: `p-${String(nextIndex).padStart(2, "0")}`,
@@ -828,7 +824,7 @@ export function buildCorPaletasPersistedAfterTurnClose(
       rollosKg: emptyPaletaRollos(),
       status: "en_progreso",
     },
-  ])
+  ]
 }
 
 export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Record<string, unknown> {
@@ -839,6 +835,9 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
   if (actual === null && mergedForm[COR_ACTUAL_KEY] === undefined) {
     actual = legacyActiveTurnoFromForm(mergedForm)
   }
+
+  const otGlobalPaletas = getCorPaletas(mergedForm)
+  
   if (actual) {
     actual = reconcileCorteTurnoFromMirror(actual, mergedForm)
     const flatTimer = timerFromLegacyFlatForm(mergedForm)
@@ -847,8 +846,8 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
     if (flatLive && nestedPending) {
       actual = { ...actual, timer: flatTimer }
     }
-    const topPaletas = getCorPaletas(mergedForm)
-    const paletas = mergeCorPaletasForSave(topPaletas, actual.paletas)
+    
+    const paletas = mergeCorPaletasForSave(otGlobalPaletas, actual.paletas)
     actual = { ...actual, paletas }
   }
 
@@ -860,8 +859,7 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
   }
 
   if (actual) {
-    const paletas = sanitizeCorPaletasForPersistence(actual.paletas)
-    actual = { ...actual, paletas }
+    const paletas = actual.paletas 
     next = {
       ...next,
       ...corteTurnoToMirror(actual),
@@ -874,6 +872,8 @@ export function bootstrapCorteFormState(mergedForm: Record<string, unknown>): Re
       ...next,
       [COR_ACTUAL_KEY]: null,
       ...clearCorteMirrorKeys(),
+      cor_paletas: otGlobalPaletas,
+      corSalidaPaletasKg: otGlobalPaletas.map(p => p.rollosKg),
       ...(turnos.length > 0 ? corteAggregatedTimerMirrorFromTurnos(turnos) : {}),
     }
   }
@@ -918,7 +918,7 @@ export function accumulateCorteFromJson(
   let ultimoCierreLabel = "Sin producción previa"
   if (ultimo?.closed_at) {
     try {
-      ultimoCierreLabel = `Último cierre: ${new Date(ultimo.closed_at).toLocaleString("es-VE")}`
+      ultimoCierreLabel = `Último cierre: ${new Date(ultimo.closed_at).toLocaleString("es-VE")} ${ultimo.status === 'pausado' ? '(Turno Pausado)' : ''}`
     } catch {
       ultimoCierreLabel = "Turno cerrado"
     }
@@ -981,8 +981,22 @@ export function createNewCorteTurno(params: {
   operador: string
   ayudante: string
   supervisor: string
+  maquina: string 
+  inheritedPaletas?: CorPaleta[] 
 }): CorteTurnoEntry {
   const now = new Date().toISOString()
+  
+  const initialPaletas = params.inheritedPaletas && params.inheritedPaletas.length > 0 
+    ? params.inheritedPaletas 
+    : [
+      {
+        id: "p-01",
+        label: "Paleta #01",
+        rollosKg: emptyPaletaRollos(),
+        status: "en_progreso" as const,
+      },
+    ];
+
   return {
     id: newCorteTurnoId(),
     started_at: now,
@@ -993,20 +1007,15 @@ export function createNewCorteTurno(params: {
     operador: params.operador.trim(),
     ayudante: params.ayudante.trim(),
     supervisor: params.supervisor.trim(),
+    maquina: params.maquina.trim(),
+    status: "abierto",
     kgIngresados: "",
     kgMerma: "",
     metraje: "",
     observaciones: "",
     entradaBobinasKg: Array.from({ length: COR_ENTRADA_SLOTS }, () => ""),
     entradaBobinasMeta: emptyMetaSeries(COR_ENTRADA_SLOTS),
-    paletas: [
-      {
-        id: "p-01",
-        label: "Paleta #01",
-        rollosKg: emptyPaletaRollos(),
-        status: "en_progreso",
-      },
-    ],
+    paletas: initialPaletas,
     timer: emptyCorteTurnTimer(),
   }
 }

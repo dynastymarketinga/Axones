@@ -64,7 +64,6 @@ class WorkOrderController extends Controller
         }
     }
 
-    /** Order index aligned with WorkOrderBoardStage declaration order. */
     private function boardStageOrderIndex(string $stage): int
     {
         foreach (WorkOrderBoardStage::cases() as $i => $case) {
@@ -76,7 +75,6 @@ class WorkOrderController extends Controller
         return -1;
     }
 
-    /** Etapa del tablero que corresponde al área de solicitud (misma convención que el frontend). */
     private function targetBoardStageForMiArea(string $miArea): string
     {
         return match ($miArea) {
@@ -88,7 +86,6 @@ class WorkOrderController extends Controller
         };
     }
 
-    /** Solicitud de coordinación OT más reciente (sin insumos) para un área. */
     private function constrainLatestCoordinationAreaRequest(\Illuminate\Database\Eloquent\Builder $q, string $area): void
     {
         $q->whereNull('material_request_id')
@@ -179,7 +176,6 @@ class WorkOrderController extends Controller
                         });
                     }
                 });
-                // Montaje / impresión / laminación / corte: En curso incluye subpestaña «Finalizadas» (MES).
                 if ($mesEstadoKeyActivas !== null) {
                     $outer->orWhereHas('technicalDocument', function ($td) use ($mesEstadoKeyActivas) {
                         $td->where("form->{$mesEstadoKeyActivas}", 'finalizada');
@@ -203,7 +199,7 @@ class WorkOrderController extends Controller
                         $query->whereRaw('1 = 0');
                     }
                 } elseif ($areaProcessTag === 'active') {
-                    /** Áreas en paralelo: la bandeja usa solicitud al área + MES, no el tablero Kanban. */
+                    // Pendiente en front
                 } else {
                     $query->where('board_stage', $targetStage);
                 }
@@ -363,9 +359,6 @@ class WorkOrderController extends Controller
         return response()->json($paginator);
     }
 
-    /**
-     * Tablero Kanban: todas las OT abiertas agrupadas por columna (board_stage).
-     */
     public function programacionBoard(): JsonResponse
     {
         $orders = WorkOrder::query()
@@ -398,6 +391,11 @@ class WorkOrderController extends Controller
     public function store(WorkOrderStoreRequest $request): JsonResponse
     {
         $data = $request->validated();
+        
+        // 🔥 Atrapamos el ID de la linea especifica que manda React
+        $clientOrderLineIdRaw = $request->input('client_order_line_id');
+        $clientOrderLineId = $clientOrderLineIdRaw ? (int) $clientOrderLineIdRaw : null;
+        
         $linesInput = $data['lines'] ?? [];
         $productionItemsInput = $data['production_items'] ?? [];
         $importLines = (bool) ($data['import_client_order_lines'] ?? false);
@@ -414,10 +412,16 @@ class WorkOrderController extends Controller
             $data['material_request_notes'],
         );
 
-        $this->applyClientOrderToWorkOrderPayload($data);
+        // Pasamos el ID de la línea para que asigne el producto exacto
+        $this->applyClientOrderToWorkOrderPayload($data, $clientOrderLineId);
 
         if ($importLines) {
-            $linesInput = $this->buildWorkOrderLinesFromClientOrder((int) $data['client_order_id']);
+            // Importamos materiales SOLO de esta linea especifica o producto especifico
+            $linesInput = $this->buildWorkOrderLinesFromClientOrder(
+                (int) $data['client_order_id'],
+                $clientOrderLineId,
+                $data['product_id'] ?? null
+            );
         }
 
         $data['code'] = $data['code'] ?? WorkOrder::nextCode();
@@ -511,9 +515,6 @@ class WorkOrderController extends Controller
         return response()->json($work_order);
     }
 
-    /**
-     * PDF "Orden de Producción" (formato impreso Axones).
-     */
     public function ordenProduccionPdf(WorkOrder $work_order): Response
     {
         $work_order->load(['client', 'product', 'productionItems']);
@@ -525,9 +526,6 @@ class WorkOrderController extends Controller
         return $pdf->download('orden-produccion-'.$fileBase.'.pdf');
     }
 
-    /**
-     * HTML para vista previa del reporte tipo planilla (merge maestro + formulario técnico).
-     */
     public function previewPlanillaReport(Request $request, WorkOrder $work_order): Response
     {
         $this->assertPlanillaReportAllowed($work_order);
@@ -544,9 +542,6 @@ class WorkOrderController extends Controller
         ]);
     }
 
-    /**
-     * PDF planilla larga (orden de trabajo / producción).
-     */
     public function downloadPlanillaReportPdf(Request $request, WorkOrder $work_order): Response
     {
         $this->assertPlanillaReportAllowed($work_order);
@@ -644,9 +639,6 @@ class WorkOrderController extends Controller
         return response()->json($freshOrder);
     }
 
-    /**
-     * @param  list<array{quantity: mixed, quantity_unit?: string|null, product_description: string, technical_specs?: string|null, position?: int|null}>  $items
-     */
     private function syncProductionItems(WorkOrder $order, array $items): void
     {
         $order->productionItems()->delete();
@@ -662,9 +654,6 @@ class WorkOrderController extends Controller
         }
     }
 
-    /**
-     * @param  list<array{material_id: int, quantity: string|float, notes?: string|null}>  $linesInput
-     */
     private function replaceWorkOrderLinesAndMaterialRequests(
         WorkOrder $wo,
         array $linesInput,
@@ -736,9 +725,6 @@ class WorkOrderController extends Controller
         }
     }
 
-    /**
-     * @return list<string>
-     */
     private function parseIncludeAreaSummaries(Request $request): array
     {
         $raw = trim((string) $request->query('include_area_summaries', ''));
@@ -765,10 +751,8 @@ class WorkOrderController extends Controller
         };
     }
 
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    private function applyClientOrderToWorkOrderPayload(array &$data): void
+    // 🔥 Modificado: Acepta el ID de la linea exacta para no amarrarse a la primera que encuentre
+    private function applyClientOrderToWorkOrderPayload(array &$data, ?int $clientOrderLineId = null): void
     {
         if (empty($data['client_order_id'])) {
             return;
@@ -790,18 +774,18 @@ class WorkOrderController extends Controller
         $data['client_id'] = $data['client_id'] ?? $co->client_id;
 
         if (empty($data['product_id'])) {
-            $line = $co->lines->first(
-                static fn (ClientOrderLine $l) => $l->product_id !== null,
-            );
+            $line = $co->lines->first(function (ClientOrderLine $l) use ($clientOrderLineId) {
+                if ($clientOrderLineId !== null && $l->id !== $clientOrderLineId) {
+                    return false;
+                }
+                return $l->product_id !== null;
+            });
             if ($line !== null) {
                 $data['product_id'] = (int) $line->product_id;
             }
         }
     }
 
-    /**
-     * @param  array<string, mixed>  $validated
-     */
     private function validateClientOrderAgainstWorkOrderState(WorkOrder $workOrder, array &$validated): void
     {
         $hasCoKey = array_key_exists('client_order_id', $validated);
@@ -834,15 +818,23 @@ class WorkOrderController extends Controller
     }
 
     /**
-     * Líneas de OT desde pedido: solo líneas del pedido que traen material_id (PDF: programación / consumo previsto).
-     *
-     * @return list<array{material_id: int, quantity: string, notes: string|null}>
+     * 🔥 Modificado: Ahora solo importa los materiales de la linea exacta que se solicitó
      */
-    private function buildWorkOrderLinesFromClientOrder(int $clientOrderId): array
+    private function buildWorkOrderLinesFromClientOrder(int $clientOrderId, ?int $clientOrderLineId = null, ?int $productId = null): array
     {
         $co = ClientOrder::query()->with('lines')->findOrFail($clientOrderId);
         $out = [];
         foreach ($co->lines as $line) {
+            // Si mandan la línea exacta, ignoramos todas las demás
+            if ($clientOrderLineId !== null && $line->id !== $clientOrderLineId) {
+                continue;
+            }
+            
+            // Fallback: Si no hay línea, pero hay producto, ignoramos las de otros productos
+            if ($clientOrderLineId === null && $productId !== null && $line->product_id !== $productId) {
+                continue;
+            }
+
             if ($line->material_id === null) {
                 continue;
             }
@@ -859,9 +851,8 @@ class WorkOrderController extends Controller
         }
 
         if ($out === []) {
-            throw ValidationException::withMessages([
-                'import_client_order_lines' => ['El pedido no tiene líneas con material_id para importar.'],
-            ]);
+            // Devolvemos vacío en lugar de explotar, para soportar productos que no llevan material_id viejo.
+            return [];
         }
 
         return $out;

@@ -1,3 +1,5 @@
+"use client"
+
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -37,13 +39,15 @@ import {
   UserPlus,
   UserRound,
   Users,
+  PauseCircle,
+  Plus,
+  Minus,
 } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
 
 import {
-  CortePaletasSectionFooter,
   CortePaletasSectionToolbar,
 } from "@/components/axones/CortePaletasSectionFooter"
 import { MesBobinaKgSlotCell } from "@/components/axones/MesBobinaKgSlotCell"
@@ -121,11 +125,7 @@ import {
   cortePaletaSummaryTotalKgInputClass,
   getCortePaletaTheme,
 } from "@/pages/axones/corte-paleta-rollos-ui"
-import {
-  clampCortePaletaPage,
-  cortePaletaTotalPages,
-  useCortePaletaPageSize,
-} from "@/pages/axones/use-corte-paleta-page-size"
+
 import {
   COR_ACTUAL_KEY,
   COR_ENTRADA_META_KEY,
@@ -161,6 +161,7 @@ import {
   type CorPaleta,
   type CortePauseEntry,
   type CorteTurnoEntry,
+  type CorteTurnStatus,
   emptyBobinaLabelMeta,
   type BobinaLabelMeta,
 } from "./corte-turnos"
@@ -219,9 +220,7 @@ type Props = {
   setForm: React.Dispatch<React.SetStateAction<Record<string, unknown>>>
   pedidoTotalKg: number
   readOnly?: boolean
-  /** Solo lectura operativa (área finalizada sin jefatura). Paridad impresión. */
   readOnlyOps?: boolean
-  /** Tras cerrar paleta u otras acciones críticas, persistir en servidor. */
   onRequestSave?: (
     srcBase?: Record<string, unknown>,
     options?: {
@@ -231,11 +230,8 @@ type Props = {
       clearTurnoActual?: boolean
     },
   ) => void | Promise<boolean>
-  /** Cierre de turno con persistencia (panel padre). */
   onApplyCerrarTurno?: (cur: CorteTurnoEntry) => void | Promise<void>
-  /** Abre confirmación de cierre en el panel padre. */
   onRequestCerrarTurno?: () => void
-  /** Turno abierto y cronómetro iniciado al menos una vez (operación en planta activa). */
   canOperateProduction?: boolean
   hasActiveTurno?: boolean
   areaFinalizada?: boolean
@@ -248,7 +244,6 @@ type Props = {
   deadSec?: number
   effectiveSec?: number
   demountSec?: number
-  /** Tiempo de arranque acumulado (OT o turno según `timerShowsOtAccumulated`). */
   arranqueSec?: number
   timerShowsOtAccumulated?: boolean
   kgHora?: string
@@ -263,7 +258,6 @@ type Props = {
   canPreviewPlanillaReport?: boolean
   onPreviewPlanillaReport?: () => void
   formatTimerHms?: (s: number) => string
-  /** Espejo planilla (paridad impresión: impTurno / impGrupo). */
   corTurno?: string
   corGrupo?: string
   corOperador?: string
@@ -272,11 +266,8 @@ type Props = {
   onSetTurno?: (v: "diurno" | "nocturno") => void
   onSetGrupo?: (v: "A" | "B" | "C") => void
   onActivePersonnelApply?: (people: DraftPerson[]) => void
-  /** Actualiza corTurnoActual + espejo (desde panel padre). */
   patchActiveTurn?: (updater: (t: CorteTurnoEntry) => CorteTurnoEntry) => void
-  /** Inicia/reanuda cronómetro (panel padre persiste en servidor). */
   startProductionTimer?: () => void
-  /** Pausa cronómetro (panel padre persiste en servidor). */
   pauseProductionTimer?: () => void
   confirmPauseAndResume?: () => void
   pauseReason?: string
@@ -561,8 +552,12 @@ export default function WorkOrderCorteOpsSection({
     onPauseMotivoDialogOpenChangeProp ?? setPauseMotivoDialogOpenLocal
   const [pauseParadaComboOpen, setPauseParadaComboOpen] = useState(false)
   const [cumulativeTurnosDialogOpen, setCumulativeTurnosDialogOpen] = useState(false)
+  
+  // 🔥 ESTADOS PARA EL INICIO DE TURNO
   const [draftTurno, setDraftTurno] = useState<"diurno" | "nocturno">("diurno")
   const [draftGrupo, setDraftGrupo] = useState<"A" | "B" | "C">("A")
+  const [draftMaquina, setDraftMaquina] = useState<string>(readString(form.maquina))
+
   const [draftPeople, setDraftPeople] = useState<DraftPerson[]>([])
   const [draftStaging, setDraftStaging] = useState<{ name: string; role: DraftPersonRole }>({
     name: "",
@@ -641,17 +636,9 @@ export default function WorkOrderCorteOpsSection({
     () => entradaBobinas.reduce((acc, v) => acc + parseBobinaKgSlotNumber(v), 0),
     [entradaBobinas],
   )
+  
   const corPaletas = useMemo(() => getCorPaletas(form), [form])
-  const paletaPageSize = useCortePaletaPageSize()
-  const [paletaPage, setPaletaPage] = useState(1)
-  const paletaTotalPages = useMemo(
-    () => cortePaletaTotalPages(corPaletas.length, paletaPageSize),
-    [corPaletas.length, paletaPageSize],
-  )
-  const visiblePaletaIndices = useMemo(() => {
-    const start = (paletaPage - 1) * paletaPageSize
-    return Array.from({ length: Math.min(paletaPageSize, Math.max(0, corPaletas.length - start)) }, (_, i) => start + i)
-  }, [corPaletas.length, paletaPage, paletaPageSize])
+  
   const salidaPaletas = useMemo(() => corPaletas.map((p) => p.rollosKg), [corPaletas])
   const salidaPaletasTotales = useMemo(
     () => salidaPaletas.map((p) => p.reduce((acc, v) => acc + readNumber(v), 0)),
@@ -708,18 +695,16 @@ export default function WorkOrderCorteOpsSection({
   const kgDespachoAcum = useMemo(() => sumSalidaKgFromClosedPaletas(corPaletas), [corPaletas])
   const kgProvisionalDespacho = useMemo(() => sumSalidaKgFromOpenPaletas(corPaletas), [corPaletas])
   const corteOp = useMemo(() => corteOperabilityFromForm(form), [form])
+  
   const inputDisabled = opsReadOnly || !hasActiveTurno
-  /** Ingreso de bobinas impresa: editable sin turno de planta (alimenta kg ingresados). */
   const entradaInputDisabled = opsReadOnly
-  const paletaInputsDisabled = (p: CorPaleta) => inputDisabled || isCorPaletaCerrada(p)
+  
+  // 🔥 SE ELIMINÓ LA RESTRICCIÓN DE PALETAS CERRADAS 🔥
+  // inputDisabled ahora manda en toda la vista de rollos sin importar si la paleta está en despacho.
   const canAddPaletaNow = corteOp.canAddPaleta && !opsReadOnly
 
   const draftOperadorName = draftPeople.find((p) => p.role === "operador")?.name.trim() ?? ""
   const draftOperadorMissing = draftPeople.every((p) => p.role !== "operador")
-
-  useEffect(() => {
-    setPaletaPage((p) => clampCortePaletaPage(p, corPaletas.length, paletaPageSize))
-  }, [corPaletas.length, paletaPageSize])
 
   useEffect(() => {
     const salidaStr = salidaTotalKg.toFixed(2)
@@ -932,12 +917,11 @@ export default function WorkOrderCorteOpsSection({
       {
         id: `p-${String(nextIndex).padStart(2, "0")}`,
         label: `Paleta #${String(nextIndex).padStart(2, "0")}`,
-        rollosKg: emptyPaletaRollos(),
+        rollosKg: Array.from({ length: 48 }, () => ""),
         status: "en_progreso" as const,
       },
     ]
     writePaletas(nextPaletas)
-    setPaletaPage(cortePaletaTotalPages(nextPaletas.length, paletaPageSize))
   }
 
   function cerrarPaleta(index: number) {
@@ -971,14 +955,10 @@ export default function WorkOrderCorteOpsSection({
         {
           id: newCorteTurnoId(),
           label: `Paleta #${String(n).padStart(2, "0")}`,
-          rollosKg: emptyPaletaRollos(),
+          rollosKg: Array.from({ length: 48 }, () => ""),
           status: "en_progreso" as const,
         },
       ]
-    }
-    const patch = {
-      cor_paletas: next,
-      corSalidaPaletasKg: next.map((p) => p.rollosKg),
     }
     writePaletas(next)
     toast.success(
@@ -986,35 +966,27 @@ export default function WorkOrderCorteOpsSection({
     )
   }
 
+  // 🔥 LA PAPELERA PUEDE BORRAR TODO, AUN EN DESPACHO 🔥
   function removePaleta(index: number) {
     if (inputDisabled) return
     const target = corPaletas[index]
+    
+    // Si tiene kilos o está en despacho, te avisa pero te deja borrarla
     if (target && isCorPaletaCerrada(target)) {
-      toast.error("No se puede eliminar una paleta ya cerrada (está en despacho).")
-      return
-    }
-    const hasAnyKg = (target?.rollosKg ?? []).some((v) => readNumber(v) > 0)
-    if (hasAnyKg) {
-      const ok = window.confirm(
-        "Esta paleta tiene pesos registrados. ¿Seguro que desea eliminarla?",
-      )
+      const ok = window.confirm("CUIDADO: Esta paleta ya está en Despacho. ¿Seguro que desea eliminarla de raíz y afectar el inventario?")
       if (!ok) return
+    } else {
+      const hasAnyKg = (target?.rollosKg ?? []).some((v) => readNumber(v) > 0)
+      if (hasAnyKg) {
+        const ok = window.confirm(
+          "Esta paleta tiene pesos registrados. ¿Seguro que desea eliminarla?",
+        )
+        if (!ok) return
+      }
     }
 
     const filtered = corPaletas.filter((_, i) => i !== index)
-    if (filtered.length >= MIN_PALETAS) {
-      writePaletas(filtered)
-      return
-    }
-
-    writePaletas([
-      {
-        id: "p-01",
-        label: "Paleta #01",
-        rollosKg: emptyPaletaRollos(),
-        status: "en_progreso",
-      },
-    ])
+    writePaletas(filtered) 
   }
 
   function onDraftPersonGuardar(name: string, role: DraftPersonRole) {
@@ -1045,10 +1017,16 @@ export default function WorkOrderCorteOpsSection({
   function requestIniciarTurno() {
     if (opsReadOnly) return
     if (hasActiveTurno) return
+    
+    if (!draftMaquina.trim()) {
+       toast.error("Debe seleccionar la máquina antes de iniciar el turno.")
+       return
+    }
+
     if (draftOperadorMissing) {
       toast.error(
         draftPeople.length > 0
-          ? "Falta un Operador en la cuadrilla. Guarde al menos una persona con rol Operador (Ayudante no basta)."
+          ? "Falta un Operador en la cuadrilla. Guarde al menos una persona con rol Operador."
           : "Guarde al menos un operador en la cuadrilla antes de iniciar el turno.",
       )
       return
@@ -1059,23 +1037,37 @@ export default function WorkOrderCorteOpsSection({
   function confirmIniciarTurno() {
     if (opsReadOnly) return
     if (hasActiveTurno) return
+    if (!draftMaquina.trim()) return // Doble check
     if (draftOperadorMissing) {
       setStartTurnConfirmOpen(false)
-      toast.error(
-        draftPeople.length > 0
-          ? "Falta un Operador en la cuadrilla. Guarde al menos una persona con rol Operador (Ayudante no basta)."
-          : "Guarde al menos un operador en la cuadrilla antes de iniciar el turno.",
-      )
+      toast.error("Guarde al menos un operador en la cuadrilla antes de iniciar el turno.")
       return
     }
+
     const { operador, ayudante, supervisor } = stringsFromActivePersonnel(draftPeople)
+    
+    let paletasToInherit = [...(form.cor_paletas as CorPaleta[] || [])];
+    
+    if (paletasToInherit.length === 0 || paletasToInherit.every(p => isCorPaletaCerrada(p))) {
+        const nextIdx = paletasToInherit.length + 1;
+        paletasToInherit.push({
+            id: `p-${String(nextIdx).padStart(2, "0")}`,
+            label: `Paleta #${String(nextIdx).padStart(2, "0")}`,
+            rollosKg: Array.from({ length: 48 }, () => ""),
+            status: "en_progreso" as const
+        });
+    }
+
     const t = createNewCorteTurno({
       turno: draftTurno,
       grupo: draftGrupo,
       operador,
       ayudante,
       supervisor,
+      maquina: draftMaquina, 
+      inheritedPaletas: paletasToInherit 
     })
+    
     const entradaKgArr = [...entradaBobinas]
     const entradaMetaArr = [...entradaBobinasMeta]
     const turnoWithEntrada: CorteTurnoEntry = {
@@ -1110,15 +1102,16 @@ export default function WorkOrderCorteOpsSection({
       }
       await showAxonesSuccessSwal(
         "Turno de planta abierto",
-        "Cuadrilla guardada. Use el cronómetro (play) y, al terminar otro turno, pulse Guardar → Finalizar turno o Cerrar turno en el cronómetro.",
+        "Cuadrilla y máquina guardadas. Use el cronómetro (play) y, al terminar o pausar su turno, vaya a la sección de Información del Turno.",
       )
     })()
   }
 
-  function applyCerrarTurno(cur: CorteTurnoEntry) {
+  function applyCerrarTurno(cur: CorteTurnoEntry, status: CorteTurnStatus = "cerrado") {
     const finalizedTimer = finalizeTurnTimerNow(cur.timer)
     const closed: CorteTurnoEntry = {
       ...cur,
+      status, // "cerrado" o "pausado"
       timer: finalizedTimer,
       closed_at: new Date().toISOString(),
       metrics: snapshotCorteTurnMetrics({
@@ -1145,13 +1138,16 @@ export default function WorkOrderCorteOpsSection({
         [COR_ACTUAL_KEY]: null,
         corRegistrosTurnos: parseCorteTurnos(prev[COR_TURNOS_KEY], prev).length + 1,
         ...clearCorteMirrorKeys(),
-        ...syncCorteSalidaFields({ ...prev, cor_paletas: clearCorteMirrorKeys().cor_paletas }),
+        ...(status === "pausado" ? { cor_paletas: closed.paletas, corSalidaPaletasKg: closed.paletas.map(p => p.rollosKg) } : {}),
       }
-      return next
+      return { ...next, ...syncCorteSalidaFields(next) };
     })
-    toast.success(
-      "Turno cerrado en pantalla. Pulse Guardar → Finalizar turno para enviar al servidor y limpiar el formulario.",
-    )
+    
+    if (status === "pausado") {
+       toast.success("Turno pausado. Las paletas activas se mantendrán para el siguiente operador. Pulse Guardar -> Finalizar turno.")
+    } else {
+       toast.success("Turno cerrado definitivo en pantalla. Pulse Guardar → Finalizar turno para enviar al servidor.")
+    }
   }
 
   function cerrarTurnoActual() {
@@ -1163,14 +1159,39 @@ export default function WorkOrderCorteOpsSection({
       return
     }
     if (onRequestCerrarTurno) {
+      patchActiveTurn((t) => ({ ...t, status: "cerrado" }))
       onRequestCerrarTurno()
       return
     }
     if (onApplyCerrarTurno) {
-      void onApplyCerrarTurno(cur)
+      void onApplyCerrarTurno({ ...cur, status: "cerrado" })
       return
     }
-    applyCerrarTurno(cur)
+    applyCerrarTurno(cur, "cerrado")
+  }
+
+  function pausarTurnoActual() {
+    if (opsReadOnly) return
+    const cur = activeTurno
+    if (!cur) return
+    if (!cur.operador.trim() || !cur.turno || !cur.grupo) {
+      toast.error("Complete turno, grupo y operador.")
+      return
+    }
+    
+    const ok = window.confirm("¿Pausar turno? Su cronómetro se detendrá y saldrá del turno, pero la paleta actual quedará a medias para que el siguiente turno la continúe.")
+    if (!ok) return;
+
+    if (onRequestCerrarTurno) {
+      patchActiveTurn((t) => ({ ...t, status: "pausado" }))
+      onRequestCerrarTurno()
+      return
+    }
+    if (onApplyCerrarTurno) {
+      void onApplyCerrarTurno({ ...cur, status: "pausado" })
+      return
+    }
+    applyCerrarTurno(cur, "pausado")
   }
 
   const onSetTurno =
@@ -1575,8 +1596,9 @@ export default function WorkOrderCorteOpsSection({
                 <ol className="montaje-setup-steps-list mt-2 space-y-2 pl-5 leading-relaxed text-muted-foreground">
                   <li>
                     <span className="font-semibold text-foreground">1)</span> Elija{" "}
-                    <span className="font-semibold text-foreground">Turno</span> y{" "}
-                    <span className="font-semibold text-foreground">Grupo</span>.
+                    <span className="font-semibold text-foreground">Turno</span>,{" "}
+                    <span className="font-semibold text-foreground">Grupo</span> y la{" "}
+                    <span className="font-semibold text-foreground">Máquina</span>.
                   </li>
                   <li>
                     <span className="font-semibold text-foreground">2)</span> Escriba nombre, seleccione rol y pulse{" "}
@@ -1596,6 +1618,28 @@ export default function WorkOrderCorteOpsSection({
               </div>
 
               <div className="montaje-personal-panel rounded-lg border bg-background/60 p-4">
+                
+                {/* 🔥 SELECTOR DE MÁQUINA AÑADIDO AQUÍ 🔥 */}
+                <div className="grid gap-4 md:grid-cols-2 mb-4 pb-4 border-b border-border/50">
+                  <div className="space-y-2 md:col-span-2">
+                    {fieldLegend(Factory, "Máquina de Corte")}
+                    <Select
+                      value={draftMaquina}
+                      onValueChange={setDraftMaquina}
+                      disabled={opsReadOnly}
+                    >
+                      <SelectTrigger className="h-10 w-full min-w-0 text-base font-semibold border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+                        <SelectValue placeholder="Seleccione en qué máquina cortará..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Cortadora China">Cortadora China</SelectItem>
+                        <SelectItem value="Cortadora Permaco">Cortadora Permaco</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="mes-field-hint">Obligatorio. Indique físicamente en qué máquina cortará la O.T.</p>
+                  </div>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     {fieldLegend(Clock, "Turno")}
@@ -1719,7 +1763,7 @@ export default function WorkOrderCorteOpsSection({
                       <Button
                         type="button"
                         variant="secondary"
-                        className="montaje-save-person-btn h-12 w-full max-w-xs gap-2 text-base font-semibold sm:w-auto sm:min-w-[12rem] sm:shrink-0"
+                        className="montaje-save-person-btn h-12 w-full max-w-xs gap-2 text-base font-semibold sm:w-auto sm:min-min-[12rem] sm:shrink-0"
                         onClick={() => onDraftPersonGuardar(draftStaging.name, draftStaging.role)}
                         disabled={opsReadOnly}
                       >
@@ -1756,10 +1800,12 @@ export default function WorkOrderCorteOpsSection({
               type="button"
               className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
               onClick={requestIniciarTurno}
-              disabled={opsReadOnly || draftOperadorMissing}
+              disabled={opsReadOnly || draftOperadorMissing || !draftMaquina.trim()}
               title={
                 draftOperadorMissing
                   ? "Guarde al menos una persona con rol Operador en la cuadrilla"
+                  : !draftMaquina.trim()
+                  ? "Seleccione en qué máquina trabajará"
                   : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
               }
             >
@@ -1783,6 +1829,7 @@ export default function WorkOrderCorteOpsSection({
               <div key={t.id} className="mt-2 rounded border p-2">
                 {t.closed_at ? new Date(t.closed_at).toLocaleString("es-VE") : "—"} · {turnoGrupoLabel(t.turno, t.grupo)} · Salida{" "}
                 {sumSalidaKgFromClosedTurno(t).toFixed(2)} Kg
+                {t.status === "pausado" ? <Badge variant="secondary" className="ml-2 text-[10px] bg-amber-100 text-amber-800 border-amber-300">Pausado</Badge> : null}
               </div>
             ))}
           </CollapsibleContent>
@@ -1797,7 +1844,7 @@ export default function WorkOrderCorteOpsSection({
           <p className="text-muted-foreground mb-3 border-b border-border/50 pb-3 text-xs leading-snug">
             Turno de planta (calendario y cuadrilla) y personal del registro actual. El cronómetro está en la sección
             siguiente. Para cerrar la sesión use{" "}
-            <span className="font-semibold text-foreground">Cerrar turno</span> en el cronómetro.
+            <span className="font-semibold text-foreground">Cerrar turno</span> en esta sección o en el cronómetro.
           </p>
           <div
             className="mb-3 rounded-md border border-sky-500/35 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
@@ -1808,24 +1855,53 @@ export default function WorkOrderCorteOpsSection({
               <span className="font-semibold">no</span> significa que el turno terminó.
             </p>
             <p className="mt-1.5">
-              Para <span className="font-semibold">otro turno con otra persona</span> (como en Montaje e Impresión): cierre
+              Para <span className="font-semibold">otro turno con otra persona</span>: cierre
               este turno y verá la pantalla <span className="font-semibold">Personal y turno de planta</span> con el botón{" "}
               <span className="font-semibold">Iniciar turno</span>.
             </p>
+            
+            {/* 🔥 BOTONES DE CIERRE Y PAUSA AÑADIDOS AQUÍ 🔥 */}
             {onRequestCerrarTurno && !opsReadOnly ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2 h-8 border-sky-600/40 bg-background text-xs font-semibold"
-                onClick={onRequestCerrarTurno}
-              >
-                <LogOut className="mr-1.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                Cerrar turno e iniciar otro
-              </Button>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-sky-600/40 bg-background text-xs font-semibold"
+                  onClick={cerrarTurnoActual}
+                  title="Cierra el turno y envía todas sus paletas terminadas a despacho"
+                >
+                  <LogOut className="mr-1.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Cerrar turno (Definitivo)
+                </Button>
+                
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-amber-600/40 bg-amber-50 text-amber-900 text-xs font-semibold hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-100 dark:hover:bg-amber-900/50"
+                  onClick={pausarTurnoActual}
+                  title="Cierra sesión pero hereda la paleta actual a medias para el próximo turno"
+                >
+                  <PauseCircle className="mr-1.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Pausar turno (Heredar paleta)
+                </Button>
+              </div>
             ) : null}
           </div>
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-3">
+            
+            {/* 🔥 MÁQUINA EN LA VISTA ACTIVA 🔥 */}
+            <div className="space-y-1">
+              {fieldLegend(Factory, "Máquina")}
+              <Input 
+                value={activeTurno?.maquina || readString(form.corMaquina) || "—"} 
+                disabled 
+                className="ot-input-unified h-9 text-slate-700 bg-slate-50 font-semibold" 
+              />
+              <p className="mes-field-hint">Máquina actual.</p>
+            </div>
+
             <div className="space-y-1">
               {fieldLegend(Clock, "Turno")}
               <div className="mes-toggle-row mes-toggle-turno">
@@ -1885,7 +1961,7 @@ export default function WorkOrderCorteOpsSection({
               </div>
               <p className="mes-field-hint">Cuadrilla o equipo asignado (rotación A / B / C).</p>
             </div>
-            <div className="md:col-span-2 mt-1 rounded-lg border bg-background/60 p-3">
+            <div className="md:col-span-3 mt-1 rounded-lg border bg-background/60 p-3">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Personal del turno
               </div>
@@ -2226,11 +2302,11 @@ export default function WorkOrderCorteOpsSection({
           canAddPaleta={canAddPaletaNow}
         />
 
-        <div className={cn("px-3 py-3", CORTE_PALETAS_CONTAINER_GRID)}>
-          {visiblePaletaIndices.map((paletaIdx) => {
+        {/* 🔥 MOSAICO DE PALETAS: Mapeamos corPaletas directamente para que salgan TODAS juntas */}
+        <div className="grid grid-cols-1 gap-4 px-3 py-3 lg:grid-cols-2 2xl:grid-cols-3">
+          {corPaletas.map((meta, paletaIdx) => {
             const paleta = salidaPaletas[paletaIdx]
             if (!paleta) return null
-            const meta = corPaletas[paletaIdx]
             const theme = getCortePaletaTheme(paletaIdx)
             const cerrada = Boolean(meta && isCorPaletaCerrada(meta))
             return (
@@ -2251,7 +2327,8 @@ export default function WorkOrderCorteOpsSection({
                   {corPaletas[paletaIdx] && isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
                     <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-950">En despacho</Badge>
                   ) : null}
-                  <Badge variant="outline">{`${salidaPaletasRollos[paletaIdx]}/${COR_ROLLOS_PER_PALETA}`}</Badge>
+                  {/* 🔥 EL TOTAL DE ROLLOS AHORA CRECE DINÁMICAMENTE 🔥 */}
+                  <Badge variant="outline">{`${salidaPaletasRollos[paletaIdx]}/${corPaletas[paletaIdx]?.rollosKg.length || COR_ROLLOS_PER_PALETA}`}</Badge>
                   {corPaletas[paletaIdx] && !isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
                     <CerrarPaletaButton
                       disabled={
@@ -2261,18 +2338,18 @@ export default function WorkOrderCorteOpsSection({
                       onClick={() => cerrarPaleta(paletaIdx)}
                     />
                   ) : null}
-                  {corPaletas[paletaIdx] && !isCorPaletaCerrada(corPaletas[paletaIdx]) ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => removePaleta(paletaIdx)}
-                      title="Eliminar paleta"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  ) : null}
+                  
+                  {/* 🔥 EL BOTÓN DE ELIMINAR PALETA ESTÁ LIBERADO (Aunque esté en despacho) 🔥 */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => removePaleta(paletaIdx)}
+                    title="Eliminar paleta"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
 
@@ -2308,7 +2385,8 @@ export default function WorkOrderCorteOpsSection({
                   paletaIdx={paletaIdx}
                   rollosKg={paleta}
                   theme={theme}
-                  inputsDisabled={meta ? paletaInputsDisabled(meta) : inputDisabled}
+                  // 🔥 SE LIBERAN LOS CUADROS: Ya no se bloquean si la paleta está cerrada 🔥
+                  inputsDisabled={inputDisabled}
                   idFor={mk}
                   onRolloChange={(rolloIdx, value) => {
                     const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
@@ -2317,21 +2395,79 @@ export default function WorkOrderCorteOpsSection({
                     writePaletas(next)
                   }}
                 />
+
+                {/* 🔥 BOTONES PARA AGREGAR Y QUITAR BOBINAS LIBERADOS (Siempre visibles si no hay inputDisabled) 🔥 */}
+                {!inputDisabled ? (
+                  <div className="flex flex-wrap justify-center gap-2 border-t border-slate-100 dark:border-slate-800 pt-3 mt-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-primary/30 text-primary hover:bg-primary/10"
+                      title="Agrega un espacio vacío al final de la paleta"
+                      onClick={() => {
+                        const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
+                        if (!next[paletaIdx]) return
+                        next[paletaIdx].rollosKg.push("") 
+                        writePaletas(next)
+                      }}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" /> Agregar 1
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-amber-500/30 text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
+                      title="Quita el último espacio de la paleta"
+                      onClick={() => {
+                        const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
+                        const targetRollos = next[paletaIdx]?.rollosKg
+                        // 🔥 SEGURO: Mínimo 48 bobinas 🔥
+                        if (!targetRollos || targetRollos.length <= 48) {
+                            toast.warning("No puede reducir la paleta a menos de 48 posiciones.");
+                            return;
+                        }
+                        targetRollos.pop() 
+                        writePaletas(next)
+                      }}
+                    >
+                      <Minus className="mr-1.5 h-4 w-4" /> Quitar última
+                    </Button>
+                    
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                      title="Elimina todos los espacios vacíos extra (después del 48)"
+                      onClick={() => {
+                        const next = corPaletas.map((p) => ({ ...p, rollosKg: [...p.rollosKg] }))
+                        const targetRollos = next[paletaIdx]?.rollosKg
+                        if (!targetRollos) return
+                        
+                        // 🔥 SEGURO: Limpia vacías, pero deja mínimo 48 🔥
+                        const baseRollos = targetRollos.slice(0, 48); // Los primeros 48 se quedan tal cual
+                        const extraRollos = targetRollos.slice(48); // Del 49 en adelante se filtran
+                        
+                        const filtradasExtra = extraRollos.filter(v => v.trim() !== "" && Number(v) > 0);
+                        
+                        next[paletaIdx].rollosKg = [...baseRollos, ...filtradasExtra];
+                        writePaletas(next)
+                        toast.success("Se eliminaron los espacios vacíos extra.");
+                      }}
+                    >
+                      <Trash2 className="mr-1.5 h-4 w-4" /> Limpiar vacías
+                    </Button>
+                  </div>
+                ) : null}
+
               </div>
             </div>
             )
           })}
         </div>
-
-        <CortePaletasSectionFooter
-          totalPaletas={corPaletas.length}
-          page={paletaPage}
-          totalPages={paletaTotalPages}
-          pageSize={paletaPageSize}
-          onPageChange={setPaletaPage}
-          onAddPaleta={addPaleta}
-          canAddPaleta={canAddPaletaNow}
-        />
       </MesSectionShell>
 
       <MesSectionShell
@@ -2881,6 +3017,7 @@ export default function WorkOrderCorteOpsSection({
               <div className="rounded-md border bg-background p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Turno en curso</p>
                 <p className="mt-2 text-xs">{turnoGrupoLabel(corTurnoProp || readString(form.corTurno), corGrupoProp || readString(form.corGrupo))}</p>
+                <p className="mt-1 text-xs">Máquina: <span className="font-semibold text-indigo-700 dark:text-indigo-400">{activeTurno?.maquina || "—"}</span></p>
                 <p className="mt-2 text-xs font-medium text-foreground">Personal</p>
                 {activeSaved.length === 0 ? (
                   <p className="text-muted-foreground mt-1 text-xs">Sin personal guardado en este turno.</p>
@@ -2915,6 +3052,7 @@ export default function WorkOrderCorteOpsSection({
                           : "Sin fecha de cierre"}{" "}
                         · {turnoGrupoLabel(t.turno, t.grupo)}
                       </p>
+                      <p className="mt-1 text-xs">Máquina: <span className="font-semibold text-indigo-700 dark:text-indigo-400">{t.maquina || "—"}</span></p>
                       <p className="text-muted-foreground mt-1">
                         Salida {readNumber(t.metrics?.salida_total_kg).toFixed(2)} Kg · Efectivo{" "}
                         {formatTimerHmsFn(t.timer.effectiveAccSec)} · Muerto {formatTimerHmsFn(t.timer.deadAccSec)}
@@ -2940,4 +3078,3 @@ export default function WorkOrderCorteOpsSection({
     </>
   )
 }
-

@@ -188,6 +188,8 @@ export function MesBandejaTableColgroup({
     variant ?? (showKgBreakdown ? "produccion-kg" : "produccion")
 
   if (resolved === "produccion-kg") {
+    // 🔥 HACHAZO AL ESQUELETO: Le quité una columna de <col style={{ width: "6.5rem" }} /> 
+    // que pertenecía al "Total Masa".
     return (
       <colgroup>
         <col style={{ width: MES_BANDEJA_INDEX_COL_WIDTH }} />
@@ -199,7 +201,6 @@ export function MesBandejaTableColgroup({
         <col style={{ width: "5.75rem" }} />
         <col style={{ width: "5.75rem" }} />
         <col style={{ width: "6.25rem" }} />
-        <col style={{ width: "6.5rem" }} />
         <col style={{ width: "10rem" }} />
         <col style={{ width: "5.5rem" }} />
       </colgroup>
@@ -231,7 +232,8 @@ export function mesBandejaTableClassName(
   if (options.pendientesMinWidth) {
     return cn("w-full table-fixed", options.pendientesMinWidth)
   }
-  return cn("w-full table-fixed", options.showKgBreakdown ? "min-w-[78rem]" : "min-w-[54rem]")
+  // 🔥 Ajuste del ancho total: Le resté 6.5rem a la tabla (de 78 a 71.5rem) para que no sobre espacio.
+  return cn("w-full table-fixed", options.showKgBreakdown ? "min-w-[71.5rem]" : "min-w-[54rem]")
 }
 
 /** Estilo del enlace/código en columna ID (alineado a MaterialRequestsPage). */

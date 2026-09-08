@@ -25,7 +25,10 @@ class Material extends Model
         'notes',
         'supplier_id',
         'no_supplier_reason',
-        'warehouse_location', // <-- AÑADIDO: Para que Laravel permita guardar el almacén
+        'warehouse_location', 
+        'is_imprimir',     // <-- AÑADIDO
+        'is_laminar',      // <-- AÑADIDO
+        'is_trilaminar',   // <-- AÑADIDO
     ];
 
     protected function casts(): array
@@ -35,6 +38,9 @@ class Material extends Model
             'quantity_on_hand' => 'decimal:3',
             'micras' => 'decimal:3',
             'ancho' => 'decimal:3',
+            'is_imprimir' => 'boolean',     // <-- AÑADIDO
+            'is_laminar' => 'boolean',      // <-- AÑADIDO
+            'is_trilaminar' => 'boolean',   // <-- AÑADIDO
         ];
     }
 

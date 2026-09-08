@@ -114,7 +114,8 @@
         </tr>
         <tr class="pedido-row">
             <td class="cell-pedido" style="text-align:center;"><span class="lbl">FECHA:</span> {{ $fechaPedido }}</td>
-            <td class="cell-pedido" style="text-align:center;"><span class="lbl">N° ORDEN:</span> {{ $val('numeroOrden') }}</td>
+            {{-- 🔥 HACHAZO AL ENCABEZADO: Título O.T. con su código correcto --}}
+            <td class="cell-pedido" style="text-align:center;"><span class="lbl">N° O.T.:</span> <span style="font-size:10px; font-weight:bold;">{{ $order->code }}</span></td>
             <td class="cell-pedido" style="text-align:center;"><span class="lbl">PEDIDO (Kg.):</span> {{ $val('pedidoKg') }}</td>
         </tr>
         <tr>
@@ -354,11 +355,44 @@
             <td class="paper-value">{{ $val('ubicFotoceldaCorte') }}</td>
             <td class="paper-label">METROS POR BOBINA (m):</td>
             <td class="paper-value">{{ $val('metrosBobina') }}</td>
-            <td colspan="3" rowspan="5" style="text-align:center; vertical-align:middle;">
-                <div class="fig-diagram">
-                    <span style="font-size:12px;font-weight:bold;">{{ $val('figuraEmbobinadoCorte') !== '—' ? $val('figuraEmbobinadoCorte') : '1' }}</span><br>
-                    <span class="muted">INVERSIONES<br>AXONES C.A.</span>
-                </div>
+            
+            {{-- 🔥 HACHAZO EN CORTE: CUADRO DE FIGURAS 1-8 --}}
+            <td colspan="3" rowspan="5" style="padding: 1px; vertical-align:middle;">
+                @php
+                    $svgs = [
+                        1 => 'M 20 20 Q 50 10 80 20 L 80 60 Q 50 70 20 60 Z M 20 20 L 20 60 M 80 20 L 80 60 M 20 40 L 80 40 M 50 20 L 50 60',
+                        2 => 'M 20 20 Q 50 30 80 20 L 80 60 Q 50 50 20 60 Z M 20 20 L 20 60 M 80 20 L 80 60 M 20 40 L 80 40 M 50 20 L 50 60',
+                        3 => 'M 20 40 C 20 20 80 20 80 40 C 80 60 20 60 20 40 Z M 50 20 L 50 60 M 20 40 L 80 40',
+                        4 => 'M 20 20 L 80 20 L 80 60 L 20 60 Z M 20 20 L 80 60 M 80 20 L 20 60 M 50 20 L 50 60 M 20 40 L 80 40',
+                        5 => 'M 20 20 Q 50 10 80 20 L 80 60 Q 50 70 20 60 Z M 20 20 L 20 60 M 80 20 L 80 60 M 20 40 L 80 40',
+                        6 => 'M 20 20 Q 50 30 80 20 L 80 60 Q 50 50 20 60 Z M 20 20 L 20 60 M 80 20 L 80 60 M 50 20 L 50 60',
+                        7 => 'M 20 40 C 20 20 80 20 80 40 C 80 60 20 60 20 40 Z M 20 40 L 80 40',
+                        8 => 'M 20 20 L 80 20 L 80 60 L 20 60 Z M 50 20 L 50 60'
+                    ];
+                    $activeFig = $val('orientacionEmbalaje') !== '—' ? $val('orientacionEmbalaje') : '1';
+                @endphp
+                <table style="width:100%; border-collapse: collapse; text-align:center;">
+                    <tr>
+                        @for($f = 1; $f <= 4; $f++)
+                            <td style="border: 1px solid #aaa; width: 25%; padding: 2px; background-color: {{ $activeFig == $f ? '#d0d0d0' : 'transparent' }};">
+                                <div style="font-size:6px; font-weight:bold; margin-bottom:1px;">FIG {{ $f }}</div>
+                                <svg viewBox="0 0 100 80" style="width:22px; height:18px; stroke:#111; stroke-width:3; fill:none;">
+                                    <path d="{{ $svgs[$f] }}"></path>
+                                </svg>
+                            </td>
+                        @endfor
+                    </tr>
+                    <tr>
+                        @for($f = 5; $f <= 8; $f++)
+                            <td style="border: 1px solid #aaa; width: 25%; padding: 2px; background-color: {{ $activeFig == $f ? '#d0d0d0' : 'transparent' }};">
+                                <div style="font-size:6px; font-weight:bold; margin-bottom:1px;">FIG {{ $f }}</div>
+                                <svg viewBox="0 0 100 80" style="width:22px; height:18px; stroke:#111; stroke-width:3; fill:none;">
+                                    <path d="{{ $svgs[$f] }}"></path>
+                                </svg>
+                            </td>
+                        @endfor
+                    </tr>
+                </table>
             </td>
         </tr>
         <tr>

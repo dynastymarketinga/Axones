@@ -31,12 +31,14 @@ export type MesBandejaMes = {
 /** Columna # (numeración de fila en bandeja MES). */
 export const MES_BANDEJA_INDEX_COLUMN_COUNT = 1
 
-/** Columnas de kg desglosadas en bandeja (impresión): bobinas + producido, entrada, desperd., total masa. */
-export const MES_BANDEJA_KG_BREAKDOWN_COLUMN_COUNT = 5
+/** Columnas de kg desglosadas en bandeja (impresión): bobinas + producido, entrada, desperd. */
+// 🔥 HACHAZO: Le restamos 1 porque eliminamos la columna de "Total Masa"
+export const MES_BANDEJA_KG_BREAKDOWN_COLUMN_COUNT = 4
 
 /** Solo columnas numéricas de kg (sin bobinas). */
-export const MES_BANDEJA_KG_NUMERIC_COLUMN_COUNT = 4
+export const MES_BANDEJA_KG_NUMERIC_COLUMN_COUNT = 3
 
+// Ya no lo necesitamos en la tabla, pero si lo usaban en algún otro lado lo dejo por si acaso
 export const MES_BANDEJA_KG_TOTAL_HEAD_LABEL = "Total masa acum."
 
 export function areaShowsMesKgBreakdownColumns(area: string): boolean {

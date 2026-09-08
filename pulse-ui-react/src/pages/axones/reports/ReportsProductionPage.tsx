@@ -73,6 +73,9 @@ export default function ReportsProductionPage() {
   const [liveAsOf, setLiveAsOf] = useState<string | null>(null)
   const [liveActive, setLiveActive] = useState<ProductionTimeLiveActiveEntry[]>([])
 
+  // 🔥 NUEVO ESTADO PARA EL FILTRO DE MÁQUINA
+  const [machineFilter, setMachineFilter] = useState("")
+
   const [rawAreaRows, setRawAreaRows] = useState<ProductionTimeRawRow[]>([])
   const [aggRows, setAggRows] = useState<ProductionTimeAggRow[]>([])
   const [candidates, setCandidates] = useState<WorkOrderTimeCandidate[]>([])
@@ -373,6 +376,9 @@ export default function ReportsProductionPage() {
             />
           }
           theme={getReportIdentity("produccion-tiempos").theme}
+          // 🔥 PASAMOS EL ESTADO Y LA FUNCIÓN DE CAMBIO DEL FILTRO DE MÁQUINA AL COMPONENTE HIJO
+          machineFilter={machineFilter}
+          onMachineFilterChange={setMachineFilter}
         />
 
         <div className="space-y-3">
@@ -429,6 +435,8 @@ export default function ReportsProductionPage() {
               aggRows={aggRows}
               loading={loadingSummary}
               includeLive={includeLive}
+              // 🔥 LE PASAMOS LA VARIABLE A LA TABLA PARA QUE SEPA QUÉ TIENE QUE FILTRAR
+              machineFilter={machineFilter}
             />
           </TabsContent>
 

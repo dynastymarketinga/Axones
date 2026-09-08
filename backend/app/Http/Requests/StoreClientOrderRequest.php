@@ -29,6 +29,9 @@ class StoreClientOrderRequest extends FormRequest
             'lines' => ['nullable', 'array'],
             'lines.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
             'lines.*.material_id' => ['nullable', 'integer', 'exists:materials,id'],
+            'lines.*.material_imprimir_id' => ['nullable', 'integer', 'exists:materials,id'],   // <-- AÑADIDO
+            'lines.*.material_laminar_id' => ['nullable', 'integer', 'exists:materials,id'],    // <-- AÑADIDO
+            'lines.*.material_trilaminar_id' => ['nullable', 'integer', 'exists:materials,id'], // <-- AÑADIDO
             'lines.*.description' => ['nullable', 'string', 'max:512'],
             'lines.*.quantity' => ['required_with:lines', 'numeric', 'min:0.001'],
             'lines.*.unit' => ['nullable', 'string', 'max:16'],
@@ -54,10 +57,19 @@ class StoreClientOrderRequest extends FormRequest
                 $mid = isset($line['material_id']) && $line['material_id'] !== '' && $line['material_id'] !== null
                     ? (int) $line['material_id']
                     : null;
+                
+                // Atrapamos los nuevos para la validación
+                $mImp = isset($line['material_imprimir_id']) && $line['material_imprimir_id'] !== '' && $line['material_imprimir_id'] !== null
+                    ? (int) $line['material_imprimir_id'] : null;
+                $mLam = isset($line['material_laminar_id']) && $line['material_laminar_id'] !== '' && $line['material_laminar_id'] !== null
+                    ? (int) $line['material_laminar_id'] : null;
+                $mTri = isset($line['material_trilaminar_id']) && $line['material_trilaminar_id'] !== '' && $line['material_trilaminar_id'] !== null
+                    ? (int) $line['material_trilaminar_id'] : null;
+
                 $desc = trim((string) ($line['description'] ?? ''));
 
                 $hasProduct = $pid !== null && $pid > 0;
-                $hasMaterial = $mid !== null && $mid > 0;
+                $hasMaterial = ($mid !== null && $mid > 0) || ($mImp !== null && $mImp > 0) || ($mLam !== null && $mLam > 0) || ($mTri !== null && $mTri > 0);
                 $hasDescription = $desc !== '';
 
                 if (! $hasProduct && ! $hasMaterial && ! $hasDescription) {

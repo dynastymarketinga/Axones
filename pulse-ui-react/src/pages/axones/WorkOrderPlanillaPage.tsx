@@ -34,7 +34,6 @@ import {
   MessageSquare,
   Package as LucidePackage,
   PackagePlus,
-  Paintbrush,
   Palette,
   Percent,
   Plus,
@@ -43,8 +42,6 @@ import {
   Ruler,
   Scale,
   StickyNote,
-  Tag,
-  Tags,
   Trash2,
   TrendingDown,
   User,
@@ -53,6 +50,7 @@ import {
   Check,
   ChevronsUpDown,
   X,
+  Download,
 } from "lucide-react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
@@ -148,7 +146,7 @@ import {
 } from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
@@ -168,8 +166,9 @@ import "./work-order-planilla.css"
 type MachineValue =
   | ""
   | "COMEXI 1"
-  | "COMEXI 2"
   | "COMEXI 3"
+  | "Laminadora Nexus"
+  | "Laminadora 2"
   | "Cortadora China"
   | "Cortadora Permaco"
 
@@ -178,14 +177,21 @@ const MACHINE_OPTIONS: Array<{
   options: Array<{ value: Exclude<MachineValue, "">; label: string }>
 }> = [
     {
-      group: "Impresion",
+      group: "Impresión",
       options: [
         { value: "COMEXI 1", label: "COMEXI 1" },
-        { value: "COMEXI 2", label: "COMEXI 2" },
+        { value: "COMEXI 3", label: "COMEXI 3" },
       ],
     },
     {
-      group: "Laminacion",
+      group: "Laminación",
+      options: [
+        { value: "Laminadora Nexus", label: "Laminadora Nexus" },
+        { value: "Laminadora 2", label: "Laminadora 2" },
+      ],
+    },
+    {
+      group: "Corte",
       options: [
         { value: "Cortadora China", label: "Cortadora China" },
         { value: "Cortadora Permaco", label: "Cortadora Permaco" },
@@ -193,11 +199,10 @@ const MACHINE_OPTIONS: Array<{
     },
   ]
 
-/** Ref. planchas por defecto al elegir máquina de impresión COMEXI. */
 function planchasReferenciaForMaquina(value: unknown): string | undefined {
   const key = readString(value).trim()
   if (key === "COMEXI 1") return "067"
-  if (key === "COMEXI 2" || key === "COMEXI 3") return "045"
+  if (key === "COMEXI 3") return "045"
   return undefined
 }
 
@@ -270,9 +275,7 @@ type SustratoKgStockModalState = {
 const MIN_SUSTRATO_ROWS = 1
 const MAX_SUSTRATO_ROWS = 4
 
-/** Toast al fallar validación al guardar (Sonner usa ~4s por defecto en errores). */
 const OT_VALIDATION_ERROR_TOAST_MS = 2600
-/** Oculta sombreado y mensajes de error de envío; puede pulsar Guardar de nuevo para revisarlos. */
 const OT_FIELD_ERRORS_AUTO_CLEAR_MS = 8000
 
 function ensureMinSustratoRows(rows: SustratoRow[], minRows = MIN_SUSTRATO_ROWS): SustratoRow[] {
@@ -303,12 +306,6 @@ function otDecimalFieldValue(fieldKey: string, value: unknown, focusedKey: strin
   return formatDecimalDisplay(raw)
 }
 
-/** Metros est.: el guion solo era “vacío” en UI; vacío real para que funcione `placeholder`. */
-function metrosEstimadosDisplay(v: unknown): string {
-  const m = readNumberString(v).trim()
-  return m === "-" ? "" : m
-}
-
 function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, unknown> | null) {
   const merged = { ...prefill, ...(form ?? {}) }
   if (readNumberString(merged.metrosEstimados).trim() === "-") {
@@ -320,20 +317,16 @@ function mergePrefill(prefill: Record<string, unknown>, form?: Record<string, un
   return merged
 }
 
-/** Misma lógica que el backend (`WorkOrderOrdenTrabajoService::buildPrefill`) para `codigoBarra`. */
 function trimBarcodeForPrefill(barcode: string | null | undefined): string | null {
   if (barcode == null) return null
   const t = String(barcode).trim()
   return t !== "" ? t : null
 }
 
-/** Alineado con `WorkOrderOrdenTrabajoService::buildPrefill()` (tipo de impresión según `print_type`). */
 function prefillFromProduct(p: ProductRecord): Record<string, unknown> {
   const tipoEstructura = tipoImpresionFromProductPrintType(p.print_type)
   const out: Record<string, unknown> = {
     producto: p.name,
-    cpe: p.cpe ?? null,
-    mpps: p.mps ?? null,
     codigoBarra: trimBarcodeForPrefill(p.barcode),
     estructuraMaterial: p.structure ?? null,
     ...structureLayersToOtFormFields(p.structure, tipoEstructura),
@@ -364,7 +357,6 @@ function normalizeTipoImpresionMontaje(v: unknown): "" | TipoImpresionMontajeKey
   const s = readString(v).toLowerCase().trim()
   if (s === "superficie" || s === "superf") return "superficie"
   if (s === "reverso" || s.includes("revers")) return "reverso"
-  // Legacy: reverso se guardaba como trilaminado en este campo
   if (s === "trilaminado" || s === "trimilaminado" || s.includes("trilamin")) return "reverso"
   return ""
 }
@@ -399,18 +391,63 @@ function toDateInputValue(iso: string | null | undefined): string {
   return s
 }
 
-function sumClientOrderLineQuantities(lines: ClientOrderDetailRecord["lines"]): string | null {
+// 🔥 Función blindada para sacar el ID del producto no importa cómo lo mande Laravel
+function getLineProductId(l: any): number | null {
+  if (!l) return null
+  const pid = l.product_id ?? l.productId ?? l.product?.id
+  if (pid == null) return null
+  const n = Number(pid)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+// 🔥 NUNCA MÁS se suman todas las líneas juntas. 
+function sumClientOrderLineQuantities(lines: any[], productId?: number | null, lineId?: number | null): string | null {
   if (!lines?.length) return null
-  let sum = 0
+  
   for (const l of lines) {
+    if (lineId && Number(l.id) !== lineId) continue;
+    
+    const linePid = getLineProductId(l)
+    if (!lineId && productId && linePid !== productId) continue
+    
     const q = readNumberString(l.quantity).trim().replace(",", ".")
     if (!q) continue
     const n = Number(q)
-    if (!Number.isFinite(n)) continue
-    sum += n
+    if (Number.isFinite(n) && n > 0) {
+      return n.toFixed(3) // Extrae el peso EXACTO de la línea y corta el ciclo. NO HAY SUMA.
+    }
   }
-  if (!(sum > 0)) return null
-  return sum.toFixed(3)
+  return null
+}
+
+// 🔥 Extrae la sugerencia de materiales desde el Pedido Cliente SOLO de la línea indicada
+function getSuggestedMaterialsForProduct(lines: any[], productId: number | null, lineId: number | null = null) {
+  if (!lines) return null;
+  let line = null;
+  
+  if (lineId) {
+    line = lines.find((l: any) => Number(l.id) === lineId);
+  } else if (productId) {
+    line = lines.find((l: any) => getLineProductId(l) === productId);
+  }
+  if (!line) return null;
+  
+  const leg = line.material ? `${line.material.sku} — ${line.material.name}` : null;
+  const impData = line.materialImprimir || line.material_imprimir;
+  const imp = impData ? `${impData.sku} — ${impData.name}` : null;
+  const lamData = line.materialLaminar || line.material_laminar;
+  const lam = lamData ? `${lamData.sku} — ${lamData.name}` : null;
+  const triData = line.materialTrilaminar || line.material_trilaminar;
+  const tri = triData ? `${triData.sku} — ${triData.name}` : null;
+  
+  if (!leg && !imp && !lam && !tri) return null;
+  
+  return { 
+    leg, imp, lam, tri,
+    impId: impData ? impData.id : null,
+    lamId: lamData ? lamData.id : null,
+    triId: triData ? triData.id : null
+  };
 }
 
 function isDecimalLike(v: unknown): boolean {
@@ -459,16 +496,6 @@ function otMetricFromPlaceholder(
   placeholder: string,
 ): string {
   return sanitizeMetricInput(raw, metricOptionsFromPlaceholder(preset, placeholder))
-}
-
-function sanitizeMetrosEstimadosInput(v: string): string {
-  const trimmed = v.trim()
-  if (trimmed === "") return ""
-  if (trimmed === "-") return "-"
-  const hasMinus = trimmed.startsWith("-")
-  const digits = v.replace(/\D/g, "")
-  if (!digits) return ""
-  return hasMinus ? `-${digits}` : digits
 }
 
 function normalizeYesNo(v: unknown): "" | "si" | "no" {
@@ -546,7 +573,6 @@ function sustratoMaterialListParts(m: MaterialRow): {
   return { identity, dims, search }
 }
 
-/** Texto mostrado en el campo: texto libre, o etiqueta de inventario si hay `material_id`. */
 function sustratoVirgenDisplayValue(materials: MaterialRow[], row: SustratoRow): string {
   const free = readString(row.material_free_text).trim()
   if (free) return free
@@ -555,7 +581,6 @@ function sustratoVirgenDisplayValue(materials: MaterialRow[], row: SustratoRow):
   return materialInventoryComboLabel(materials, id)
 }
 
-/** Hay referencia de material si hay ID de inventario válido o descripción manual. */
 function sustratoRowHasMaterialChoice(row: SustratoRow): boolean {
   const free = readString(row.material_free_text).trim()
   if (free) return true
@@ -571,7 +596,6 @@ function sustratoMaterialIdDigits(row: SustratoRow): string {
   return /^\d+$/.test(s) ? s : ""
 }
 
-/** Stock / kg: solo filas de catálogo (id numérico y sin texto libre). */
 function sustratoRowUsesCatalogMaterial(row: SustratoRow): boolean {
   if (readString(row.material_free_text).trim()) return false
   return sustratoMaterialIdDigits(row) !== ""
@@ -594,7 +618,6 @@ function formatKgForOtHint(n: number): string {
   return n.toLocaleString("es-VE", { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 }
 
-/** Compara cantidades como decimales con hasta 3 fracciones (alineado con backend `bccomp(..., 3)`). */
 function decimalKgExceedsStock(requestedStr: string, stockStr: string): boolean {
   const req = parseDecimalKgString(requestedStr)
   const stock = parseDecimalKgString(stockStr)
@@ -780,7 +803,6 @@ function setSustratosLam(
   setForm((prev) => ({ ...prev, sustratosVirgenLam: rows.slice(0, MAX_SUSTRATO_ROWS) }))
 }
 
-/** Sustratos virgen en impresión (repetible; p. ej. trilaminado). */
 function getSustratosImp(form: Record<string, unknown>): SustratoRow[] {
   const raw = form.sustratosVirgenImp
   if (Array.isArray(raw)) {
@@ -809,9 +831,7 @@ function setSustratosImp(
 }
 
 const OT_BLUR_REQUIRED_MSG = "Este campo es obligatorio."
-/** TEMPORAL: true = no validar obligatorios al guardar ni en blur (reactivar en producción). */
 const OT_SKIP_SAVE_VALIDATION = true
-/** Cuánto tiempo se muestra el aviso por blur antes de ocultarlo solo (los errores de “Guardar orden” no caducan). */
 const OT_BLUR_TIP_MS = 4000
 
 type OtBlurCtx = {
@@ -836,7 +856,6 @@ function sustratosLamBlockEmpty(form: Record<string, unknown>): boolean {
   return !rows.some((r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim())
 }
 
-/** Vacío según criterio “obligatorio al guardar” (solo texto vacío / sin selección; no valida formatos). */
 function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
   if (OT_SKIP_SAVE_VALIDATION) return false
   const {
@@ -855,10 +874,6 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
     "fechaOrden",
     "pedidoKg",
     "maquina",
-    "metrosEstimados",
-    "tipoImpresionEstructura",
-    "cpe",
-    "mpps",
     "codigoBarra",
   ])
   if (shared.has(key)) {
@@ -870,14 +885,6 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
         return !(readNumberString(form.pedidoKg).trim() || readNumberString(prefill.pedidoKg).trim())
       case "maquina":
         return !readString(form.maquina).trim()
-      case "metrosEstimados": {
-        const m = readNumberString(form.metrosEstimados).trim()
-        return !m || m === "-"
-      }
-      case "tipoImpresionEstructura":
-        return !tipoImpresion
-      case "cpe":
-      case "mpps":
       case "codigoBarra":
         return !readString(form[key]).trim()
       default:
@@ -899,7 +906,7 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
     if (!canEditShared || !canViewMontaje) return false
     return !readString(form[key]).trim()
   }
-  if (key === "figuraEmbobinadoMontaje" || key === "obsMontaje") {
+  if (key === "figuraEmbobinadoMontaje") {
     if (!canEditShared || !canViewMontaje) return false
     return !readString(form[key]).trim()
   }
@@ -927,7 +934,6 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
     "figuraEmbobinadoLam",
     "gramajeAdhesivo",
     "relacionMezcla",
-    "obsLaminacion",
     "kgAdhesivoLaminacion",
     "kgCatalizadorLaminacion",
     "sustratosLam",
@@ -936,7 +942,7 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
     if (!canViewLaminacion) return false
     if (key === "sustratosLam") return sustratosLamBlockEmpty(form)
     if (key === "figuraEmbobinadoLam") return !readString(form.figuraEmbobinadoLam).trim()
-    if (key === "gramajeAdhesivo" || key === "relacionMezcla" || key === "obsLaminacion") {
+    if (key === "gramajeAdhesivo" || key === "relacionMezcla") {
       return !readString(form[key]).trim()
     }
     return !readNumberString(form[key]).trim()
@@ -976,7 +982,7 @@ function isOtBlurRequiredEmpty(key: string, ctx: OtBlurCtx): boolean {
     return !readNumberString(form[key]).trim()
   }
 
-  const programacion = new Set(["observacionesGenerales", "fechaInicio", "fechaEntrega", "programacionMotivo"])
+  const programacion = new Set(["fechaInicio", "fechaEntrega", "programacionMotivo"])
   if (programacion.has(key)) {
     if (!canEditShared || !canViewProgramacion) return false
     return !readString(form[key]).trim()
@@ -1006,10 +1012,6 @@ function randomLamMaterialMetrosValue(): string {
   return randomInt(0, 1) === 0 ? LAM_MATERIAL_METROS_NA : randomDecimalTwoComma(500, 5000)
 }
 
-/**
- * Cabecera / maestro que no debe pisarse con valores demo (identidad del pedido, cliente, producto).
- * Máquina, ref. planchas, metros est. y sustratos sí se rellenan al azar si vienen vacíos.
- */
 const USER_ONLY_RANDOM_SKIP = new Set<string>([
   "fechaOrden",
   "numeroOrden",
@@ -1019,9 +1021,6 @@ const USER_ONLY_RANDOM_SKIP = new Set<string>([
   "clienteRif",
   "producto",
   "tipoImpresion",
-  "cpe",
-  "mpps",
-  "codigoBarra",
   "estructuraMaterial",
   "estructuraCapa1",
   "estructuraCapa1Rev",
@@ -1033,14 +1032,9 @@ const USER_ONLY_RANDOM_SKIP = new Set<string>([
   "etapaOt",
 ])
 
-/** Datos del pedido / maestro (`prefill`): no los pisa el relleno al azar. */
 const PREFILL_RANDOM_BLOCKLIST = new Set<string>([
   "cliente",
   "clienteRif",
-  "producto",
-  "cpe",
-  "mpps",
-  "pedidoKg",
   "fechaOrden",
   "numeroOrden",
   "client_order_code",
@@ -1125,7 +1119,6 @@ function buildRandomPlanillaPatch(prev: Record<string, unknown>): Record<string,
   return {
     maquina: randomMachineValue(),
     planchasReferencia: String(randomInt(1, 999)).padStart(3, "0"),
-    metrosEstimados: String(randomInt(5000, 28000)),
     tipoImpresionEstructura: TIPO_IMPRESION_ESPEC_OPTIONS[randomInt(0, TIPO_IMPRESION_ESPEC_OPTIONS.length - 1)],
     tipoImpresionMontaje: TIPO_IMPRESION_MONTAGE_OPTIONS[randomInt(0, TIPO_IMPRESION_MONTAGE_OPTIONS.length - 1)],
     frecuencia: `${randomInt(200, 360)}±${randomInt(1, 5)}`,
@@ -1250,7 +1243,6 @@ function computeRandomFill(
     filled += 1
   }
 
-  // Sincroniza desarrollo / ancho montaje si ya hay frecuencia, bandas, etc.
   const montajeSync = syncMontajeAutoFields(next)
   for (const key of ["desarrollo", "anchoMontaje"] as const) {
     const val = montajeSync[key]
@@ -1323,6 +1315,21 @@ export default function WorkOrderPlanillaPage() {
   const woIdRaw = readString(woId)
   const id = Number(woIdRaw)
   const isDraftRoute = woIdRaw === "nueva"
+  
+  // 🔥 Nuevo estado para almacenar el Código Real de la OT (OT-XXXX-XXXX)
+  const [otCode, setOtCode] = useState<string>("")
+  
+  // 🔥 Nuevo estado para almacenar las sugerencias
+  const [suggestions, setSuggestions] = useState<{
+    leg?: string | null
+    imp?: string | null
+    lam?: string | null
+    tri?: string | null
+  } | null>(null)
+  
+  // Almacenamos temporalmente las líneas del pedido cuando creamos OT
+  const draftCoLinesRef = useRef<any[]>([])
+
   const draftCoId = useMemo(() => {
     if (!isDraftRoute) return null
     const raw = readString(searchParams.get("client_order_id")).trim()
@@ -1372,6 +1379,39 @@ export default function WorkOrderPlanillaPage() {
   const isRestrictedAreaView = activeScope !== "planning"
 
   const [loading, setLoading] = useState(true)
+
+  // Estados para el Clonador de OT
+  const [clonadorModalOpen, setClonadorModalOpen] = useState(false)
+  const [clonadorSearch, setClonadorSearch] = useState("")
+  const [clonando, setClonando] = useState(false)
+  
+  // Novedad: Estados para el Select/Combobox
+  const [clonadorComboOpen, setClonadorComboOpen] = useState(false)
+  const [clonadorOts, setClonadorOts] = useState<WorkOrderListRow[]>([])
+  const [clonadorOtsLoading, setClonadorOtsLoading] = useState(false)
+
+  // Cargar las OTs automáticamente al abrir el modal
+  useEffect(() => {
+    if (!clonadorModalOpen) return
+    let active = true
+    setClonadorOtsLoading(true)
+    apiFetch<LaravelPaginated<WorkOrderListRow>>("work-orders", {
+      query: { per_page: 300, sort_dir: "desc" }, // Traemos las últimas 300
+    })
+      .then((res) => {
+        if (active) {
+          setClonadorOts(res.data ?? [])
+          setClonadorOtsLoading(false)
+        }
+      })
+      .catch(() => {
+        if (active) setClonadorOtsLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [clonadorModalOpen])
+
   const [saving, setSaving] = useState(false)
   const [duplicateOtMatches, setDuplicateOtMatches] = useState<WorkOrderListRow[] | null>(null)
   const [rellenoAzarDialogOpen, setRellenoAzarDialogOpen] = useState(false)
@@ -1417,7 +1457,6 @@ export default function WorkOrderPlanillaPage() {
             })
             window.dispatchEvent(new Event("alerts:refresh"))
           } catch {
-            // El modal ya advierte; no bloquear la edición de la planilla.
           }
         })()
       }, 500)
@@ -1485,7 +1524,8 @@ export default function WorkOrderPlanillaPage() {
 
   const [woClientId, setWoClientId] = useState<number | null>(null)
   const [woProductId, setWoProductId] = useState<number | null>(null)
-  const [clientProducts, setClientProducts] = useState<ProductRecord[]>([])
+  const [woLineId, setWoLineId] = useState<number | null>(null) 
+  
   const [productPickerOpen, setProductPickerOpen] = useState(false)
   const [maquinaPickerOpen, setMaquinaPickerOpen] = useState(false)
   const [tipoImpresionPickerOpen, setTipoImpresionPickerOpen] = useState(false)
@@ -1600,14 +1640,12 @@ export default function WorkOrderPlanillaPage() {
     }
     setLoading(true)
     try {
-      // Aquí se hace una petición a la API para obtener los datos de la orden de trabajo con el id dado.
-      // La función apiFetch hace una solicitud HTTP (probablemente por GET) al endpoint 'work-orders/{id}/orden-trabajo'
-      // y espera recibir como respuesta un objeto que cumple con el tipo OrdenTrabajoPayload.
-      // El resultado de la petición se guarda en la variable 'payload', que luego se usa para poblar el estado del formulario, cliente, producto, etc.
       const payload = await apiFetch<OrdenTrabajoPayload>(
         `work-orders/${id}/orden-trabajo`,
       )
       setPrefill(payload.prefill ?? {})
+      // 🔥 Guardamos el OT Code Real (OT-XXXX-XXXX)
+      setOtCode(payload.code ?? "")
       setWoClientId(
         payload.client_id !== null && payload.client_id !== undefined ? Number(payload.client_id) : null,
       )
@@ -1621,11 +1659,9 @@ export default function WorkOrderPlanillaPage() {
         const kg = readNumberString(merged.kgUtilizarImp1)
         if (mid || kg) merged.sustratosVirgenImp = [{ material_id: mid, kg, material_free_text: "" }]
       }
-      // Maestro: nombres de cliente/producto vienen del servidor, no de un borrador antiguo.
       if (readString(p.cliente)) merged.cliente = p.cliente
       if (Object.prototype.hasOwnProperty.call(p, "clienteRif")) merged.clienteRif = p.clienteRif
       if (readString(p.producto)) merged.producto = p.producto
-      // Evita dos semánticas de estado: siempre reflejar estado/etapa reales del modelo OT.
       merged.estadoOt = statusOtLabel(p.estadoOt)
       merged.etapaOt = stageOtLabel(p.etapaOt)
       {
@@ -1646,6 +1682,7 @@ export default function WorkOrderPlanillaPage() {
       else toast.error("No se pudo cargar la orden de trabajo.")
       setPrefill({})
       setForm({})
+      setOtCode("")
       setWoClientId(null)
       setWoProductId(null)
       clearAllBlurDismissTimers()
@@ -1660,14 +1697,15 @@ export default function WorkOrderPlanillaPage() {
     setLoading(true)
     try {
       const co = await apiFetch<ClientOrderDetailRecord>(`client-orders/${draftCoId}`)
-      const lineWithProduct = co.lines?.find((l) => {
-        const pid = l.product_id
-        return pid != null && Number.isFinite(Number(pid)) && Number(pid) > 0
-      })
-      const productId =
-        lineWithProduct?.product_id != null && Number.isFinite(Number(lineWithProduct.product_id))
-          ? Number(lineWithProduct.product_id)
-          : null
+      
+      draftCoLinesRef.current = co.lines ?? []
+      
+      const lineWithProduct = co.lines?.find((l) => getLineProductId(l) !== null)
+      const productId = getLineProductId(lineWithProduct)
+      const lineId = lineWithProduct?.id ? Number(lineWithProduct.id) : null;
+
+      // 🔥 Obtenemos las sugerencias usando la LINEA inicial por defecto
+      setSuggestions(getSuggestedMaterialsForProduct(co.lines ?? [], productId, lineId))
 
       let product: ProductRecord | null = null
       if (productId) {
@@ -1678,19 +1716,17 @@ export default function WorkOrderPlanillaPage() {
         }
       }
 
-      const pedidoKg = sumClientOrderLineQuantities(co.lines ?? [])
+      // 🔥 Filtro de kilos para la LINEA exacta
+      const pedidoKg = sumClientOrderLineQuantities(co.lines ?? [], productId, lineId)
 
       const p: Record<string, unknown> = {
         fechaOrden: toDateInputValue(co.ordered_at) || new Date().toISOString().slice(0, 10),
-        // Mostrar el código real de la Orden de Producción (OC) incluso en modo "nueva".
         numeroOrden: readString(co.code) || "OC",
         pedidoKg,
         cliente: co.client?.name ?? null,
         clienteRif: co.client?.rif ?? null,
         producto: product?.name ?? lineWithProduct?.product?.name ?? null,
         estructuraMaterial: product?.structure ?? null,
-        cpe: product?.cpe ?? null,
-        mpps: product?.mps ?? null,
         codigoBarra: null,
         client_order_code: co.code,
         client_order_reference: null,
@@ -1740,6 +1776,7 @@ export default function WorkOrderPlanillaPage() {
       setPrefill(p)
       setWoClientId(Number.isFinite(Number(co.client_id)) ? Number(co.client_id) : null)
       setWoProductId(productId)
+      setWoLineId(lineId)
       setForm(withCorteAutoFields(fillMontajeAutoFieldsIfEmpty(merged)))
       clearAllBlurDismissTimers()
       setBlurFieldMessages({})
@@ -1750,6 +1787,7 @@ export default function WorkOrderPlanillaPage() {
       setForm({})
       setWoClientId(null)
       setWoProductId(null)
+      setWoLineId(null)
       clearAllBlurDismissTimers()
       setBlurFieldMessages({})
     } finally {
@@ -1774,27 +1812,6 @@ export default function WorkOrderPlanillaPage() {
       nav(`/ordenes-trabajo/${id}/produccion?tab=montaje`, { replace: true })
     }
   }, [id, isDraftRoute, isFullAccess, nav, role])
-
-  useEffect(() => {
-    if (!woClientId) {
-      setClientProducts([])
-      return
-    }
-    let c = false
-    void (async () => {
-      try {
-        const data = await apiFetch<LaravelPaginated<ProductRecord>>("products", {
-          query: { client_id: woClientId, per_page: 200, page: 1 },
-        })
-        if (!c) setClientProducts(data.data ?? [])
-      } catch {
-        if (!c) setClientProducts([])
-      }
-    })()
-    return () => {
-      c = true
-    }
-  }, [woClientId])
 
   useEffect(() => {
     let c = false
@@ -1828,29 +1845,15 @@ export default function WorkOrderPlanillaPage() {
     [form.tipoImpresionEstructura, form.tipoImpresion],
   )
 
-  const tipoImpresionComboLabel = useMemo(() => {
-    if (tipoImpresion) return tipoImpresionLabel(tipoImpresion)
-    return "Elegir…"
-  }, [tipoImpresion])
-
-  const tipoImpresionMontaje = useMemo(
-    () => normalizeTipoImpresionMontaje(readString(form.tipoImpresionMontaje)),
-    [form.tipoImpresionMontaje],
-  )
-
-  const tipoImpresionMontajeLabel = useMemo(() => {
-    if (tipoImpresionMontaje) return tipoImpresionMontajeDisplayLabel(tipoImpresionMontaje)
-    return "Elegir…"
-  }, [tipoImpresionMontaje])
-
   const productComboLabel = useMemo(() => {
     const n = readString(form.producto) || readString(prefill.producto)
     return n || "—"
   }, [form.producto, prefill.producto])
 
-  const applyProduct = useCallback(
-    async (p: ProductRecord) => {
-      if (p.id === woProductIdRef.current) {
+  // 🔥 NUEVA función que procesa la selección de una LÍNEA específica
+  const applyProductLine = useCallback(
+    async (lineId: number, p: ProductRecord) => {
+      if (lineId === woLineId) {
         setProductPickerOpen(false)
         return
       }
@@ -1859,14 +1862,19 @@ export default function WorkOrderPlanillaPage() {
         prefill: { ...prefillRef.current },
         form: { ...formRef.current } as Record<string, unknown>,
         woProductId: woProductIdRef.current,
+        woLineId: woLineId,
       }
       const delta = prefillFromProduct(p)
-      // Actualización inmediata en pantalla (sin `load` → sin “Cargando…” de toda la página).
+      
+      const newPedidoKg = sumClientOrderLineQuantities(draftCoLinesRef.current, p.id, lineId)
+      const suggestionsData = getSuggestedMaterialsForProduct(draftCoLinesRef.current, p.id, lineId)
+      setSuggestions(suggestionsData)
+
       setPrefill((prev) => ({ ...prev, ...delta }))
+      
       setForm((f) => {
         const n: Record<string, unknown> = { ...f, producto: p.name }
-        n.cpe = readString(p.cpe)
-        n.mpps = readString(p.mps)
+        n.pedidoKg = newPedidoKg ?? "" 
         n.codigoBarra = trimBarcodeForPrefill(p.barcode) ?? ""
         const tipoEstructura = normalizeTipoImpresion(
           readString(delta.tipoImpresion) || readString(f.tipoImpresionEstructura),
@@ -1874,13 +1882,41 @@ export default function WorkOrderPlanillaPage() {
         Object.assign(n, structureLayersToOtFormFields(p.structure, tipoEstructura))
         if (tipoEstructura) n.tipoImpresionEstructura = tipoEstructura
         n.tipoImpresion = delta.tipoImpresion ?? f.tipoImpresion
+        
+        // 🔥 AUTO-LLENADO MÁGICO DEL SUSTRATO SEGÚN LA SUGERENCIA DE VENTAS
+        if (suggestionsData?.impId) {
+           const materialFound = materials.find(m => Number(m.id) === Number(suggestionsData.impId));
+           if (materialFound) {
+              const currentImp = getSustratosImp(f);
+              currentImp[0] = { material_id: String(materialFound.id), kg: "", material_free_text: "" };
+              n.sustratosVirgenImp = currentImp;
+              
+              const upperName = (materialFound.name || "").toUpperCase();
+              if (upperName.includes("BOPP")) n.densidadImp = "0.90";
+              else if (upperName.includes("PEBD")) n.densidadImp = "0.93";
+           }
+        }
+        if (suggestionsData?.lamId) {
+           const materialFound = materials.find(m => Number(m.id) === Number(suggestionsData.lamId));
+           if (materialFound) {
+              const currentLam = getSustratosLam(f);
+              currentLam[0] = { material_id: String(materialFound.id), kg: "", material_free_text: "" };
+              n.sustratosVirgenLam = currentLam;
+              
+              const upperName = (materialFound.name || "").toUpperCase();
+              if (upperName.includes("BOPP")) n.densidadLam = "0.90";
+              else if (upperName.includes("PEBD")) n.densidadLam = "0.93";
+           }
+        }
+
         return n
       })
       setWoProductId(p.id)
+      setWoLineId(lineId)
       setProductPickerOpen(false)
 
       if (isDraftRoute) {
-        toast.message("Producto actualizado en el borrador. Se guardará al pulsar Guardar orden.")
+        toast.message("Línea seleccionada en el borrador. Se guardará al pulsar Guardar orden.")
         return
       }
 
@@ -1888,20 +1924,21 @@ export default function WorkOrderPlanillaPage() {
       try {
         await apiFetch(`work-orders/${id}`, {
           method: "PATCH",
-          body: JSON.stringify({ product_id: p.id }),
+          body: JSON.stringify({ product_id: p.id, client_order_line_id: lineId }),
         })
         toast.success("Producto de la OT actualizado y guardado en el servidor.")
       } catch (e) {
         setPrefill(snapshot.prefill)
         setForm(snapshot.form)
         setWoProductId(snapshot.woProductId)
+        setWoLineId(snapshot.woLineId)
         if (e instanceof ApiError) toast.error(e.message)
         else toast.error("No se pudo actualizar el producto de la OT.")
       } finally {
         setUpdatingProduct(false)
       }
     },
-    [id, isDraftRoute],
+    [id, isDraftRoute, woLineId, materials],
   )
 
   const maquina = readString(form.maquina) as MachineValue
@@ -1945,8 +1982,8 @@ export default function WorkOrderPlanillaPage() {
       </p>
     )
   }
-  /** `aria-invalid` + estilos en `work-order-planilla.css` (mismo criterio que Notas en pedido cliente). */
   const otInvalid = (key: string) => Boolean(errorFor(key))
+  
   const focusFieldSoft = useCallback((key: string) => {
     if (typeof document === "undefined") return
     const field = document.querySelector<HTMLElement>(`[data-field="${key}"]`)
@@ -2069,7 +2106,198 @@ export default function WorkOrderPlanillaPage() {
     }
   }, [])
 
-  async function guardar(opts?: { forceNewOt?: boolean }) {
+ // 🔥 VIGILANTE 1: Cálculo Automático de Piñón (Desarrollo / 5)
+  useEffect(() => {
+    const desarrolloRaw = normalizeDesarrolloMmValue(form.desarrollo) || "";
+    const num = parseFloat(desarrolloRaw.replace(/[^\d.]/g, ''));
+    if (!isNaN(num) && num > 0) {
+      const pinonCalculado = Math.round(num / 5).toString();
+      if (readString(form.pinonImp) !== pinonCalculado) {
+        setKey(setForm, "pinonImp", pinonCalculado);
+      }
+    }
+  }, [form.desarrollo]);
+
+ // 🔥 VIGILANTE 2: Autollenado de Kilos (DIVIDIDO SIEMPRE ENTRE 2 Y PURGA DE BASURA)
+  useEffect(() => {
+    const kgPedido = parseFloat(readNumberString(form.pedidoKg).replace(',', '.')) || parseFloat(readNumberString(prefill.pedidoKg).replace(',', '.')) || 0;
+    const porcentajeExtra = parseFloat(readNumberString(form.porcentajeExtra).replace(',', '.')) || 20;
+
+    if (kgPedido > 0) {
+       const kgTotal = kgPedido * (1 + (porcentajeExtra / 100));
+       
+       // 🔥 LA REGLA ABSOLUTA: Picar SIEMPRE a la mitad
+       const mitadKgStr = (kgTotal / 2).toFixed(2);
+
+       setForm(prev => {
+          const next = { ...prev };
+          let changed = false;
+          
+          // --- IMPRESIÓN ---
+          const prevSImp = getSustratosImp(prev);
+          if (prevSImp.length > 0) {
+             if (prevSImp[0].kg !== mitadKgStr) { prevSImp[0].kg = mitadKgStr; changed = true; }
+             // Purgar filas zombis
+             for(let i=1; i < prevSImp.length; i++) {
+                 if (prevSImp[i].kg !== "") { prevSImp[i].kg = ""; changed = true; }
+             }
+          } else {
+             prevSImp.push({ material_id: "", kg: mitadKgStr, material_free_text: "" });
+             changed = true;
+          }
+          if (changed) next.sustratosVirgenImp = prevSImp;
+
+          // --- LAMINACIÓN ---
+          const prevSLam = getSustratosLam(prev);
+          let changedLam = false;
+          if (prevSLam.length > 0) {
+             if (prevSLam[0].kg !== mitadKgStr) { prevSLam[0].kg = mitadKgStr; changedLam = true; }
+             // Purgar filas zombis
+             for(let i=1; i < prevSLam.length; i++) {
+                 if (prevSLam[i].kg !== "") { prevSLam[i].kg = ""; changedLam = true; }
+             }
+          } else {
+             prevSLam.push({ material_id: "", kg: mitadKgStr, material_free_text: "" });
+             changedLam = true;
+          }
+          if (changedLam) {
+             next.sustratosVirgenLam = prevSLam;
+             changed = true;
+          }
+
+          return changed ? next : prev;
+       });
+    }
+  }, [form.pedidoKg, prefill.pedidoKg, form.porcentajeExtra]);
+
+  // 🔥 VIGILANTE 3: Fórmula Doble C (Metros) con precisión intermedia exacta y redondeo final ".00"
+  useEffect(() => {
+    const sImp = getSustratosImp(form)[0];
+    let densidadImp = readNumberString(form.densidadImp);
+    let metrosImp = readString(form.metrosImp);
+
+    if (sImp && sustratoRowUsesCatalogMaterial(sImp)) {
+      const material = materialRowById(materials, sustratoMaterialIdDigits(sImp));
+      if (material) {
+        const upperName = (material.name || "").toUpperCase();
+        if (upperName.includes("BOPP") && !densidadImp) densidadImp = "0.90";
+        else if (upperName.includes("PEBD") && !densidadImp) densidadImp = "0.93";
+
+        const ancho = parseFloat(String(material.ancho)) || 0;
+        const micras = parseFloat(String(material.micras)) || 0;
+        const dens = parseFloat(densidadImp.replace(',', '.')) || 0;
+        const kgSalida = parseFloat(readNumberString(form.kgSalidaImp).replace(',', '.')) || 0;
+
+        if (kgSalida > 0 && ancho > 0 && micras > 0 && dens > 0) {
+          const anchoMetros = ancho / 1000;
+          // 🔥 HACHAZO 1: Cero redondeo en el camino, precisión total
+          const gramajeExacto = micras * dens; 
+          const gramajeKgM2 = gramajeExacto / 1000; 
+          
+          const divisorDobleC = anchoMetros * gramajeKgM2;
+          const calculoMetros = (kgSalida / divisorDobleC);
+          
+          // 🔥 HACHAZO 2: Redondeo al entero más cercano y forzamos dos decimales (.00)
+          metrosImp = Math.round(calculoMetros).toFixed(2); 
+        }
+      }
+    }
+
+    setForm(prev => {
+      const next = { ...prev };
+      let changed = false;
+      
+      if (densidadImp && readString(prev.densidadImp) !== densidadImp) {
+        next.densidadImp = densidadImp;
+        changed = true;
+      }
+      if (metrosImp && readString(prev.metrosImp) !== metrosImp) {
+        next.metrosImp = metrosImp;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [form.sustratosVirgenImp, materials, form.densidadImp, form.kgSalidaImp]);
+
+  // 🔥 MOTOR DE CLONACIÓN TÁCTICA
+  async function importarConfiguracion() {
+    if (!clonadorSearch.trim()) return
+    setClonando(true)
+    try {
+      const searchVal = clonadorSearch.trim()
+      const otEncontrada = clonadorOts.find(ot => ot.code === searchVal || ot.code === searchVal.split(' ')[0])
+      
+      if (!otEncontrada) {
+        toast.error("Por favor, seleccione una orden válida de la lista desplegable.")
+        setClonando(false)
+        return
+      }
+
+      const payload = await apiFetch<OrdenTrabajoPayload>(`work-orders/${otEncontrada.id}/orden-trabajo`)
+      const oldForm = payload.form || {}
+
+      setForm(prev => {
+        const next = { ...prev, ...oldForm }
+        
+        let clonImp = getSustratosImp(next);
+        let clonLam = getSustratosLam(next);
+
+        // Bloqueo de seguridad: Restauramos los datos del pedido NUEVO
+        next.fechaOrden = prev.fechaOrden
+        next.numeroOrden = prev.numeroOrden
+        next.pedidoKg = prev.pedidoKg
+        next.porcentajeExtra = prev.porcentajeExtra
+        next.cliente = prev.cliente
+        next.clienteRif = prev.clienteRif
+        next.producto = prev.producto
+        next.cpe = prev.cpe
+        next.mpps = prev.mpps
+        next.codigoBarra = prev.codigoBarra
+        next.estadoOt = prev.estadoOt
+        next.etapaOt = prev.etapaOt
+        next.document_number = prev.document_number
+        next.client_order_code = prev.client_order_code
+        next.client_order_reference = prev.client_order_reference
+
+        // OBLIGAMOS A LOS SUSTRATOS A USAR EL KILAJE ACTUAL Y LIMPIAMOS BASURA
+        const kgPedido = parseFloat(readNumberString(next.pedidoKg).replace(',', '.')) || 0;
+        const porcExtra = parseFloat(readNumberString(next.porcentajeExtra).replace(',', '.')) || 20;
+        const isLaminated = normalizeTipoImpresion(next.tipoImpresionEstructura || next.tipoImpresion) === "bilaminado" || normalizeTipoImpresion(next.tipoImpresionEstructura || next.tipoImpresion) === "trilaminado";
+        
+        if (kgPedido > 0) {
+          const kgTotal = kgPedido * (1 + (porcExtra / 100));
+          const targetKgStr = isLaminated ? (kgTotal / 2).toFixed(2) : kgTotal.toFixed(2);
+
+          if (clonImp.length > 0) {
+              clonImp[0].kg = targetKgStr;
+              for(let i=1; i<clonImp.length; i++) clonImp[i].kg = ""; 
+          } else clonImp = [{ material_id: "", kg: targetKgStr, material_free_text: "" }];
+
+          if (isLaminated) {
+            if (clonLam.length > 0) {
+                clonLam[0].kg = targetKgStr;
+                for(let i=1; i<clonLam.length; i++) clonLam[i].kg = ""; 
+            } else clonLam = [{ material_id: "", kg: targetKgStr, material_free_text: "" }];
+          }
+        }
+
+        next.sustratosVirgenImp = clonImp;
+        next.sustratosVirgenLam = clonLam;
+        
+        return next
+      })
+
+      toast.success(`¡Configuración de ${otEncontrada.code} importada con éxito!`)
+      setClonadorModalOpen(false)
+      setClonadorSearch("")
+    } catch (e) {
+      toast.error("Hubo un error al intentar clonar la configuración.")
+    } finally {
+      setClonando(false)
+    }
+  }
+
+async function guardar(opts?: { forceNewOt?: boolean }) {
     if (isDraftRoute) {
       if (!draftCoId) {
         toast.error("Falta el pedido cliente (OC) en la URL. Vuelva a la lista e inténtelo otra vez.")
@@ -2090,409 +2318,386 @@ export default function WorkOrderPlanillaPage() {
     }
 
     if (!OT_SKIP_SAVE_VALIDATION) {
-    if (canEditShared) {
-      const fechaOrden =
-        readString(form.fechaOrden).trim() || readString(prefill.fechaOrden).trim()
-      if (!fechaOrden) {
-        addError("fechaOrden", "Fecha es obligatoria.")
-      }
-    }
-
-    const pedidoKg = readNumberString(formToSave.pedidoKg) || readNumberString(prefill.pedidoKg)
-    if (!isDecimalLike(pedidoKg) || Number(pedidoKg.replace(",", ".")) <= 0) {
-      addError("pedidoKg", "Cantidad solicitada (Kg) debe ser numérica y mayor a 0.")
-    }
-    if (!readString(form.maquina).trim()) {
-      addError("maquina", "Seleccione una máquina antes de guardar.")
-    }
-    const planchasRef = readString(form.planchasReferencia).trim()
-    if (planchasRef && !/^\d+$/.test(planchasRef)) {
-      addError("planchasReferencia", "Ref. planchas debe contener solo números.")
-    }
-    const metrosEstimados = readNumberString(form.metrosEstimados).trim()
-    if (!metrosEstimados || metrosEstimados === "-") {
-      addError("metrosEstimados", "Metros Est. es obligatorio.")
-    } else if (!/^-?\d+$/.test(metrosEstimados)) {
-      addError("metrosEstimados", "Metros Est. debe ser numérico (puede ser negativo).")
-    }
-    if (!tipoImpresion) {
-      addError("tipoImpresionEstructura", "Seleccione el tipo de impresión.")
-    }
-    if (!readString(form.cpe).trim()) {
-      addError("cpe", "C.P.E. es obligatorio.")
-    }
-    if (!readString(form.mpps).trim()) {
-      addError("mpps", "M.P.P.S. es obligatorio.")
-    }
-    if (!readString(form.codigoBarra).trim()) {
-      addError("codigoBarra", "Cod. Barra es obligatorio.")
-    }
-
-    if (canEditShared) {
-      if (tipoImpresion === "trilaminado") {
-        if (!readString(formToSave.estructuraCapa1Rev).trim()) {
-          addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
-        }
-        if (!readString(formToSave.estructuraCapa2Rev).trim()) {
-          addError("estructuraCapa2Rev", "Capa 2 es obligatoria (revise estructura del producto).")
-        }
-        if (!readString(formToSave.estructuraCapa3Rev).trim()) {
-          addError("estructuraCapa3Rev", "Capa 3 es obligatoria (revise estructura del producto).")
-        }
-      } else if (tipoImpresion === "bilaminado") {
-        if (!readString(formToSave.estructuraCapa1Rev).trim()) {
-          addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
-        }
-        if (!readString(formToSave.estructuraCapa2Rev).trim()) {
-          addError("estructuraCapa2Rev", "Capa 2 es obligatoria (revise estructura del producto).")
-        }
-      } else if (tipoImpresion === "superficie") {
-        const estructuraSuperficie =
-          readString(formToSave.estructuraCapa1).trim() ||
-          readString(prefill.estructuraMaterial).trim()
-        if (!estructuraSuperficie) {
-          addError("estructuraCapa1", "Estructura (1 capa) es obligatoria.")
+      if (canEditShared) {
+        const fechaOrden =
+          readString(form.fechaOrden).trim() || readString(prefill.fechaOrden).trim()
+        if (!fechaOrden) {
+          addError("fechaOrden", "Fecha es obligatoria.")
         }
       }
-    }
 
-    if (canEditShared && canViewMontaje) {
-      if (!isMetricLike(readString(formToSave.frecuencia))) {
-        addError("frecuencia", "Formato válido: 250, 250±2 o 250-252.")
+      const pedidoKg = readNumberString(formToSave.pedidoKg) || readNumberString(prefill.pedidoKg)
+      if (!isDecimalLike(pedidoKg) || Number(pedidoKg.replace(",", ".")) <= 0) {
+        addError("pedidoKg", "Cantidad solicitada (kg) debe ser numérica y mayor a 0.")
       }
-      if (!isPositiveIntLike(formToSave.numBandas)) {
-        addError("numBandas", "Debe ser entero mayor a 0.")
+      if (!readString(form.maquina).trim()) {
+        addError("maquina", "Seleccione una máquina antes de guardar.")
       }
-      if (!isMetricLike(readString(formToSave.anchoCorteMontaje))) {
-        addError("anchoCorteMontaje", "Formato válido: 330±2, 330 o 329-331.")
-      }
-      if (!isPositiveIntLike(formToSave.numRepeticion)) {
-        addError("numRepeticion", "Debe ser entero mayor a 0.")
-      }
-      if (!normalizeTipoImpresionMontaje(formToSave.tipoImpresionMontaje)) {
-        addError("tipoImpresionMontaje", "Seleccione el tipo de impresión en montaje.")
-      }
-      const desarrollo = normalizeDesarrolloMmValue(formToSave.desarrollo)
-      if (!desarrollo) {
-        addError("desarrollo", "Desarrollo (mm) es obligatorio.")
-      } else if (!isDesarrolloMmLike(desarrollo)) {
-        addError("desarrollo", "Ingrese hasta 3 dígitos (ej. 812mm).")
-      }
-      const anchoMontaje = readString(formToSave.anchoMontaje).trim()
-      if (!anchoMontaje) {
-        addError("anchoMontaje", "Ancho montaje (mm) es obligatorio.")
-      } else if (!isMetricLike(anchoMontaje)) {
-        addError("anchoMontaje", "Formato válido: 330±2, 330 o 329-331.")
-      }
-      if (!isPositiveIntLike(formToSave.numColores)) {
-        addError("numColores", "Debe ser entero mayor a 0.")
-      }
-      const figuraMontaje = readString(form.figuraEmbobinadoMontaje).trim()
-      if (!figuraMontaje) {
-        addError("figuraEmbobinadoMontaje", "Figura embobinado (montaje) es obligatoria.")
-      } else if (!/^[1-8]$/.test(figuraMontaje)) {
-        addError("figuraEmbobinadoMontaje", "Figura embobinado debe ser un número del 1 al 8.")
-      }
-      if (!readString(form.obsMontaje).trim()) {
-        addError("obsMontaje", "Observaciones montaje es obligatorio.")
-      }
-    }
-
-    if (canViewImpresion) {
-      const pinon = readString(form.pinonImp).trim()
-      if (!pinon) {
-        addError("pinonImp", "Piñón (dientes) es obligatorio.")
-      } else if (!isPositiveIntLike(pinon)) {
-        addError("pinonImp", "Piñón debe ser entero mayor a 0.")
+      const planchasRef = readString(form.planchasReferencia).trim()
+      if (planchasRef && !/^\d+$/.test(planchasRef)) {
+        addError("planchasReferencia", "Ref. planchas debe contener solo números.")
       }
 
-      const lineaCorte = normalizeYesNo(form.lineaCorte)
-      if (!lineaCorte) {
-        addError("lineaCorte", "Línea de corte es obligatoria.")
+      if (!readString(form.codigoBarra).trim()) {
+        addError("codigoBarra", "Cod. Barra es obligatorio.")
       }
 
-      const figEmbImpDisplay = readString(form.figEmbImpDisplay).trim()
-      if (!figEmbImpDisplay) {
-        addError("figEmbImpDisplay", "Figura emb. (1-8) es obligatoria.")
-      } else if (!/^[1-8]$/.test(figEmbImpDisplay)) {
-        addError("figEmbImpDisplay", "Figura emb. debe ser un número del 1 al 8.")
-      }
-
-      const gramajeTinta = readNumberString(form.gramajeTintaGm2).trim()
-      if (!gramajeTinta) {
-        addError("gramajeTintaGm2", "Gramaje de tinta es obligatorio.")
-      }
-
-      const sImpRows = getSustratosImp(form)
-      const anySustratoFilled = sImpRows.some(
-        (r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim(),
-      )
-      if (!anySustratoFilled) {
-        addError("sustratosImp", "Debe seleccionar al menos un sustrato y su Kg a utilizar.")
-      } else {
-        for (let i = 0; i < sImpRows.length; i += 1) {
-          const row = sImpRows[i]
-          if (!row) continue
-          const kg = readNumberString(row.kg).trim()
-          if (!sustratoRowHasMaterialChoice(row) && !kg) continue
-          if (!sustratoRowHasMaterialChoice(row)) {
-            addError(
-              "sustratosImp",
-              `Indique el material del sustrato ${i + 1} (texto libre o inventario).`,
-            )
-            break
+      if (canEditShared) {
+        if (tipoImpresion === "trilaminado") {
+          if (!readString(formToSave.estructuraCapa1Rev).trim()) {
+            addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
           }
-          if (!kg) {
-            addError("sustratosImp", `Indique los Kg a utilizar del sustrato ${i + 1}.`)
-            break
+          if (!readString(formToSave.estructuraCapa2Rev).trim()) {
+            addError("estructuraCapa2Rev", "Capa 2 es obligatoria (revise estructura del producto).")
           }
-          if (!isDecimalLike(kg) || Number(kg.replace(",", ".")) <= 0) {
-            addError("sustratosImp", `Kg a utilizar del sustrato ${i + 1} debe ser numérico y mayor a 0.`)
-            break
+          if (!readString(formToSave.estructuraCapa3Rev).trim()) {
+            addError("estructuraCapa3Rev", "Capa 3 es obligatoria (revise estructura del producto).")
           }
-          if (sustratoRowUsesCatalogMaterial(row)) {
-            const mid = sustratoMaterialIdDigits(row)
-            const mat = materialRowById(materials, mid)
-            if (!mat) {
+        } else if (tipoImpresion === "bilaminado") {
+          if (!readString(formToSave.estructuraCapa1Rev).trim()) {
+            addError("estructuraCapa1Rev", "Capa 1 es obligatoria (revise estructura del producto).")
+          }
+          if (!readString(formToSave.estructuraCapa2Rev).trim()) {
+            addError("estructuraCapa2Rev", "Capa 2 es obligatoria (revise estructura del producto).")
+          }
+        } else if (tipoImpresion === "superficie") {
+          const estructuraSuperficie =
+            readString(formToSave.estructuraCapa1).trim() ||
+            readString(prefill.estructuraMaterial).trim()
+          if (!estructuraSuperficie) {
+            addError("estructuraCapa1", "Estructura (1 capa) es obligatoria.")
+          }
+        }
+      }
+
+      if (canEditShared && canViewMontaje) {
+        if (!isMetricLike(readString(formToSave.frecuencia))) {
+          addError("frecuencia", "Formato válido: 250, 250±2 o 250-252.")
+        }
+        if (!isPositiveIntLike(formToSave.numBandas)) {
+          addError("numBandas", "Debe ser entero mayor a 0.")
+        }
+        if (!isMetricLike(readString(formToSave.anchoCorteMontaje))) {
+          addError("anchoCorteMontaje", "Formato válido: 330±2, 330 o 329-331.")
+        }
+        if (!isPositiveIntLike(formToSave.numRepeticion)) {
+          addError("numRepeticion", "Debe ser entero mayor a 0.")
+        }
+        if (!normalizeTipoImpresionMontaje(formToSave.tipoImpresionMontaje)) {
+          addError("tipoImpresionMontaje", "Seleccione el tipo de impresión en montaje.")
+        }
+        const desarrollo = normalizeDesarrolloMmValue(formToSave.desarrollo)
+        if (!desarrollo) {
+          addError("desarrollo", "Desarrollo (mm) es obligatorio.")
+        } else if (!isDesarrolloMmLike(desarrollo)) {
+          addError("desarrollo", "Ingrese hasta 3 dígitos (ej. 812mm).")
+        }
+        const anchoMontaje = readString(formToSave.anchoMontaje).trim()
+        if (!anchoMontaje) {
+          addError("anchoMontaje", "Ancho montaje (mm) es obligatorio.")
+        } else if (!isMetricLike(anchoMontaje)) {
+          addError("anchoMontaje", "Formato válido: 330±2, 330 o 329-331.")
+        }
+        if (!isPositiveIntLike(formToSave.numColores)) {
+          addError("numColores", "Debe ser entero mayor a 0.")
+        }
+        const figuraMontaje = readString(form.figuraEmbobinadoMontaje).trim()
+        if (!figuraMontaje) {
+          addError("figuraEmbobinadoMontaje", "Figura embobinado (montaje) es obligatoria.")
+        } else if (!/^[1-8]$/.test(figuraMontaje)) {
+          addError("figuraEmbobinadoMontaje", "Figura embobinado debe ser un número del 1 al 8.")
+        }
+      }
+
+      if (canViewImpresion) {
+        const pinon = readString(form.pinonImp).trim()
+        if (!pinon) {
+          addError("pinonImp", "Piñón (dientes) es obligatorio.")
+        } else if (!isPositiveIntLike(pinon)) {
+          addError("pinonImp", "Piñón debe ser entero mayor a 0.")
+        }
+
+        const lineaCorte = normalizeYesNo(form.lineaCorte)
+        if (!lineaCorte) {
+          addError("lineaCorte", "Línea de corte es obligatoria.")
+        }
+
+        const figEmbImpDisplay = readString(form.figEmbImpDisplay).trim()
+        if (!figEmbImpDisplay) {
+          addError("figEmbImpDisplay", "Figura emb. (1-8) es obligatoria.")
+        } else if (!/^[1-8]$/.test(figEmbImpDisplay)) {
+          addError("figEmbImpDisplay", "Figura emb. debe ser un número del 1 al 8.")
+        }
+
+        const gramajeTinta = readNumberString(form.gramajeTintaGm2).trim()
+        if (!gramajeTinta) {
+          addError("gramajeTintaGm2", "Gramaje de tinta es obligatorio.")
+        }
+
+        const sImpRows = getSustratosImp(form)
+        const anySustratoFilled = sImpRows.some(
+          (r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim(),
+        )
+        if (!anySustratoFilled) {
+          addError("sustratosImp", "Debe seleccionar al menos un sustrato y su Kg a utilizar.")
+        } else {
+          for (let i = 0; i < sImpRows.length; i += 1) {
+            const row = sImpRows[i]
+            if (!row) continue
+            const kg = readNumberString(row.kg).trim()
+            if (!sustratoRowHasMaterialChoice(row) && !kg) continue
+            if (!sustratoRowHasMaterialChoice(row)) {
               addError(
                 "sustratosImp",
-                `Impresión: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
+                `Indique el material del sustrato ${i + 1} (texto libre o inventario).`,
               )
               break
             }
+            if (!kg) {
+              addError("sustratosImp", `Indique los Kg a utilizar del sustrato ${i + 1}.`)
+              break
+            }
+            if (!isDecimalLike(kg) || Number(kg.replace(",", ".")) <= 0) {
+              addError("sustratosImp", `Kg a utilizar del sustrato ${i + 1} debe ser numérico y mayor a 0.`)
+              break
+            }
+            if (sustratoRowUsesCatalogMaterial(row)) {
+              const mid = sustratoMaterialIdDigits(row)
+              const mat = materialRowById(materials, mid)
+              if (!mat) {
+                addError(
+                  "sustratosImp",
+                  `Impresión: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
+                )
+                break
+              }
+            }
           }
         }
-      }
 
-      const impRequiredDecimals: Array<[key: string, label: string, value: unknown]> = [
-        ["kgIngresadoImp", "Kg ingresado", form.kgIngresadoImp],
-        ["kgSalidaImp", "Kg salida", form.kgSalidaImp],
-        ["mermaImp", "Merma", form.mermaImp],
-        ["metrosImp", "Metros", form.metrosImp],
-      ]
-      for (const [key, label, value] of impRequiredDecimals) {
-        const s = readNumberString(value).trim()
-        if (!s) addError(key, `Impresión: ${label} es obligatorio.`)
-      }
-    }
-
-    if ((canViewImpresion || canViewTintas) && canEditShared) {
-      const numColoresRaw = readString(formToSave.numColores).trim()
-      const numColores = Number(numColoresRaw)
-      if (numColoresRaw && Number.isFinite(numColores) && numColores > 0) {
-        const filledInRange = countFilledTintaColorsInRange(formToSave, 1, Math.min(8, numColores))
-        if (filledInRange < numColores) {
-          addError(
-            "tintaColor1",
-            `Descripción de tintas: indique color en las posiciones 1 a ${numColores} (N° colores = ${numColores}).`,
-          )
+        const impRequiredDecimals: Array<[key: string, label: string, value: unknown]> = [
+          ["kgIngresadoImp", "Kg ingresado", form.kgIngresadoImp],
+          ["kgSalidaImp", "Kg salida", form.kgSalidaImp],
+          ["mermaImp", "Merma", form.mermaImp],
+          ["metrosImp", "Metros", form.metrosImp],
+        ]
+        for (const [key, label, value] of impRequiredDecimals) {
+          const s = readNumberString(value).trim()
+          if (!s) addError(key, `Impresión: ${label} es obligatorio.`)
         }
       }
-    }
 
-    if (canViewLaminacion) {
-      const figuraLam = readString(form.figuraEmbobinadoLam).trim()
-      if (!figuraLam) {
-        addError("figuraEmbobinadoLam", "Figura embobinado es obligatoria.")
-      } else if (!/^[1-8]$/.test(figuraLam)) {
-        addError("figuraEmbobinadoLam", "Figura embobinado debe ser un número del 1 al 8.")
-      }
-
-      const gramaje = readString(form.gramajeAdhesivo).trim()
-      if (!gramaje) {
-        addError("gramajeAdhesivo", "Gramaje adhesivo es obligatorio.")
-      } else if (!isGramajeAdhesivoRangeLike(gramaje)) {
-        addError("gramajeAdhesivo", "Use formato rango (ej: 1,5 A 2,2).")
-      }
-      const relacion = readString(form.relacionMezcla).trim()
-      if (!relacion) {
-        addError("relacionMezcla", "Relación mezcla es obligatoria.")
-      } else if (!isRatioLike(relacion)) {
-        addError("relacionMezcla", "Use formato 100/80.")
-      }
-      if (!readString(form.obsLaminacion).trim()) {
-        addError("obsLaminacion", "Observaciones laminación es obligatorio.")
-      }
-
-      const sLamRows = getSustratosLam(form)
-      const anySustratoFilled = sLamRows.some(
-        (r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim(),
-      )
-      if (!anySustratoFilled) {
-        addError("sustratosLam", "Debe seleccionar al menos un sustrato y su Kg a utilizar.")
-      } else {
-        for (let i = 0; i < sLamRows.length; i += 1) {
-          const row = sLamRows[i]
-          if (!row) continue
-          const kg = readNumberString(row.kg).trim()
-          if (!sustratoRowHasMaterialChoice(row) && !kg) continue
-          if (!sustratoRowHasMaterialChoice(row)) {
+      if ((canViewImpresion || canViewTintas) && canEditShared) {
+        const numColoresRaw = readString(formToSave.numColores).trim()
+        const numColores = Number(numColoresRaw)
+        if (numColoresRaw && Number.isFinite(numColores) && numColores > 0) {
+          const filledInRange = countFilledTintaColorsInRange(formToSave, 1, Math.min(8, numColores))
+          if (filledInRange < numColores) {
             addError(
-              "sustratosLam",
-              `Indique el material del sustrato ${i + 1} (texto libre o inventario).`,
+              "tintaColor1",
+              `Descripción de tintas: indique color en las posiciones 1 a ${numColores} (N° colores = ${numColores}).`,
             )
-            break
           }
-          if (!kg) {
-            addError("sustratosLam", `Indique los Kg a utilizar del sustrato ${i + 1}.`)
-            break
-          }
-          if (!isDecimalLike(kg) || Number(kg.replace(",", ".")) <= 0) {
-            addError("sustratosLam", `Kg a utilizar del sustrato ${i + 1} debe ser numérico y mayor a 0.`)
-            break
-          }
-          if (sustratoRowUsesCatalogMaterial(row)) {
-            const mid = sustratoMaterialIdDigits(row)
-            const mat = materialRowById(materials, mid)
-            if (!mat) {
+        }
+      }
+
+      if (canViewLaminacion) {
+        const figuraLam = readString(form.figuraEmbobinadoLam).trim()
+        if (!figuraLam) {
+          addError("figuraEmbobinadoLam", "Figura embobinado es obligatoria.")
+        } else if (!/^[1-8]$/.test(figuraLam)) {
+          addError("figuraEmbobinadoLam", "Figura embobinado debe ser un número del 1 al 8.")
+        }
+
+        const gramaje = readString(form.gramajeAdhesivo).trim()
+        if (!gramaje) {
+          addError("gramajeAdhesivo", "Gramaje adhesivo es obligatorio.")
+        } else if (!isGramajeAdhesivoRangeLike(gramaje)) {
+          addError("gramajeAdhesivo", "Use formato rango (ej: 1,5 A 2,2).")
+        }
+        const relacion = readString(form.relacionMezcla).trim()
+        if (!relacion) {
+          addError("relacionMezcla", "Relación mezcla es obligatoria.")
+        } else if (!isRatioLike(relacion)) {
+          addError("relacionMezcla", "Use formato 100/80.")
+        }
+
+        const sLamRows = getSustratosLam(form)
+        const anySustratoFilled = sLamRows.some(
+          (r) => sustratoRowHasMaterialChoice(r) || readNumberString(r.kg).trim(),
+        )
+        if (!anySustratoFilled) {
+          addError("sustratosLam", "Debe seleccionar al menos un sustrato y su Kg a utilizar.")
+        } else {
+          for (let i = 0; i < sLamRows.length; i += 1) {
+            const row = sLamRows[i]
+            if (!row) continue
+            const kg = readNumberString(row.kg).trim()
+            if (!sustratoRowHasMaterialChoice(row) && !kg) continue
+            if (!sustratoRowHasMaterialChoice(row)) {
               addError(
                 "sustratosLam",
-                `Laminación: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
+                `Indique el material del sustrato ${i + 1} (texto libre o inventario).`,
               )
               break
             }
+            if (!kg) {
+              addError("sustratosLam", `Indique los Kg a utilizar del sustrato ${i + 1}.`)
+              break
+            }
+            if (!isDecimalLike(kg) || Number(kg.replace(",", ".")) <= 0) {
+              addError("sustratosLam", `Kg a utilizar del sustrato ${i + 1} debe ser numérico y mayor a 0.`)
+              break
+            }
+            if (sustratoRowUsesCatalogMaterial(row)) {
+              const mid = sustratoMaterialIdDigits(row)
+              const mat = materialRowById(materials, mid)
+              if (!mat) {
+                addError(
+                  "sustratosLam",
+                  `Laminación: sustrato ${i + 1}: material no está en el listado cargado. Recargue o vuelva a elegir del catálogo.`,
+                )
+                break
+              }
+            }
+          }
+        }
+
+        const lamRequiredDecimals: Array<[key: string, label: string, value: unknown]> = [
+          ["kgAdhesivoLaminacion", "Adhesivo", form.kgAdhesivoLaminacion],
+          ["kgCatalizadorLaminacion", "Catalizador", form.kgCatalizadorLaminacion],
+        ]
+        for (const [key, label, value] of lamRequiredDecimals) {
+          const s = readNumberString(value).trim()
+          if (!s) addError(key, `Laminación: ${label} es obligatorio.`)
+        }
+      }
+
+      if (canViewCorte) {
+        const requiredMetricChecks: Array<[key: string, label: string, value: unknown]> = [
+          ["anchoCorteFinal", "Ancho corte (mm)", form.anchoCorteFinal],
+          ["pesoBobina", "Peso bobina (Kg)", form.pesoBobina],
+          ["metrosBobina", "Metros/Bobina (m)", form.metrosBobina],
+          ["distFotoceldaBorde", "Dist. fotocelda al borde (mm)", form.distFotoceldaBorde],
+          ["distFiguraLadoContrario", "Distancia figura lado contrario (mm)", form.distFiguraLadoContrario],
+          ["distFiguraLadoFotocelda", "Distancia figura lado fotocelda (mm)", form.distFiguraLadoFotocelda],
+          ["diamBobina", "Diám. bobina (mm)", form.diamBobina],
+          ["anchoCore", "Ancho core (mm)", form.anchoCore],
+          ["diamCorePlg", "Diám. core (Plg)", form.diamCorePlg],
+        ]
+        for (const [key, label, value] of requiredMetricChecks) {
+          const s = readString(value).trim()
+          if (!s) {
+            addError(key, `Corte: ${label} es obligatorio.`)
+            continue
+          }
+          if (!isMetricLikeOrNA(s)) {
+            addError(key, `Corte: ${label} debe tener formato válido (ej: 400±5, 19-20, 460 o N/A).`)
+          }
+        }
+
+        const orient = readString(form.orientacionEmbalaje).trim()
+        if (!orient) {
+          addError("orientacionEmbalaje", "Corte: Figura embobinado es obligatoria.")
+        }
+
+        const ubic = readString(form.ubicFotoceldaCorte).trim()
+        if (!ubic) {
+          addError("ubicFotoceldaCorte", "Corte: Ubic. fotocelda es obligatoria.")
+        }
+
+        const wholeNumberRequired: Array<[key: string, label: string, value: unknown]> = [
+          ["maxEmpates", "Max. empates", form.maxEmpates],
+          ["cantCores", "Cant. cores", form.cantCores],
+        ]
+        for (const [key, label, value] of wholeNumberRequired) {
+          const s = readString(value).trim()
+          if (!s) {
+            addError(key, `Corte: ${label} es obligatorio.`)
+            continue
+          }
+          if (!isPositiveIntLike(s)) {
+            addError(key, `Corte: ${label} debe ser entero mayor a 0.`)
+          }
+        }
+
+        const decimalRequired: Array<[key: string, label: string, value: unknown]> = [
+          ["kgIngresadosCorte", "Kg ingresados", form.kgIngresadosCorte],
+          ["kgSalidaCorte", "Kg salida", form.kgSalidaCorte],
+          ["kgMermaCorte", "Kg merma", form.kgMermaCorte],
+          ["metrajeCorte", "Metraje", form.metrajeCorte],
+        ]
+        for (const [key, label, value] of decimalRequired) {
+          const s = readNumberString(value).trim()
+          if (!s) {
+            addError(key, `Corte: ${label} es obligatorio.`)
+            continue
+          }
+          if (!isDecimalLike(s)) {
+            addError(key, `Corte: ${label} debe ser numérico.`)
           }
         }
       }
 
-      const lamRequiredDecimals: Array<[key: string, label: string, value: unknown]> = [
-        ["kgAdhesivoLaminacion", "Adhesivo", form.kgAdhesivoLaminacion],
-        ["kgCatalizadorLaminacion", "Catalizador", form.kgCatalizadorLaminacion],
+      const decimalChecks: Array<[key: string, label: string, value: unknown]> = [
+        ["gramajeTintaGm2", "Impresión: Gramaje de tinta", form.gramajeTintaGm2],
+        ["kgIngresadoImp", "Impresión: Kg ingresado", form.kgIngresadoImp],
+        ["kgSalidaImp", "Impresión: Kg salida", form.kgSalidaImp],
+        ["mermaImp", "Impresión: Merma", form.mermaImp],
+        ["metrosImp", "Impresión: Metros", form.metrosImp],
+        ["kgLaminaImpresaLaminacion", "Laminación: Lámina impresa", form.kgLaminaImpresaLaminacion],
+        ["kgLaminaVirgenLaminacion", "Laminación: Lámina virgen", form.kgLaminaVirgenLaminacion],
+        ["kgAdhesivoLaminacion", "Laminación: Adhesivo", form.kgAdhesivoLaminacion],
+        ["kgCatalizadorLaminacion", "Laminación: Catalizador", form.kgCatalizadorLaminacion],
+        ["kgEntradaLam", "Laminación: Kg entrada", form.kgEntradaLam],
+        ["kgSalidaLam", "Laminación: Kg salida", form.kgSalidaLam],
+        ["metrajeLam", "Laminación: Metraje", form.metrajeLam],
+        ["mermaLam", "Laminación: Merma", form.mermaLam],
+        ["kgEntradaLam2", "Laminación: Kg entrada 2", form.kgEntradaLam2],
+        ["kgSalidaLam2", "Laminación: Kg salida 2", form.kgSalidaLam2],
+        ["metrajeLam2", "Laminación: Metraje 2", form.metrajeLam2],
+        ["mermaLam2", "Laminación: Merma 2", form.mermaLam2],
+        ["kgIngresadosCorte", "Corte: Kg ingresados", form.kgIngresadosCorte],
+        ["kgSalidaCorte", "Corte: Kg salida", form.kgSalidaCorte],
+        ["kgMermaCorte", "Corte: Kg merma", form.kgMermaCorte],
+        ["metrajeCorte", "Corte: Metraje", form.metrajeCorte],
       ]
-      for (const [key, label, value] of lamRequiredDecimals) {
+      for (const [key, label, value] of decimalChecks) {
         const s = readNumberString(value).trim()
-        if (!s) addError(key, `Laminación: ${label} es obligatorio.`)
-      }
-    }
-
-    if (canViewCorte) {
-      const requiredMetricChecks: Array<[key: string, label: string, value: unknown]> = [
-        ["anchoCorteFinal", "Ancho corte (mm)", form.anchoCorteFinal],
-        ["pesoBobina", "Peso bobina (Kg)", form.pesoBobina],
-        ["metrosBobina", "Metros/Bobina (m)", form.metrosBobina],
-        ["distFotoceldaBorde", "Dist. fotocelda al borde (mm)", form.distFotoceldaBorde],
-        ["distFiguraLadoContrario", "Distancia figura lado contrario (mm)", form.distFiguraLadoContrario],
-        ["distFiguraLadoFotocelda", "Distancia figura lado fotocelda (mm)", form.distFiguraLadoFotocelda],
-        ["diamBobina", "Diám. bobina (mm)", form.diamBobina],
-        ["anchoCore", "Ancho core (mm)", form.anchoCore],
-        ["diamCorePlg", "Diám. core (Plg)", form.diamCorePlg],
-      ]
-      for (const [key, label, value] of requiredMetricChecks) {
-        const s = readString(value).trim()
-        if (!s) {
-          addError(key, `Corte: ${label} es obligatorio.`)
-          continue
-        }
-        if (!isMetricLikeOrNA(s)) {
-          addError(key, `Corte: ${label} debe tener formato válido (ej: 400±5, 19-20, 460 o N/A).`)
-        }
-      }
-
-      const orient = readString(form.orientacionEmbalaje).trim()
-      if (!orient) {
-        addError("orientacionEmbalaje", "Corte: Figura embobinado es obligatoria.")
-      }
-
-      const ubic = readString(form.ubicFotoceldaCorte).trim()
-      if (!ubic) {
-        addError("ubicFotoceldaCorte", "Corte: Ubic. fotocelda es obligatoria.")
-      }
-
-      const wholeNumberRequired: Array<[key: string, label: string, value: unknown]> = [
-        ["maxEmpates", "Max. empates", form.maxEmpates],
-        ["cantCores", "Cant. cores", form.cantCores],
-      ]
-      for (const [key, label, value] of wholeNumberRequired) {
-        const s = readString(value).trim()
-        if (!s) {
-          addError(key, `Corte: ${label} es obligatorio.`)
-          continue
-        }
-        if (!isPositiveIntLike(s)) {
-          addError(key, `Corte: ${label} debe ser entero mayor a 0.`)
-        }
-      }
-
-      const decimalRequired: Array<[key: string, label: string, value: unknown]> = [
-        ["kgIngresadosCorte", "Kg ingresados", form.kgIngresadosCorte],
-        ["kgSalidaCorte", "Kg salida", form.kgSalidaCorte],
-        ["kgMermaCorte", "Kg merma", form.kgMermaCorte],
-        ["metrajeCorte", "Metraje", form.metrajeCorte],
-      ]
-      for (const [key, label, value] of decimalRequired) {
-        const s = readNumberString(value).trim()
-        if (!s) {
-          addError(key, `Corte: ${label} es obligatorio.`)
-          continue
-        }
+        if (!s) continue
         if (!isDecimalLike(s)) {
-          addError(key, `Corte: ${label} debe ser numérico.`)
+          addError(key, `${label} debe ser numérico.`)
+        }
+      }
+
+      for (let i = 0; i < sustratosImp.length; i += 1) {
+        const kg = readString(sustratosImp[i]?.kg).trim()
+        if (kg && !isDecimalLike(kg)) {
+          addError("sustratosImp", `Impresión: 'Kg a utilizar' de sustrato ${i + 1} debe ser numérico.`)
+        }
+      }
+      for (let i = 0; i < sustratosLam.length; i += 1) {
+        const kg = readString(sustratosLam[i]?.kg).trim()
+        if (kg && !isDecimalLike(kg)) {
+          addError("sustratosLam", `Laminación: 'Kg a utilizar' de sustrato ${i + 1} debe ser numérico.`)
+        }
+      }
+
+      if (canViewProgramacion) {
+        if (!readString(form.fechaInicio).trim()) {
+          addError("fechaInicio", "F. Inicio es obligatoria.")
+        }
+        if (!readString(form.fechaEntrega).trim()) {
+          addError("fechaEntrega", "F. Entrega es obligatoria.")
+        }
+        if (!readString(form.programacionMotivo).trim()) {
+          addError("programacionMotivo", "Motivo de asignación es obligatorio.")
+        }
+        if (readProgramacionAreas(form).length === 0) {
+          addError("programacionAreas", "Seleccione al menos un área.")
         }
       }
     }
-
-    const decimalChecks: Array<[key: string, label: string, value: unknown]> = [
-      ["gramajeTintaGm2", "Impresión: Gramaje de tinta", form.gramajeTintaGm2],
-      ["kgIngresadoImp", "Impresión: Kg ingresado", form.kgIngresadoImp],
-      ["kgSalidaImp", "Impresión: Kg salida", form.kgSalidaImp],
-      ["mermaImp", "Impresión: Merma", form.mermaImp],
-      ["metrosImp", "Impresión: Metros", form.metrosImp],
-      ["kgLaminaImpresaLaminacion", "Laminación: Lámina impresa", form.kgLaminaImpresaLaminacion],
-      ["kgLaminaVirgenLaminacion", "Laminación: Lámina virgen", form.kgLaminaVirgenLaminacion],
-      ["kgAdhesivoLaminacion", "Laminación: Adhesivo", form.kgAdhesivoLaminacion],
-      ["kgCatalizadorLaminacion", "Laminación: Catalizador", form.kgCatalizadorLaminacion],
-      ["kgEntradaLam", "Laminación: Kg entrada", form.kgEntradaLam],
-      ["kgSalidaLam", "Laminación: Kg salida", form.kgSalidaLam],
-      ["metrajeLam", "Laminación: Metraje", form.metrajeLam],
-      ["mermaLam", "Laminación: Merma", form.mermaLam],
-      ["kgEntradaLam2", "Laminación: Kg entrada 2", form.kgEntradaLam2],
-      ["kgSalidaLam2", "Laminación: Kg salida 2", form.kgSalidaLam2],
-      ["metrajeLam2", "Laminación: Metraje 2", form.metrajeLam2],
-      ["mermaLam2", "Laminación: Merma 2", form.mermaLam2],
-      ["kgIngresadosCorte", "Corte: Kg ingresados", form.kgIngresadosCorte],
-      ["kgSalidaCorte", "Corte: Kg salida", form.kgSalidaCorte],
-      ["kgMermaCorte", "Corte: Kg merma", form.kgMermaCorte],
-      ["metrajeCorte", "Corte: Metraje", form.metrajeCorte],
-    ]
-    for (const [key, label, value] of decimalChecks) {
-      const s = readNumberString(value).trim()
-      if (!s) continue
-      if (!isDecimalLike(s)) {
-        addError(key, `${label} debe ser numérico.`)
-      }
-    }
-
-    for (let i = 0; i < sustratosImp.length; i += 1) {
-      const kg = readString(sustratosImp[i]?.kg).trim()
-      if (kg && !isDecimalLike(kg)) {
-        addError("sustratosImp", `Impresión: 'Kg a utilizar' de sustrato ${i + 1} debe ser numérico.`)
-      }
-    }
-    for (let i = 0; i < sustratosLam.length; i += 1) {
-      const kg = readString(sustratosLam[i]?.kg).trim()
-      if (kg && !isDecimalLike(kg)) {
-        addError("sustratosLam", `Laminación: 'Kg a utilizar' de sustrato ${i + 1} debe ser numérico.`)
-      }
-    }
-
-    if (canViewProgramacion) {
-      if (!readString(form.observacionesGenerales).trim()) {
-        addError("observacionesGenerales", "Observaciones generales es obligatorio.")
-      }
-      if (!readString(form.fechaInicio).trim()) {
-        addError("fechaInicio", "F. Inicio es obligatoria.")
-      }
-      if (!readString(form.fechaEntrega).trim()) {
-        addError("fechaEntrega", "F. Entrega es obligatoria.")
-      }
-      if (!readString(form.programacionMotivo).trim()) {
-        addError("programacionMotivo", "Motivo de asignación es obligatorio.")
-      }
-      if (readProgramacionAreas(form).length === 0) {
-        addError("programacionAreas", "Seleccione al menos un área.")
-      }
-    }
-    } // OT_SKIP_SAVE_VALIDATION
 
     const programacionAreas = readProgramacionAreas(form)
     const programacionMotivo = readString(form.programacionMotivo).trim()
@@ -2548,6 +2753,7 @@ export default function WorkOrderPlanillaPage() {
           body: JSON.stringify({
             client_order_id: draftCoId,
             ...(woProductId ? { product_id: woProductId } : {}),
+            ...(woLineId ? { client_order_line_id: woLineId } : {}),
             import_client_order_lines: importMaterial,
             auto_create_material_request: importMaterial,
             originating_area: "printing",
@@ -2560,6 +2766,7 @@ export default function WorkOrderPlanillaPage() {
       const rowsImp = getSustratosImp(formToSave)
       const rowsLam = getSustratosLam(formToSave)
       const desarrolloNorm = normalizeDesarrolloMmValue(formToSave.desarrollo)
+      
       const formOut: Record<string, unknown> = {
         ...formToSave,
         ...(desarrolloNorm ? { desarrollo: desarrolloNorm } : {}),
@@ -2570,11 +2777,9 @@ export default function WorkOrderPlanillaPage() {
         cliente: readString(prefill.cliente) || readString(formToSave.cliente),
         clienteRif: readString(prefill.clienteRif) || readString(formToSave.clienteRif),
         producto: readString(prefill.producto) || readString(formToSave.producto),
-
-        // Luego, realiza una petición HTTP (PUT) al backend para guardar el formulario actualizado.
-        // La información enviada será el objeto "formOut", que contiene todos los datos del formulario incluyendo los campos anteriores.
-        // apiFetch hace la llamada HTTP al endpoint de la orden de trabajo con su id, enviando el formulario serializado como JSON.
+        metrosEstimados: formToSave.metrosEstimados || "0", 
       }
+      
       const priorityOut =
         readString(form.priority).toLowerCase() === "urgente"
           ? "urgente"
@@ -2643,7 +2848,6 @@ export default function WorkOrderPlanillaPage() {
   }
 
   function limpiar() {
-    // Mantener precarga (cliente/producto/pedido) y limpiar el resto.
     const p = prefill as Record<string, unknown>
     const base: Record<string, unknown> = { ...prefill }
     base.programacionAreas = [...PROGRAMACION_AREAS]
@@ -2705,50 +2909,58 @@ export default function WorkOrderPlanillaPage() {
     ""
 
   const clienteVisible = readString(form.cliente) || readString(prefill.cliente) || ""
-
   return (
     <div className="ax-ot p-2 sm:p-4 md:p-6">
-      {/* Mismo carril horizontal que el <form>: en borrador el padding derecho reserva los FAB flotantes */}
+      
+      {/* 🔥 CSS MAGIA PARA MATAR EL LOCALHOST EN EL PDF */}
+      <style>{`
+        @media print {
+          @page { margin: 0; }
+          body { margin: 1.6cm; }
+        }
+      `}</style>
+
       <div
         className={cn(
-          "min-w-0",
+          "min-w-0 max-w-7xl mx-auto",
           isDraftRoute && "pr-14 sm:pr-20 print:pr-0",
         )}
       >
-      {/* Header (Ver órdenes / Rellenar al azar / Limpiar / Guardar) */}
-      <div className="no-print mb-4 ax-card flex w-full min-w-0 flex-col gap-5 px-4 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <ClipboardCheck className="h-5 w-5 text-primary" />
-            <h2 className="text-lg font-semibold">Orden de trabajo</h2>
+      <div className="no-print mb-6 ax-card flex w-full min-w-0 flex-col gap-5 px-4 py-4 md:py-6 shadow-sm">
+        <div className="min-w-0 flex flex-col items-center justify-center space-y-2">
+          <div className="flex items-center gap-2 text-primary">
+            <ClipboardCheck className="h-6 w-6" />
+            <h2 className="text-xl font-bold uppercase tracking-wide">Orden de trabajo</h2>
           </div>
-          <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold leading-snug text-foreground">
+          <div className="rounded-md border border-primary/20 bg-primary/5 px-4 py-2 text-xs md:text-sm font-medium leading-snug text-foreground max-w-2xl text-center">
             {isDraftRoute ? (
               <>
-                <span className="text-primary">Borrador:</span> la OT aún no existe en base de datos.{" "}
-                <span className="text-primary">Guardar orden</span> la crea
+                <span className="font-bold text-primary">Borrador:</span> la OT aún no existe en base de datos.{" "}
+                <span className="font-bold text-primary">Guardar orden</span> la crea
                 {OT_SKIP_SAVE_VALIDATION ? (
-                  <> (validación de obligatorios desactivada temporalmente).</>
+                  <> (validación temporalmente desactivada).</>
                 ) : (
                   <>, valida obligatorios y la deja en la lista.</>
                 )}
               </>
             ) : (
               <>
-                <span className="text-primary">Edición:</span> planilla de esta OT en servidor. Pulse{" "}
-                <span className="text-primary">Guardar orden</span> para aplicar cambios.
+                <span className="font-bold text-primary">Edición:</span> planilla de esta OT en servidor. Pulse{" "}
+                <span className="font-bold text-primary">Guardar orden</span> para aplicar cambios.
               </>
             )}
           </div>
-          {numeroOrdenVisible.trim() !== "" || clienteVisible.trim() !== "" ? (
-            <div className="mt-3 text-center">
-              {numeroOrdenVisible.trim() !== "" ? (
-                <h3 className="text-xl font-normal leading-tight sm:text-2xl md:text-3xl">
-                  <strong className="font-semibold tracking-tight text-primary">{numeroOrdenVisible}</strong>
+          {(otCode || numeroOrdenVisible).trim() !== "" || clienteVisible.trim() !== "" ? (
+            <div className="mt-2 text-center flex flex-col md:flex-row md:items-baseline md:justify-center md:gap-4">
+              {/* 🔥 TÍTULO ARREGLADO: Si hay código de OT, lo muestra y encierra la OC en paréntesis */}
+              {(otCode || numeroOrdenVisible).trim() !== "" ? (
+                <h3 className="text-2xl font-black tracking-tight text-primary md:text-3xl">
+                  {otCode ? otCode : numeroOrdenVisible}
+                  {otCode && numeroOrdenVisible ? <span className="text-lg text-muted-foreground ml-2">(Ped: {numeroOrdenVisible})</span> : null}
                 </h3>
               ) : null}
               {clienteVisible.trim() !== "" ? (
-                <p className="mt-1.5 text-sm font-medium text-muted-foreground sm:text-base">
+                <p className="text-sm font-semibold text-muted-foreground md:text-lg">
                   {clienteVisible}
                 </p>
               ) : null}
@@ -2756,7 +2968,26 @@ export default function WorkOrderPlanillaPage() {
           ) : null}
         </div>
         <TooltipProvider delayDuration={150}>
-          <div className="flex w-full flex-wrap items-center justify-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-center gap-3 pt-2">
+            
+            {/* 🔥 NUEVO BOTÓN: IMPRIMIR O.T. DIRECTAMENTE */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Imprimir OT"
+                  className="h-10 w-10 border-teal-300 bg-teal-50 text-teal-800 shadow-sm hover:bg-teal-100 hover:text-teal-950 transition-colors print:hidden"
+                  onClick={() => window.print()}
+                  disabled={loading || isDraftRoute}
+                >
+                  <Printer className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Imprimir Orden de Trabajo</TooltipContent>
+            </Tooltip>
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2764,10 +2995,10 @@ export default function WorkOrderPlanillaPage() {
                   variant="outline"
                   size="icon"
                   aria-label="Ver órdenes"
-                  className="border-sky-300 bg-sky-50 text-sky-800 shadow-sm hover:bg-sky-100 hover:text-sky-900"
+                  className="h-10 w-10 border-sky-300 bg-sky-50 text-sky-800 shadow-sm hover:bg-sky-100 hover:text-sky-900 transition-colors print:hidden"
                   onClick={() => setPendingHeaderAction("view")}
                 >
-                  <ClipboardList className="h-4 w-4" />
+                  <ClipboardList className="h-5 w-5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">Ver órdenes</TooltipContent>
@@ -2781,16 +3012,34 @@ export default function WorkOrderPlanillaPage() {
                     variant="outline"
                     size="icon"
                     aria-label="Rellenar datos con datos al azar"
-                    className="border-amber-300 bg-amber-50 text-amber-900 shadow-sm hover:bg-amber-100 hover:text-amber-950"
+                    className="h-10 w-10 border-amber-300 bg-amber-50 text-amber-900 shadow-sm hover:bg-amber-100 hover:text-amber-950 transition-colors print:hidden"
                     onClick={() => setPendingHeaderAction("random")}
                     disabled={loading || isRestrictedAreaView}
                   >
-                    <Shuffle className="h-4 w-4" />
+                    <Shuffle className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Rellenar al azar</TooltipContent>
               </Tooltip>
             ) : null}
+
+            {/* BOTÓN CLONAR OT MÁGICO */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Importar configuración"
+                  className="h-10 w-10 border-indigo-300 bg-indigo-50 text-indigo-800 shadow-sm hover:bg-indigo-100 hover:text-indigo-950 transition-colors print:hidden"
+                  onClick={() => setClonadorModalOpen(true)}
+                  disabled={loading || isRestrictedAreaView}
+                >
+                  <Download className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Importar Config. (Otra O.T.)</TooltipContent>
+            </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2799,11 +3048,11 @@ export default function WorkOrderPlanillaPage() {
                   variant="outline"
                   size="icon"
                   aria-label="Limpiar formulario"
-                  className="border-rose-300 bg-rose-50 text-rose-800 shadow-sm hover:bg-rose-100 hover:text-rose-950"
+                  className="h-10 w-10 border-rose-300 bg-rose-50 text-rose-800 shadow-sm hover:bg-rose-100 hover:text-rose-950 transition-colors print:hidden"
                   onClick={() => setPendingHeaderAction("clear")}
                   disabled={loading || isRestrictedAreaView}
                 >
-                  <Eraser className="h-4 w-4" />
+                  <Eraser className="h-5 w-5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">Limpiar formulario</TooltipContent>
@@ -2813,10 +3062,11 @@ export default function WorkOrderPlanillaPage() {
               <TooltipTrigger asChild>
                 <Button
                   type="button"
+                  className="h-10 px-6 font-semibold shadow-md transition-transform active:scale-95 print:hidden"
                   onClick={() => setPendingHeaderAction("save")}
                   disabled={saving || loading}
                 >
-                  <Save className="mr-2 h-4 w-4" />
+                  <Save className="mr-2 h-5 w-5" />
                   {saving ? "Guardando…" : "Guardar orden"}
                 </Button>
               </TooltipTrigger>
@@ -2928,7 +3178,10 @@ export default function WorkOrderPlanillaPage() {
       ) : null}
 
       {loading ? (
-        <p className="text-muted-foreground">Cargando…</p>
+        <div className="flex flex-col items-center justify-center p-12">
+           <Loader2 className="h-8 w-8 animate-spin text-primary opacity-50 mb-4" />
+           <p className="text-muted-foreground font-medium">Cargando planilla...</p>
+        </div>
       ) : (
         <>
           <form
@@ -2944,7 +3197,6 @@ export default function WorkOrderPlanillaPage() {
             }}
             className={cn(
               "min-w-0 w-full",
-              /* Espacio inferior para FAB en borrador (el padding derecho va en el contenedor padre) */
               isDraftRoute ? "pb-[19rem] print:pb-16" : "pb-16",
             )}
           >
@@ -2966,15 +3218,13 @@ export default function WorkOrderPlanillaPage() {
             <div className="ax-section mb-3">
               <div className="ax-section__header ax-hdr-brand justify-center">
                 <div className="ax-section__headerLeft">
-                  <strong>ORDEN DE TRABAJO</strong>
+                  <strong className="text-lg tracking-wider">ORDEN DE TRABAJO</strong>
                 </div>
               </div>
             </div>
 
-            {/* Row: Cabecera OC + datos producto */}
             <div className="ot-section">
               <div className="ot-two-col">
-                {/* Cabecera vinculada al pedido cliente (OC) */}
                 <div>
                   <div className="section-header section-hdr-cabecera">
                     <span className="inline-flex items-center gap-2">
@@ -2984,13 +3234,13 @@ export default function WorkOrderPlanillaPage() {
                   </div>
                   <div className="section-body">
                     <p className="mb-3 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-xs font-semibold leading-snug text-foreground">
-                      <span className="text-primary">Catálogo</span> — cliente y producto del sistema.{" "}
+                      <span className="text-primary">Líneas del pedido</span> — elija la línea a procesar.{" "}
                       <span className="text-primary">Inventario</span> — elija material en bodega.{" "}
                       <span className="text-primary">Figura</span> — botones 1–8 fijan el valor del campo.
                     </p>
-                    <div className="ot-grid ot-cols-3">
+                    <div className="ot-grid ot-cols-4">
                       <div className="ot-field">
-                        <label htmlFor="ot-fechaOrden" className="ot-label required">Fecha</label>
+                        <label htmlFor="ot-fechaOrden" className="ot-label required uppercase">Fecha</label>
                         <OtPlanillaInputIcon icon={Calendar}>
                           <input
                             type="date"
@@ -3005,20 +3255,21 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("fechaOrden")}
                       </div>
                       <div className="ot-field">
-                        <label htmlFor="ot-numeroOrden" className="ot-label required">N° Orden</label>
+                        <label htmlFor="ot-numeroOrden" className="ot-label required uppercase">N° Orden (Manual)</label>
                         <OtPlanillaInputIcon icon={Hash}>
                           <input
                             id="ot-numeroOrden"
                             name="numeroOrden"
-                            className="ot-input"
-                            readOnly
+                            data-field="numeroOrden"
+                            className="ot-input font-bold text-primary"
                             value={readString(form.numeroOrden) || readString(prefill.numeroOrden) || readString(form.document_number) || ""}
-                            onChange={() => { }}
+                            onChange={(ev) => setKey(setForm, "numeroOrden", ev.target.value)}
+                            disabled={!canEditShared}
                           />
                         </OtPlanillaInputIcon>
                       </div>
                       <div className="ot-field">
-                        <label htmlFor="ot-pedidoKg" className="ot-label required">Cantidad solicitada (Kg)</label>
+                        <label htmlFor="ot-pedidoKg" className="ot-label required uppercase">Cant. solicitada (Kg)</label>
                         <OtPlanillaInputIcon icon={Scale}>
                           <input
                             type="number"
@@ -3034,11 +3285,26 @@ export default function WorkOrderPlanillaPage() {
                         </OtPlanillaInputIcon>
                         {renderError("pedidoKg")}
                       </div>
+                      <div className="ot-field">
+                        <label htmlFor="ot-porcentajeExtra" className="ot-label required uppercase">% Extra pedido</label>
+                        <OtPlanillaInputIcon icon={Percent}>
+                          <input
+                            type="number"
+                            data-field="porcentajeExtra" id="ot-porcentajeExtra" name="porcentajeExtra"
+                            className="ot-input"
+                            step="0.1"
+                            min="0"
+                            value={readNumberString(form.porcentajeExtra) || "20"}
+                            onChange={(ev) => setKey(setForm, "porcentajeExtra", ev.target.value)}
+                            disabled={!canEditShared}
+                          />
+                        </OtPlanillaInputIcon>
+                      </div>
                     </div>
 
                     <div className="ot-grid ot-cols-2">
                       <div className="ot-field">
-                        <label htmlFor="ot-maquina" id="ot-label-maquina" className="ot-label required">Maquina</label>
+                        <label htmlFor="ot-maquina" id="ot-label-maquina" className="ot-label required uppercase">Maquina</label>
                         <Popover open={maquinaPickerOpen} onOpenChange={setMaquinaPickerOpen}>
                           <PopoverTrigger asChild>
                             <Button
@@ -3053,7 +3319,7 @@ export default function WorkOrderPlanillaPage() {
                             >
                               <span className="flex min-w-0 flex-1 items-center gap-2">
                                 <Factory className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                                <span className="min-w-0 flex-1 truncate text-left text-sm">{maquinaComboLabel}</span>
+                                <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">{maquinaComboLabel}</span>
                               </span>
                               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
                             </Button>
@@ -3103,7 +3369,7 @@ export default function WorkOrderPlanillaPage() {
                                         <Check
                                           className={cn(
                                             "mr-2 h-4 w-4",
-                                            maquina === o.value ? "opacity-100" : "opacity-0",
+                                            maquina === o.value ? "opacity-100 text-primary" : "opacity-0",
                                           )}
                                           aria-hidden
                                         />
@@ -3123,7 +3389,7 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("maquina")}
                       </div>
                       <div className="ot-field">
-                        <label htmlFor="ot-planchasReferencia" className="ot-label">Ref. planchas (opcional)</label>
+                        <label htmlFor="ot-planchasReferencia" className="ot-label uppercase">Ref. planchas (opcional)</label>
                         <OtPlanillaInputIcon icon={LayoutGrid}>
                           <input
                             className="ot-input"
@@ -3144,33 +3410,9 @@ export default function WorkOrderPlanillaPage() {
                       </div>
                     </div>
 
-                    <div className="ot-grid ot-cols-2">
-                      <div className="ot-field md:col-span-2">
-                        <label htmlFor="ot-metrosEstimados" className="ot-label required">Metros Est.</label>
-                        <OtPlanillaInputIcon icon={Ruler}>
-                          <input
-                            data-field="metrosEstimados" id="ot-metrosEstimados" name="metrosEstimados"
-                            className="ot-input"
-                            type="text"
-                            inputMode="text"
-                            pattern="-?[0-9]*"
-                            aria-invalid={otInvalid("metrosEstimados")}
-                            value={metrosEstimadosDisplay(form.metrosEstimados)}
-                            placeholder="12850"
-                            onChange={(ev) => {
-                              setKey(setForm, "metrosEstimados", sanitizeMetrosEstimadosInput(ev.target.value))
-                            }}
-                            disabled={!canEditShared}
-                          />
-                        </OtPlanillaInputIcon>
-                        {renderError("metrosEstimados")}
-                      </div>
-                    </div>
-
                   </div>
                 </div>
 
-                {/* Datos del producto */}
                 <div>
                   <div className="section-header section-hdr-producto">
                     <span className="inline-flex items-center gap-2">
@@ -3179,41 +3421,57 @@ export default function WorkOrderPlanillaPage() {
                     </span>
                   </div>
                   <div className="section-body">
+                    {/* 🔥 Cuadro de Sugerencias de Inventario de la LINEA EXACTA */}
+                    {suggestions ? (
+                      <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 shadow-sm dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-200">
+                        <h4 className="flex items-center gap-2 text-sm font-bold mb-1">
+                          <AlertCircle className="h-4 w-4" />
+                          Insumos solicitados (Línea del pedido)
+                        </h4>
+                        <ul className="text-xs space-y-1 pl-6 list-disc">
+                          {suggestions.imp ? <li><strong>Imprimir:</strong> {suggestions.imp}</li> : null}
+                          {suggestions.lam ? <li><strong>Laminar:</strong> {suggestions.lam}</li> : null}
+                          {suggestions.tri ? <li><strong>Trilaminar:</strong> {suggestions.tri}</li> : null}
+                          {suggestions.leg ? <li><strong>M. Legado:</strong> {suggestions.leg}</li> : null}
+                        </ul>
+                      </div>
+                    ) : null}
+
                     <div className="ot-datos-producto-master">
                       <div className="ot-field ot-dpm-span-4">
-                        <Label htmlFor="ot-cliente" className="ot-label !font-black required">Cliente</Label>
+                        <Label htmlFor="ot-cliente" className="ot-label uppercase required">Cliente</Label>
                         <OtPlanillaInputIcon icon={User}>
                           <Input
                             id="ot-cliente"
                             name="cliente"
                             readOnly
-                            className="ot-input-unified h-9 bg-muted/50 text-sm"
+                            className="ot-input-unified h-9 bg-muted/50 text-sm font-semibold"
                             value={readString(form.cliente) || readString(prefill.cliente)}
                           />
                         </OtPlanillaInputIcon>
                       </div>
                       <div className="ot-field ot-dpm-span-2">
-                        <Label htmlFor="ot-clienteRif" className="ot-label !font-black required">RIF</Label>
+                        <Label htmlFor="ot-clienteRif" className="ot-label uppercase required">RIF</Label>
                         <OtPlanillaInputIcon icon={IdCard}>
                           <Input
                             id="ot-clienteRif"
                             name="clienteRif"
                             readOnly
-                            className="ot-input-unified h-9 bg-muted/50 text-sm"
+                            className="ot-input-unified h-9 bg-muted/50 text-sm font-medium"
                             value={readString(form.clienteRif) || readString(prefill.clienteRif)}
                           />
                         </OtPlanillaInputIcon>
                       </div>
 
-                      <div className="ot-field ot-dpm-span-4">
-                        <Label htmlFor="ot-producto" id="ot-label-producto" className="ot-label !font-black required">Producto</Label>
+                      <div className="ot-field ot-dpm-span-6">
+                        <Label htmlFor="ot-producto" id="ot-label-producto" className="ot-label uppercase required">Producto</Label>
                         {!woClientId ? (
                           <OtPlanillaInputIcon icon={LucidePackage}>
                             <Input
                               id="ot-producto"
                               name="producto"
                               readOnly
-                              className="ot-input-unified h-9 bg-muted/50 text-sm"
+                              className="ot-input-unified h-9 bg-muted/50 text-sm font-semibold text-primary"
                               value={readString(form.producto) || readString(prefill.producto)}
                             />
                           </OtPlanillaInputIcon>
@@ -3227,16 +3485,16 @@ export default function WorkOrderPlanillaPage() {
                                   role="combobox"
                                   id="ot-producto"
                                   aria-labelledby="ot-label-producto"
-                                  disabled={!canEditShared || updatingProduct || clientProducts.length === 0}
+                                  disabled={!canEditShared || updatingProduct || draftCoLinesRef.current.length === 0}
                                   className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
                                 >
                                   <span className="flex min-w-0 flex-1 items-center gap-2">
                                     <LucidePackage className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                                    <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                    <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-primary">
                                     {updatingProduct ? (
                                       <span className="text-muted-foreground">Actualizando…</span>
-                                    ) : clientProducts.length === 0 ? (
-                                      <span className="text-muted-foreground">No hay especificaciones para este cliente</span>
+                                    ) : draftCoLinesRef.current.length === 0 ? (
+                                      <span className="text-muted-foreground font-normal">No hay productos en esta orden</span>
                                     ) : (
                                       productComboLabel
                                     )}
@@ -3258,35 +3516,46 @@ export default function WorkOrderPlanillaPage() {
                                   <CommandInput placeholder="Buscar por nombre, C.P.E. o M.P.P.S…" />
                                   <CommandList>
                                     <CommandEmpty>
-                                      {clientProducts.length === 0
-                                        ? "Cargue especificaciones del cliente o intente otra búsqueda."
-                                        : "Ninguna especificación coincide."}
+                                      {draftCoLinesRef.current.length === 0
+                                        ? "No hay productos en esta orden."
+                                        : "Ninguna línea coincide."}
                                     </CommandEmpty>
-                                    <CommandGroup>
-                                      {clientProducts.map((p) => {
-                                        const v = [p.name, p.cpe ?? "", p.mps ?? ""].filter(Boolean).join(" ")
+                                    <CommandGroup heading="Líneas del Pedido">
+                                      {draftCoLinesRef.current.map((line) => {
+                                        const p = line.product;
+                                        if (!p) return null;
+                                        
+                                        const v = [p.name, p.cpe ?? "", p.mps ?? ""].filter(Boolean).join(" ");
+                                        const lineWeightStr = readNumberString(line.quantity).trim().replace(",", ".");
+                                        const exactWeight = Number(lineWeightStr);
+                                        
                                         return (
                                           <CommandItem
-                                            key={p.id}
-                                            value={v}
+                                            key={line.id}
+                                            value={`${v} linea ${line.id}`}
                                             onSelect={() => {
-                                              void applyProduct(p)
+                                              void applyProductLine(Number(line.id), p);
                                             }}
                                           >
                                             <Check
                                               className={cn(
-                                                "mr-2 h-4 w-4",
-                                                p.id === woProductId ? "opacity-100" : "opacity-0",
+                                                "mr-2 h-4 w-4 shrink-0",
+                                                Number(line.id) === woLineId ? "opacity-100" : "opacity-0",
                                               )}
                                               aria-hidden
                                             />
-                                            <div className="min-w-0 flex-1">
-                                              <div className="truncate font-medium">{p.name}</div>
-                                              {p.cpe || p.mps ? (
-                                                <div className="text-muted-foreground truncate text-xs">
-                                                  {[p.cpe, p.mps].filter(Boolean).join(" · ")}
-                                                </div>
-                                              ) : null}
+                                            <div className="min-w-0 flex-1 flex justify-between items-center gap-2">
+                                              <div className="min-w-0 flex-1">
+                                                <div className="truncate font-medium">{p.name}</div>
+                                                {p.cpe || p.mps ? (
+                                                  <div className="text-muted-foreground truncate text-xs">
+                                                    {[p.cpe, p.mps].filter(Boolean).join(" · ")}
+                                                  </div>
+                                                ) : null}
+                                              </div>
+                                              <Badge variant="secondary" className="shrink-0 whitespace-nowrap tabular-nums">
+                                                {exactWeight > 0 ? exactWeight.toFixed(2) : "0.00"} kg
+                                              </Badge>
                                             </div>
                                           </CommandItem>
                                         )
@@ -3296,93 +3565,16 @@ export default function WorkOrderPlanillaPage() {
                                 </Command>
                               </PopoverContent>
                             </Popover>
-                            <div className="ot-input-unified hidden h-9 items-center px-2 text-sm print:flex">
+                            <div className="ot-input-unified hidden h-9 items-center px-2 text-sm font-semibold print:flex">
                               {productComboLabel}
                             </div>
                           </>
                         )}
                       </div>
-                      <div className="ot-field ot-dpm-span-2">
-                        <label htmlFor="ot-tipoImpresionEstructura" id="ot-label-tipoImpresionEstructura" className="ot-label required">Tipo impresión (especificación)</label>
-                        <Popover open={tipoImpresionPickerOpen} onOpenChange={setTipoImpresionPickerOpen}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              role="combobox"
-                              data-field="tipoImpresionEstructura" id="ot-tipoImpresionEstructura" aria-labelledby="ot-label-tipoImpresionEstructura"
-                              disabled={!canEditShared}
-                              aria-expanded={tipoImpresionPickerOpen}
-                              aria-invalid={otInvalid("tipoImpresionEstructura")}
-                              className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
-                            >
-                              <span className="flex min-w-0 flex-1 items-center gap-2">
-                                <Paintbrush className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                                <span className="min-w-0 flex-1 truncate text-left text-sm">
-                                  {tipoImpresionComboLabel}
-                                </span>
-                              </span>
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            className="p-0 no-print w-[min(100vw-2rem,20rem)] min-w-[var(--radix-popover-trigger-width)]"
-                            align="start"
-                            side="bottom"
-                          >
-                            <Command>
-                              <CommandList>
-                                <CommandGroup>
-                                  <CommandItem
-                                    value="elegir tipo impresion vacio"
-                                    onSelect={() => {
-                                      setKey(setForm, "tipoImpresionEstructura", "")
-                                      setTipoImpresionPickerOpen(false)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        tipoImpresion === "" ? "opacity-100" : "opacity-0",
-                                      )}
-                                      aria-hidden
-                                    />
-                                    Elegir…
-                                  </CommandItem>
-                                  {TIPO_IMPRESION_ESPEC_OPTIONS.map((opt) => (
-                                    <CommandItem
-                                      key={opt}
-                                      value={`${opt} tipo impresion`}
-                                      onSelect={() => {
-                                        setKey(setForm, "tipoImpresionEstructura", opt)
-                                        setTipoImpresionPickerOpen(false)
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          tipoImpresion === opt ? "opacity-100" : "opacity-0",
-                                        )}
-                                        aria-hidden
-                                      />
-                                      {tipoImpresionLabel(opt)}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                        <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
-                          <Paintbrush className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                          <span className="min-w-0 flex-1 truncate">{tipoImpresionComboLabel}</span>
-                        </div>
-                        {renderError("tipoImpresionEstructura")}
-                      </div>
 
                       {tipoImpresion === "superficie" ? (
                         <div className="ot-field ot-dpm-span-6">
-                          <label htmlFor="ot-estructuraCapa1" className="ot-label required">Estructura (1 capa)</label>
+                          <label htmlFor="ot-estructuraCapa1" className="ot-label uppercase required">Estructura (1 capa)</label>
                           <OtPlanillaInputIcon icon={LucideLayers}>
                             <input
                               data-field="estructuraCapa1" id="ot-estructuraCapa1" name="estructuraCapa1"
@@ -3401,7 +3593,7 @@ export default function WorkOrderPlanillaPage() {
                       {tipoImpresionCapas(tipoImpresion) >= 2 ? (
                         <div className="ot-dpm-estructura-capas">
                           <div className="ot-field">
-                            <label htmlFor="ot-estructuraCapa1Rev" className="ot-label required">Capa 1</label>
+                            <label htmlFor="ot-estructuraCapa1Rev" className="ot-label uppercase required">Capa 1</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
@@ -3416,7 +3608,7 @@ export default function WorkOrderPlanillaPage() {
                             {renderError("estructuraCapa1Rev")}
                           </div>
                           <div className="ot-field">
-                            <label htmlFor="ot-estructuraCapa2Rev" className="ot-label required">Capa 2</label>
+                            <label htmlFor="ot-estructuraCapa2Rev" className="ot-label uppercase required">Capa 2</label>
                             <OtPlanillaInputIcon icon={LucideLayers}>
                               <input
                                 className="ot-input"
@@ -3432,7 +3624,7 @@ export default function WorkOrderPlanillaPage() {
                           </div>
                           {tipoImpresionCapas(tipoImpresion) === 3 ? (
                             <div className="ot-field">
-                              <label htmlFor="ot-estructuraCapa3Rev" className="ot-label required">Capa 3</label>
+                              <label htmlFor="ot-estructuraCapa3Rev" className="ot-label uppercase required">Capa 3</label>
                               <OtPlanillaInputIcon icon={LucideLayers}>
                                 <input
                                   className="ot-input"
@@ -3450,42 +3642,8 @@ export default function WorkOrderPlanillaPage() {
                         </div>
                       ) : null}
 
-                      <div className="ot-field ot-dpm-span-2">
-                        <Label htmlFor="ot-cpe" className="ot-label !font-black required">C.P.E.</Label>
-                        <OtPlanillaInputIcon icon={Tag}>
-                          <Input
-                            id="ot-cpe"
-                            name="cpe"
-                            data-field="cpe"
-                            className="ot-input-unified h-9 text-sm"
-                            value={readString(form.cpe)}
-                            onChange={(ev) => setKey(setForm, "cpe", ev.target.value)}
-                            disabled={!canEditShared}
-                            placeholder="CPE-LAM-OT-01"
-                            aria-invalid={otInvalid("cpe")}
-                          />
-                        </OtPlanillaInputIcon>
-                        {renderError("cpe")}
-                      </div>
-                      <div className="ot-field ot-dpm-span-2">
-                        <Label htmlFor="ot-mpps" className="ot-label !font-black required">M.P.P.S.</Label>
-                        <OtPlanillaInputIcon icon={Tags}>
-                          <Input
-                            id="ot-mpps"
-                            name="mpps"
-                            data-field="mpps"
-                            className="ot-input-unified h-9 text-sm"
-                            value={readString(form.mpps)}
-                            onChange={(ev) => setKey(setForm, "mpps", ev.target.value)}
-                            disabled={!canEditShared}
-                            placeholder="MPS-PR-2026-A"
-                            aria-invalid={otInvalid("mpps")}
-                          />
-                        </OtPlanillaInputIcon>
-                        {renderError("mpps")}
-                      </div>
-                      <div className="ot-field ot-dpm-span-2">
-                        <Label htmlFor="ot-codigoBarra" className="ot-label !font-black required">Cod. Barra</Label>
+                      <div className="ot-field ot-dpm-span-6">
+                        <Label htmlFor="ot-codigoBarra" className="ot-label uppercase required">Cod. Barra</Label>
                         <OtPlanillaInputIcon icon={Barcode}>
                           <Input
                             id="ot-codigoBarra"
@@ -3520,7 +3678,7 @@ export default function WorkOrderPlanillaPage() {
                   {/* 3×3 como planilla física: fila1 frec/bandas/tipo · fila2 ancho corte/repet/desarrollo · fila3 ancho mont/figura/colores */}
                   <div className="ot-grid ot-cols-3 ot-grid-montaje">
                     <div className="ot-field">
-                      <label htmlFor="ot-frecuencia" className="ot-label required">Frecuencia (mm)</label>
+                      <label htmlFor="ot-frecuencia" className="ot-label uppercase required">Frecuencia <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Activity}>
                         <input
                           data-field="frecuencia" id="ot-frecuencia" name="frecuencia"
@@ -3540,7 +3698,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("frecuencia")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-numBandas" className="ot-label required">N° Bandas</label>
+                      <label htmlFor="ot-numBandas" className="ot-label uppercase required">N° Bandas</label>
                       <OtPlanillaInputIcon icon={GripHorizontal}>
                         <input
                           type="number"
@@ -3558,7 +3716,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("numBandas")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-tipoImpresionMontaje" id="ot-label-tipoImpresionMontaje" className="ot-label required">Tipo impresión</label>
+                      <label htmlFor="ot-tipoImpresionMontaje" id="ot-label-tipoImpresionMontaje" className="ot-label uppercase required">Tipo impresión</label>
                       <Popover
                         open={tipoImpresionMontajePickerOpen}
                         onOpenChange={setTipoImpresionMontajePickerOpen}
@@ -3576,7 +3734,7 @@ export default function WorkOrderPlanillaPage() {
                             <span className="flex min-w-0 flex-1 items-center gap-2">
                               <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                               <span className="min-w-0 flex-1 truncate text-left text-sm">
-                                {tipoImpresionMontajeLabel}
+                                {tipoImpresionMontajeDisplayLabel(normalizeTipoImpresionMontaje(readString(form.tipoImpresionMontaje)) || "superficie")}
                               </span>
                             </span>
                             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
@@ -3600,7 +3758,7 @@ export default function WorkOrderPlanillaPage() {
                                   <Check
                                     className={cn(
                                       "mr-2 h-4 w-4",
-                                      tipoImpresionMontaje === "" ? "opacity-100" : "opacity-0",
+                                      normalizeTipoImpresionMontaje(readString(form.tipoImpresionMontaje)) === "" ? "opacity-100" : "opacity-0",
                                     )}
                                     aria-hidden
                                   />
@@ -3618,7 +3776,7 @@ export default function WorkOrderPlanillaPage() {
                                     <Check
                                       className={cn(
                                         "mr-2 h-4 w-4",
-                                        tipoImpresionMontaje === opt ? "opacity-100" : "opacity-0",
+                                        normalizeTipoImpresionMontaje(readString(form.tipoImpresionMontaje)) === opt ? "opacity-100" : "opacity-0",
                                       )}
                                       aria-hidden
                                     />
@@ -3632,12 +3790,12 @@ export default function WorkOrderPlanillaPage() {
                       </Popover>
                       <div className="ot-input-unified hidden h-9 items-center gap-2 bg-muted/40 px-2 text-sm print:flex">
                         <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate">{tipoImpresionMontajeLabel}</span>
+                        <span className="min-w-0 flex-1 truncate">{tipoImpresionMontajeDisplayLabel(normalizeTipoImpresionMontaje(readString(form.tipoImpresionMontaje)) || "superficie")}</span>
                       </div>
                       {renderError("tipoImpresionMontaje")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-anchoCorteMontaje" className="ot-label required">Ancho Corte (mm)</label>
+                      <label htmlFor="ot-anchoCorteMontaje" className="ot-label uppercase required">Ancho corte <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={ArrowLeftRight}>
                         <input
                           data-field="anchoCorteMontaje" id="ot-anchoCorteMontaje" name="anchoCorteMontaje"
@@ -3666,7 +3824,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("anchoCorteMontaje")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-numRepeticion" className="ot-label required">N° Repeticion o Frecuencia</label>
+                      <label htmlFor="ot-numRepeticion" className="ot-label uppercase required">N° Repeticion o Frecuencia</label>
                       <OtPlanillaInputIcon icon={Repeat}>
                         <input
                           type="number"
@@ -3684,7 +3842,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("numRepeticion")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-desarrollo" className="ot-label required">Desarrollo (mm)</label>
+                      <label htmlFor="ot-desarrollo" className="ot-label uppercase required">Desarrollo <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="desarrollo" id="ot-desarrollo" name="desarrollo"
@@ -3699,7 +3857,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("desarrollo")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-anchoMontaje" className="ot-label required">Ancho Montaje (mm)</label>
+                      <label htmlFor="ot-anchoMontaje" className="ot-label uppercase required">Ancho montaje <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Columns}>
                         <input
                           data-field="anchoMontaje" id="ot-anchoMontaje" name="anchoMontaje"
@@ -3729,7 +3887,7 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <div className="ot-field ot-field-figure ot-field-figure--montaje" data-field="figuraEmbobinadoMontaje">
                       <div className="ot-label-row">
-                        <label htmlFor="ot-figuraEmbobinadoMontaje" className="ot-label required">Figura del embobinado impresión</label>
+                        <label htmlFor="ot-figuraEmbobinadoMontaje" className="ot-label uppercase required">Figura del embobinado impresión</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
@@ -3747,7 +3905,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("figuraEmbobinadoMontaje")}
                     </div>
                     <div className="ot-field ot-field-align-figure">
-                      <label htmlFor="ot-numColores" className="ot-label required">N° Colores</label>
+                      <label htmlFor="ot-numColores" className="ot-label uppercase required">N° Colores</label>
                       <OtPlanillaInputIcon icon={Palette}>
                         <input
                           type="number"
@@ -3767,7 +3925,7 @@ export default function WorkOrderPlanillaPage() {
                   </div>
                   <div className="ot-grid ot-cols-1">
                     <div className="ot-field">
-                      <label htmlFor="ot-obsMontaje" className="ot-label required">Observaciones montaje</label>
+                      <label htmlFor="ot-obsMontaje" className="ot-label uppercase">Observaciones montaje</label>
                       <OtPlanillaInputIcon icon={MessageSquare}>
                         <input
                           data-field="obsMontaje" id="ot-obsMontaje" name="obsMontaje"
@@ -3801,7 +3959,7 @@ export default function WorkOrderPlanillaPage() {
                       <div className="ot-imp-params">
                         <div className="ot-grid ot-cols-2 ot-imp-metrics-grid lg:ot-cols-4">
                         <div className="ot-field">
-                          <label htmlFor="ot-pinonImp" className="ot-label required">Piñon (dientes)</label>
+                          <label htmlFor="ot-pinonImp" className="ot-label uppercase required">Piñon <span className="lowercase">(dientes)</span></label>
                           <OtPlanillaInputIcon icon={Cog}>
                             <input
                               data-field="pinonImp" id="ot-pinonImp" name="pinonImp"
@@ -3817,7 +3975,7 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("pinonImp")}
                         </div>
                         <div className="ot-field">
-                          <label id="ot-label-lineaCorte" htmlFor="ot-lineaCorte" className="ot-label required">Linea de corte</label>
+                          <label id="ot-label-lineaCorte" htmlFor="ot-lineaCorte" className="ot-label uppercase required">Linea de corte</label>
                           <Popover open={lineaCortePickerOpen} onOpenChange={setLineaCortePickerOpen}>
                             <PopoverTrigger asChild>
                               <Button
@@ -3906,7 +4064,7 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("lineaCorte")}
                         </div>
                         <div className="ot-field">
-                          <label htmlFor="ot-ubicFotoceldaImp" className="ot-label">Ubic. fotocelda</label>
+                          <label htmlFor="ot-ubicFotoceldaImp" className="ot-label uppercase">Ubic. fotocelda</label>
                           <OtPlanillaInputIcon icon={MapPin}>
                             <input
                               data-field="ubicFotoceldaImp" id="ot-ubicFotoceldaImp" name="ubicFotoceldaImp"
@@ -3933,7 +4091,7 @@ export default function WorkOrderPlanillaPage() {
                           </OtPlanillaInputIcon>
                         </div>
                         <div className="ot-field">
-                          <label htmlFor="ot-gramajeTintaGm2" className="ot-label">Gramaje de tinta (g/m²)</label>
+                          <label htmlFor="ot-gramajeTintaGm2" className="ot-label uppercase">Gramaje de tinta <span className="lowercase">(g/m²)</span></label>
                           <OtPlanillaInputIcon icon={Scale}>
                             <input
                               data-field="gramajeTintaGm2" id="ot-gramajeTintaGm2" name="gramajeTintaGm2"
@@ -3964,7 +4122,7 @@ export default function WorkOrderPlanillaPage() {
 
                         <div className="ot-field ot-imp-figura-field" data-field="figEmbImpDisplay">
                           <div className="flex flex-wrap items-center gap-2">
-                            <label htmlFor={otPlanillaFieldId("figEmbImpDisplay")} className="ot-label required">Figura emb. (1-8)</label>
+                            <label htmlFor={otPlanillaFieldId("figEmbImpDisplay")} className="ot-label uppercase required">Figura emb. (1-8)</label>
                             <Badge
                               variant="outline"
                               className="text-[10px] font-normal"
@@ -3985,7 +4143,7 @@ export default function WorkOrderPlanillaPage() {
 
                       <div className="ot-sustratos-virgen-block ot-sustratos-virgen-block--impresion">
                         <div className="ot-sustratos-virgen-head">
-                          <span className="ot-label required">Sustratos virgen (inventario)</span>
+                          <span className="ot-label uppercase required">Sustratos virgen (inventario)</span>
                           <Badge
                             variant="outline"
                             className={cn(
@@ -3996,77 +4154,53 @@ export default function WorkOrderPlanillaPage() {
                           </Badge>
                         </div>
                         <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
-                          <span className="font-medium text-foreground">Sustrato:</span> puede escribir la referencia o
-                          elegir del inventario al hacer clic en el campo.
+                          <span className="font-medium text-foreground">Sustrato:</span> puede elegir del inventario o limpiar selección al hacer clic en el campo.
                         </p>
                         <div className="ot-sustratos-virgen-rows">
                           {sustratosImp.map((r, idx) => (
                             <div key={idx} className="ot-grid ot-cols-2-asym">
                               <div className="ot-field">
-                                <label htmlFor={otPlanillaSustratoFieldId("Imp", idx, "material")} className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                                <label htmlFor={otPlanillaSustratoFieldId("Imp", idx, "material")} className="ot-label uppercase required">{`Sustrato ${idx + 1}`}</label>
                                 <div className="min-w-0 no-print">
                                   <Popover
                                     open={sustratoImpPickerIdx === idx}
                                     onOpenChange={(open) => setSustratoImpPickerIdx(open ? idx : null)}
                                   >
-                                    <OtPlanillaInputIcon icon={Warehouse} className="min-w-0 flex-1">
-                                      <PopoverAnchor asChild>
-                                        <Input
-                                          role="combobox"
-                                          id={otPlanillaSustratoFieldId("Imp", idx, "material")}
-                                          name={`sustratosImp-${idx}-material`}
-                                          data-field="sustratosImp"
-                                          className="ot-input-unified h-9 min-w-0 pr-8 text-sm"
-                                          value={sustratoVirgenDisplayValue(materials, r)}
-                                          title={
-                                            sustratoRowUsesCatalogMaterial(r)
-                                              ? sustratoVirgenDisplayValue(materials, r) || undefined
-                                              : undefined
-                                          }
-                                          onFocus={() => {
-                                            setSustratoImpPickerIdx(idx)
-                                            void loadMaterials()
-                                          }}
-                                          onClick={() => {
-                                            setSustratoImpPickerIdx(idx)
-                                            void loadMaterials()
-                                          }}
-                                          onChange={(e) => {
-                                            const next = [...sustratosImp]
-                                            next[idx] = {
-                                              ...next[idx],
-                                              material_id: "",
-                                              material_free_text: e.target.value,
-                                            }
-                                            setSustratosImp(setForm, next)
-                                          }}
-                                          placeholder="Referencia libre o elegir del inventario…"
-                                          aria-expanded={sustratoImpPickerIdx === idx}
-                                          aria-invalid={otInvalid("sustratosImp")}
-                                        />
-                                      </PopoverAnchor>
-                                      <ChevronsUpDown
-                                        className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50"
-                                        aria-hidden
-                                      />
-                                    </OtPlanillaInputIcon>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        role="combobox"
+                                        id={otPlanillaSustratoFieldId("Imp", idx, "material")}
+                                        aria-expanded={sustratoImpPickerIdx === idx}
+                                        aria-invalid={otInvalid("sustratosImp")}
+                                        className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                                      >
+                                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                                          <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                          <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                            {sustratoVirgenDisplayValue(materials, r) || "Elegir del inventario..."}
+                                          </span>
+                                        </span>
+                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                                      </Button>
+                                    </PopoverTrigger>
                                     <PopoverContent
                                       className="p-0 no-print w-[min(100vw-2rem,28rem)] min-w-[var(--radix-popover-trigger-width)]"
                                       align="start"
                                       side="bottom"
-                                      onOpenAutoFocus={(e) => e.preventDefault()}
                                     >
                                       <Command shouldFilter>
                                         <CommandInput placeholder="Buscar código, nombre, proveedor o medidas…" />
                                         <CommandList>
                                           <CommandEmpty>
                                             {materials.length === 0
-                                              ? "No hay filas en inventario. Escriba la referencia a mano o cree un material."
+                                              ? "No hay materiales en inventario."
                                               : "Ninguno coincide."}
                                           </CommandEmpty>
                                           <CommandGroup>
                                             <CommandItem
-                                              value="ninguno sustrato impresion"
+                                              value="limpiar seleccion"
                                               onSelect={() => {
                                                 const next = [...sustratosImp]
                                                 next[idx] = { ...next[idx], material_id: "", material_free_text: "" }
@@ -4081,16 +4215,14 @@ export default function WorkOrderPlanillaPage() {
                                                 )}
                                                 aria-hidden
                                               />
-                                              Sin selección (solo texto libre abajo)
+                                              [Limpiar selección]
                                             </CommandItem>
                                             {materials.map((m) => {
                                               const { identity, dims, search } = sustratoMaterialListParts(m)
                                               const stockQty = parseDecimalKgString(m.quantity_on_hand)
                                               const stockLabel =
                                                 stockQty !== null ? `${formatKgForOtHint(stockQty)} kg` : null
-                                              const pickedInv =
-                                                readString(r.material_id).trim() === String(m.id) &&
-                                                !readString(r.material_free_text).trim()
+                                              const pickedInv = readString(r.material_id).trim() === String(m.id)
                                               return (
                                                 <CommandItem
                                                   key={m.id}
@@ -4106,12 +4238,12 @@ export default function WorkOrderPlanillaPage() {
                                                     sustratoKgStockModalDismissedRef.current = null
                                                     setSustratosImp(setForm, next)
                                                     setSustratoImpPickerIdx(null)
-                                                    syncSustratoKgStockModal(
-                                                      "impresion",
-                                                      idx,
-                                                      updated,
-                                                      materials,
-                                                    )
+                                                    syncSustratoKgStockModal("impresion", idx, updated, materials)
+
+                                                    // 🔥 Auto-completar densidad
+                                                    const upperName = (m.name || "").toUpperCase();
+                                                    if (upperName.includes("BOPP")) setKey(setForm, "densidadImp", "0.90");
+                                                    else if (upperName.includes("PEBD")) setKey(setForm, "densidadImp", "0.93");
                                                   }}
                                                 >
                                                   <Check
@@ -4125,16 +4257,10 @@ export default function WorkOrderPlanillaPage() {
                                                     <p className="truncate text-sm">{identity}</p>
                                                     <div className="flex items-center justify-between gap-2">
                                                       {dims ? (
-                                                        <p className="truncate text-xs text-muted-foreground">
-                                                          {dims}
-                                                        </p>
-                                                      ) : (
-                                                        <span />
-                                                      )}
+                                                        <p className="truncate text-xs text-muted-foreground">{dims}</p>
+                                                      ) : <span />}
                                                       {stockLabel != null ? (
-                                                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                                          {stockLabel}
-                                                        </span>
+                                                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{stockLabel}</span>
                                                       ) : null}
                                                     </div>
                                                   </div>
@@ -4160,7 +4286,7 @@ export default function WorkOrderPlanillaPage() {
                                   sustratoRowUsesCatalogMaterial(r) && "ot-field-kg-stock--reserved",
                                 )}
                               >
-                                <label htmlFor={otPlanillaSustratoFieldId("Imp", idx, "kg")} className="ot-label required">Kg a utilizar</label>
+                                <label htmlFor={otPlanillaSustratoFieldId("Imp", idx, "kg")} className="ot-label uppercase required">Kg a utilizar</label>
                                 <div className="ot-field-kg-stock-body">
                                   <div className="ot-field-kg-stock-input">
                                   <OtPlanillaInputIcon icon={Weight}>
@@ -4224,9 +4350,9 @@ export default function WorkOrderPlanillaPage() {
                         {renderError("sustratosImp")}
                       </div>
 
-                      <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
+                      <div className="ot-grid ot-cols-2 lg:ot-cols-5 ot-metrics-before-nested ot-sustratos-virgen-metrics-gap">
                         <div className="ot-field">
-                          <label htmlFor="ot-kgIngresadoImp" className="ot-label required">Kg ingresado</label>
+                          <label htmlFor="ot-kgIngresadoImp" className="ot-label uppercase required">kg ingresados</label>
                           <OtPlanillaInputIcon icon={ArrowDownToLine}>
                             <input
                               data-field="kgIngresadoImp" id="ot-kgIngresadoImp" name="kgIngresadoImp"
@@ -4249,8 +4375,9 @@ export default function WorkOrderPlanillaPage() {
                           </OtPlanillaInputIcon>
                           {renderError("kgIngresadoImp")}
                         </div>
+                        
                         <div className="ot-field">
-                          <label htmlFor="ot-kgSalidaImp" className="ot-label required">Kg salida</label>
+                          <label htmlFor="ot-kgSalidaImp" className="ot-label uppercase required">kg salida</label>
                           <OtPlanillaInputIcon icon={ArrowUpFromLine}>
                             <input
                               data-field="kgSalidaImp" id="ot-kgSalidaImp" name="kgSalidaImp"
@@ -4273,8 +4400,34 @@ export default function WorkOrderPlanillaPage() {
                           </OtPlanillaInputIcon>
                           {renderError("kgSalidaImp")}
                         </div>
+
                         <div className="ot-field">
-                          <label htmlFor="ot-mermaImp" className="ot-label required">Merma</label>
+                          <label htmlFor="ot-metrosImp" className="ot-label uppercase required">Metros</label>
+                          <OtPlanillaInputIcon icon={Ruler}>
+                            <input
+                              data-field="metrosImp" id="ot-metrosImp" name="metrosImp"
+                              type="text"
+                              inputMode="decimal"
+                              autoComplete="off"
+                              className="ot-input font-medium"
+                              value={otDecimalFieldValue("metrosImp", form.metrosImp, decimalTwoFocusKey)}
+                              onFocus={() => setDecimalTwoFocusKey("metrosImp")}
+                              onChange={(e) =>
+                                setKey(setForm, "metrosImp", sanitizeDecimalInput(e.target.value))
+                              }
+                              onBlur={(e) => {
+                                setDecimalTwoFocusKey(null)
+                                setKey(setForm, "metrosImp", formatDecimalOnBlur(e.target.value))
+                              }}
+                              placeholder="Calculado auto."
+                              aria-invalid={otInvalid("metrosImp")}
+                            />
+                          </OtPlanillaInputIcon>
+                          {renderError("metrosImp")}
+                        </div>
+
+                        <div className="ot-field">
+                          <label htmlFor="ot-mermaImp" className="ot-label uppercase required">kg merma</label>
                           <OtPlanillaInputIcon icon={TrendingDown}>
                             <input
                               data-field="mermaImp" id="ot-mermaImp" name="mermaImp"
@@ -4297,29 +4450,21 @@ export default function WorkOrderPlanillaPage() {
                           </OtPlanillaInputIcon>
                           {renderError("mermaImp")}
                         </div>
+
                         <div className="ot-field">
-                          <label htmlFor="ot-metrosImp" className="ot-label required">Metros</label>
-                          <OtPlanillaInputIcon icon={Ruler}>
+                          <label htmlFor="ot-densidadImp" className="ot-label uppercase required">Densidad</label>
+                          <OtPlanillaInputIcon icon={FlaskConical}>
                             <input
-                              data-field="metrosImp" id="ot-metrosImp" name="metrosImp"
+                              data-field="densidadImp" id="ot-densidadImp" name="densidadImp"
                               type="text"
                               inputMode="decimal"
                               autoComplete="off"
                               className="ot-input"
-                              value={otDecimalFieldValue("metrosImp", form.metrosImp, decimalTwoFocusKey)}
-                              onFocus={() => setDecimalTwoFocusKey("metrosImp")}
-                              onChange={(e) =>
-                                setKey(setForm, "metrosImp", sanitizeDecimalInput(e.target.value))
-                              }
-                              onBlur={(e) => {
-                                setDecimalTwoFocusKey(null)
-                                setKey(setForm, "metrosImp", formatDecimalOnBlur(e.target.value))
-                              }}
-                              placeholder="8200,00"
-                              aria-invalid={otInvalid("metrosImp")}
+                              value={readString(form.densidadImp)}
+                              onChange={(e) => setKey(setForm, "densidadImp", sanitizeDecimalTwoInput(e.target.value))}
+                              placeholder="0.90"
                             />
                           </OtPlanillaInputIcon>
-                          {renderError("metrosImp")}
                         </div>
                       </div>
 
@@ -4343,7 +4488,6 @@ export default function WorkOrderPlanillaPage() {
                 </div>
               </div>
             ) : null}
-
             {/* Laminación */}
             {canViewLaminacion ? (
               <div className="ot-section">
@@ -4357,7 +4501,7 @@ export default function WorkOrderPlanillaPage() {
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field sm:col-span-2 lg:col-span-1" data-field="figuraEmbobinadoLam">
                       <div className="flex flex-wrap items-center gap-2">
-                        <label htmlFor={otPlanillaFieldId("figuraEmbobinadoLam")} className="ot-label required">Figura embobinado</label>
+                        <label htmlFor={otPlanillaFieldId("figuraEmbobinadoLam")} className="ot-label uppercase required">Figura embobinado</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
@@ -4375,7 +4519,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("figuraEmbobinadoLam")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-gramajeAdhesivo" className="ot-label required">Gramaje adhesivo (g/m2)</label>
+                      <label htmlFor="ot-gramajeAdhesivo" className="ot-label uppercase required">Gramaje adhesivo <span className="lowercase">(g/m²)</span></label>
                       <OtPlanillaInputIcon icon={FlaskConical}>
                         <input
                           data-field="gramajeAdhesivo" id="ot-gramajeAdhesivo" name="gramajeAdhesivo"
@@ -4392,7 +4536,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("gramajeAdhesivo")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-relacionMezcla" className="ot-label required">Relacion mezcla</label>
+                      <label htmlFor="ot-relacionMezcla" className="ot-label uppercase required">Relacion mezcla</label>
                       <OtPlanillaInputIcon icon={Percent}>
                         <input
                           data-field="relacionMezcla" id="ot-relacionMezcla" name="relacionMezcla"
@@ -4409,14 +4553,14 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("relacionMezcla")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-obsLaminacion" className="ot-label required">Observaciones</label>
+                      <label htmlFor="ot-obsLaminacion" className="ot-label uppercase">Observaciones</label>
                       <OtPlanillaInputIcon icon={StickyNote}>
                         <input
                           data-field="obsLaminacion" id="ot-obsLaminacion" name="obsLaminacion"
                           className="ot-input"
                           value={readString(form.obsLaminacion)}
                           onChange={(e) => setKey(setForm, "obsLaminacion", e.target.value)}
-                          placeholder="Temperatura tambor según ficha del adhesivo"
+                          placeholder="Temperatura tambor según ficha"
                           aria-invalid={otInvalid("obsLaminacion")}
                         />
                       </OtPlanillaInputIcon>
@@ -4426,9 +4570,9 @@ export default function WorkOrderPlanillaPage() {
 
                   <div className="ot-lam-materiales-block">
                     <div className="ot-lam-materiales-table">
-                      <span className="ot-lam-materiales-head">Materiales</span>
-                      <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric">Kilos (kg)</span>
-                      <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric">Metros (m)</span>
+                      <span className="ot-lam-materiales-head uppercase">Materiales</span>
+                      <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric uppercase">Kilos (kg)</span>
+                      <span className="ot-lam-materiales-head ot-lam-materiales-head--numeric uppercase">Metros (m)</span>
 
                       <label htmlFor="ot-kgLaminaImpresaLaminacion" className="ot-lam-materiales-label">Lámina impresa</label>
                       <div className="ot-lam-materiales-cell">
@@ -4640,7 +4784,7 @@ export default function WorkOrderPlanillaPage() {
                     <div className="ot-sustratos-virgen-head">
                       <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
                         <Package className="h-4 w-4 shrink-0" aria-hidden />
-                        <span className="ot-label required">Sustratos virgen a utilizar (laminación)</span>
+                        <span className="ot-label uppercase required">Sustratos virgen a utilizar (laminación)</span>
                       </span>
                       <Badge
                         variant="outline"
@@ -4652,77 +4796,53 @@ export default function WorkOrderPlanillaPage() {
                       </Badge>
                     </div>
                     <p className="text-muted-foreground mb-2 text-xs leading-relaxed no-print">
-                      <span className="font-medium text-foreground">Sustrato:</span> puede escribir la referencia o
-                      elegir del inventario al hacer clic en el campo.
+                      <span className="font-medium text-foreground">Sustrato:</span> puede elegir del inventario o limpiar selección al hacer clic en el campo.
                     </p>
                     <div className="ot-sustratos-virgen-rows">
                       {sustratosLam.map((r, idx) => (
                         <div key={idx} className="ot-grid ot-cols-2-asym">
                           <div className="ot-field">
-                            <label htmlFor={otPlanillaSustratoFieldId("Lam", idx, "material")} className="ot-label required">{`Sustrato ${idx + 1}`}</label>
+                            <label htmlFor={otPlanillaSustratoFieldId("Lam", idx, "material")} className="ot-label uppercase required">{`Sustrato ${idx + 1}`}</label>
                             <div className="min-w-0 no-print">
                               <Popover
                                 open={sustratoLamPickerIdx === idx}
                                 onOpenChange={(open) => setSustratoLamPickerIdx(open ? idx : null)}
                               >
-                                <OtPlanillaInputIcon icon={Warehouse} className="min-w-0 flex-1">
-                                  <PopoverAnchor asChild>
-                                    <Input
-                                      role="combobox"
-                                      id={otPlanillaSustratoFieldId("Lam", idx, "material")}
-                                      name={`sustratosLam-${idx}-material`}
-                                      data-field="sustratosLam"
-                                      className="ot-input-unified h-9 min-w-0 pr-8 text-sm"
-                                      value={sustratoVirgenDisplayValue(materials, r)}
-                                      title={
-                                        sustratoRowUsesCatalogMaterial(r)
-                                          ? sustratoVirgenDisplayValue(materials, r) || undefined
-                                          : undefined
-                                      }
-                                      onFocus={() => {
-                                        setSustratoLamPickerIdx(idx)
-                                        void loadMaterials()
-                                      }}
-                                      onClick={() => {
-                                        setSustratoLamPickerIdx(idx)
-                                        void loadMaterials()
-                                      }}
-                                      onChange={(e) => {
-                                        const next = [...sustratosLam]
-                                        next[idx] = {
-                                          ...next[idx],
-                                          material_id: "",
-                                          material_free_text: e.target.value,
-                                        }
-                                        setSustratosLam(setForm, next)
-                                      }}
-                                      placeholder="Referencia libre o elegir del inventario…"
-                                      aria-expanded={sustratoLamPickerIdx === idx}
-                                      aria-invalid={otInvalid("sustratosLam")}
-                                    />
-                                  </PopoverAnchor>
-                                  <ChevronsUpDown
-                                    className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50"
-                                    aria-hidden
-                                  />
-                                </OtPlanillaInputIcon>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    role="combobox"
+                                    id={otPlanillaSustratoFieldId("Lam", idx, "material")}
+                                    aria-expanded={sustratoLamPickerIdx === idx}
+                                    aria-invalid={otInvalid("sustratosLam")}
+                                    className="ot-input-unified h-9 w-full min-w-0 max-w-full justify-between gap-2 px-2 font-normal print:hidden"
+                                  >
+                                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                                      <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                      <span className="min-w-0 flex-1 truncate text-left text-sm">
+                                        {sustratoVirgenDisplayValue(materials, r) || "Elegir del inventario..."}
+                                      </span>
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                                  </Button>
+                                </PopoverTrigger>
                                 <PopoverContent
                                   className="p-0 no-print w-[min(100vw-2rem,28rem)] min-w-[var(--radix-popover-trigger-width)]"
                                   align="start"
                                   side="bottom"
-                                  onOpenAutoFocus={(e) => e.preventDefault()}
                                 >
                                   <Command shouldFilter>
                                     <CommandInput placeholder="Buscar código, nombre, proveedor o medidas…" />
                                     <CommandList>
                                       <CommandEmpty>
                                         {materials.length === 0
-                                          ? "No hay filas en inventario. Escriba la referencia a mano o cree un material."
+                                          ? "No hay materiales en inventario."
                                           : "Ninguno coincide."}
                                       </CommandEmpty>
                                       <CommandGroup>
                                         <CommandItem
-                                          value="ninguno sustrato laminacion"
+                                          value="limpiar seleccion"
                                           onSelect={() => {
                                             const next = [...sustratosLam]
                                             next[idx] = { ...next[idx], material_id: "", material_free_text: "" }
@@ -4737,16 +4857,14 @@ export default function WorkOrderPlanillaPage() {
                                             )}
                                             aria-hidden
                                           />
-                                          Sin selección (solo texto libre abajo)
+                                          [Limpiar selección]
                                         </CommandItem>
                                         {materials.map((m) => {
                                           const { identity, dims, search } = sustratoMaterialListParts(m)
                                           const stockQty = parseDecimalKgString(m.quantity_on_hand)
                                           const stockLabel =
                                             stockQty !== null ? `${formatKgForOtHint(stockQty)} kg` : null
-                                          const pickedInv =
-                                            readString(r.material_id).trim() === String(m.id) &&
-                                            !readString(r.material_free_text).trim()
+                                          const pickedInv = readString(r.material_id).trim() === String(m.id)
                                           return (
                                             <CommandItem
                                               key={m.id}
@@ -4762,12 +4880,12 @@ export default function WorkOrderPlanillaPage() {
                                                 sustratoKgStockModalDismissedRef.current = null
                                                 setSustratosLam(setForm, next)
                                                 setSustratoLamPickerIdx(null)
-                                                syncSustratoKgStockModal(
-                                                  "laminacion",
-                                                  idx,
-                                                  updated,
-                                                  materials,
-                                                )
+                                                syncSustratoKgStockModal("laminacion", idx, updated, materials)
+
+                                                // 🔥 Auto-completar densidad
+                                                const upperName = (m.name || "").toUpperCase();
+                                                if (upperName.includes("BOPP")) setKey(setForm, "densidadLam", "0.90");
+                                                else if (upperName.includes("PEBD")) setKey(setForm, "densidadLam", "0.93");
                                               }}
                                             >
                                               <Check
@@ -4781,16 +4899,10 @@ export default function WorkOrderPlanillaPage() {
                                                 <p className="truncate text-sm">{identity}</p>
                                                 <div className="flex items-center justify-between gap-2">
                                                   {dims ? (
-                                                    <p className="truncate text-xs text-muted-foreground">
-                                                      {dims}
-                                                    </p>
-                                                  ) : (
-                                                    <span />
-                                                  )}
+                                                    <p className="truncate text-xs text-muted-foreground">{dims}</p>
+                                                  ) : <span />}
                                                   {stockLabel != null ? (
-                                                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                                      {stockLabel}
-                                                    </span>
+                                                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{stockLabel}</span>
                                                   ) : null}
                                                 </div>
                                               </div>
@@ -4802,7 +4914,6 @@ export default function WorkOrderPlanillaPage() {
                                   </Command>
                                 </PopoverContent>
                               </Popover>
-                              
                             </div>
                             <div className="ot-input-unified hidden h-9 items-center gap-2 px-2 text-sm print:flex">
                               <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -4817,7 +4928,7 @@ export default function WorkOrderPlanillaPage() {
                               sustratoRowUsesCatalogMaterial(r) && "ot-field-kg-stock--reserved",
                             )}
                           >
-                            <label htmlFor={otPlanillaSustratoFieldId("Lam", idx, "kg")} className="ot-label required">Kg a utilizar</label>
+                            <label htmlFor={otPlanillaSustratoFieldId("Lam", idx, "kg")} className="ot-label uppercase required">Kg a utilizar</label>
                             <div className="ot-field-kg-stock-body">
                               <div className="ot-field-kg-stock-input">
                               <OtPlanillaInputIcon icon={Weight}>
@@ -4881,9 +4992,9 @@ export default function WorkOrderPlanillaPage() {
                     {renderError("sustratosLam")}
                   </div>
 
-                  <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-4">
+                  <div className="ot-grid ot-metrics-before-nested ot-sustratos-virgen-metrics-gap ot-cols-2 lg:ot-cols-4">
                     <div className="ot-field">
-                      <label htmlFor="ot-kgEntradaLam" className="ot-label">Kg entrada</label>
+                      <label htmlFor="ot-kgEntradaLam" className="ot-label uppercase">Kg entrada</label>
                       <OtPlanillaInputIcon icon={ArrowDownToLine}>
                         <input
                           data-field="kgEntradaLam" id="ot-kgEntradaLam" name="kgEntradaLam"
@@ -4901,7 +5012,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgEntradaLam")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-kgSalidaLam" className="ot-label">Kg salida</label>
+                      <label htmlFor="ot-kgSalidaLam" className="ot-label uppercase">Kg salida</label>
                       <OtPlanillaInputIcon icon={ArrowUpFromLine}>
                         <input
                           data-field="kgSalidaLam" id="ot-kgSalidaLam" name="kgSalidaLam"
@@ -4919,7 +5030,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgSalidaLam")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-metrajeLam" className="ot-label">Metraje</label>
+                      <label htmlFor="ot-metrajeLam" className="ot-label uppercase">Metraje</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="metrajeLam" id="ot-metrajeLam" name="metrajeLam"
@@ -4937,7 +5048,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("metrajeLam")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-mermaLam" className="ot-label">Merma</label>
+                      <label htmlFor="ot-mermaLam" className="ot-label uppercase">Merma</label>
                       <OtPlanillaInputIcon icon={TrendingDown}>
                         <input
                           data-field="mermaLam" id="ot-mermaLam" name="mermaLam"
@@ -4954,82 +5065,99 @@ export default function WorkOrderPlanillaPage() {
                       </OtPlanillaInputIcon>
                       {renderError("mermaLam")}
                     </div>
+                    <div className="ot-field">
+                      <label htmlFor="ot-densidadLam" className="ot-label uppercase required">Densidad</label>
+                      <OtPlanillaInputIcon icon={FlaskConical}>
+                        <input
+                          data-field="densidadLam" id="ot-densidadLam" name="densidadLam"
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          className="ot-input"
+                          value={readString(form.densidadLam)}
+                          onChange={(e) => setKey(setForm, "densidadLam", sanitizeDecimalTwoInput(e.target.value))}
+                          placeholder="0.93"
+                        />
+                      </OtPlanillaInputIcon>
+                    </div>
                   </div>
 
-                  <div className="ot-grid ot-cols-4">
-                    <div className="ot-field">
-                      <label htmlFor="ot-kgEntradaLam2" className="ot-label">Kg entrada 2 (trilam.)</label>
-                      <OtPlanillaInputIcon icon={LucideLayers}>
-                        <input
-                          data-field="kgEntradaLam2" id="ot-kgEntradaLam2" name="kgEntradaLam2"
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          className="ot-input"
-                          value={readNumberString(form.kgEntradaLam2)}
-                          onChange={(e) => setKey(setForm, "kgEntradaLam2", e.target.value)}
-                          placeholder="180.00"
-                          aria-invalid={otInvalid("kgEntradaLam2")}
-                        />
-                      </OtPlanillaInputIcon>
-                      {renderError("kgEntradaLam2")}
+                  {tipoImpresionCapas(tipoImpresion) === 3 ? (
+                    <div className="ot-grid ot-cols-2 lg:ot-cols-4 mt-4 pt-4 border-t border-border">
+                      <div className="ot-field">
+                        <label htmlFor="ot-kgEntradaLam2" className="ot-label uppercase">Kg entrada 2 <span className="lowercase">(trilam.)</span></label>
+                        <OtPlanillaInputIcon icon={LucideLayers}>
+                          <input
+                            data-field="kgEntradaLam2" id="ot-kgEntradaLam2" name="kgEntradaLam2"
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            className="ot-input"
+                            value={readNumberString(form.kgEntradaLam2)}
+                            onChange={(e) => setKey(setForm, "kgEntradaLam2", e.target.value)}
+                            placeholder="180.00"
+                            aria-invalid={otInvalid("kgEntradaLam2")}
+                          />
+                        </OtPlanillaInputIcon>
+                        {renderError("kgEntradaLam2")}
+                      </div>
+                      <div className="ot-field">
+                        <label htmlFor="ot-kgSalidaLam2" className="ot-label uppercase">Kg salida 2 <span className="lowercase">(trilam.)</span></label>
+                        <OtPlanillaInputIcon icon={LucideLayers}>
+                          <input
+                            data-field="kgSalidaLam2" id="ot-kgSalidaLam2" name="kgSalidaLam2"
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            className="ot-input"
+                            value={readNumberString(form.kgSalidaLam2)}
+                            onChange={(e) => setKey(setForm, "kgSalidaLam2", e.target.value)}
+                            placeholder="175.00"
+                            aria-invalid={otInvalid("kgSalidaLam2")}
+                          />
+                        </OtPlanillaInputIcon>
+                        {renderError("kgSalidaLam2")}
+                      </div>
+                      <div className="ot-field">
+                        <label htmlFor="ot-metrajeLam2" className="ot-label uppercase">Metraje 2</label>
+                        <OtPlanillaInputIcon icon={Ruler}>
+                          <input
+                            data-field="metrajeLam2" id="ot-metrajeLam2" name="metrajeLam2"
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            className="ot-input"
+                            value={readNumberString(form.metrajeLam2)}
+                            onChange={(e) => setKey(setForm, "metrajeLam2", e.target.value)}
+                            placeholder="2800"
+                            aria-invalid={otInvalid("metrajeLam2")}
+                          />
+                        </OtPlanillaInputIcon>
+                        {renderError("metrajeLam2")}
+                      </div>
+                      <div className="ot-field">
+                        <label htmlFor="ot-mermaLam2" className="ot-label uppercase">Merma 2</label>
+                        <OtPlanillaInputIcon icon={TrendingDown}>
+                          <input
+                            data-field="mermaLam2" id="ot-mermaLam2" name="mermaLam2"
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            className="ot-input"
+                            value={readNumberString(form.mermaLam2)}
+                            onChange={(e) => setKey(setForm, "mermaLam2", e.target.value)}
+                            placeholder="6.20"
+                            aria-invalid={otInvalid("mermaLam2")}
+                          />
+                        </OtPlanillaInputIcon>
+                        {renderError("mermaLam2")}
+                      </div>
                     </div>
-                    <div className="ot-field">
-                      <label htmlFor="ot-kgSalidaLam2" className="ot-label">Kg salida 2 (trilam.)</label>
-                      <OtPlanillaInputIcon icon={LucideLayers}>
-                        <input
-                          data-field="kgSalidaLam2" id="ot-kgSalidaLam2" name="kgSalidaLam2"
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          className="ot-input"
-                          value={readNumberString(form.kgSalidaLam2)}
-                          onChange={(e) => setKey(setForm, "kgSalidaLam2", e.target.value)}
-                          placeholder="175.00"
-                          aria-invalid={otInvalid("kgSalidaLam2")}
-                        />
-                      </OtPlanillaInputIcon>
-                      {renderError("kgSalidaLam2")}
-                    </div>
-                    <div className="ot-field">
-                      <label htmlFor="ot-metrajeLam2" className="ot-label">Metraje 2</label>
-                      <OtPlanillaInputIcon icon={Ruler}>
-                        <input
-                          data-field="metrajeLam2" id="ot-metrajeLam2" name="metrajeLam2"
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          className="ot-input"
-                          value={readNumberString(form.metrajeLam2)}
-                          onChange={(e) => setKey(setForm, "metrajeLam2", e.target.value)}
-                          placeholder="2800"
-                          aria-invalid={otInvalid("metrajeLam2")}
-                        />
-                      </OtPlanillaInputIcon>
-                      {renderError("metrajeLam2")}
-                    </div>
-                    <div className="ot-field">
-                      <label htmlFor="ot-mermaLam2" className="ot-label">Merma 2</label>
-                      <OtPlanillaInputIcon icon={TrendingDown}>
-                        <input
-                          data-field="mermaLam2" id="ot-mermaLam2" name="mermaLam2"
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          className="ot-input"
-                          value={readNumberString(form.mermaLam2)}
-                          onChange={(e) => setKey(setForm, "mermaLam2", e.target.value)}
-                          placeholder="6.20"
-                          aria-invalid={otInvalid("mermaLam2")}
-                        />
-                      </OtPlanillaInputIcon>
-                      {renderError("mermaLam2")}
-                    </div>
-                  </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -5046,7 +5174,7 @@ export default function WorkOrderPlanillaPage() {
                 <div className="section-body">
                   <div className="ot-grid ot-cols-4">
                     <div className="ot-field">
-                      <label htmlFor="ot-anchoCorteFinal" className="ot-label required">Ancho corte (mm)</label>
+                      <label htmlFor="ot-anchoCorteFinal" className="ot-label uppercase required">Ancho corte <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Crop}>
                         <input
                           data-field="anchoCorteFinal" id="ot-anchoCorteFinal" name="anchoCorteFinal"
@@ -5074,7 +5202,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("anchoCorteFinal")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-pesoBobina" className="ot-label required">Peso bobina (Kg)</label>
+                      <label htmlFor="ot-pesoBobina" className="ot-label uppercase required">Peso bobina <span className="lowercase">(Kg)</span></label>
                       <OtPlanillaInputIcon icon={Weight}>
                         <input
                           data-field="pesoBobina" id="ot-pesoBobina" name="pesoBobina"
@@ -5090,7 +5218,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("pesoBobina")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-metrosBobina" className="ot-label required">Metros/Bobina (m)</label>
+                      <label htmlFor="ot-metrosBobina" className="ot-label uppercase required">Metros/Bobina <span className="lowercase">(m)</span></label>
                       <OtPlanillaInputIcon icon={CircleDot}>
                         <input
                           data-field="metrosBobina" id="ot-metrosBobina" name="metrosBobina"
@@ -5119,7 +5247,7 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <div className="ot-field sm:col-span-2" data-field="orientacionEmbalaje">
                       <div className="flex flex-wrap items-center gap-2">
-                        <label htmlFor={otPlanillaFieldId("orientacionEmbalaje")} className="ot-label required">Figura embobinado (1-8 o libre)</label>
+                        <label htmlFor={otPlanillaFieldId("orientacionEmbalaje")} className="ot-label uppercase required">Figura embobinado (1-8 o libre)</label>
                         <Badge
                           variant="outline"
                           className="text-[10px] font-normal"
@@ -5137,7 +5265,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("orientacionEmbalaje")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-ubicFotoceldaCorte" className="ot-label required">Ubic. fotocelda</label>
+                      <label htmlFor="ot-ubicFotoceldaCorte" className="ot-label uppercase required">Ubic. fotocelda</label>
                       <OtPlanillaInputIcon icon={MapPin}>
                         <input
                           data-field="ubicFotoceldaCorte" id="ot-ubicFotoceldaCorte" name="ubicFotoceldaCorte"
@@ -5151,7 +5279,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("ubicFotoceldaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-distFotoceldaBorde" className="ot-label required">Dist. fotocelda al borde (mm)</label>
+                      <label htmlFor="ot-distFotoceldaBorde" className="ot-label uppercase required">Dist. fotocelda al borde <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="distFotoceldaBorde" id="ot-distFotoceldaBorde" name="distFotoceldaBorde"
@@ -5179,7 +5307,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("distFotoceldaBorde")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-distFiguraLadoContrario" className="ot-label required">Distancia figura lado contrario (mm)</label>
+                      <label htmlFor="ot-distFiguraLadoContrario" className="ot-label uppercase required">Distancia figura lado contrario <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="distFiguraLadoContrario" id="ot-distFiguraLadoContrario" name="distFiguraLadoContrario"
@@ -5207,7 +5335,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("distFiguraLadoContrario")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-distFiguraLadoFotocelda" className="ot-label required">Distancia figura lado fotocelda (mm)</label>
+                      <label htmlFor="ot-distFiguraLadoFotocelda" className="ot-label uppercase required">Distancia figura lado fotocelda <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="distFiguraLadoFotocelda" id="ot-distFiguraLadoFotocelda" name="distFiguraLadoFotocelda"
@@ -5235,7 +5363,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("distFiguraLadoFotocelda")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-maxEmpates" className="ot-label required">Max. empates</label>
+                      <label htmlFor="ot-maxEmpates" className="ot-label uppercase required">Max. empates</label>
                       <OtPlanillaInputIcon icon={Link2}>
                         <input
                           data-field="maxEmpates" id="ot-maxEmpates" name="maxEmpates"
@@ -5250,7 +5378,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("maxEmpates")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-diamBobina" className="ot-label required">Diam. bobina (mm)</label>
+                      <label htmlFor="ot-diamBobina" className="ot-label uppercase required">Diam. bobina <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Circle}>
                         <input
                           data-field="diamBobina" id="ot-diamBobina" name="diamBobina"
@@ -5278,7 +5406,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("diamBobina")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-anchoCore" className="ot-label required">Ancho core (mm)</label>
+                      <label htmlFor="ot-anchoCore" className="ot-label uppercase required">Ancho core <span className="lowercase">(mm)</span></label>
                       <OtPlanillaInputIcon icon={Columns}>
                         <input
                           data-field="anchoCore" id="ot-anchoCore" name="anchoCore"
@@ -5301,7 +5429,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("anchoCore")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-diamCorePlg" className="ot-label required">Diam. core (Plg)</label>
+                      <label htmlFor="ot-diamCorePlg" className="ot-label uppercase required">Diam. core <span className="lowercase">(Plg)</span></label>
                       <OtPlanillaInputIcon icon={Disc}>
                         <input
                           data-field="diamCorePlg" id="ot-diamCorePlg" name="diamCorePlg"
@@ -5317,7 +5445,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("diamCorePlg")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-cantCores" className="ot-label required">Cant. cores</label>
+                      <label htmlFor="ot-cantCores" className="ot-label uppercase required">Cant. cores</label>
                       <OtPlanillaInputIcon icon={Hash}>
                         <input
                           data-field="cantCores" id="ot-cantCores" name="cantCores"
@@ -5333,9 +5461,9 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                   </div>
 
-                  <div className="ot-grid ot-metrics-before-nested ot-cols-4">
+                  <div className="ot-grid ot-metrics-before-nested ot-cols-2 lg:ot-cols-4">
                     <div className="ot-field">
-                      <label htmlFor="ot-kgIngresadosCorte" className="ot-label required">Kg ingresados</label>
+                      <label htmlFor="ot-kgIngresadosCorte" className="ot-label uppercase required">Kg ingresados</label>
                       <OtPlanillaInputIcon icon={PackagePlus}>
                         <input
                           data-field="kgIngresadosCorte" id="ot-kgIngresadosCorte" name="kgIngresadosCorte"
@@ -5353,7 +5481,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgIngresadosCorte")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-kgSalidaCorte" className="ot-label required">Kg salida</label>
+                      <label htmlFor="ot-kgSalidaCorte" className="ot-label uppercase required">Kg salida</label>
                       <OtPlanillaInputIcon icon={ArrowUpFromLine}>
                         <input
                           data-field="kgSalidaCorte" id="ot-kgSalidaCorte" name="kgSalidaCorte"
@@ -5389,25 +5517,7 @@ export default function WorkOrderPlanillaPage() {
                       {renderError("kgSalidaCorte")}
                     </div>
                     <div className="ot-field">
-                      <label htmlFor="ot-kgMermaCorte" className="ot-label required">Kg merma</label>
-                      <OtPlanillaInputIcon icon={Trash2}>
-                        <input
-                          data-field="kgMermaCorte" id="ot-kgMermaCorte" name="kgMermaCorte"
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          className="ot-input"
-                          value={readNumberString(form.kgMermaCorte)}
-                          placeholder="10.25"
-                          onChange={(e) => setKey(setForm, "kgMermaCorte", e.target.value)}
-                          aria-invalid={otInvalid("kgMermaCorte")}
-                        />
-                      </OtPlanillaInputIcon>
-                      {renderError("kgMermaCorte")}
-                    </div>
-                    <div className="ot-field">
-                      <label htmlFor="ot-metrajeCorte" className="ot-label required">Metraje</label>
+                      <label htmlFor="ot-metrajeCorte" className="ot-label uppercase required">Metraje</label>
                       <OtPlanillaInputIcon icon={Ruler}>
                         <input
                           data-field="metrajeCorte" id="ot-metrajeCorte" name="metrajeCorte"
@@ -5423,6 +5533,24 @@ export default function WorkOrderPlanillaPage() {
                         />
                       </OtPlanillaInputIcon>
                       {renderError("metrajeCorte")}
+                    </div>
+                    <div className="ot-field">
+                      <label htmlFor="ot-kgMermaCorte" className="ot-label uppercase required">Kg merma</label>
+                      <OtPlanillaInputIcon icon={Trash2}>
+                        <input
+                          data-field="kgMermaCorte" id="ot-kgMermaCorte" name="kgMermaCorte"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          className="ot-input"
+                          value={readNumberString(form.kgMermaCorte)}
+                          placeholder="10.25"
+                          onChange={(e) => setKey(setForm, "kgMermaCorte", e.target.value)}
+                          aria-invalid={otInvalid("kgMermaCorte")}
+                        />
+                      </OtPlanillaInputIcon>
+                      {renderError("kgMermaCorte")}
                     </div>
                   </div>
                 </div>
@@ -5442,7 +5570,7 @@ export default function WorkOrderPlanillaPage() {
                     </div>
                     <div className="section-body">
                       <div className="ot-field">
-                        <label htmlFor="ot-observacionesGenerales" className="ot-label required">Observaciones generales</label>
+                        <label htmlFor="ot-observacionesGenerales" className="ot-label">Observaciones generales</label>
                         <OtPlanillaInputIcon icon={FileText} align="top">
                           <Textarea
                             id="ot-observacionesGenerales"
@@ -5464,7 +5592,7 @@ export default function WorkOrderPlanillaPage() {
                     <div className="section-body">
                       <div className="ot-grid ot-cols-2">
                         <div className="ot-field">
-                          <label htmlFor="ot-fechaInicio" className="ot-label required">F. Inicio</label>
+                          <label htmlFor="ot-fechaInicio" className="ot-label uppercase required">F. Inicio</label>
                           <OtPlanillaInputIcon icon={CalendarClock}>
                             <input
                               type="date"
@@ -5478,7 +5606,7 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("fechaInicio")}
                         </div>
                         <div className="ot-field">
-                          <label htmlFor="ot-fechaEntrega" className="ot-label required">F. Entrega</label>
+                          <label htmlFor="ot-fechaEntrega" className="ot-label uppercase required">F. Entrega</label>
                           <OtPlanillaInputIcon icon={CalendarDays}>
                             <input
                               type="date"
@@ -5492,7 +5620,7 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("fechaEntrega")}
                         </div>
                         <div className="ot-field">
-                          <label htmlFor="ot-priority" id="ot-label-priority" className="ot-label required">Prioridad</label>
+                          <label htmlFor="ot-priority" id="ot-label-priority" className="ot-label uppercase required">Prioridad</label>
                           <Popover open={priorityPickerOpen} onOpenChange={setPriorityPickerOpen}>
                             <PopoverTrigger asChild>
                               <Button
@@ -5558,7 +5686,7 @@ export default function WorkOrderPlanillaPage() {
                           </div>
                         </div>
                         <fieldset className="ot-field sm:col-span-2 border-0 p-0 m-0 min-w-0">
-                          <legend className="ot-label required float-left w-full mb-1">Asignar a área(s)</legend>
+                          <legend className="ot-label uppercase required float-left w-full mb-1">Asignar a área(s)</legend>
                           <div className="relative min-w-0 rounded-md border border-[rgba(0,0,0,0.18)] bg-[rgba(255,255,255,0.92)] p-2 pl-8 clear-both">
                             <LayoutGrid
                               className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground"
@@ -5570,7 +5698,7 @@ export default function WorkOrderPlanillaPage() {
                           {renderError("programacionAreas")}
                         </fieldset>
                         <div className="ot-field sm:col-span-2">
-                          <label htmlFor="ot-programacionMotivo" className="ot-label required">Motivo de asignación</label>
+                          <label htmlFor="ot-programacionMotivo" className="ot-label uppercase required">Motivo de asignación</label>
                           <OtPlanillaInputIcon icon={LucideClipboardList} align="top">
                             <Textarea
                               id="ot-programacionMotivo"
@@ -5717,7 +5845,8 @@ export default function WorkOrderPlanillaPage() {
                   OT ya registradas para este pedido y producto
                 </DialogTitle>
               </DialogHeader>
-              <DialogDescription className="space-y-3 px-6 py-4 text-center text-sm leading-relaxed text-muted-foreground">
+              <DialogDescription asChild className="space-y-3 px-6 py-4 text-center text-sm leading-relaxed text-muted-foreground">
+                <div>
                 <p>
                   Ya existe al menos una orden de trabajo activa vinculada al mismo pedido cliente y
                   producto. Puede abrir la más reciente para seguir trabajando en ella (acumulativo en
@@ -5734,6 +5863,7 @@ export default function WorkOrderPlanillaPage() {
                     .join(", ")}
                   {duplicateOtMatches.length > 10 ? " …" : ""}
                 </p>
+                </div>
               </DialogDescription>
               <DialogFooter className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-6 py-4 sm:flex-col">
                 <Button
@@ -5744,7 +5874,7 @@ export default function WorkOrderPlanillaPage() {
                     const pick = latestRowInGroup(duplicateOtMatches)
                     setDuplicateOtMatches(null)
                     toast.message(
-                      "Se abre la OT más reciente. El borrador actual no se creó como OT nueva.",
+                      "Se abre la OT más reciente. El borrador actual no se created como OT nueva.",
                     )
                     nav(`/ordenes-trabajo/${pick.id}`, { replace: true })
                   }}
@@ -5877,7 +6007,102 @@ export default function WorkOrderPlanillaPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* DIALOGO DE CLONACIÓN TÁCTICA MEJORADO */}
+      <Dialog open={clonadorModalOpen} onOpenChange={setClonadorModalOpen}>
+        <DialogContent
+          overlayClassName="z-[100] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            "max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl sm:max-w-md",
+            "z-[101] w-full translate-x-[-50%] translate-y-[-50%]"
+          )}
+        >
+          <DialogHeader className="border-b border-border/60 bg-gradient-to-b from-indigo-50/80 to-transparent px-6 py-6 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
+              <Download className="h-6 w-6 shrink-0" aria-hidden />
+            </div>
+            <DialogTitle className="text-xl font-bold tracking-tight text-indigo-950">
+              Importar Configuración
+            </DialogTitle>
+            <DialogDescription className="text-sm mt-2 px-6 pb-2 text-center text-muted-foreground">
+              Seleccione una O.T. anterior. Se copiará toda su configuración técnica sin alterar su pedido actual.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="p-6 pb-2">
+            <Popover open={clonadorComboOpen} onOpenChange={setClonadorComboOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={clonadorComboOpen}
+                  className="w-full justify-between h-12 px-4 bg-white hover:bg-slate-50 border-indigo-200"
+                >
+                  <span className="truncate">
+                    {clonadorSearch 
+                      ? clonadorOts.find(ot => ot.code === clonadorSearch)?.code || clonadorSearch 
+                      : "Seleccione o busque una orden..."}
+                  </span>
+                  {clonadorOtsLoading ? (
+                    <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+                  ) : (
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[min(100vw-3rem,22rem)] p-0 z-[105]" align="center" side="bottom">
+                <Command shouldFilter>
+                  <CommandInput placeholder="Buscar código, cliente o producto..." />
+                  <CommandList>
+                    <CommandEmpty>
+                      {clonadorOtsLoading ? "Cargando órdenes recientes..." : "No se encontró ninguna O.T."}
+                    </CommandEmpty>
+                    <CommandGroup heading="Últimas 300 O.T.">
+                      {clonadorOts.map((ot) => {
+                        // Juntamos el código, cliente y producto para que el buscador atrape los tres
+                        const searchString = `${ot.code} ${ot.client?.name || ""} ${ot.product?.name || ""}`
+                        return (
+                          <CommandItem
+                            key={ot.id}
+                            value={searchString}
+                            onSelect={() => {
+                              setClonadorSearch(ot.code)
+                              setClonadorComboOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4 shrink-0",
+                                clonadorSearch === ot.code ? "opacity-100 text-indigo-600" : "opacity-0"
+                              )}
+                            />
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-semibold text-sm">{ot.code}</span>
+                              <span className="text-xs text-muted-foreground truncate">
+                                {ot.client?.name || "Sin cliente"} · {ot.product?.name || "Sin producto"}
+                              </span>
+                            </div>
+                          </CommandItem>
+                        )
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+          <DialogFooter className="flex flex-row gap-3 border-t border-border/60 bg-muted/20 px-6 py-4 justify-center">
+            <Button variant="outline" onClick={() => setClonadorModalOpen(false)}>Cancelar</Button>
+            <Button 
+              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2" 
+              onClick={importarConfiguracion}
+              disabled={clonando || !clonadorSearch.trim()}
+            >
+              {clonando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {clonando ? "Importando..." : "Importar Datos"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-

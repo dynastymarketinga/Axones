@@ -73,7 +73,9 @@ export default function AppLayout() {
     <SidebarProvider open={open} onOpenChange={setOpen}>
       <AppSidebar />
 
-      <SidebarInset>
+      {/* FIX: Se agregó min-w-0, overflow-hidden y w-full para evitar que se desborde */}
+      <SidebarInset className="min-w-0 flex flex-col w-full overflow-hidden">
+        
         {/* HEADER */}
         <header
           className={cn(
@@ -83,7 +85,7 @@ export default function AppLayout() {
               : "bg-transparent"
           )}
         >
-          <div className="flex items-center gap-2 px-6">
+          <div className="flex items-center gap-2 px-4 md:px-6">
             <SidebarTrigger
               size="icon"
               className="rounded-full h-9 w-9 [&_svg]:size-5"
@@ -91,10 +93,13 @@ export default function AppLayout() {
 
             <Separator orientation="vertical" className="h-4" />
 
-            <AxonesAppBreadcrumb />
+            {/* Ocultamos las migas de pan en móviles muy pequeños si estorban */}
+            <div className="hidden sm:block">
+              <AxonesAppBreadcrumb />
+            </div>
           </div>
 
-          <div className="ml-auto px-6">
+          <div className="ml-auto px-4 md:px-6">
             <div className="flex items-center gap-1">
               <PwaInstallPrompt />
               <GlobalSearch />
@@ -107,12 +112,14 @@ export default function AppLayout() {
             </div>
           </div>
         </header>
+
         {assistantAvailable ? (
           <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
         ) : null}
 
         {/* PAGE CONTENT */}
-        <main className="flex-1 p-6">
+        {/* FIX: Se agregó min-w-0 y overflow-x-hidden para frenar tablas gigantes */}
+        <main className="flex-1 p-4 md:p-6 min-w-0 w-full overflow-x-hidden">
           <Outlet />
         </main>
 

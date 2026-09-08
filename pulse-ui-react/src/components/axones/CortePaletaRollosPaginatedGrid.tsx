@@ -14,12 +14,7 @@ import {
   cortePaletaRollosGridClass,
   type CortePaletaTheme,
 } from "@/pages/axones/corte-paleta-rollos-ui"
-import {
-  clampCortePaletaRolloPage,
-  cortePaletaRolloTotalPages,
-  useCortePaletaRolloPageSize,
-} from "@/pages/axones/use-corte-paleta-rollo-page-size"
-import { COR_ROLLOS_PER_PALETA } from "@/pages/axones/corte-turnos"
+import { useCortePaletaRolloPageSize } from "@/pages/axones/use-corte-paleta-rollo-page-size"
 
 type Props = {
   paletaIdx: number
@@ -40,20 +35,23 @@ export function CortePaletaRollosPaginatedGrid({
 }: Props) {
   const rollPageSize = useCortePaletaRolloPageSize()
   const [rollPage, setRollPage] = useState(1)
-  const rollTotalPages = cortePaletaRolloTotalPages(rollPageSize)
+
+  // 🔥 MAGIA: Calculamos el total de páginas basados en la cantidad REAL de rollos, no en 48 fijos.
+  const totalRollos = rollosKg.length
+  const rollTotalPages = Math.max(1, Math.ceil(totalRollos / rollPageSize))
 
   useEffect(() => {
-    setRollPage((p) => clampCortePaletaRolloPage(p, rollPageSize))
-  }, [rollPageSize])
+    setRollPage((p) => Math.min(Math.max(1, p), rollTotalPages))
+  }, [rollPageSize, rollTotalPages])
 
   const visibleRolloIndices = useMemo(() => {
     const start = (rollPage - 1) * rollPageSize
-    const count = Math.min(rollPageSize, Math.max(0, COR_ROLLOS_PER_PALETA - start))
+    const count = Math.min(rollPageSize, Math.max(0, totalRollos - start))
     return Array.from({ length: count }, (_, i) => start + i)
-  }, [rollPage, rollPageSize])
+  }, [rollPage, rollPageSize, totalRollos])
 
   const rangeStart = (rollPage - 1) * rollPageSize + 1
-  const rangeEnd = Math.min(rollPage * rollPageSize, COR_ROLLOS_PER_PALETA)
+  const rangeEnd = Math.min(rollPage * rollPageSize, totalRollos)
   const showPager = rollTotalPages > 1
 
   return (
@@ -61,7 +59,7 @@ export function CortePaletaRollosPaginatedGrid({
       <div
         className={cortePaletaRollosGridClass()}
         role="group"
-        aria-label={`Rollos ${rangeStart} a ${rangeEnd} de ${COR_ROLLOS_PER_PALETA}`}
+        aria-label={`Rollos ${rangeStart} a ${rangeEnd} de ${totalRollos}`}
       >
         {visibleRolloIndices.map((rolloIdx) => (
           <CortePaletaRolloCell key={`p-${paletaIdx}-r-${rolloIdx}`} rolloNumber={rolloIdx + 1} theme={theme}>
@@ -93,7 +91,7 @@ export function CortePaletaRollosPaginatedGrid({
           aria-label={`Paginación rollos paleta ${paletaIdx + 1}`}
         >
           <span className={cn("tabular-nums", theme.title)}>
-            Rollos {rangeStart}–{rangeEnd} de {COR_ROLLOS_PER_PALETA}
+            Rollos {rangeStart}–{rangeEnd} de {totalRollos}
             <span className="text-muted-foreground font-normal">
               {" "}
               · pág. {rollPage}/{rollTotalPages}
@@ -126,7 +124,7 @@ export function CortePaletaRollosPaginatedGrid({
         </nav>
       ) : (
         <p className={cn("text-center text-[11px] tabular-nums", theme.title)}>
-          Rollos 1–{COR_ROLLOS_PER_PALETA}
+          Rollos 1–{totalRollos}
         </p>
       )}
     </div>

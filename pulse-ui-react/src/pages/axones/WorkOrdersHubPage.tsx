@@ -109,8 +109,9 @@ const WO_SEARCH_DEBOUNCE_MS = 320
 type MachineValue =
   | ""
   | "COMEXI 1"
-  | "COMEXI 2"
   | "COMEXI 3"
+  | "Laminadora Nexus"
+  | "Laminadora 2"
   | "Cortadora China"
   | "Cortadora Permaco"
 
@@ -122,11 +123,18 @@ const MACHINE_OPTIONS: Array<{
     group: "Impresión",
     options: [
       { value: "COMEXI 1", label: "COMEXI 1" },
-      { value: "COMEXI 2", label: "COMEXI 2" },
+      { value: "COMEXI 3", label: "COMEXI 3" },
     ],
   },
   {
     group: "Laminación",
+    options: [
+      { value: "Laminadora Nexus", label: "Laminadora Nexus" },
+      { value: "Laminadora 2", label: "Laminadora 2" },
+    ],
+  },
+  {
+    group: "Corte",
     options: [
       { value: "Cortadora China", label: "Cortadora China" },
       { value: "Cortadora Permaco", label: "Cortadora Permaco" },
@@ -1387,7 +1395,7 @@ export default function WorkOrdersHubPage() {
                                   {baseN}.{j + 1}
                                 </span>
                               }
-                            />,
+                            />
                           )
                         })
                       }
@@ -1421,4 +1429,3 @@ export default function WorkOrdersHubPage() {
     </TooltipProvider>
   )
 }
-

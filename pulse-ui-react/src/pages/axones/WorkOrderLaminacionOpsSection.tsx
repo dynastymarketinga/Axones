@@ -167,7 +167,6 @@ function turnoGrupoLabel(turno: string, grupo: string): string {
   return `${t} · ${g}`
 }
 
-/** Reconstruye la lista editable a partir de los tres campos persistidos en el turno. */
 export function activePersonnelFromStrings(
   operador: string,
   ayudante: string,
@@ -217,7 +216,6 @@ type Props = {
   totalSec: number
   deadSec: number
   effectiveSec: number
-  /** Si true, effectiveSec/deadSec/totalSec son acumulado OT (todos los turnos). */
   timerShowsOtAccumulated?: boolean
   kgHora: string
   horaArranque: string
@@ -239,6 +237,7 @@ type Props = {
   lamOperador: string
   lamAyudante: string
   lamSupervisor: string
+  lamMaquina?: string // 🔥 NUEVO: Máquina actual
   metrajeRaw: string
   entradaImpresaBobinas: string[]
   entradaImpresaMeta: BobinaLabelMeta[]
@@ -332,12 +331,14 @@ type Props = {
   canFinalizeOrder: boolean
   draftTurno: "diurno" | "nocturno"
   draftGrupo: "A" | "B" | "C"
+  draftMaquina?: string // 🔥 NUEVO: Máquina a elegir
   draftPeople: DraftPerson[]
   draftOperadorMissing: boolean
   draftStagingName: string
   draftStagingRole: DraftPersonRole
   onDraftTurno: (v: "diurno" | "nocturno") => void
   onDraftGrupo: (v: "A" | "B" | "C") => void
+  onDraftMaquina?: (v: string) => void // 🔥 NUEVO
   onDraftStagingName: (v: string) => void
   onDraftStagingRole: (v: DraftPersonRole) => void
   onDraftPersonGuardar: (name: string, role: DraftPersonRole) => void
@@ -350,7 +351,6 @@ type Props = {
   onPreviewTimerReport: () => void
   canPreviewPlanillaReport?: boolean
   onPreviewPlanillaReport?: () => void
-  /** Vista piso: solo play / parada / vista previa en el cronómetro. */
   simplifiedTimerActions?: boolean
 }
 
@@ -507,8 +507,6 @@ function fmtKg(n: unknown, decimals = 2): string {
   return (Number.isFinite(parsed) ? parsed : 0).toFixed(decimals)
 }
 
-
-
 export default function WorkOrderLaminacionOpsSection(props: Props) {
   const simplifiedTimer = props.simplifiedTimerActions !== false
   const [activeStageName, setActiveStageName] = useState("")
@@ -562,7 +560,6 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
     return Number.isFinite(n) ? n : 0
   }
 
-  /** Pedido de cliente cubierto por salida acumulada (no marcar “Completo” sin criterio). */
   const doneAcumulado =
     (props.pedidoTotalKg ?? 0) > 0.01 && (props.faltanteKg ?? 0) <= 0.01
 
@@ -574,7 +571,6 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
     !!props.lamGrupo.trim()
   const doneInfoTurno = autoInfoTurno
 
-  /** “Completo” solo cuando el cronómetro quedó detenido/cerrado (no mientras corre o está en pausa). */
   const doneTemporizador =
     props.areaFinalizada ||
     props.timerState === "completed" ||
@@ -636,7 +632,6 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       ),
     [props.warehouseReturn.draft.buenaMaterialId, props.warehouseReturn.materialOptionsGood],
   )
-
 
   const showPersonalTurnoSetup = !props.hasActiveTurno && !props.areaFinalizada
   const draftPeopleFiltered = useMemo(() => {
@@ -886,7 +881,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
 
   return (
     <>
-      {props.areaFinalizada ? (
+    {props.areaFinalizada ? (
         <div className="rounded-lg border border-violet-300 bg-violet-100/80 p-3 text-sm text-violet-950 dark:bg-violet-950/40 dark:text-violet-100">
           <span className="font-semibold">Área de laminación finalizada.</span>{" "}
           {props.canFinalizeOrder
@@ -945,8 +940,9 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
                 <ol className="montaje-setup-steps-list mt-2 space-y-2 pl-5 leading-relaxed text-muted-foreground">
                   <li>
                     <span className="font-semibold text-foreground">1)</span> Elija{" "}
-                    <span className="font-semibold text-foreground">Turno</span> y{" "}
-                    <span className="font-semibold text-foreground">Grupo</span>.
+                    <span className="font-semibold text-foreground">Turno</span>,{" "}
+                    <span className="font-semibold text-foreground">Grupo</span> y la{" "}
+                    <span className="font-semibold text-foreground">Máquina</span>.
                   </li>
                   <li>
                     <span className="font-semibold text-foreground">2)</span> Escriba nombre, seleccione rol y pulse{" "}
@@ -966,6 +962,28 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               </div>
 
               <div className="montaje-personal-panel rounded-lg border bg-background/60 p-4">
+                
+                {/* 🔥 SELECTOR DE MÁQUINA AÑADIDO AQUÍ 🔥 */}
+                <div className="grid gap-4 md:grid-cols-2 mb-4 pb-4 border-b border-border/50">
+                  <div className="space-y-2 md:col-span-2">
+                    {fieldLegend(Factory, "Máquina Laminadora")}
+                    <Select
+                      value={props.draftMaquina}
+                      onValueChange={(v) => props.onDraftMaquina?.(v)}
+                      disabled={props.readOnlyOps}
+                    >
+                      <SelectTrigger className="h-10 w-full min-w-0 text-base font-semibold border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+                        <SelectValue placeholder="Seleccione en qué máquina trabajará..." />
+                      </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="Laminadora Nexus">Laminadora Nexus</SelectItem>
+                        <SelectItem value="Laminadora 2">Laminadora 2</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="mes-field-hint">Obligatorio. Indique físicamente en qué máquina trabajará.</p>
+                  </div>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     {fieldLegend(Clock, "Turno")}
@@ -1128,10 +1146,12 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               type="button"
               className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
               onClick={props.onIniciarTurno}
-              disabled={props.readOnlyOps || props.draftOperadorMissing}
+              disabled={props.readOnlyOps || props.draftOperadorMissing || !(props.draftMaquina ?? "").trim()}
               title={
                 props.draftOperadorMissing
                   ? "Guarde al menos una persona con rol Operador en la cuadrilla"
+                  : !(props.draftMaquina ?? "").trim()
+                  ? "Seleccione la máquina laminadora"
                   : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
               }
             >
@@ -1143,213 +1163,220 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       ) : null}
 
       {props.hasActiveTurno ? (
-      <MesSectionShell
-        title={mesSectionTitle(ClipboardList, "Información del turno")}
-        headerRight={<MesSectionHeaderExtras isDone={doneInfoTurno} />}
-      >
-        <p className="text-muted-foreground mb-3 border-b border-border/50 pb-3 text-xs leading-snug">
-          Turno de planta (calendario y cuadrilla) y personal del registro actual. El cronómetro (tiempo efectivo y
-          paradas con motivo) está en la sección siguiente.
-          {simplifiedTimer ? (
-            <>
-              {" "}
-              Use <span className="font-semibold text-foreground">Guardar</span> o{" "}
-              <span className="font-semibold text-foreground">Terminar turno de planta</span> en el panel del cronómetro cuando
-              corresponda.
-            </>
-          ) : (
-            <>
-              {" "}
-              Para cerrar la sesión use <span className="font-semibold text-foreground">Cerrar turno</span> en el
-              cronómetro.
-            </>
-          )}
-        </p>
-        <div className="grid gap-2 md:grid-cols-2">
-          <div className="space-y-1">
-            {fieldLegend(Clock, "Turno")}
-            <div className="mes-toggle-row mes-toggle-turno">
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                className="w-full"
-                value={props.lamTurno}
-                onValueChange={(v) => {
-                  if (!v) return
-                  props.onSetTurno(v as "diurno" | "nocturno")
-                }}
-                disabled={props.readOnlyOps}
-              >
-                <ToggleGroupItem value="diurno" className="flex-1 gap-2">
-                  <Sun className="h-4 w-4 shrink-0" aria-hidden />
-                  Diurno
-                </ToggleGroupItem>
-                <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
-                  <Moon className="h-4 w-4 shrink-0" aria-hidden />
-                  Nocturno
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-            <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
+        <MesSectionShell
+          title={mesSectionTitle(ClipboardList, "Información del turno")}
+          headerRight={<MesSectionHeaderExtras isDone={doneInfoTurno} />}
+        >
+          <p className="text-muted-foreground mb-3 border-b border-border/50 pb-3 text-xs leading-snug">
+            Turno de planta (calendario y cuadrilla) y personal del registro actual. El cronómetro (tiempo efectivo y
+            paradas con motivo) está en la sección siguiente.
+            {simplifiedTimer ? (
+              <>
+                {" "}
+                Use <span className="font-semibold text-foreground">Guardar</span> o{" "}
+                <span className="font-semibold text-foreground">Terminar turno de planta</span> en el panel del cronómetro cuando
+                corresponda.
+              </>
+            ) : (
+              <>
+                {" "}
+                Para cerrar la sesión use <span className="font-semibold text-foreground">Cerrar turno</span> en el
+                cronómetro.
+              </>
+            )}
+          </p>
+          <div
+            className="mb-3 rounded-md border border-sky-500/35 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
+            role="status"
+          >
+            <p>
+              <span className="font-semibold">Completo</span> solo indica que este turno ya tiene operador registrado;{" "}
+              <span className="font-semibold">no</span> significa que el turno terminó.
+            </p>
+            <p className="mt-1.5">
+              Para <span className="font-semibold">otro turno con otra persona</span>: cierre
+              este turno y verá la pantalla <span className="font-semibold">Personal y turno de planta</span> con el botón{" "}
+              <span className="font-semibold">Iniciar turno</span>.
+            </p>
           </div>
-          <div className="space-y-1">
-            {fieldLegend(Users, "Grupo")}
-            <div className="mes-toggle-row mes-toggle-grupo">
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                className="w-full"
-                value={props.lamGrupo}
-                onValueChange={(v) => {
-                  if (!v) return
-                  props.onSetGrupo(v as "A" | "B" | "C")
-                }}
-                disabled={props.readOnlyOps}
-              >
-                {(["A", "B", "C"] as const).map((g) => (
-                  <ToggleGroupItem
-                    key={g}
-                    value={g}
-                    className={cn(
-                      "flex-1 gap-1",
-                      g === "A" && "mes-grupo-a",
-                      g === "B" && "mes-grupo-b",
-                      g === "C" && "mes-grupo-c",
-                    )}
-                  >
-                    <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
-                    {g}
+          <div className="grid gap-2 md:grid-cols-3">
+            <div className="space-y-1">
+              {fieldLegend(Factory, "Máquina Laminadora")}
+              <Input
+                value={props.lamMaquina || "—"}
+                disabled
+                className="ot-input-unified h-9 text-slate-700 bg-slate-50 font-semibold"
+              />
+              <p className="mes-field-hint">Máquina en uso actual.</p>
+            </div>
+            <div className="space-y-1">
+              {fieldLegend(Clock, "Turno")}
+              <div className="mes-toggle-row mes-toggle-turno">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  className="w-full"
+                  value={props.lamTurno || undefined}
+                  onValueChange={(v) => {
+                    if (!v) return
+                    props.onSetTurno(v as "diurno" | "nocturno")
+                  }}
+                  disabled={props.readOnlyOps}
+                >
+                  <ToggleGroupItem value="diurno" className="flex-1 gap-2">
+                    <Sun className="h-4 w-4 shrink-0" aria-hidden />
+                    Diurno
                   </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
-            <p className="mes-field-hint">Cuadrilla o equipo asignado a la máquina (rotación interna A / B / C).</p>
-          </div>
-
-          <div className="md:col-span-2 mt-1 rounded-lg border bg-background/60 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Personal del turno
-            </div>
-
-            <div className="space-y-3 rounded-md border bg-background p-2">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
-                <div className="min-w-0 space-y-1">
-                  {fieldLabel(
-                    mk("active-person-name"),
-                    UserRound,
-                    <>
-                      Nombre
-                      {activeStageRole === "operador" ? (
-                        <span className="text-muted-foreground"> (operador)</span>
-                      ) : null}
-                    </>,
-                  )}
-                  <Input
-                    id={mk("active-person-name")}
-                    name="lamActivePersonName"
-                    className="ot-input-unified h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900"
-                    value={activeStageName}
-                    onChange={(e) => setActiveStageName(e.target.value)}
-                    placeholder="Nombre"
-                    disabled={props.readOnlyOps}
-                  />
-                </div>
-
-                <div className="min-w-0 space-y-1">
-                  {fieldLabel(mk("active-person-role"), IdCard, "Rol")}
-                  <Select
-                    value={activeStageRole}
-                    onValueChange={(v) => setActiveStageRole(v as DraftPersonRole)}
-                    disabled={props.readOnlyOps}
-                  >
-                    <SelectTrigger
-                      id={mk("active-person-role")}
-                      className="h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900"
-                    >
-                      <SelectValue placeholder="Seleccione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="operador">Operador</SelectItem>
-                      <SelectItem value="ayudante">Ayudante</SelectItem>
-                      <SelectItem value="supervisor">Supervisor</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="text-[11px] text-muted-foreground">
-                    {activeStageRole === "operador"
-                      ? "Responsable del turno"
-                      : activeStageRole === "supervisor"
-                        ? "Máximo 1 por turno"
-                        : "Apoyo operativo"}
-                  </div>
-                </div>
+                  <ToggleGroupItem value="nocturno" className="flex-1 gap-2">
+                    <Moon className="h-4 w-4 shrink-0" aria-hidden />
+                    Nocturno
+                  </ToggleGroupItem>
+                </ToggleGroup>
               </div>
-
-              <Button
-                type="button"
-                variant="secondary"
-                className="h-9 w-full gap-1.5 sm:w-auto sm:shrink-0"
-                onClick={guardarPersonaTurnoActivo}
-                disabled={props.readOnlyOps}
-              >
-                <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
-                Guardar persona
-              </Button>
+              <p className="mes-field-hint">Turno según calendario de planta (diurno / nocturno).</p>
             </div>
-
-            <Collapsible defaultOpen className="mt-3 rounded-md border border-dashed bg-muted/20">
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/40">
-                <span className="inline-flex items-center gap-2">
-                  <History className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
-                  Personal en este turno ({activeSaved.length})
-                </span>
-                <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                {activeSaved.length === 0 ? (
-                  <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-                    Nadie registrado aún. Guarde operador, ayudantes o supervisor con el botón de arriba.
+            <div className="space-y-1">
+              {fieldLegend(Users, "Grupo")}
+              <div className="mes-toggle-row mes-toggle-grupo">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  className="w-full"
+                  value={props.lamGrupo || undefined}
+                  onValueChange={(v) => {
+                    if (!v) return
+                    props.onSetGrupo(v as "A" | "B" | "C")
+                  }}
+                  disabled={props.readOnlyOps}
+                >
+                  {(["A", "B", "C"] as const).map((g) => (
+                    <ToggleGroupItem
+                      key={g}
+                      value={g}
+                      className={cn(
+                        "flex-1 gap-1",
+                        g === "A" && "mes-grupo-a",
+                        g === "B" && "mes-grupo-b",
+                        g === "C" && "mes-grupo-c",
+                      )}
+                    >
+                      <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                      {g}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+              <p className="mes-field-hint">Cuadrilla o equipo asignado (rotación A / B / C).</p>
+            </div>
+            <div className="md:col-span-3 mt-1 rounded-lg border bg-background/60 p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Personal del turno
+              </div>
+              <div className="space-y-3 rounded-md border bg-background p-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
+                  <div className="min-w-0 space-y-1">
+                    {fieldLabel(
+                      mk("active-person-name"),
+                      UserRound,
+                      <>
+                        Nombre
+                        {activeStageRole === "operador" ? (
+                          <span className="text-muted-foreground"> (operador)</span>
+                        ) : null}
+                      </>,
+                    )}
+                    <Input
+                      id={mk("active-person-name")}
+                      name="lamActivePersonName"
+                      className="ot-input-unified h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900"
+                      value={activeStageName}
+                      onChange={(e) => setActiveStageName(e.target.value)}
+                      placeholder="Nombre"
+                      disabled={props.readOnlyOps}
+                    />
                   </div>
-                ) : (
-                  <ul className="space-y-1 border-t px-3 py-2">
-                    {activeSaved.map((p) => (
-                      <li
-                        key={p.id}
-                        className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs"
-                      >
-                        <span>
-                          <span className="font-medium text-foreground">{p.name}</span>
-                          <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
-                        </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() =>
-                            props.onActivePersonnelApply(activeSaved.filter((x) => x.id !== p.id))
-                          }
-                          disabled={props.readOnlyOps}
-                          title="Quitar de la lista"
+                  <div className="min-w-0 space-y-1">
+                    {fieldLabel(mk("active-person-role"), IdCard, "Rol")}
+                    <Select
+                      value={activeStageRole}
+                      onValueChange={(v) => setActiveStageRole(v as DraftPersonRole)}
+                      disabled={props.readOnlyOps}
+                    >
+                      <SelectTrigger id={mk("active-person-role")} className="h-9 w-full min-w-0 bg-white dark:bg-white dark:text-slate-900">
+                        <SelectValue placeholder="Seleccione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="operador">Operador</SelectItem>
+                        <SelectItem value="ayudante">Ayudante</SelectItem>
+                        <SelectItem value="supervisor">Supervisor</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="text-[11px] text-muted-foreground">
+                      {activeStageRole === "operador"
+                        ? "Responsable del turno"
+                        : activeStageRole === "supervisor"
+                          ? "Máximo 1 por turno"
+                          : "Apoyo operativo"}
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-9 w-full gap-1.5 sm:w-auto sm:shrink-0"
+                  onClick={guardarPersonaTurnoActivo}
+                  disabled={props.readOnlyOps}
+                >
+                  <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
+                  Guardar persona
+                </Button>
+              </div>
+              <Collapsible defaultOpen className="mt-3 rounded-md border border-dashed bg-muted/20">
+                <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/40">
+                  <span className="inline-flex items-center gap-2">
+                    <History className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+                    Personal en este turno ({activeSaved.length})
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  {activeSaved.length === 0 ? (
+                    <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
+                      Nadie registrado aún. Guarde operador, ayudantes o supervisor con el botón de arriba.
+                    </div>
+                  ) : (
+                    <ul className="space-y-1 border-t px-3 py-2">
+                      {activeSaved.map((p) => (
+                        <li
+                          key={p.id}
+                          className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs"
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CollapsibleContent>
-            </Collapsible>
-          </div>
-          {simplifiedTimer && props.hasActiveTurno && !props.areaFinalizada ? (
-            <div className="mt-4 border-t border-border/50 pt-4">
-              <p className="text-muted-foreground text-xs leading-snug">
-                El cierre del turno se realiza con{" "}
-                <span className="font-semibold text-foreground">Guardar</span> o Terminar turno de planta en el panel del cronómetro.
-              </p>
+                          <span>
+                            <span className="font-medium text-foreground">{p.name}</span>
+                            <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={() =>
+                              props.onActivePersonnelApply(activeSaved.filter((x) => x.id !== p.id))
+                            }
+                            disabled={props.readOnlyOps}
+                            title="Quitar de la lista"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
             </div>
-          ) : null}
-        </div>
-      </MesSectionShell>
+          </div>
+        </MesSectionShell>
       ) : null}
 
       <MesSectionShell
@@ -1467,10 +1494,8 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         ) : null}
       </MesSectionShell>
 
-      {props.hasActiveTurno ? (
-      <>
       <MesSectionShell
-        title={mesSectionTitle(Printer, "Ingreso bobinas impresas")}
+        title={mesSectionTitle(Package, "Ingreso de bobinas impresas")}
         subtle
         headerRight={<MesSectionHeaderExtras isDone={doneEntradaImpresa} />}
         bodyClassName="mes-section__body--flush"
@@ -1861,9 +1886,11 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
       <MesSectionShell
         title={mesSectionTitle(PieChart, "Resumen de producción del turno")}
         subtle
+        className="mes-section--resumen-premium"
+        bodyClassName="mes-section__body--flush"
         headerRight={<MesSectionHeaderExtras isDone={doneResumen} />}
       >
-        <div className="space-y-4">
+        <div className="space-y-4 px-3 py-3">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Entradas y salida
@@ -2047,8 +2074,6 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
           onRevisado={props.onChecklistRevisado ?? (() => {})}
           onAprobadoPor={props.onChecklistAprobadoPor ?? (() => {})}
         />
-      ) : null}
-      </>
       ) : null}
 
       <Dialog open={props.labelEditorOpen} onOpenChange={props.onLabelOpenChange}>
@@ -2502,107 +2527,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={cumulativeTurnosDialogOpen} onOpenChange={setCumulativeTurnosDialogOpen}>
-        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Turnos acumulativos</DialogTitle>
-            <DialogDescription>
-              Turnos de planta cerrados y turno en curso, con tiempos del cronómetro y personal involucrado. El
-              contador en vivo sigue en la sección «Cronómetro de producción».
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 text-sm">
-            <div className="rounded-md border bg-muted/25 p-3 text-xs leading-relaxed">
-              <p>
-                <span className="font-semibold text-foreground">Registros / turnos:</span>{" "}
-                {props.turnosRegistrados}
-              </p>
-              <p className="mt-1">
-                <span className="font-semibold text-foreground">Turnos cerrados:</span>{" "}
-                {props.closedTurnos.length}
-              </p>
-              <p className="mt-1 text-muted-foreground">
-                Último estado: <strong className="text-foreground">{props.ultimoTurnoLabel}</strong>
-              </p>
-            </div>
-
-            {props.hasActiveTurno ? (
-              <div className="rounded-md border bg-background p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Turno en curso
-                </p>
-                <p className="mt-2 text-xs">
-                  {turnoGrupoLabel(props.lamTurno, props.lamGrupo)}
-                </p>
-                <p className="mt-2 text-xs font-medium text-foreground">Personal</p>
-                {activeSaved.length === 0 ? (
-                  <p className="text-muted-foreground mt-1 text-xs">Sin personal guardado en este turno.</p>
-                ) : (
-                  <ul className="mt-1 space-y-1 text-xs">
-                    {activeSaved.map((p) => (
-                      <li key={p.id}>
-                        <span className="font-medium">{p.name}</span>
-                        <span className="text-muted-foreground"> — {roleLabelEs(p.role)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
-                  Efectivo {props.formatTimerHms(props.effectiveSec)} · Muerto{" "}
-                  {props.formatTimerHms(props.deadSec)} · Total {props.formatTimerHms(props.totalSec)}
-                </p>
-              </div>
-            ) : null}
-
-            {props.closedTurnos.length > 0 ? (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Turnos cerrados ({props.closedTurnos.length})
-                </p>
-                <ul className="max-h-[40vh] space-y-3 overflow-y-auto pr-1">
-                  {props.closedTurnos.map((t) => {
-                    const people = personnelLinesFromLaminacionTurno(t)
-                    return (
-                      <li key={t.id} className="rounded-md border bg-background p-3 text-xs">
-                        <p className="font-medium text-foreground">
-                          {t.closed_at
-                            ? new Date(t.closed_at).toLocaleString("es-VE")
-                            : "Sin fecha de cierre"}{" "}
-                          · {turnoGrupoLabel(t.turno, t.grupo)}
-                        </p>
-                        <p className="text-muted-foreground mt-1">
-                          Producción {sumSalidaKgTurno(t).toFixed(2)} Kg · Salida {sumSalidaKgTurno(t).toFixed(2)} Kg · Efectivo{" "}
-                          {props.formatTimerHms(t.timer.effectiveAccSec)} · Muerto{" "}
-                          {props.formatTimerHms(t.timer.deadAccSec)}
-                        </p>
-                        <p className="mt-2 font-medium text-foreground">Personal</p>
-                        {people.length === 0 ? (
-                          <p className="text-muted-foreground mt-1">Sin personal registrado.</p>
-                        ) : (
-                          <ul className="mt-1 space-y-0.5">
-                            {people.map((line, i) => (
-                              <li key={`${t.id}-p-${i}`}>{line}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ) : !props.hasActiveTurno ? (
-              <p className="text-muted-foreground text-xs">
-                Aún no hay turnos cerrados. Al cerrar un turno, aparecerá aquí con tiempos y personal.
-              </p>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCumulativeTurnosDialogOpen(false)}>
-              Cerrar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+  
     </>
   )
 }

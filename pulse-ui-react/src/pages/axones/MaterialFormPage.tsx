@@ -62,7 +62,6 @@ type NewProductDraft = {
 type InventoryTab = "sustratos" | "tintas" | "quimicos" | "miscelaneo"
 const MISC_UNITS = ["kg", "unidad", "m", "rollo", "otros"] as const
 
-/** Alineado con `MaterialNoSupplierPolicy` en backend: pueden usar «Sin proveedor» sin texto en no_supplier_reason. */
 const ROLES_THAT_OMIT_NO_SUPPLIER_REASON = [
   "boss",
   "admin",
@@ -119,7 +118,13 @@ export default function MaterialFormPage() {
   const [micras, setMicras] = useState("")
   const [ancho, setAncho] = useState("")
   const [notes, setNotes] = useState("")
-  const [warehouseLocation, setWarehouseLocation] = useState("") // <-- NUEVO ESTADO PARA ALMACEN
+  const [warehouseLocation, setWarehouseLocation] = useState("") 
+  
+  // NUEVOS ESTADOS BOOLEANOS PARA LOS CHECKBOXES
+  const [isImprimir, setIsImprimir] = useState(false)
+  const [isLaminar, setIsLaminar] = useState(false)
+  const [isTrilaminar, setIsTrilaminar] = useState(false)
+
   const [products, setProducts] = useState<ProductRecord[]>([])
   const [clients, setClients] = useState<ClientRecord[]>([])
   const [productComboOpen, setProductComboOpen] = useState(false)
@@ -128,7 +133,6 @@ export default function MaterialFormPage() {
   const [newProductDraft, setNewProductDraft] = useState<NewProductDraft>({ name: "", clientId: "" })
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([])
   const [tintaSubarea, setTintaSubarea] = useState<"laminacion" | "superficie" | "prueba_laminacion" | "laminacion_nueva">("laminacion")
-  /** En pestaña Tintas: `tintas` vs `cementerio_tintas` (misma UI, distinto área en API). */
   const [tintaAreaChoice, setTintaAreaChoice] = useState<"tintas" | "cementerio_tintas">("tintas")
   const [consumibleUnit, setConsumibleUnit] = useState<(typeof MISC_UNITS)[number]>("unidad")
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([])
@@ -208,7 +212,18 @@ export default function MaterialFormPage() {
       setMicras(formatMaterialDimensionDisplay(row.micras))
       setAncho(formatMaterialDimensionDisplay(row.ancho))
       setNotes(row.notes ?? "")
-      setWarehouseLocation((row as MaterialRow & { warehouse_location?: string }).warehouse_location ?? "") // <-- CARGAMOS EL ALMACEN
+      
+      const rowExt = row as MaterialRow & { 
+        warehouse_location?: string
+        is_imprimir?: boolean
+        is_laminar?: boolean
+        is_trilaminar?: boolean 
+      }
+      setWarehouseLocation(rowExt.warehouse_location ?? "")
+      setIsImprimir(rowExt.is_imprimir ?? false)
+      setIsLaminar(rowExt.is_laminar ?? false)
+      setIsTrilaminar(rowExt.is_trilaminar ?? false)
+
       setConsumibleUnit(MISC_UNITS.includes((row.unit ?? "") as (typeof MISC_UNITS)[number]) ? (row.unit as (typeof MISC_UNITS)[number]) : "unidad")
       setSelectedProductIds((row.substrate_products ?? []).map((p) => p.id))
       const sid = row.supplier_id ?? row.supplier?.id ?? null
@@ -262,9 +277,7 @@ export default function MaterialFormPage() {
         if (!cancelled) setProducts([])
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
@@ -279,9 +292,7 @@ export default function MaterialFormPage() {
         if (!cancelled) setClients([])
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
@@ -296,9 +307,7 @@ export default function MaterialFormPage() {
         if (!cancelled) setSuppliers([])
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   const supplierOptions = useMemo(
@@ -346,10 +355,7 @@ export default function MaterialFormPage() {
             }
           }}
         />
-        <Label
-          htmlFor={`material-no-supplier-${tab}`}
-          className="cursor-pointer text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-        >
+        <Label htmlFor={`material-no-supplier-${tab}`} className="cursor-pointer text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
           Sin proveedor
         </Label>
       </div>
@@ -370,18 +376,13 @@ export default function MaterialFormPage() {
                 setNoSupplierReason(ev.target.value)
                 if (noSupplierReasonError) setNoSupplierReasonError(false)
               }}
-              className={cn(
-                FILTER_INPUT_CLASS,
-                noSupplierReasonError ? "border-red-500 focus-visible:ring-red-500" : "",
-              )}
+              className={cn(FILTER_INPUT_CLASS, noSupplierReasonError ? "border-red-500 focus-visible:ring-red-500" : "")}
               aria-required
             />
             {noSupplierReasonError ? (
               <p className="text-destructive text-sm">Debe explicar por qué no hay proveedor (mínimo 5 caracteres).</p>
             ) : (
-              <p className="text-muted-foreground text-xs">
-                Obligatorio para inventario cuando marca sin proveedor (auditoría).
-              </p>
+              <p className="text-muted-foreground text-xs">Obligatorio para inventario cuando marca sin proveedor (auditoría).</p>
             )}
           </div>
         )
@@ -391,7 +392,7 @@ export default function MaterialFormPage() {
 
   function buildPayloadByTab() {
     const commonNotes = notes.trim() || null
-    const commonWarehouse = warehouseLocation || null // <-- NUEVO ALMACEN FÍSICO
+    const commonWarehouse = warehouseLocation || null 
 
     if (tab === "sustratos") {
       return {
@@ -407,7 +408,10 @@ export default function MaterialFormPage() {
         notes: commonNotes,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
-        warehouse_location: commonWarehouse, // <-- INYECTADO
+        warehouse_location: commonWarehouse, 
+        is_imprimir: isImprimir,       // <-- INYECTADO
+        is_laminar: isLaminar,         // <-- INYECTADO
+        is_trilaminar: isTrilaminar,   // <-- INYECTADO
       }
     }
     if (tab === "tintas") {
@@ -422,7 +426,7 @@ export default function MaterialFormPage() {
         notes: notes.trim() || null,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
-        warehouse_location: commonWarehouse, // <-- INYECTADO
+        warehouse_location: commonWarehouse, 
       }
     }
     if (tab === "quimicos") {
@@ -436,7 +440,7 @@ export default function MaterialFormPage() {
         notes: notes.trim() || null,
         supplier_id: noSupplier ? null : supplierId ?? null,
         no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
-        warehouse_location: commonWarehouse, // <-- INYECTADO
+        warehouse_location: commonWarehouse, 
       }
     }
     return {
@@ -451,7 +455,7 @@ export default function MaterialFormPage() {
       notes: notes.trim() || null,
       supplier_id: noSupplier ? null : supplierId ?? null,
       no_supplier_reason: noSupplier ? noSupplierReason.trim() || null : null,
-      warehouse_location: commonWarehouse, // <-- INYECTADO
+      warehouse_location: commonWarehouse, 
     }
   }
 
@@ -587,26 +591,14 @@ export default function MaterialFormPage() {
   async function createProductQuickly() {
     const name = newProductDraft.name.trim()
     const clientId = Number(newProductDraft.clientId)
-    if (!name) {
-      toast.error("Indique el nombre del producto.")
-      return
-    }
-    if (!Number.isFinite(clientId) || clientId < 1) {
-      toast.error("Seleccione el cliente para crear el producto.")
-      return
-    }
+    if (!name) { toast.error("Indique el nombre del producto."); return }
+    if (!Number.isFinite(clientId) || clientId < 1) { toast.error("Seleccione el cliente."); return }
     setCreatingProduct(true)
     try {
       const created = await apiFetch<ProductRecord>("products", {
         method: "POST",
         body: JSON.stringify({
-          name,
-          client_id: clientId,
-          cpe: null,
-          barcode: null,
-          mps: null,
-          print_type: "Sustrato",
-          structure: null,
+          name, client_id: clientId, cpe: null, barcode: null, mps: null, print_type: "Sustrato", structure: null,
         }),
       })
       setProducts((prev) => [...prev, created].sort((a, b) => (a.name || "").localeCompare(b.name || "")))
@@ -670,15 +662,35 @@ export default function MaterialFormPage() {
               </p>
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="grid gap-2"><Label htmlFor="material-sku">Código *</Label><div className="group/field relative"><Barcode className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", skuError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-sku" value={sku} onChange={(ev) => {
-                  setSku(ev.target.value.toUpperCase())
-                  if (skuError) setSkuError(false)
+                  setSku(ev.target.value.toUpperCase()); if (skuError) setSkuError(false)
                 }} className={cn("pl-10", FILTER_INPUT_CLASS, skuError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: SUB-BOPP-1042" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-name">Material *</Label><div className="group/field relative"><Package2 className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors", nameError ? "text-red-500" : "text-muted-foreground group-focus-within/field:text-primary")} aria-hidden /><Input id="material-name" value={name} onChange={(ev) => {
-                  setName(ev.target.value)
-                  if (nameError) setNameError(false)
+                  setName(ev.target.value); if (nameError) setNameError(false)
                 }} className={cn("pl-10", FILTER_INPUT_CLASS, nameError ? "border-red-500 focus-visible:ring-red-500" : "")} placeholder="Ej: BOPP transparente 20 µm" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-micras">Micras *</Label><div className="group/field relative"><ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-micras" type="number" min="0" step="0.001" value={micras} onChange={(ev) => setMicras(ev.target.value)} className={cn("pl-10", FILTER_INPUT_CLASS)} placeholder="Ej: 20" /></div></div>
                 <div className="grid gap-2"><Label htmlFor="material-ancho">Ancho *</Label><div className="group/field relative"><Ruler className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors text-muted-foreground group-focus-within/field:text-primary" aria-hidden /><Input id="material-ancho" type="number" min="0" step="0.001" value={ancho} onChange={(ev) => setAncho(ev.target.value)} className={cn("pl-10", FILTER_INPUT_CLASS)} placeholder="Ej: 1040 (mm)" /></div></div>
+                
+                {/* --- NUEVA CLASIFICACIÓN DE USO (CHECKBOXES) --- */}
+                <div className="grid gap-2 md:col-span-3 mt-2">
+                   <Label>Clasificación de Uso en Pedidos</Label>
+                   <div className="flex flex-wrap items-center gap-6 rounded-md border border-dashed border-emerald-500/40 bg-white/60 p-4 shadow-sm">
+                     <div className="flex items-center gap-2 cursor-pointer">
+                       <Checkbox id="is-imprimir" checked={isImprimir} onCheckedChange={(v) => setIsImprimir(!!v)} disabled={saving} />
+                       <Label htmlFor="is-imprimir" className="cursor-pointer text-sm font-medium">Imprimir</Label>
+                     </div>
+                     <div className="flex items-center gap-2 cursor-pointer">
+                       <Checkbox id="is-laminar" checked={isLaminar} onCheckedChange={(v) => setIsLaminar(!!v)} disabled={saving} />
+                       <Label htmlFor="is-laminar" className="cursor-pointer text-sm font-medium">Laminar</Label>
+                     </div>
+                     <div className="flex items-center gap-2 cursor-pointer">
+                       <Checkbox id="is-trilaminar" checked={isTrilaminar} onCheckedChange={(v) => setIsTrilaminar(!!v)} disabled={saving} />
+                       <Label htmlFor="is-trilaminar" className="cursor-pointer text-sm font-medium">Trilaminar</Label>
+                     </div>
+                   </div>
+                   <p className="text-xs text-muted-foreground">Marque las áreas de producción donde este sustrato puede ser utilizado. Esto lo hará aparecer en los selectores correspondientes al crear un Pedido de Cliente.</p>
+                </div>
+                {/* ------------------------------------------------ */}
+
                 <div className="grid gap-2 md:col-span-3">
                   <Label htmlFor="material-preferred-supplier-sustratos">
                     {noSupplier ? "Proveedor" : "Proveedor *"}
@@ -695,15 +707,8 @@ export default function MaterialFormPage() {
                         />
                         <Button
                           id="material-preferred-supplier-sustratos"
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={preferredSupplierOpen}
-                          disabled={noSupplier || saving}
-                          className={cn(
-                            "h-10 w-full justify-between pl-10 pr-3 font-normal",
-                            supplierIdError ? "border-red-500 focus-visible:ring-red-500" : "",
-                          )}
+                          type="button" variant="outline" role="combobox" aria-expanded={preferredSupplierOpen} disabled={noSupplier || saving}
+                          className={cn("h-10 w-full justify-between pl-10 pr-3 font-normal", supplierIdError ? "border-red-500 focus-visible:ring-red-500" : "")}
                         >
                           <span className={cn("truncate text-left", !selectedPreferredSupplier && "text-muted-foreground")}>
                             {selectedPreferredSupplier?.name || "Buscar proveedor…"}
@@ -723,25 +728,12 @@ export default function MaterialFormPage() {
                                 key={supplier.id}
                                 value={`sustratos-${supplier.id}-${supplier.name} ${supplier.rif ?? ""}`}
                                 onSelect={() => {
-                                  setSupplierId(supplier.id)
-                                  setPreferredSupplierOpen(false)
-                                  setSupplierIdError(false)
-                                  setNoSupplier(false)
-                                  setNoSupplierReason("")
-                                  setNoSupplierReasonError(false)
+                                  setSupplierId(supplier.id); setPreferredSupplierOpen(false); setSupplierIdError(false); setNoSupplier(false); setNoSupplierReason(""); setNoSupplierReasonError(false)
                                 }}
                               >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    supplierId === supplier.id ? "opacity-100" : "opacity-0",
-                                  )}
-                                  aria-hidden
-                                />
+                                <Check className={cn("mr-2 h-4 w-4", supplierId === supplier.id ? "opacity-100" : "opacity-0")} aria-hidden />
                                 <span>{supplier.name}</span>
-                                {supplier.rif ? (
-                                  <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span>
-                                ) : null}
+                                {supplier.rif ? <span className="text-muted-foreground ml-2 text-xs">{supplier.rif}</span> : null}
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -757,15 +749,10 @@ export default function MaterialFormPage() {
                     <Popover open={productComboOpen} onOpenChange={setProductComboOpen}>
                       <PopoverTrigger asChild>
                         <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={productComboOpen}
+                          type="button" variant="outline" role="combobox" aria-expanded={productComboOpen}
                           className={cn("h-10 flex-1 justify-between font-normal", FILTER_INPUT_CLASS)}
                         >
-                          <span className={cn("truncate text-left", !selectedProductIds.length && "text-muted-foreground")}>
-                            {selectedProductsLabel}
-                          </span>
+                          <span className={cn("truncate text-left", !selectedProductIds.length && "text-muted-foreground")}>{selectedProductsLabel}</span>
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -776,19 +763,8 @@ export default function MaterialFormPage() {
                             <CommandEmpty>Sin productos disponibles.</CommandEmpty>
                             <CommandGroup>
                               {products.map((p) => (
-                                <CommandItem
-                                  key={p.id}
-                                  value={p.name}
-                                  onSelect={() => toggleProduct(p.id)}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      selectedProductIds.includes(p.id) ? "opacity-100" : "opacity-0",
-                                    )}
-                                    aria-hidden
-                                  />
-                                  {p.name}
+                                <CommandItem key={p.id} value={p.name} onSelect={() => toggleProduct(p.id)}>
+                                  <Check className={cn("mr-2 h-4 w-4", selectedProductIds.includes(p.id) ? "opacity-100" : "opacity-0")} aria-hidden />{p.name}
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -796,18 +772,12 @@ export default function MaterialFormPage() {
                         </Command>
                       </PopoverContent>
                     </Popover>
-                    {products.length ? (
-                      <Button type="button" variant="outline" onClick={() => setProductModalOpen(true)}>
-                        + Nuevo producto
-                      </Button>
-                    ) : null}
+                    {products.length ? (<Button type="button" variant="outline" onClick={() => setProductModalOpen(true)}>+ Nuevo producto</Button>) : null}
                   </div>
                   {!products.length ? (
                     <div className="rounded-md border border-dashed border-primary/30 bg-background/80 p-3">
                       <p className="text-muted-foreground text-sm">Aun no hay productos creados para vincular.</p>
-                      <Button className="mt-2" type="button" size="sm" variant="secondary" onClick={() => setProductModalOpen(true)}>
-                        Crear producto ahora
-                      </Button>
+                      <Button className="mt-2" type="button" size="sm" variant="secondary" onClick={() => setProductModalOpen(true)}>Crear producto ahora</Button>
                     </div>
                   ) : null}
                 </div>
@@ -1120,7 +1090,6 @@ export default function MaterialFormPage() {
           </Tabs>
 
           <div className="space-y-4 rounded-xl border border-primary/15 bg-background/60 p-4">
-            {/* NUEVO CAMPO: ALMACÉN FÍSICO */}
             <div className="grid gap-2">
               <Label htmlFor="m-warehouse">Almacén Físico (Opcional)</Label>
               <div className="group/field relative">
@@ -1140,7 +1109,6 @@ export default function MaterialFormPage() {
               </div>
               <p className="text-xs text-muted-foreground">Ubicación física del material para separar inventario.</p>
             </div>
-            {/* FIN NUEVO CAMPO */}
 
             <div className="grid gap-2">
               <Label htmlFor="m-notes">Notas</Label>

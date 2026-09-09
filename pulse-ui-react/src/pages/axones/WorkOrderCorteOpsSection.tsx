@@ -119,7 +119,6 @@ import { MES_TIMER_HELP_TEXT, MesProductionTimerOpsBlock } from "./mes-productio
 import type { MesTimerActionFlags, MesTimerConfirmKey } from "./mes-timer-actions"
 
 import {
-  CORTE_PALETAS_CONTAINER_GRID,
   cortePaletaCardClass,
   cortePaletaSummaryGridClass,
   cortePaletaSummaryTotalKgInputClass,
@@ -139,7 +138,6 @@ import {
   materializeOpenCorteTurnoActual,
   resolveCorteDisplayTimer,
   createNewCorteTurno,
-  emptyPaletaRollos,
   finalizeTurnTimerNow,
   formatTimerHms,
   countRollosWithKg,
@@ -1046,7 +1044,7 @@ export default function WorkOrderCorteOpsSection({
 
     const { operador, ayudante, supervisor } = stringsFromActivePersonnel(draftPeople)
     
-    let paletasToInherit = [...(form.cor_paletas as CorPaleta[] || [])];
+    const paletasToInherit = [...(form.cor_paletas as CorPaleta[] || [])];
     
     if (paletasToInherit.length === 0 || paletasToInherit.every(p => isCorPaletaCerrada(p))) {
         const nextIdx = paletasToInherit.length + 1;

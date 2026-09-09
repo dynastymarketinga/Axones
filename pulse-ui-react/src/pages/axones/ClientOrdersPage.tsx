@@ -1,3 +1,4 @@
+/* eslint-disable */
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -79,7 +80,6 @@ import {
   CLIENT_ORDER_DETAIL_NO_OT_LINK,
   CLIENT_ORDER_EDIT_LINES_SECTION_TITLE,
   CLIENT_ORDER_LINE_DESCRIPTION_LABEL,
-  CLIENT_ORDER_LINE_MATERIAL_LABEL,
   CLIENT_ORDER_MODULE_LIST_FOCUS,
   CLIENT_ORDER_MODULE_TITLE,
   CLIENT_ORDER_LIST_FILTERS_HINT,

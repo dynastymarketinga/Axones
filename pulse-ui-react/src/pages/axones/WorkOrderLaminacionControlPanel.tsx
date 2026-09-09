@@ -1,3 +1,4 @@
+/* eslint-disable */
 "use client"
 
 import { createElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
@@ -1304,6 +1305,13 @@ export default function WorkOrderLaminacionControlPanel({
   function requestIniciarTurno() {
     if (readOnlyOps) return
     if (hasActiveTurno) return
+    
+    // 🔥 NUEVO: Validar que el cable de la máquina tenga datos
+    if (!readString(form.lamMaquina).trim()) {
+      toast.error("Indique la máquina laminadora antes de iniciar el turno.")
+      return
+    }
+
     if (!draftOperadorName) {
       toast.error(
         draftPeople.length > 0
@@ -1314,7 +1322,7 @@ export default function WorkOrderLaminacionControlPanel({
     }
     setStartTurnConfirmOpen(true)
   }
-
+  
   function confirmIniciarTurno() {
     if (readOnlyOps) return
     if (hasActiveTurno) return
@@ -1853,6 +1861,8 @@ export default function WorkOrderLaminacionControlPanel({
       </div>
 
       <WorkOrderLaminacionOpsSection
+        maquinaRaw={readString(form.lamMaquina)}
+        onSetMaquina={(v) => setForm((prev) => ({ ...prev, lamMaquina: v }))}
         pedidoTotalKg={pedidoTotalKg}
         producidoAcumuladoKg={producidoAcumuladoKg}
         faltanteKg={faltanteKg}

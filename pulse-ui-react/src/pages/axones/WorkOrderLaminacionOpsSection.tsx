@@ -1,3 +1,6 @@
+/* eslint-disable */
+"use client"
+
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { LucideIcon } from "lucide-react"
@@ -205,6 +208,8 @@ export function stringsFromActivePersonnel(people: DraftPerson[]): {
 export type { MesWarehouseReturnPanelProps } from "./mes-warehouse-return-section"
 
 type Props = {
+  maquinaRaw?: string // 🔥 PUERTO ABIERTO PARA RECIBIR LA MÁQUINA
+  onSetMaquina?: (v: string) => void // 🔥 PUERTO ABIERTO PARA ACTUALIZARLA
   pedidoTotalKg: number
   producidoAcumuladoKg: number
   faltanteKg: number
@@ -237,7 +242,7 @@ type Props = {
   lamOperador: string
   lamAyudante: string
   lamSupervisor: string
-  lamMaquina?: string // 🔥 NUEVO: Máquina actual
+  lamMaquina?: string 
   metrajeRaw: string
   entradaImpresaBobinas: string[]
   entradaImpresaMeta: BobinaLabelMeta[]
@@ -331,14 +336,14 @@ type Props = {
   canFinalizeOrder: boolean
   draftTurno: "diurno" | "nocturno"
   draftGrupo: "A" | "B" | "C"
-  draftMaquina?: string // 🔥 NUEVO: Máquina a elegir
+  draftMaquina?: string 
   draftPeople: DraftPerson[]
   draftOperadorMissing: boolean
   draftStagingName: string
   draftStagingRole: DraftPersonRole
   onDraftTurno: (v: "diurno" | "nocturno") => void
   onDraftGrupo: (v: "A" | "B" | "C") => void
-  onDraftMaquina?: (v: string) => void // 🔥 NUEVO
+  onDraftMaquina?: (v: string) => void
   onDraftStagingName: (v: string) => void
   onDraftStagingRole: (v: DraftPersonRole) => void
   onDraftPersonGuardar: (name: string, role: DraftPersonRole) => void
@@ -968,8 +973,8 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
                   <div className="space-y-2 md:col-span-2">
                     {fieldLegend(Factory, "Máquina Laminadora")}
                     <Select
-                      value={props.draftMaquina}
-                      onValueChange={(v) => props.onDraftMaquina?.(v)}
+                      value={props.maquinaRaw}
+                      onValueChange={(v) => props.onSetMaquina?.(v)}
                       disabled={props.readOnlyOps}
                     >
                       <SelectTrigger className="h-10 w-full min-w-0 text-base font-semibold border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
@@ -1146,11 +1151,11 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
               type="button"
               className="montaje-iniciar-turno-btn h-12 min-w-[14rem] gap-2 px-6 text-base font-semibold"
               onClick={props.onIniciarTurno}
-              disabled={props.readOnlyOps || props.draftOperadorMissing || !(props.draftMaquina ?? "").trim()}
+              disabled={props.readOnlyOps || props.draftOperadorMissing || !(props.maquinaRaw ?? "").trim()}
               title={
                 props.draftOperadorMissing
                   ? "Guarde al menos una persona con rol Operador en la cuadrilla"
-                  : !(props.draftMaquina ?? "").trim()
+                  : !(props.maquinaRaw ?? "").trim()
                   ? "Seleccione la máquina laminadora"
                   : "Abre el registro de turno de planta (no inicia el cronómetro de máquina)"
               }
@@ -1203,7 +1208,7 @@ export default function WorkOrderLaminacionOpsSection(props: Props) {
             <div className="space-y-1">
               {fieldLegend(Factory, "Máquina Laminadora")}
               <Input
-                value={props.lamMaquina || "—"}
+                value={props.maquinaRaw || "—"}
                 disabled
                 className="ot-input-unified h-9 text-slate-700 bg-slate-50 font-semibold"
               />

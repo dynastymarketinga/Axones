@@ -10,3 +10,7 @@ CONTEXTO-AXONES-V2.md
 PUBLIC-LEGADO.md
 backend/.phpunit.result.cache
 pulse-ui-react/node_modules/
+# Ignorar archivos de configuración de Docker y docker-compose.
+backend/Dockerfile
+docker-compose.yml
+pulse-ui-react/Dockerfile
